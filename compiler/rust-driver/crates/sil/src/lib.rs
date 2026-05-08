@@ -7,6 +7,11 @@ pub struct SilArtifact {
     pub instructions: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SilAnalysisReport {
+    pub call_edges: Vec<(String, String)>,
+}
+
 pub fn parse_textual_sil(input: &str) -> SilArtifact {
     let mut function_id = String::from("unknown");
     let mut cfg_blocks = Vec::new();
@@ -41,6 +46,28 @@ pub fn remove_debug_insts(artifact: &SilArtifact) -> SilArtifact {
     }
 }
 
+pub fn extract_call_graph(artifact: &SilArtifact) -> SilAnalysisReport {
+    let caller = artifact.function_id.clone();
+    let call_edges = artifact
+        .instructions
+        .iter()
+        .filter_map(|inst| {
+            if let Some(rest) = inst.split("function_ref @").nth(1) {
+                let callee = rest
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or(rest)
+                    .trim()
+                    .to_string();
+                Some((caller.clone(), callee))
+            } else {
+                None
+            }
+        })
+        .collect();
+    SilAnalysisReport { call_edges }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -61,5 +88,13 @@ mod tests {
         );
         let reduced = remove_debug_insts(&artifact);
         assert_eq!(reduced.instructions.len(), 1);
+    }
+
+    #[test]
+    fn extracts_call_graph_edges_from_function_ref() {
+        let artifact =
+            parse_textual_sil("sil @main\nentry:\n%0 = function_ref @helper : $@convention(thin)");
+        let report = extract_call_graph(&artifact);
+        assert_eq!(report.call_edges, vec![("main".to_string(), "helper".to_string())]);
     }
 }

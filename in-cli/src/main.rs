@@ -136,6 +136,12 @@ fn cmd_test(root: &Path) -> Result<()> {
     )?;
     run_cmd(
         Command::new("swift")
+            .arg("package")
+            .arg("clean")
+            .current_dir(root.join("runtime").join("swift-preview-host")),
+    )?;
+    run_cmd(
+        Command::new("swift")
             .arg("test")
             .current_dir(root.join("runtime").join("swift-preview-host")),
     )?;

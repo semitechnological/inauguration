@@ -1,6 +1,6 @@
 use hybrid_core::{ChangeEvent, TaskKind};
 use hybrid_scheduler::{BuildScheduler, SchedulerError};
-use hybrid_sil::{parse_textual_sil, remove_debug_insts};
+use hybrid_sil::{extract_call_graph, parse_textual_sil, remove_debug_insts};
 use serde_json::Value;
 use thiserror::Error;
 
@@ -16,22 +16,34 @@ pub enum PipelineError {
 pub struct FrontendArtifactSummary {
     pub structs: usize,
     pub functions: usize,
+    pub diagnostics: usize,
+    pub success: bool,
 }
 
-pub fn summarize_frontend_artifact(lines: &str) -> Result<FrontendArtifactSummary, PipelineError> {
-    let mut summary = FrontendArtifactSummary {
-        structs: 0,
-        functions: 0,
-    };
-    for line in lines.lines().map(str::trim).filter(|line| !line.is_empty()) {
-        let value: Value = serde_json::from_str(line)?;
-        match value.get("kind").and_then(Value::as_str) {
-            Some("struct") => summary.structs += 1,
-            Some("function") => summary.functions += 1,
-            _ => {}
-        }
-    }
-    Ok(summary)
+pub fn summarize_frontend_artifact(json: &str) -> Result<FrontendArtifactSummary, PipelineError> {
+    let value: Value = serde_json::from_str(json)?;
+    let structs = value
+        .pointer("/symbols/structs")
+        .and_then(Value::as_array)
+        .map_or(0, std::vec::Vec::len);
+    let functions = value
+        .pointer("/symbols/functions")
+        .and_then(Value::as_array)
+        .map_or(0, std::vec::Vec::len);
+    let diagnostics = value
+        .get("diagnostics")
+        .and_then(Value::as_array)
+        .map_or(0, std::vec::Vec::len);
+    let success = value
+        .get("success")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    Ok(FrontendArtifactSummary {
+        structs,
+        functions,
+        diagnostics,
+        success,
+    })
 }
 
 pub async fn run_wave(
@@ -52,6 +64,7 @@ pub async fn run_wave(
             TaskKind::SilAnalysis => {
                 let artifact = parse_textual_sil(sil_source);
                 let _optimized = remove_debug_insts(&artifact);
+                let _report = extract_call_graph(&artifact);
                 processed += 1;
             }
         }
@@ -82,14 +95,25 @@ mod tests {
     }
 
     #[test]
-    fn summarizes_ocaml_frontend_artifact_json_lines() {
+    fn summarizes_ocaml_frontend_artifact_json() {
         let summary = summarize_frontend_artifact(
-            r#"{"kind":"struct","name":"User","field_count":0}
-{"kind":"function","name":"main","ret":"Void","stmt_count":1}
-{"kind":"function","name":"helper","ret":"Void","stmt_count":1}"#,
+            r#"{
+  "format_version": 1,
+  "module": "App",
+  "source_path": "App.swift",
+  "symbols": {
+    "structs": [{ "name": "User" }],
+    "functions": [{ "name": "main" }, { "name": "helper" }]
+  },
+  "typed_decls": [],
+  "diagnostics": [],
+  "success": true
+}"#,
         )
         .expect("artifact parses");
         assert_eq!(summary.structs, 1);
         assert_eq!(summary.functions, 2);
+        assert_eq!(summary.diagnostics, 0);
+        assert!(summary.success);
     }
 }

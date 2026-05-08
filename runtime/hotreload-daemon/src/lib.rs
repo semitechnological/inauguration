@@ -1,6 +1,7 @@
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
@@ -38,6 +39,7 @@ pub struct RuntimeMetric {
     pub source: String,
     pub target: String,
     pub compatible: bool,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone)]
@@ -129,6 +131,33 @@ pub fn symbols_for_path(path: &str) -> Vec<String> {
     }
 }
 
+pub fn compile_check(path: &Path) -> bool {
+    if !path.exists() {
+        return false;
+    }
+    matches!(
+        Command::new("swiftc")
+            .arg("-typecheck")
+            .arg(path)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status(),
+        Ok(status) if status.success()
+    )
+}
+
+pub fn apply_restart_supervisor(mut patch: ReloadPatch, compile_ok: bool) -> (ReloadPatch, String) {
+    if !compile_ok {
+        patch.compatible = false;
+        return (patch, "compile_failed".to_string());
+    }
+    if matches!(patch.patch_type, PatchType::FullModule) || !patch.compatible {
+        patch.compatible = false;
+        return (patch, "restart_required".to_string());
+    }
+    (patch, "patch_applied".to_string())
+}
+
 pub async fn append_metric(path: &Path, metric: &RuntimeMetric) -> Result<(), DaemonError> {
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent).await?;
@@ -175,7 +204,8 @@ async fn emit_patch(
     metrics_path: &Path,
     pool: &ClientPool,
 ) -> Result<ReloadPatch, DaemonError> {
-    let patch = plan_patch(target, symbols);
+    let (patch, reason) =
+        apply_restart_supervisor(plan_patch(target, symbols), compile_check(Path::new(target)));
     let envelope = PatchEnvelope {
         protocol_version: 1,
         patch_id: patch_id_for(target),
@@ -187,6 +217,7 @@ async fn emit_patch(
         source: "daemon".to_string(),
         target: patch.target.clone(),
         compatible: patch.compatible,
+        reason,
     };
     append_metric(metrics_path, &metric).await?;
     let line = serde_json::to_string(&envelope)?;
@@ -263,6 +294,14 @@ mod tests {
         assert_eq!(symbols_for_path("Foo/SampleApp.swift"), empty);
     }
 
+    #[test]
+    fn restart_supervisor_marks_restart_for_failed_compile() {
+        let patch = plan_patch("ContentView.swift", &["body".to_string()]);
+        let (updated, reason) = apply_restart_supervisor(patch, false);
+        assert!(!updated.compatible);
+        assert_eq!(reason, "compile_failed");
+    }
+
     #[tokio::test]
     async fn metric_file_is_written() {
         let path = std::env::temp_dir().join(format!("hotreload-metric-{}.ndjson", now_ms()));
@@ -271,6 +310,7 @@ mod tests {
             source: "test".to_string(),
             target: "ContentView.swift".to_string(),
             compatible: true,
+            reason: "patch_applied".to_string(),
         };
         append_metric(&path, &metric).await.expect("metric write");
         let content = tokio::fs::read_to_string(&path).await.expect("metric read");

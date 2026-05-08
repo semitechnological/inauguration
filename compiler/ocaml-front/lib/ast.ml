@@ -27,3 +27,8 @@ type decl =
   | Function of fn_decl
 
 type program = decl list
+
+type diagnostic = {
+  code : string;
+  message : string;
+}
