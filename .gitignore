@@ -1,0 +1,13 @@
+# Build artifacts
+**/target/
+**/.build/
+
+# OCaml/opam artifacts
+**/_build/
+**/.opam-switch/
+
+# Runtime outputs
+.brisk/
+
+# Vendored upstream source (local reference only)
+vendor/swift/

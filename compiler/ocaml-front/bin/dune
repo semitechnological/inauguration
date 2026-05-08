@@ -1,0 +1,4 @@
+(executable
+ (name main)
+ (public_name ocaml-front)
+ (libraries ocaml_front))

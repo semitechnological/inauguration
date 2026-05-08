@@ -1,0 +1,3 @@
+(test
+ (name parser_test)
+ (libraries ocaml_front))

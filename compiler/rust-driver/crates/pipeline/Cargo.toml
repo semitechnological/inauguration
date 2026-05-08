@@ -1,0 +1,13 @@
+[package]
+name = "hybrid-pipeline"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+hybrid-core = { path = "../core" }
+hybrid-scheduler = { path = "../scheduler" }
+hybrid-sil = { path = "../sil" }
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true

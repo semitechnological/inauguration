@@ -1,0 +1,2 @@
+struct User
+func main()

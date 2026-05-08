@@ -1,0 +1,12 @@
+[package]
+name = "hybrid-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+hybrid-core = { path = "../core" }
+hybrid-pipeline = { path = "../pipeline" }
+hybrid-scheduler = { path = "../scheduler" }
+tokio.workspace = true

@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://semitechnological.dev/inauguration/events.schema.json",
+  "title": "HybridMvpProtocol",
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/$defs/ChangeEvent" },
+    { "$ref": "#/$defs/BuildTask" },
+    { "$ref": "#/$defs/SilArtifact" },
+    { "$ref": "#/$defs/ReloadPatch" },
+    { "$ref": "#/$defs/RuntimeMetrics" }
+  ],
+  "$defs": {
+    "ChangeEvent": {
+      "type": "object",
+      "required": ["kind", "path", "module_id", "hash", "timestamp_ms"],
+      "properties": {
+        "kind": { "const": "change_event" },
+        "path": { "type": "string" },
+        "module_id": { "type": "string" },
+        "hash": { "type": "string" },
+        "timestamp_ms": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "BuildTask": {
+      "type": "object",
+      "required": ["kind", "task_kind", "build_id", "deps", "cancel_token"],
+      "properties": {
+        "kind": { "const": "build_task" },
+        "task_kind": { "type": "string", "enum": ["ast_refresh", "swift_frontend", "sil_analysis"] },
+        "build_id": { "type": "string" },
+        "deps": { "type": "array", "items": { "type": "string" } },
+        "cancel_token": { "type": "string" }
+      }
+    },
+    "SilArtifact": {
+      "type": "object",
+      "required": ["kind", "function_id", "cfg_blocks", "instructions"],
+      "properties": {
+        "kind": { "const": "sil_artifact" },
+        "function_id": { "type": "string" },
+        "cfg_blocks": { "type": "array", "items": { "type": "string" } },
+        "instructions": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "ReloadPatch": {
+      "type": "object",
+      "required": ["kind", "target", "patch_type", "compatible"],
+      "properties": {
+        "kind": { "const": "reload_patch" },
+        "target": { "type": "string" },
+        "patch_type": { "type": "string", "enum": ["view_body", "modifier", "full_module"] },
+        "compatible": { "type": "boolean" }
+      }
+    },
+    "RuntimeMetrics": {
+      "type": "object",
+      "required": ["kind", "p50_ms", "p95_ms", "patch_success_rate", "fallback_count"],
+      "properties": {
+        "kind": { "const": "runtime_metrics" },
+        "p50_ms": { "type": "number", "minimum": 0 },
+        "p95_ms": { "type": "number", "minimum": 0 },
+        "patch_success_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "fallback_count": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}
