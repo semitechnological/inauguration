@@ -106,8 +106,8 @@ fn run() -> Result<()> {
 
 fn cmd_build(root: &Path, path: &str, module_id: &str) -> Result<()> {
     let rust_driver = root.join("compiler").join("rust-driver");
-    let mut cmd = Command::new("cargo");
-    cmd.arg("run").arg("-p").arg("hybrid-cli").arg("--");
+    ensure_hybrid_cli_built(&rust_driver)?;
+    let mut cmd = Command::new(hybrid_cli_path(&rust_driver));
     let resolved = root.join(path);
     cmd.arg("--path")
         .arg(if resolved.exists() {
@@ -118,6 +118,31 @@ fn cmd_build(root: &Path, path: &str, module_id: &str) -> Result<()> {
         .arg("--module-id")
         .arg(module_id);
     run_cmd(cmd.current_dir(rust_driver))
+}
+
+fn hybrid_cli_path(rust_driver: &Path) -> PathBuf {
+    rust_driver
+        .join("target")
+        .join("debug")
+        .join(if cfg!(windows) {
+            "hybrid-cli.exe"
+        } else {
+            "hybrid-cli"
+        })
+}
+
+fn ensure_hybrid_cli_built(rust_driver: &Path) -> Result<()> {
+    let bin = hybrid_cli_path(rust_driver);
+    if bin.exists() {
+        return Ok(());
+    }
+    run_cmd(
+        Command::new("cargo")
+            .arg("build")
+            .arg("-p")
+            .arg("hybrid-cli")
+            .current_dir(rust_driver),
+    )
 }
 
 fn cmd_dev(root: &Path) -> Result<()> {

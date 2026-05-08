@@ -69,6 +69,8 @@ Writes:
 - `docs/benchmarks/swift-vs-in.md`
 - `docs/benchmarks/swift-vs-in.json`
 
+The markdown benchmark report includes a `Benchmark Environment` section (host specs + tool versions) so timing comparisons remain reproducible.
+
 ## Acknowledgements
 
 - `brisk` for build orchestration patterns and command UX inspiration.
