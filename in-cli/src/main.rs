@@ -153,6 +153,11 @@ fn cmd_run(
 
 fn cmd_test(root: &Path) -> Result<()> {
     run_cmd(
+        Command::new("bash")
+            .arg("scripts/check-protocol-models.sh")
+            .current_dir(root),
+    )?;
+    run_cmd(
         Command::new("cargo")
             .arg("test")
             .arg("--all")

@@ -1,6 +1,6 @@
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -9,15 +9,10 @@ use thiserror::Error;
 use tokio::fs::OpenOptions;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{mpsc, Mutex};
 use tokio::time::sleep;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum PatchType {
-    ViewBody,
-    Modifier,
-    FullModule,
-}
+include!("generated_protocol.rs");
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ReloadPatch {
@@ -32,6 +27,7 @@ pub struct PatchEnvelope {
     pub patch_id: String,
     pub timestamp_ms: u64,
     pub patch: ReloadPatch,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -132,6 +128,92 @@ pub fn symbols_for_path(path: &str) -> Vec<String> {
     } else {
         vec![]
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct NodeId(String);
+
+impl NodeId {
+    fn from_path(path: &str) -> Self {
+        Self(path.to_string())
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct QueryGraph {
+    symbols: HashMap<NodeId, Vec<String>>,
+    deps: HashMap<NodeId, HashSet<NodeId>>,
+    reverse_deps: HashMap<NodeId, HashSet<NodeId>>,
+}
+
+impl QueryGraph {
+    fn upsert_node(&mut self, path: &str, symbols: Vec<String>, deps: HashSet<String>) {
+        let node = NodeId::from_path(path);
+        if let Some(old) = self.deps.remove(&node) {
+            for dep in old {
+                if let Some(reverse) = self.reverse_deps.get_mut(&dep) {
+                    reverse.remove(&node);
+                }
+            }
+        }
+        self.symbols.insert(node.clone(), symbols);
+        let mapped: HashSet<NodeId> = deps.into_iter().map(NodeId).collect();
+        for dep in &mapped {
+            self.reverse_deps
+                .entry(dep.clone())
+                .or_default()
+                .insert(node.clone());
+        }
+        self.deps.insert(node, mapped);
+    }
+
+    fn invalidate_from_path(&self, path: &str) -> Vec<NodeId> {
+        let start = NodeId::from_path(path);
+        let mut queue = VecDeque::from([start.clone()]);
+        let mut seen = HashSet::from([start]);
+        let mut dirty = Vec::new();
+        while let Some(node) = queue.pop_front() {
+            dirty.push(node.clone());
+            if let Some(dependents) = self.reverse_deps.get(&node) {
+                for dependent in dependents {
+                    if seen.insert(dependent.clone()) {
+                        queue.push_back(dependent.clone());
+                    }
+                }
+            }
+        }
+        dirty
+    }
+
+    fn symbols_for_node(&self, node: &NodeId) -> &[String] {
+        self.symbols.get(node).map(Vec::as_slice).unwrap_or(&[])
+    }
+}
+
+fn infer_deps_for_path(path: &str) -> HashSet<String> {
+    let mut deps = HashSet::new();
+    if path.ends_with("App.swift") {
+        return deps;
+    }
+    if let Some((prefix, _)) = path.rsplit_once('/') {
+        deps.insert(format!("{prefix}/App.swift"));
+    } else {
+        deps.insert("App.swift".to_string());
+    }
+    deps
+}
+
+fn classify_change(path: &str, graph: &mut QueryGraph) -> Vec<String> {
+    let local_symbols = symbols_for_path(path);
+    graph.upsert_node(path, local_symbols, infer_deps_for_path(path));
+    let dirty_nodes = graph.invalidate_from_path(path);
+    let mut combined = Vec::new();
+    for node in dirty_nodes {
+        combined.extend_from_slice(graph.symbols_for_node(&node));
+    }
+    combined.sort_unstable();
+    combined.dedup();
+    combined
 }
 
 pub fn compile_check(path: &Path) -> bool {
@@ -250,13 +332,13 @@ async fn emit_patch(
 ) -> Result<ReloadPatch, DaemonError> {
     let (compile_ok, compile_cache_hit, compile_check_ms) =
         compile_check_cached(Path::new(target), compile_cache);
-    let (patch, reason) =
-        apply_restart_supervisor(plan_patch(target, symbols), compile_ok);
+    let (patch, reason) = apply_restart_supervisor(plan_patch(target, symbols), compile_ok);
     let envelope = PatchEnvelope {
         protocol_version: 1,
         patch_id: patch_id_for(target),
         timestamp_ms: now_ms(),
         patch: patch.clone(),
+        reason: reason.clone(),
     };
     let metric = RuntimeMetric {
         timestamp_ms: now_ms(),
@@ -297,6 +379,7 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), DaemonError> {
         })?;
     watcher.watch(&watch_root, RecursiveMode::Recursive)?;
     let mut compile_cache: CompileCache = HashMap::new();
+    let mut query_graph = QueryGraph::default();
 
     loop {
         match rx.recv().await {
@@ -307,7 +390,7 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), DaemonError> {
                     latest = Some(next);
                 }
                 if let Some(target) = latest.take() {
-                    let symbols = symbols_for_path(&target);
+                    let symbols = classify_change(&target, &mut query_graph);
                     let _ = emit_patch(
                         &target,
                         &symbols,
@@ -345,9 +428,37 @@ mod tests {
     #[test]
     fn symbol_classification_uses_path_heuristics() {
         assert_eq!(symbols_for_path("Foo/ContentView.swift"), vec!["body"]);
-        assert_eq!(symbols_for_path("Foo/SpacingModifier.swift"), vec!["modifier"]);
+        assert_eq!(
+            symbols_for_path("Foo/SpacingModifier.swift"),
+            vec!["modifier"]
+        );
         let empty: Vec<String> = vec![];
         assert_eq!(symbols_for_path("Foo/SampleApp.swift"), empty);
+    }
+
+    #[test]
+    fn query_graph_invalidates_dependents() {
+        let mut graph = QueryGraph::default();
+        graph.upsert_node(
+            "App.swift",
+            vec![],
+            HashSet::from(["ContentView.swift".to_string()]),
+        );
+        graph.upsert_node(
+            "ContentView.swift",
+            vec!["body".to_string()],
+            HashSet::new(),
+        );
+        let dirty = graph.invalidate_from_path("ContentView.swift");
+        assert!(dirty.contains(&NodeId("ContentView.swift".to_string())));
+        assert!(dirty.contains(&NodeId("App.swift".to_string())));
+    }
+
+    #[test]
+    fn classify_change_keeps_body_symbol_signal() {
+        let mut graph = QueryGraph::default();
+        let symbols = classify_change("Foo/ContentView.swift", &mut graph);
+        assert!(symbols.contains(&"body".to_string()));
     }
 
     #[test]
@@ -368,6 +479,17 @@ mod tests {
         assert!(!first.1);
         assert!(second.1);
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn patch_type_serializes_to_schema_snake_case() {
+        let patch = ReloadPatch {
+            target: "ContentView.swift".to_string(),
+            patch_type: PatchType::ViewBody,
+            compatible: true,
+        };
+        let json = serde_json::to_string(&patch).expect("serialize reload patch");
+        assert!(json.contains("\"patch_type\":\"view_body\""));
     }
 
     #[tokio::test]

@@ -1,4 +1,4 @@
-use hotreload_daemon::{DaemonConfig, run_daemon};
+use hotreload_daemon::{run_daemon, DaemonConfig};
 use std::path::PathBuf;
 
 #[tokio::main]

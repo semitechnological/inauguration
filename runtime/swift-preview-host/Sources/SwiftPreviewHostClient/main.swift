@@ -14,55 +14,36 @@ enum SwiftPreviewHostClientMain {
         let host = PreviewHost()
         let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
         let decoder = JSONDecoder()
-        var pending = ""
-
+        var wireDecoder = WireStreamDecoder()
         while true {
             let data = handle.availableData
             if data.isEmpty {
                 break
             }
-            pending += String(decoding: data, as: UTF8.self)
-            let parts = pending.split(separator: "\n", omittingEmptySubsequences: false)
-            if parts.isEmpty {
-                continue
-            }
-
-            let completeCount = pending.hasSuffix("\n") ? parts.count : parts.count - 1
-            for index in 0..<max(0, completeCount) {
-                let chunk = String(parts[index])
-                guard !chunk.isEmpty,
-                      let line = chunk.data(using: .utf8),
-                      let env = try? decoder.decode(Envelope.self, from: line) else {
-                    continue
+            for event in wireDecoder.ingest(data, decoder: decoder) {
+                switch event {
+                case .envelope(let envelope):
+                    do {
+                        let patch = try envelope.toReloadPatch()
+                        await host.apply(patch)
+                        let restartCount = await host.restartCounter()
+                        print("applied patch \(envelope.patchID) target=\(patch.target) reason=\(envelope.reason) restarts=\(restartCount)")
+                    } catch PreviewHostDecodeError.unsupportedProtocolVersion(let version) {
+                        fputs("swift-preview-host-client: dropped line (unsupported protocol_version=\(version))\n", stderr)
+                    } catch {
+                        fputs("swift-preview-host-client: dropped line (decode error: \(error))\n", stderr)
+                    }
+                case .dropped(let reason):
+                    if reason == "pending_buffer_overflow" {
+                        fputs("swift-preview-host-client: pending buffer overflow, dropping buffered data\n", stderr)
+                    } else {
+                        fputs("swift-preview-host-client: dropped line (\(reason))\n", stderr)
+                    }
                 }
-                let patchType: ReloadPatch.PatchType = switch env.patch.patch_type {
-                case "ViewBody": .viewBody
-                case "Modifier": .modifier
-                default: .fullModule
-                }
-                let patch = ReloadPatch(
-                    target: env.patch.target,
-                    patchType: patchType,
-                    compatible: env.patch.compatible
-                )
-                await host.apply(patch)
-                let restartCount = await host.restartCounter()
-                print("applied patch \(env.patch_id) target=\(patch.target) restarts=\(restartCount)")
             }
-            pending = pending.hasSuffix("\n") ? "" : String(parts.last ?? "")
         }
-    }
-
-    private struct Envelope: Codable {
-        let protocol_version: Int
-        let patch_id: String
-        let timestamp_ms: UInt64
-        let patch: WirePatch
-
-        struct WirePatch: Codable {
-            let target: String
-            let patch_type: String
-            let compatible: Bool
+        if wireDecoder.droppedLines > 0 {
+            fputs("swift-preview-host-client: dropped_lines=\(wireDecoder.droppedLines)\n", stderr)
         }
     }
 

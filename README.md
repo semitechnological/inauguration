@@ -55,6 +55,7 @@ cd compiler/rust-driver && cargo test --all
 cd compiler/ocaml-front && eval "$(opam env --switch=default)" && dune runtest
 cd runtime/swift-preview-host && swift build -Xswiftc -warnings-as-errors && swift test
 cd runtime/hotreload-daemon && cargo test
+./scripts/check-protocol-models.sh
 ```
 
 ## Benchmarking
