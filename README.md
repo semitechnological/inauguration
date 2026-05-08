@@ -1,59 +1,33 @@
 # inauguration
 
-Hybrid MVP for Swift reimplementation + SwiftUI hot reload.
+`inauguration` is fast developer toolchain for Swift projects: incremental compiler experimentation, SIL analysis, and low-latency SwiftUI hot reload.
 
-## Layout
+## What it is
 
-- `compiler/rust-driver`: concurrent orchestrator, SIL pipeline, CLI
-- `compiler/ocaml-front`: Swift subset parser + minimal type checker
-- `runtime/hotreload-daemon`: file watcher + patch planner + metrics
-- `runtime/swift-preview-host`: Swift package host that receives reload patches
-- `apps/sample-swiftui`: sample app for edit-to-preview benchmarks
-- `vendor/swift`: shallow clone of `swiftlang/swift`
-- `docs/architecture`: architecture + interfaces
-- `docs/benchmarks`: week-6 benchmark report template
+- **Compiler workspace** for Swift front-end experimentation (OCaml parser/checker + Rust pipeline).
+- **Runtime hot reload system** for SwiftUI (daemon + preview host bridge).
+- **CLI (`in`)** for build, test, benchmark, plugin installation, and daily dev workflows.
 
-## Quickstart
+## Repository layout
 
-```bash
-cd compiler/rust-driver
-cargo test --all
-cargo clippy --all-targets --all-features --locked -- -D warnings
-cargo fmt --check
-```
+- `compiler/rust-driver`: concurrent orchestrator, pipeline, SIL analysis, batch compile path.
+- `compiler/ocaml-front`: Swift subset front-end, diagnostics, artifact emission.
+- `runtime/hotreload-daemon`: watcher, patch/restart supervisor, metrics emitter.
+- `runtime/swift-preview-host`: Swift package receiving and applying reload envelopes.
+- `in-cli`: user-facing command line binary (`in`).
+- `plugins/registry`: installable project accelerators (aurorality, crepuscularity).
+- `scripts`: operational scripts (dev loop, compiler benchmark harness).
+- `docs/architecture`: architecture and local runbooks.
+- `docs/benchmarks`: benchmark reports and generated comparison artifacts.
+- `vendor/swift`: local clone of `swiftlang/swift` for architecture parity reference.
 
-```bash
-cd compiler/ocaml-front
-opam install . --deps-only --with-test
-dune runtest
-```
-
-```bash
-cd runtime/swift-preview-host
-swift build
-swift build -warnings-as-errors
-swift test
-```
-
-## Notes
-
-- Apple-first runtime path for SwiftUI hot reload.
-- Compiler subset intentionally narrow for deterministic milestone.
-- Built on top of ideas and workflows from `brisk`.
-
-## MVP Loop
-
-Use `docs/architecture/local-mvp-runbook.md` to run daemon + preview host client and capture patch metrics.
-
-## in CLI
-
-Install local binary:
+## Install CLI
 
 ```bash
 cargo install --path in-cli --bin in --force
 ```
 
-Commands:
+## Core commands
 
 ```bash
 in build
@@ -62,11 +36,38 @@ in dev
 in run
 in test
 in doctor
+in bench
+```
+
+## Plugin commands
+
+```bash
 in plugin list
 in plugin install aurorality
+in plugin install crepuscularity
 in plugin run aurorality --target ../aurorality
 ```
 
+## Validation commands
+
+```bash
+cd compiler/rust-driver && cargo test --all
+cd compiler/ocaml-front && eval "$(opam env --switch=default)" && dune runtest
+cd runtime/swift-preview-host && swift build -Xswiftc -warnings-as-errors && swift test
+cd runtime/hotreload-daemon && cargo test
+```
+
+## Benchmarking
+
+```bash
+./scripts/bench-swift.sh
+```
+
+Writes:
+
+- `docs/benchmarks/swift-vs-in.md`
+- `docs/benchmarks/swift-vs-in.json`
+
 ## Acknowledgements
 
-- `brisk` for build orchestration patterns and developer workflow inspiration.
+- `brisk` for build orchestration patterns and command UX inspiration.
