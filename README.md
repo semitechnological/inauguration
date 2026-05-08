@@ -19,7 +19,7 @@ The `in` binary ships **all Rust runtime logic that crates.io installs**: hybrid
 - `in-cli`: user-facing command line binary (`in`).
 - `plugins/registry`: installable project accelerators (aurorality, crepuscularity).
 - `scripts`: operational scripts (dev loop, compiler benchmark harness).
-- `docs/architecture`: architecture and local runbooks.
+- `docs/architecture`: architecture and local runbooks ([interop roadmap](docs/architecture/interop-roadmap.md): OCaml / Equilibrium-V / Swift options).
 - `docs/benchmarks`: benchmark reports and generated comparison artifacts.
 
 ## `in build` and SwiftPM staging (macOS/Linux)
