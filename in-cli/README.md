@@ -1,27 +1,11 @@
-# in CLI
+# inauguration (`in`)
 
-Thin command surface for inauguration MVP.
+Rust CLI for the [inauguration](https://github.com/semitechnological/inauguration) Swift toolchain experiments: embedded hybrid pipeline (AST refresh → frontend → SIL analysis wave), SwiftPM staging under `.build/bin` and `.build/artifacts`, plugins, and workspace integration commands.
 
-## Install
-
-```bash
-cargo install --path . --bin in --force
-```
-
-## Commands
-
-- `in build` -> runs `hybrid-cli` from `compiler/rust-driver`
-- `in build --path <dir>` -> auto-batch mode (default behavior for directories)
-- `in dev` -> runs `scripts/dev-loop.sh`
-- `in run` -> runs hotreload daemon only
-- `in test` -> runs Rust + OCaml + Swift + daemon test lanes
-- `in doctor` -> checks `cargo`, `swift`, `opam`, `dune`
-
-## Plugins
+Install:
 
 ```bash
-in plugin list
-in plugin install aurorality
-in plugin install crepuscularity
-in plugin run aurorality --target ../aurorality
+cargo install inauguration
 ```
+
+Full repository layout, benchmarks, Wax/Homebrew installers, and contribution docs live in the GitHub repo.

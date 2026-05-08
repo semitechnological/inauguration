@@ -1,7 +1,12 @@
+mod hybrid_core;
+mod hybrid_pipeline;
+mod hybrid_scheduler;
+mod hybrid_sil;
+
+use crate::hybrid_core::ChangeEvent;
+use crate::hybrid_pipeline::run_wave_with_timings;
+use crate::hybrid_scheduler::BuildScheduler;
 use clap::{Parser, Subcommand};
-use hybrid_core::ChangeEvent;
-use hybrid_pipeline::run_wave_with_timings;
-use hybrid_scheduler::BuildScheduler;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::ffi::OsStr;

@@ -35,21 +35,29 @@ Those directories are emptied on each `in build`, then repopulated with **symlin
 
 Recommended order:
 
-**1. Wax (Homebrew-compatible parity)**
+**1. crates.io (Rust toolchain)**
+
+```bash
+cargo install inauguration
+```
+
+Installs the `in` binary; hybrid pipeline is linked into this crate (no separate `hybrid-*` crates on crates.io).
+
+**2. Wax (Homebrew-compatible parity)**
 
 ```bash
 wax tap semitechnological/tap
 wax install inauguration
 ```
 
-**2. Homebrew tap**
+**3. Homebrew tap**
 
 ```bash
 brew tap semitechnological/tap
 brew install inauguration
 ```
 
-**3. Install script (GitHub release tarball or build from clone)**
+**4. Install script (GitHub release tarball or build from clone)**
 
 From a clone of this repository (detects `in-cli` with `name = "inauguration"`, runs `cargo build --release` inside `in-cli` unless `IN_USE_RELEASE=1`):
 
@@ -59,16 +67,16 @@ From a clone of this repository (detects `in-cli` with `name = "inauguration"`, 
 
 Release assets match [`.github/workflows/release.yml`](.github/workflows/release.yml) (e.g. `in-macos-aarch64.tar.gz`, `in-linux-x86_64.tar.gz`). Override install dir with **`IN_INSTALL_DIR`**, pin a tag with **`IN_VERSION`**, prefer release when working in a tree with **`IN_USE_RELEASE=1`**. A thin wrapper remains at [`scripts/install.sh`](scripts/install.sh) and delegates to `./install.sh`.
 
-**4. Build from source in this workspace**
+**5. Build from source in this workspace**
 
 ```bash
 cargo build --release --manifest-path in-cli/Cargo.toml
 # binary: in-cli/target/release/in
 ```
 
-Equivalent to `cargo install --path in-cli --bin in --force` for a local path install.
+Equivalent to `cargo install --path in-cli --bin in --force` for a local path install (matches the crates.io package layout).
 
-**Crates.io:** `cargo publish` from `in-cli` is not supported until the workspace `hybrid-*` crates are published with version requirements; the CLI is distributed via GitHub releases, Homebrew, Wax, and `./install.sh`.
+Publishing: `in-cli` is the standalone crate **`inauguration`** on crates.io; hybrid pipeline sources are vendored under `in-cli/src/hybrid_*.rs` and kept in sync with `compiler/rust-driver/crates/{core,sil,scheduler,pipeline}`.
 
 ## Core commands
 
