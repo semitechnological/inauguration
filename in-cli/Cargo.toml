@@ -13,3 +13,7 @@ clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread"] }
+hybrid-core = { path = "../compiler/rust-driver/crates/core" }
+hybrid-pipeline = { path = "../compiler/rust-driver/crates/pipeline" }
+hybrid-scheduler = { path = "../compiler/rust-driver/crates/scheduler" }

@@ -1,4 +1,7 @@
 use clap::{Parser, Subcommand};
+use hybrid_core::ChangeEvent;
+use hybrid_pipeline::run_wave_with_timings;
+use hybrid_scheduler::BuildScheduler;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
@@ -93,30 +96,34 @@ fn main() {
 fn run() -> Result<()> {
     let cli = Cli::parse();
     let invocation_cwd = cwd()?;
-    let root = workspace_root(invocation_cwd.clone())?;
     match cli.command {
         Commands::Build {
             path,
             module_id,
             verbose,
             no_emit,
-        } => cmd_build(&root, &invocation_cwd, &path, &module_id, verbose, no_emit),
-        Commands::Dev => cmd_dev(&root),
+        } => cmd_build(&invocation_cwd, &path, &module_id, verbose, no_emit),
+        Commands::Dev => cmd_dev(&workspace_root(invocation_cwd.clone())?),
         Commands::Run {
             watch_root,
             socket,
             metrics,
             debounce_ms,
-        } => cmd_run(&root, &watch_root, &socket, &metrics, debounce_ms),
-        Commands::Test => cmd_test(&root),
+        } => cmd_run(
+            &workspace_root(invocation_cwd.clone())?,
+            &watch_root,
+            &socket,
+            &metrics,
+            debounce_ms,
+        ),
+        Commands::Test => cmd_test(&workspace_root(invocation_cwd.clone())?),
         Commands::Doctor => cmd_doctor(),
-        Commands::Bench { metrics } => cmd_bench(&root, &metrics),
-        Commands::Plugin { action } => cmd_plugin(&root, action),
+        Commands::Bench { metrics } => cmd_bench(&workspace_root(invocation_cwd.clone())?, &metrics),
+        Commands::Plugin { action } => cmd_plugin(&workspace_root(invocation_cwd.clone())?, action),
     }
 }
 
 fn cmd_build(
-    root: &Path,
     invocation_cwd: &Path,
     path: &str,
     module_id: &str,
@@ -124,27 +131,13 @@ fn cmd_build(
     no_emit: bool,
 ) -> Result<()> {
     let start = Instant::now();
-    let rust_driver = root.join("compiler").join("rust-driver");
-    ensure_hybrid_cli_built(&rust_driver)?;
     let resolved = if Path::new(path).is_absolute() {
         PathBuf::from(path)
     } else {
         invocation_cwd.join(path)
     };
     let display_target = resolved.display();
-    let mut cmd = Command::new(hybrid_cli_path(&rust_driver));
-    cmd.arg("--path")
-        .arg(&resolved)
-        .arg("--module-id")
-        .arg(module_id);
-
-    let result = if verbose {
-        println!("   Compiling {display_target} with `in` pipeline");
-        run_cmd(cmd.current_dir(rust_driver))
-    } else {
-        run_cmd_silent(cmd.current_dir(rust_driver))
-    };
-
+    let result = run_pipeline_for_path(&resolved, module_id, verbose);
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
     let wall = format!("{elapsed_ms:.3}ms");
     let mut emit_note = String::new();
@@ -170,7 +163,7 @@ fn cmd_build(
         if result.is_ok() {
             println!("    Finished `in build` in {wall}{emit_note}");
         }
-        println!("in.build_wall_ms={wall}");
+        println!("in.build_wall_ms={elapsed_ms:.3}");
     } else if result.is_ok() {
         println!(
             "\x1b[32m✓\x1b[0m \x1b[36min build\x1b[0m {display_target} \x1b[2m({wall}{emit_note})\x1b[0m"
@@ -181,6 +174,62 @@ fn cmd_build(
         );
     }
     result
+}
+
+fn run_pipeline_for_path(path: &Path, module_id: &str, verbose: bool) -> Result<()> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(|err| InError::Message(format!("failed to build runtime: {err}")))?;
+    let scheduler = BuildScheduler::default();
+    let event = ChangeEvent {
+        path: path.to_string_lossy().to_string(),
+        module_id: module_id.to_string(),
+        hash: "dev".to_string(),
+        timestamp_ms: 0,
+    };
+    let (count, timings) = runtime
+        .block_on(run_wave_with_timings(
+            &scheduler,
+            &event,
+            "sil @main\nentry:\ndebug_value %0\n%1 = integer_literal $Builtin.Int64, 1\n%2 = function_ref @helper",
+        ))
+        .map_err(|err| InError::Message(format!("pipeline failed: {err}")))?;
+    if verbose {
+        println!(
+            "    Finished `in` compiler pipeline (tasks: {count}) in {:.3}ms",
+            (timings.total_us as f64) / 1000.0
+        );
+        println!("      Stage timings:");
+        println!(
+            "      - ast refresh: {:.3}ms",
+            (timings.ast_refresh_us as f64) / 1000.0
+        );
+        println!(
+            "      - swift frontend: {:.3}ms",
+            (timings.swift_frontend_us as f64) / 1000.0
+        );
+        println!(
+            "      - sil analysis: {:.3}ms",
+            (timings.sil_analysis_us as f64) / 1000.0
+        );
+        println!("      - total: {:.3}ms", (timings.total_us as f64) / 1000.0);
+        println!("processed tasks: {count}");
+        println!(
+            "stage.ast_refresh_ms={:.3}",
+            (timings.ast_refresh_us as f64) / 1000.0
+        );
+        println!(
+            "stage.swift_frontend_ms={:.3}",
+            (timings.swift_frontend_us as f64) / 1000.0
+        );
+        println!(
+            "stage.sil_analysis_ms={:.3}",
+            (timings.sil_analysis_us as f64) / 1000.0
+        );
+        println!("stage.total_ms={:.3}", (timings.total_us as f64) / 1000.0);
+    }
+    Ok(())
 }
 
 fn find_package_root(path: &Path) -> Option<PathBuf> {
@@ -242,31 +291,6 @@ fn swift_executables_in_dir(bin_dir: &Path) -> Vec<String> {
     }
     bins.sort();
     bins
-}
-
-fn hybrid_cli_path(rust_driver: &Path) -> PathBuf {
-    rust_driver
-        .join("target")
-        .join("debug")
-        .join(if cfg!(windows) {
-            "hybrid-cli.exe"
-        } else {
-            "hybrid-cli"
-        })
-}
-
-fn ensure_hybrid_cli_built(rust_driver: &Path) -> Result<()> {
-    let bin = hybrid_cli_path(rust_driver);
-    if bin.exists() {
-        return Ok(());
-    }
-    run_cmd(
-        Command::new("cargo")
-            .arg("build")
-            .arg("-p")
-            .arg("hybrid-cli")
-            .current_dir(rust_driver),
-    )
 }
 
 fn cmd_dev(root: &Path) -> Result<()> {
