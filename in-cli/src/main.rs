@@ -38,9 +38,17 @@ enum Commands {
         path: String,
         #[arg(long, default_value = "App")]
         module_id: String,
-        #[arg(long, default_value_t = false, help = "Show detailed stage timing output")]
+        #[arg(
+            long,
+            default_value_t = false,
+            help = "Show detailed stage timing output"
+        )]
         verbose: bool,
-        #[arg(long, default_value_t = false, help = "Skip swift build artifact emission")]
+        #[arg(
+            long,
+            default_value_t = false,
+            help = "Skip swift build artifact emission"
+        )]
         no_emit: bool,
     },
     #[command(about = "Run full local dev loop (daemon + client)")]
@@ -118,7 +126,9 @@ fn run() -> Result<()> {
         ),
         Commands::Test => cmd_test(&workspace_root(invocation_cwd.clone())?),
         Commands::Doctor => cmd_doctor(),
-        Commands::Bench { metrics } => cmd_bench(&workspace_root(invocation_cwd.clone())?, &metrics),
+        Commands::Bench { metrics } => {
+            cmd_bench(&workspace_root(invocation_cwd.clone())?, &metrics)
+        }
         Commands::Plugin { action } => cmd_plugin(&workspace_root(invocation_cwd.clone())?, action),
     }
 }
@@ -144,18 +154,55 @@ fn cmd_build(
     if !no_emit {
         if let Some(package_root) = find_package_root(&resolved) {
             let build_result = if verbose {
-                run_cmd(Command::new("swift").arg("build").current_dir(&package_root))
+                run_cmd(
+                    Command::new("swift")
+                        .arg("build")
+                        .current_dir(&package_root),
+                )
             } else {
-                run_cmd_silent(Command::new("swift").arg("build").current_dir(&package_root))
+                run_cmd_silent(
+                    Command::new("swift")
+                        .arg("build")
+                        .current_dir(&package_root),
+                )
             };
             build_result?;
             let bin_dir = swift_bin_path(&package_root)?;
-            let executables = swift_executables_in_dir(&bin_dir);
-            emit_note = if executables.is_empty() {
-                format!(" -> {} (no executable product; library artifacts built)", bin_dir.display())
-            } else {
-                format!(" -> {} [{}]", bin_dir.display(), executables.join(", "))
-            };
+            #[cfg(unix)]
+            {
+                match stage_swift_products(&package_root, &bin_dir) {
+                    Ok(summary) => emit_note = staging_emit_note(&summary, Some(&bin_dir)),
+                    Err(e) => {
+                        let executables = swift_executables_in_dir(&bin_dir);
+                        emit_note = if executables.is_empty() {
+                            format!(
+                                " -> {} (no executable product; library artifacts built); staging failed: {}",
+                                bin_dir.display(),
+                                e
+                            )
+                        } else {
+                            format!(
+                                " -> {} [{}]; staging failed: {}",
+                                bin_dir.display(),
+                                executables.join(", "),
+                                e
+                            )
+                        };
+                    }
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                let executables = swift_executables_in_dir(&bin_dir);
+                emit_note = if executables.is_empty() {
+                    format!(
+                        " -> {} (no executable product; library artifacts built)",
+                        bin_dir.display()
+                    )
+                } else {
+                    format!(" -> {} [{}]", bin_dir.display(), executables.join(", "))
+                };
+            }
         }
     }
 
@@ -293,6 +340,162 @@ fn swift_executables_in_dir(bin_dir: &Path) -> Vec<String> {
     bins
 }
 
+/// Staging layout under the package root for stable paths (`.build/bin`, `.build/artifacts`).
+#[cfg(unix)]
+#[derive(Debug, Default)]
+struct StageSummary {
+    bin_names: Vec<String>,
+    artifact_names: Vec<String>,
+}
+
+#[cfg(unix)]
+fn clear_dir_contents(dir: &Path) -> Result<()> {
+    if !dir.exists() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(dir)? {
+        let path = entry?.path();
+        let meta = fs::symlink_metadata(&path)?;
+        if meta.file_type().is_symlink() {
+            fs::remove_file(&path)?;
+        } else if meta.is_dir() {
+            fs::remove_dir_all(&path)?;
+        } else {
+            fs::remove_file(&path)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn is_swift_products_internal_skip(name: &str, is_dir: bool) -> bool {
+    if matches!(
+        name,
+        "Modules" | "ModuleCache" | "index" | "description.json" | "plugin-tools-description.json"
+    ) {
+        return true;
+    }
+    if is_dir && name.ends_with(".build") {
+        return true;
+    }
+    name.starts_with("swift-version-") && name.ends_with(".txt")
+}
+
+#[cfg(unix)]
+fn excluded_non_bin_extension(path: &Path) -> bool {
+    let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
+        return false;
+    };
+    matches!(
+        ext,
+        "a" | "dylib" | "swiftmodule" | "json" | "txt" | "swiftdoc" | "swiftsourceinfo"
+    )
+}
+
+#[cfg(unix)]
+fn is_unix_executable_file(path: &Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    if excluded_non_bin_extension(path) {
+        return false;
+    }
+    use std::os::unix::fs::PermissionsExt;
+    let Ok(meta) = fs::metadata(path) else {
+        return false;
+    };
+    meta.permissions().mode() & 0o111 != 0
+}
+
+#[cfg(unix)]
+fn should_stage_as_bin(path: &Path, name: &str) -> bool {
+    if is_swift_products_internal_skip(name, path.is_dir()) {
+        return false;
+    }
+    if path.is_dir() && name.ends_with(".app") {
+        return true;
+    }
+    is_unix_executable_file(path)
+}
+
+#[cfg(unix)]
+fn should_stage_as_artifact(path: &Path, name: &str) -> bool {
+    if is_swift_products_internal_skip(name, path.is_dir()) {
+        return false;
+    }
+    if name.ends_with(".xctest")
+        || name.ends_with(".dSYM")
+        || name.ends_with(".bundle")
+        || name.ends_with(".product")
+    {
+        return true;
+    }
+    path.is_file() && name.ends_with(".plist")
+}
+
+#[cfg(unix)]
+fn stage_swift_products(package_root: &Path, products_dir: &Path) -> Result<StageSummary> {
+    let bin_stage = package_root.join(".build/bin");
+    let art_stage = package_root.join(".build/artifacts");
+    fs::create_dir_all(&bin_stage)?;
+    fs::create_dir_all(&art_stage)?;
+    clear_dir_contents(&bin_stage)?;
+    clear_dir_contents(&art_stage)?;
+
+    let mut summary = StageSummary::default();
+    let entries = fs::read_dir(products_dir)?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let target = path
+            .canonicalize()
+            .map_err(|e| InError::Message(format!("canonicalize {}: {e}", path.display())))?;
+
+        if should_stage_as_bin(&path, name) {
+            let link = bin_stage.join(name);
+            std::os::unix::fs::symlink(&target, &link)?;
+            summary.bin_names.push(name.to_string());
+        } else if should_stage_as_artifact(&path, name) {
+            let link = art_stage.join(name);
+            std::os::unix::fs::symlink(&target, &link)?;
+            summary.artifact_names.push(name.to_string());
+        }
+    }
+    summary.bin_names.sort();
+    summary.artifact_names.sort();
+    Ok(summary)
+}
+
+#[cfg(unix)]
+fn staging_emit_note(summary: &StageSummary, swift_products_dir: Option<&Path>) -> String {
+    let mut parts = Vec::new();
+    if !summary.bin_names.is_empty() {
+        parts.push(format!(".build/bin [{}]", summary.bin_names.join(", ")));
+    } else if let Some(p) = swift_products_dir {
+        parts.push(format!(
+            ".build/bin (empty); SwiftPM products {}",
+            p.display()
+        ));
+    } else {
+        parts.push(".build/bin (empty)".to_string());
+    }
+    if !summary.artifact_names.is_empty() {
+        let hint = if summary.artifact_names.len() <= 4 {
+            summary.artifact_names.join(", ")
+        } else {
+            format!(
+                "{}, +{} more",
+                summary.artifact_names[..4].join(", "),
+                summary.artifact_names.len() - 4
+            )
+        };
+        parts.push(format!(".build/artifacts [{hint}]"));
+    }
+    format!(" -> {}", parts.join("; "))
+}
+
 fn cmd_dev(root: &Path) -> Result<()> {
     run_cmd(
         Command::new("bash")
@@ -382,9 +585,12 @@ fn plugin_registry_dir(root: &Path) -> PathBuf {
 }
 
 fn plugin_install_dir() -> Result<PathBuf> {
-    let home = std::env::var_os("HOME")
-        .ok_or_else(|| InError::Message("HOME is not set".to_string()))?;
-    Ok(PathBuf::from(home).join(".config").join("in").join("plugins"))
+    let home =
+        std::env::var_os("HOME").ok_or_else(|| InError::Message("HOME is not set".to_string()))?;
+    Ok(PathBuf::from(home)
+        .join(".config")
+        .join("in")
+        .join("plugins"))
 }
 
 fn cmd_plugin(root: &Path, action: PluginAction) -> Result<()> {
@@ -475,7 +681,11 @@ fn cmd_bench(root: &Path, metrics: &str) -> Result<()> {
     let path = root.join(metrics);
     let content = std::fs::read_to_string(&path)?;
     let mut rows = Vec::new();
-    for line in content.lines().map(str::trim).filter(|line| !line.is_empty()) {
+    for line in content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
         if let Ok(m) = serde_json::from_str::<BenchMetric>(line) {
             rows.push(m);
         }
@@ -503,7 +713,10 @@ fn cmd_bench(root: &Path, metrics: &str) -> Result<()> {
         "compile_cache_hit_rate: {:.2}%",
         (cache_hits as f64 / total as f64) * 100.0
     );
-    println!("compile_check_ms p50: {}", percentile(compile_times.clone(), 0.50));
+    println!(
+        "compile_check_ms p50: {}",
+        percentile(compile_times.clone(), 0.50)
+    );
     println!("compile_check_ms p95: {}", percentile(compile_times, 0.95));
     println!("reasons:");
     for (reason, count) in reasons {
@@ -521,7 +734,9 @@ fn run_cmd(cmd: &mut Command) -> Result<()> {
     if status.success() {
         Ok(())
     } else {
-        Err(InError::Message(format!("command failed with status {status}")))
+        Err(InError::Message(format!(
+            "command failed with status {status}"
+        )))
     }
 }
 
@@ -623,5 +838,28 @@ mod tests {
             }
             _ => panic!("expected bench command"),
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn swift_products_internal_skip_patterns() {
+        assert!(super::is_swift_products_internal_skip("Modules", true));
+        assert!(super::is_swift_products_internal_skip("ModuleCache", true));
+        assert!(super::is_swift_products_internal_skip("index", false));
+        assert!(super::is_swift_products_internal_skip(
+            "description.json",
+            false
+        ));
+        assert!(super::is_swift_products_internal_skip(
+            "plugin-tools-description.json",
+            false
+        ));
+        assert!(super::is_swift_products_internal_skip("foo.build", true));
+        assert!(!super::is_swift_products_internal_skip("foo.build", false));
+        assert!(super::is_swift_products_internal_skip(
+            "swift-version-5.9.txt",
+            false
+        ));
+        assert!(!super::is_swift_products_internal_skip("MyApp.app", true));
     }
 }
