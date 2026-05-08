@@ -6,7 +6,7 @@ Contributor guide for humans and coding agents working in `inauguration`.
 
 Ship faster Swift developer workflows by improving three core layers together:
 
-1. `compiler/ocaml-front` (frontend and diagnostics)
+1. `in-cli` Swift subset front (`swift_subset`) + CLI workflows
 2. `compiler/rust-driver` (pipeline/orchestration/perf)
 3. `runtime/*` (reload latency and reliability)
 
@@ -33,9 +33,14 @@ If touching benchmarks or runtime timing, also run:
 in bench
 ```
 
+## Rust `protocol-gen` vs V
+
+- **`protocol-gen` (Rust, `in-cli`)**: canonical checked-in codegen for `PatchType` / Swift `GeneratedWirePatchType` from `shared/protocol/events.schema.json`. CI runs **`scripts/check-protocol-models.sh`** (Rust generator + `git diff`).
+- **V**: benchmark driver **`scripts/bench_swift.v`** (via **`scripts/bench-swift.sh`**: `v -gc none run …/bench_swift.v`) plus optional tools such as **`shared/protocol/generate_models.v`**.
+
 ## Code ownership map
 
-- `compiler/ocaml-front`: parser/checker/artifact contract
+- `in-cli/src/swift_subset.rs`: Swift subset parser/checker/artifact JSON
 - `compiler/rust-driver/crates/pipeline`: stage model + artifact ingestion
 - `compiler/rust-driver/crates/sil`: SIL analysis/transforms
 - `runtime/hotreload-daemon`: watch/decision/metrics loop

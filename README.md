@@ -4,22 +4,25 @@
 
 ## What it is
 
-- **Compiler workspace** for Swift front-end experimentation (OCaml parser/checker + Rust pipeline).
-- **Runtime hot reload system** for SwiftUI (daemon + preview host bridge).
-- **CLI (`in`)** for build, test, benchmark, plugin installation, and daily dev workflows.
+- **Compiler workspace** for experimenting with Swift tooling (pipeline, SIL passes, small frontend checks).
+- **Hot reload** path for SwiftUI: daemon plus preview host bridge.
+- **`in` CLI** for daily workflows: build, dev loop, tests, benchmarks, plugins.
 
-The `in` binary ships **all Rust runtime logic that crates.io installs**: hybrid compiler wave (stub timings + SIL pass), **`in run` / `in dev` hotreload daemon** (notify → Unix socket → NDJSON metrics). **`in dev`** defaults to the **Rust** preview socket client; use **`--preview-client swift`** when you need the SwiftPM **`PreviewHost`** bridge and SwiftUI. **`swift`** / **`swiftc`** remain separate for **`swift build`** emit. **`compiler/ocaml-front`** is not linked into `in`; it powers experiments via **`in test`** (runs opam/dune in-tree). Protocol enum codegen is **`cargo run --manifest-path in-cli/Cargo.toml --bin protocol-gen`** (reads `shared/protocol/events.schema.json`).
+The published **`in`** binary bundles the hybrid compile wave, hotreload daemon, and socket-based dev preview. **`in dev`** uses a lightweight client by default; pass **`--preview-client swift`** when you want the SwiftPM preview host. Regular **`swift build`** / **`swiftc`** stay on the normal Swift toolchain.
+
+Hotreload wire formats live under **`shared/protocol`**; regenerators and benchmark helpers live in **`in-cli`** and **`scripts`** (see **`scripts/check-protocol-models.sh`** and **`./scripts/bench-swift.sh`**).
+
+**Protocol models:** Rust **`protocol-gen`** (`cargo run --manifest-path in-cli/Cargo.toml --bin protocol-gen`) is the **canonical checked-in codegen** from `shared/protocol/events.schema.json`. **V** is retained for **`scripts/bench_swift.v`** (Swift vs `in` timings via **`./scripts/bench-swift.sh`**) and optional **`shared/protocol/generate_models.v`** minor-tool parity (same emitted Rust/Swift as `protocol-gen`; headers identify the V generator).
 
 ## Repository layout
 
-- `compiler/rust-driver`: concurrent orchestrator, pipeline, SIL analysis, batch compile path.
-- `compiler/ocaml-front`: Swift subset front-end, diagnostics, artifact emission.
+- `compiler/rust-driver`: orchestrator, pipeline, SIL analysis, batch compile path.
+- `in-cli`: **`in`** CLI, hybrid pipeline sources, hotreload daemon, protocol regeneration.
 - `runtime/hotreload-daemon`: thin `cargo run` wrapper + integration tests (daemon sources live in `in-cli`, embedded into `in`).
 - `runtime/swift-preview-host`: Swift package receiving and applying reload envelopes.
-- `in-cli`: user-facing command line binary (`in`).
 - `plugins/registry`: installable project accelerators (aurorality, crepuscularity).
 - `scripts`: operational scripts (dev loop, compiler benchmark harness).
-- `docs/architecture`: architecture and local runbooks ([interop roadmap](docs/architecture/interop-roadmap.md): OCaml / Equilibrium-V / Swift options).
+- `docs/architecture`: architecture and local runbooks ([interop roadmap](docs/architecture/interop-roadmap.md)).
 - `docs/benchmarks`: benchmark reports and generated comparison artifacts.
 
 ## `in build` and SwiftPM staging (macOS/Linux)
@@ -29,19 +32,19 @@ After a successful **`swift build`** for a package (when the target path lives u
 - **`.build/bin`**: runnable products — executable files (excluding typical non-binaries such as `.dylib`, `.a`, `.swiftmodule`, `.json`, `.txt`) plus **`.app`** bundles.
 - **`.build/artifacts`**: auxiliary outputs such as **`.xctest`**, **`.dSYM`**, **`.bundle`**, **`.product`**, and loose **`.plist`** files (e.g. entitlements).
 
-Those directories are emptied on each `in build`, then repopulated with **symlinks** to the real SwiftPM layout from `swift build --show-bin-path`. SwiftPM plumbing (e.g. `Modules`, `ModuleCache`, `index`, `description.json`) is not staged. On non-Unix targets, staging is skipped and the success line points at the Swift products directory only.
+Those directories are emptied on each `in build`, then repopulated with **symlinks** to the real SwiftPM layout from `swift build --show-bin-path`. SwiftPM plumbing (e.g. `Modules`, `ModuleCache`, `index`, `description.json`) is not staged. On non-Unix targets, staging is skipped.
 
 ## Install CLI (pick one)
 
 Recommended order:
 
-**1. crates.io (Rust toolchain)**
+**1. crates.io**
 
 ```bash
 cargo install inauguration
 ```
 
-Installs the `in` binary; hybrid pipeline is linked into this crate (no separate `hybrid-*` crates on crates.io).
+Installs the **`in`** binary as a single package.
 
 **2. Wax (Homebrew-compatible parity)**
 
@@ -76,17 +79,17 @@ cargo build --release --manifest-path in-cli/Cargo.toml
 
 Equivalent to `cargo install --path in-cli --bin in --force` for a local path install (matches the crates.io package layout).
 
-Publishing: `in-cli` is the standalone crate **`inauguration`** on crates.io; hybrid pipeline sources are vendored under `in-cli/src/hybrid_*.rs` and kept in sync with `compiler/rust-driver/crates/{core,sil,scheduler,pipeline}`.
+Publishing: **`inauguration`** crate ships from **`in-cli`**; sources stay aligned with **`compiler/rust-driver`**.
 
 ## Core commands
 
 ```bash
 in build
 in build --path ../aurorality/examples
-in dev                              # Rust NDJSON socket client (default)
-in dev --preview-client swift       # Swift PreviewHost + SwiftUI
+in dev
+in dev --preview-client swift       # Swift preview host + SwiftUI path
 in run
-in ocaml path/to/File.swift         # OCaml Swift subset checker (workspace + opam)
+in ocaml path/to/File.swift         # experimental Swift subset check → JSON
 in test
 in doctor
 in bench
@@ -105,11 +108,15 @@ in plugin run aurorality --target ../aurorality
 
 ```bash
 cd compiler/rust-driver && cargo test --all
-cd compiler/ocaml-front && eval "$(opam env --switch=default)" && dune runtest
+cd in-cli && cargo test
 cd runtime/swift-preview-host && swift build -Xswiftc -warnings-as-errors && swift test
 cd runtime/hotreload-daemon && cargo test
 ./scripts/check-protocol-models.sh # runs protocol-gen (Rust) then git diff
+# Optional: same outputs via V (header comment differs); not run in CI.
+v -gc none run shared/protocol/generate_models.v "$(pwd)"   # omit "$(pwd)" to walk up to repo root
 ```
+
+CI stays on **`protocol-gen` (Rust)** via **`scripts/check-protocol-models.sh`**.
 
 ## Benchmarking
 
@@ -117,7 +124,7 @@ cd runtime/hotreload-daemon && cargo test
 ./scripts/bench-swift.sh
 ```
 
-The shell driver exports defaults when unset: **`BENCH_RUNS=3`**, **`BENCH_WARMUP_RUNS=1`**. Override via the environment (`BENCH_RUNS`, `BENCH_WARMUP_RUNS`).
+[`scripts/bench-swift.sh`](scripts/bench-swift.sh) exports **`BENCH_ROOT`** to the repository root and runs **`v -gc none run "$BENCH_ROOT/scripts/bench_swift.v`**. The shell driver exports defaults when unset: **`BENCH_RUNS=3`**, **`BENCH_WARMUP_RUNS=1`**. Override via the environment (`BENCH_RUNS`, `BENCH_WARMUP_RUNS`). If bare **`v run`** fails with missing **`gc.h`**, use **`v -gc none`** (as this script does) or install Boehm **`gc`** development headers.
 
 Writes:
 
@@ -130,7 +137,7 @@ The markdown benchmark report includes:
 
 ### Latest Benchmark Snapshot
 
-Generated (UTC): `2026-05-08T16:17:59Z`
+Generated (UTC): `2026-05-08T16:53:07Z`
 
 Environment:
 - OS: `macOS 26.5`
@@ -143,15 +150,15 @@ Environment:
 
 | Example | swift build(ms) | in(ms) |
 |---|---:|---:|
-| `aurorality/examples/counter` | 789.62 | 5.14 |
-| `aurorality/examples/basic` | 763.95 | 4.85 |
-| `aurorality/examples/hyperchat` | 320.13 | 5.12 |
+| `aurorality/examples/counter` | 852.58 | 8.11 |
+| `aurorality/examples/basic` | 958.66 | 7.29 |
+| `aurorality/examples/hyperchat` | 365.90 | 7.76 |
 
 Swift compiler sources (`swift` toolchain package) vs `in`:
 
 | Example | swift build(ms) | in(ms) |
 |---|---:|---:|
-| `vendor/swift/SwiftCompilerSources` | 321.65 | 5.15 |
+| `vendor/swift/SwiftCompilerSources` | 354.11 | 7.41 |
 
 `SwiftCompilerSources` is a library product package, so SwiftPM may place library products under its build tree; **`in build` still stages runnable and artifact-like outputs** into `.build/bin` and `.build/artifacts` when present in the `swift build --show-bin-path` directory.
 

@@ -1,25 +1,15 @@
-# Polyglot interop roadmap (OCaml, Swift)
+# Polyglot interop roadmap (Rust front, Swift)
 
 This doc ties optional embedding work to concrete crates and repo paths. Nothing here is required for `cargo install inauguration`; it guides **in-tree** consolidation.
 
 ## Boundaries today
 
 | Piece | Role | Today |
-|-------|------|--------|
-| OCaml front | Parse/check Swift subset → JSON artifact | STDIN/STDOUT CLI (`compiler/ocaml-front/bin/main.ml`) + **`in ocaml`** |
-| Protocol enums (`PatchType`) | Rust + Swift from JSON Schema | **`cargo run --manifest-path in-cli/Cargo.toml --bin protocol-gen`** (`serde_json` on `events.schema.json`) |
+|-------|------|-------|
+| Swift subset front | Parse/check minimal Swift-ish lines → JSON artifact | **`in ocaml`** → `in-cli/src/swift_subset.rs` (Rust; legacy subcommand name) |
+| Protocol enums (`PatchType`) | Rust + Swift from JSON Schema | **Rust `protocol-gen`** (`cargo run --manifest-path in-cli/Cargo.toml --bin protocol-gen`) is canonical checked-in codegen; CI uses **`scripts/check-protocol-models.sh`**. **V** **`shared/protocol/generate_models.v`** is optional minor-tool parity (same outputs as `protocol-gen` aside from header comment). |
+| Benchmark harness | Swift vs `in` timings + markdown/json reports | **`./scripts/bench-swift.sh`** runs **`v -gc none run $ROOT/scripts/bench_swift.v`** (sets **`BENCH_ROOT`**). |
 | Preview pipeline | NDJSON over Unix socket | **`in dev`** defaults to **Rust** client; **`--preview-client swift`** runs SwiftPM **`swift-preview-host-client`** |
-
-## OCaml ↔ Rust
-
-Build with **`cargo build --manifest-path in-cli/Cargo.toml --features experimental-ocaml-interop`** only when OCaml 5.x / opam are available (otherwise `ocaml-sys` build scripts fail). Default crates.io builds omit this feature.
-
-| Crate | Best when | Notes |
-|-------|-----------|--------|
-| **ocaml-interop** | Rust **hosts** OCaml | GC rooting via Rust types |
-| **ocaml-rs** (+ macros) | OCaml hosts Rust | `#[ocaml::func]` |
-
-**Concrete OCaml surface to FFI-wrap:** parse string → check → `Artifact.program_to_json` → JSON string (mirror `bin/main.ml`).
 
 ## swift-rs (macOS Swift linkage)
 
@@ -27,11 +17,11 @@ Add **`swift-rs`** + **`build-dependencies swift-rs` with `features = ["build"]`
 
 ## Suggested phases
 
-1. **Phase A — Contract freeze:** JSON schema + OCaml artifact JSON shape stay the cross-language contracts.
-2. **Phase B — OCaml embed:** Link OCaml runtime + wrap `program_to_json` via **ocaml-interop**, with **`experimental-ocaml-interop`** feature.
+1. **Phase A — Contract freeze:** JSON schema + frontend artifact JSON shape stay the cross-language contracts.
+2. **Phase B — Richer Rust front:** extend `swift_subset` parsing beyond line declarations without breaking `format_version`.
 3. **Phase C — Preview bridge:** SPM static lib + **swift-rs** for **`PreviewHost`** without subprocess.
 
 ## Related paths
 
-- OCaml front entry: `compiler/ocaml-front/bin/main.ml`.
+- Parser/check entry: `in-cli/src/swift_subset.rs`.
 - Socket client reference: `runtime/swift-preview-host/Sources/SwiftPreviewHostClient/main.swift`.

@@ -5,7 +5,7 @@ Each metric uses median of `3` runs.
 
 ## Benchmark Environment
 
-- Generated (UTC): `2026-05-08T16:17:59Z`
+- Generated (UTC): `2026-05-08T16:53:07Z`
 - Host OS: `Darwin`
 - Kernel: `25.4.0`
 - CPU: `Apple M5 Pro`
@@ -24,18 +24,18 @@ Target: arm64-apple-macosx26.0`
 
 | Example | swift build(ms) | in(ms) |
 |---|---:|---:|
-| `aurorality/examples/counter` | 789.62 | 5.14 |
-| `aurorality/examples/basic` | 763.95 | 4.85 |
-| `aurorality/examples/hyperchat` | 320.13 | 5.12 |
+| `aurorality/examples/counter` | 852.58 | 8.11 |
+| `aurorality/examples/basic` | 958.66 | 7.29 |
+| `aurorality/examples/hyperchat` | 365.90 | 7.76 |
 
 ## Swift Toolchain (Compiler Sources) Benchmark
 
 | Example | swift build(ms) | in(ms) |
 |---|---:|---:|
-| `vendor/swift/SwiftCompilerSources` | 321.65 | 5.15 |
+| `vendor/swift/SwiftCompilerSources` | 354.11 | 7.41 |
 
 | Example | swiftc(ms) | swift build(ms) | in(ms) | hybrid-cli(ms) | in/swift-build | in-stage-total(ms) | in-driver-overhead(ms) | in-wrapper-overhead(ms) | loss bucket | swift build ok | in ok |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---|:---:|:---:|
-| `aurorality/examples/counter` | 150.72 | 789.62 | 5.14 | 4.70 | 0.007 | 0.019 | 5.117 | 0.437 | win | ✅ | ✅ |
-| `aurorality/examples/basic` | 141.91 | 763.95 | 4.85 | 4.47 | 0.006 | 0.018 | 4.827 | 0.379 | win | ✅ | ✅ |
-| `aurorality/examples/hyperchat` | 9139.58 | 320.13 | 5.12 | 4.72 | 0.016 | 0.018 | 5.103 | 0.397 | win | ✅ | ✅ |
+| `aurorality/examples/counter` | 157.19 | 852.58 | 8.11 | 6.06 | 0.010 | 0.048 | 8.061 | 2.051 | win | ✅ | ✅ |
+| `aurorality/examples/basic` | 218.98 | 958.66 | 7.29 | 5.66 | 0.008 | 0.046 | 7.246 | 1.632 | win | ✅ | ✅ |
+| `aurorality/examples/hyperchat` | 10304.84 | 365.90 | 7.76 | 6.05 | 0.021 | 0.044 | 7.717 | 1.716 | win | ✅ | ✅ |
