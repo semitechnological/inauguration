@@ -1,6 +1,8 @@
 use clap::{Parser, Subcommand};
 use serde::Deserialize;
 use std::collections::BTreeMap;
+use std::ffi::OsStr;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use thiserror::Error;
@@ -28,7 +30,7 @@ struct Cli {
 enum Commands {
     #[command(about = "Run hybrid compiler pipeline")]
     Build {
-        #[arg(long, default_value = "App.swift")]
+        #[arg(long, default_value = "App.swift", help = "Swift file or directory")]
         path: String,
         #[arg(long, default_value = "App")]
         module_id: String,
@@ -55,6 +57,25 @@ enum Commands {
         #[arg(long, default_value = ".brisk/hotreload/metrics/latest.ndjson")]
         metrics: String,
     },
+    #[command(about = "Manage installable optimization plugins")]
+    Plugin {
+        #[command(subcommand)]
+        action: PluginAction,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum PluginAction {
+    #[command(about = "List built-in and installed plugins")]
+    List,
+    #[command(about = "Install plugin from built-in registry")]
+    Install { name: String },
+    #[command(about = "Run installed plugin against target path")]
+    Run {
+        name: String,
+        #[arg(long, default_value = ".")]
+        target: String,
+    },
 }
 
 fn main() {
@@ -79,23 +100,24 @@ fn run() -> Result<()> {
         Commands::Test => cmd_test(&root),
         Commands::Doctor => cmd_doctor(),
         Commands::Bench { metrics } => cmd_bench(&root, &metrics),
+        Commands::Plugin { action } => cmd_plugin(&root, action),
     }
 }
 
 fn cmd_build(root: &Path, path: &str, module_id: &str) -> Result<()> {
     let rust_driver = root.join("compiler").join("rust-driver");
-    run_cmd(
-        Command::new("cargo")
-            .arg("run")
-            .arg("-p")
-            .arg("hybrid-cli")
-            .arg("--")
-            .arg("--path")
-            .arg(path)
-            .arg("--module-id")
-            .arg(module_id)
-            .current_dir(rust_driver),
-    )
+    let mut cmd = Command::new("cargo");
+    cmd.arg("run").arg("-p").arg("hybrid-cli").arg("--");
+    let resolved = root.join(path);
+    cmd.arg("--path")
+        .arg(if resolved.exists() {
+            resolved
+        } else {
+            PathBuf::from(path)
+        })
+        .arg("--module-id")
+        .arg(module_id);
+    run_cmd(cmd.current_dir(rust_driver))
 }
 
 fn cmd_dev(root: &Path) -> Result<()> {
@@ -162,7 +184,7 @@ fn cmd_test(root: &Path) -> Result<()> {
 }
 
 fn cmd_doctor() -> Result<()> {
-    for tool in ["cargo", "swift", "opam", "dune"] {
+    for tool in ["cargo", "swift", "opam", "dune", "rg"] {
         let status = Command::new("/usr/bin/which")
             .arg(tool)
             .stdout(Stdio::null())
@@ -175,6 +197,83 @@ fn cmd_doctor() -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn plugin_registry_dir(root: &Path) -> PathBuf {
+    root.join("plugins").join("registry")
+}
+
+fn plugin_install_dir() -> Result<PathBuf> {
+    let home = std::env::var_os("HOME")
+        .ok_or_else(|| InError::Message("HOME is not set".to_string()))?;
+    Ok(PathBuf::from(home).join(".config").join("in").join("plugins"))
+}
+
+fn cmd_plugin(root: &Path, action: PluginAction) -> Result<()> {
+    match action {
+        PluginAction::List => {
+            println!("built-in:");
+            let reg = plugin_registry_dir(root);
+            if reg.exists() {
+                for entry in fs::read_dir(reg)? {
+                    let entry = entry?;
+                    let name = entry.file_name();
+                    if let Some(name) = name.to_str()
+                        && name.ends_with(".sh")
+                    {
+                        println!("  {}", name.trim_end_matches(".sh"));
+                    }
+                }
+            }
+            let install = plugin_install_dir()?;
+            println!("installed:");
+            if install.exists() {
+                for entry in fs::read_dir(install)? {
+                    let entry = entry?;
+                    let name = entry.file_name();
+                    if let Some(name) = name.to_str()
+                        && name.ends_with(".sh")
+                    {
+                        println!("  {}", name.trim_end_matches(".sh"));
+                    }
+                }
+            }
+            Ok(())
+        }
+        PluginAction::Install { name } => {
+            let src = plugin_registry_dir(root).join(format!("{name}.sh"));
+            if !src.exists() {
+                return Err(InError::Message(format!("unknown plugin: {name}")));
+            }
+            let dst_dir = plugin_install_dir()?;
+            fs::create_dir_all(&dst_dir)?;
+            let dst = dst_dir.join(format!("{name}.sh"));
+            fs::copy(&src, &dst)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = fs::metadata(&dst)?.permissions();
+                perms.set_mode(0o755);
+                fs::set_permissions(&dst, perms)?;
+            }
+            println!("installed plugin: {name}");
+            Ok(())
+        }
+        PluginAction::Run { name, target } => {
+            let script = plugin_install_dir()?.join(format!("{name}.sh"));
+            if !script.exists() {
+                return Err(InError::Message(format!(
+                    "plugin not installed: {name} (run `in plugin install {name}`)"
+                )));
+            }
+            run_cmd(
+                Command::new("bash")
+                    .arg(&script)
+                    .arg(root.join(target))
+                    .arg(root),
+            )
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -248,6 +347,11 @@ fn run_cmd(cmd: &mut Command) -> Result<()> {
     }
 }
 
+#[allow(dead_code)]
+fn path_as_os(path: &Path) -> &OsStr {
+    path.as_os_str()
+}
+
 fn cwd() -> Result<PathBuf> {
     Ok(std::env::current_dir()?)
 }
@@ -261,7 +365,10 @@ mod tests {
         let cli = Cli::try_parse_from(["in", "build", "--path", "Foo.swift", "--module-id", "Foo"])
             .expect("cli parse");
         match cli.command {
-            Commands::Build { path, module_id } => {
+            Commands::Build {
+                path,
+                module_id,
+            } => {
                 assert_eq!(path, "Foo.swift");
                 assert_eq!(module_id, "Foo");
             }

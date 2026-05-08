@@ -9,4 +9,5 @@ clap = { version = "4", features = ["derive"] }
 hybrid-core = { path = "../core" }
 hybrid-pipeline = { path = "../pipeline" }
 hybrid-scheduler = { path = "../scheduler" }
+rayon = "1"
 tokio.workspace = true

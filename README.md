@@ -57,10 +57,14 @@ Commands:
 
 ```bash
 in build
+in build --path ../aurorality/examples
 in dev
 in run
 in test
 in doctor
+in plugin list
+in plugin install aurorality
+in plugin run aurorality --target ../aurorality
 ```
 
 ## Acknowledgements

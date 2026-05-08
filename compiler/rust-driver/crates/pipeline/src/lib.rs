@@ -2,6 +2,7 @@ use hybrid_core::{ChangeEvent, TaskKind};
 use hybrid_scheduler::{BuildScheduler, SchedulerError};
 use hybrid_sil::{extract_call_graph, parse_textual_sil, remove_debug_insts};
 use serde_json::Value;
+use std::time::Instant;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -18,6 +19,14 @@ pub struct FrontendArtifactSummary {
     pub functions: usize,
     pub diagnostics: usize,
     pub success: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StageTimings {
+    pub ast_refresh_us: u64,
+    pub swift_frontend_us: u64,
+    pub sil_analysis_us: u64,
+    pub total_us: u64,
 }
 
 pub fn summarize_frontend_artifact(json: &str) -> Result<FrontendArtifactSummary, PipelineError> {
@@ -51,25 +60,44 @@ pub async fn run_wave(
     event: &ChangeEvent,
     sil_source: &str,
 ) -> Result<usize, PipelineError> {
+    Ok(run_wave_with_timings(scheduler, event, sil_source).await?.0)
+}
+
+pub async fn run_wave_with_timings(
+    scheduler: &BuildScheduler,
+    event: &ChangeEvent,
+    sil_source: &str,
+) -> Result<(usize, StageTimings), PipelineError> {
+    let start_total = Instant::now();
     scheduler.enqueue_wave(event).await;
     let mut processed = 0usize;
+    let mut timings = StageTimings::default();
     while let Ok(task) = scheduler.next_task().await {
         if scheduler.is_cancelled(&task.cancel_token) {
             continue;
         }
+        let stage_start = Instant::now();
         match task.task_kind {
             TaskKind::AstRefresh | TaskKind::SwiftFrontend => {
                 processed += 1;
+                let elapsed = stage_start.elapsed().as_micros() as u64;
+                match task.task_kind {
+                    TaskKind::AstRefresh => timings.ast_refresh_us += elapsed,
+                    TaskKind::SwiftFrontend => timings.swift_frontend_us += elapsed,
+                    TaskKind::SilAnalysis => {}
+                }
             }
             TaskKind::SilAnalysis => {
                 let artifact = parse_textual_sil(sil_source);
                 let _optimized = remove_debug_insts(&artifact);
                 let _report = extract_call_graph(&artifact);
                 processed += 1;
+                timings.sil_analysis_us += stage_start.elapsed().as_micros() as u64;
             }
         }
     }
-    Ok(processed)
+    timings.total_us = start_total.elapsed().as_micros() as u64;
+    Ok((processed, timings))
 }
 
 #[cfg(test)]
@@ -79,7 +107,7 @@ mod tests {
     #[tokio::test]
     async fn runs_three_task_wave() {
         let scheduler = BuildScheduler::default();
-        let count = run_wave(
+        let (count, timings) = run_wave_with_timings(
             &scheduler,
             &ChangeEvent {
                 path: "App.swift".to_string(),
@@ -92,6 +120,7 @@ mod tests {
         .await
         .expect("pipeline runs");
         assert_eq!(count, 3);
+        assert!(timings.total_us <= 50_000_000);
     }
 
     #[test]
