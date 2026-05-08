@@ -1,12 +1,7 @@
-mod hybrid_core;
-mod hybrid_pipeline;
-mod hybrid_scheduler;
-mod hybrid_sil;
-
-use crate::hybrid_core::ChangeEvent;
-use crate::hybrid_pipeline::run_wave_with_timings;
-use crate::hybrid_scheduler::BuildScheduler;
 use clap::{Parser, Subcommand};
+use inauguration::hybrid_core::ChangeEvent;
+use inauguration::hybrid_pipeline::run_wave_with_timings;
+use inauguration::hybrid_scheduler::BuildScheduler;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
@@ -502,11 +497,59 @@ fn staging_emit_note(summary: &StageSummary, swift_products_dir: Option<&Path>) 
 }
 
 fn cmd_dev(root: &Path) -> Result<()> {
-    run_cmd(
-        Command::new("bash")
-            .arg("scripts/dev-loop.sh")
-            .current_dir(root),
-    )
+    use std::time::Duration;
+
+    #[cfg(unix)]
+    {
+        let socket = root.join(".brisk/hotreload/daemon.sock");
+        let metrics = root.join(".brisk/hotreload/metrics/latest.ndjson");
+        let watch_root = root.join("apps/sample-swiftui");
+        if let Some(p) = socket.parent() {
+            fs::create_dir_all(p)?;
+        }
+        if let Some(p) = metrics.parent() {
+            fs::create_dir_all(p)?;
+        }
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| InError::Message(format!("tokio runtime: {e}")))?;
+        rt.block_on(async {
+            let config = inauguration::hotreload::DaemonConfig {
+                watch_root,
+                socket_path: socket.clone(),
+                metrics_path: metrics,
+                debounce_ms: 60,
+            };
+            let daemon = tokio::spawn(inauguration::hotreload::run_daemon(config));
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            let swift_root = root.join("runtime/swift-preview-host");
+            let sock_arg = socket.to_string_lossy().to_string();
+            let status = tokio::task::spawn_blocking(move || {
+                Command::new("swift")
+                    .current_dir(swift_root)
+                    .args(["run", "swift-preview-host-client", sock_arg.as_str()])
+                    .status()
+            })
+            .await
+            .map_err(|e| InError::Message(format!("swift task join: {e}")))?;
+            daemon.abort();
+            let status = status.map_err(|e| InError::Message(format!("swift spawn: {e}")))?;
+            if status.success() {
+                Ok(())
+            } else {
+                Err(InError::Message(format!(
+                    "swift preview host client exited with {status}"
+                )))
+            }
+        })
+    }
+    #[cfg(not(unix))]
+    {
+        Err(InError::Message(
+            "`in dev` requires Unix (hotreload uses AF_UNIX)".into(),
+        ))
+    }
 }
 
 fn cmd_run(
@@ -516,20 +559,30 @@ fn cmd_run(
     metrics: &str,
     debounce_ms: u64,
 ) -> Result<()> {
-    let daemon_dir = root.join("runtime").join("hotreload-daemon");
-    let watch_root = root.join(watch_root);
-    let socket = root.join(socket);
-    let metrics = root.join(metrics);
-    run_cmd(
-        Command::new("cargo")
-            .arg("run")
-            .arg("--")
-            .arg(watch_root)
-            .arg(socket)
-            .arg(metrics)
-            .arg(debounce_ms.to_string())
-            .current_dir(daemon_dir),
-    )
+    #[cfg(unix)]
+    {
+        let watch_root = root.join(watch_root);
+        let socket = root.join(socket);
+        let metrics = root.join(metrics);
+        let config = inauguration::hotreload::DaemonConfig {
+            watch_root,
+            socket_path: socket,
+            metrics_path: metrics,
+            debounce_ms,
+        };
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| InError::Message(format!("tokio runtime: {e}")))?;
+        rt.block_on(inauguration::hotreload::run_daemon(config))
+            .map_err(|e| InError::Message(format!("daemon: {e}")))
+    }
+    #[cfg(not(unix))]
+    {
+        Err(InError::Message(
+            "`in run` requires Unix (hotreload uses AF_UNIX)".into(),
+        ))
+    }
 }
 
 fn cmd_test(root: &Path) -> Result<()> {

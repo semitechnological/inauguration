@@ -16,8 +16,8 @@ trap cleanup EXIT INT TERM
 mkdir -p "$(dirname "$SOCKET")" "$(dirname "$METRICS")"
 
 (
-  cd "$ROOT/runtime/hotreload-daemon"
-  cargo run -- "$WATCH_ROOT" "$SOCKET" "$METRICS" 60
+  cd "$ROOT"
+  cargo run --manifest-path in-cli/Cargo.toml -- run "$WATCH_ROOT" "$SOCKET" "$METRICS" 60
 ) &
 DAEMON_PID=$!
 

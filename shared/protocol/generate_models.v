@@ -77,7 +77,7 @@ fn write_swift(out_path string, values []string) ! {
 fn main() {
 	root := os.real_path(os.join_path(os.dir(@FILE), '..', '..'))
 	schema_path := os.join_path(root, 'shared', 'protocol', 'events.schema.json')
-	rust_out := os.join_path(root, 'runtime', 'hotreload-daemon', 'src', 'generated_protocol.rs')
+	rust_out := os.join_path(root, 'in-cli', 'src', 'hotreload', 'generated_protocol.rs')
 	swift_out := os.join_path(root, 'runtime', 'swift-preview-host', 'Sources', 'SwiftPreviewHost', 'GeneratedProtocol.swift')
 
 	schema := os.read_file(schema_path) or {

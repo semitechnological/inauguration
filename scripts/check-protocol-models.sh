@@ -7,5 +7,5 @@ cd "$ROOT"
 v -gc none run shared/protocol/generate_models.v
 
 git diff --exit-code -- \
-  runtime/hotreload-daemon/src/generated_protocol.rs \
+  in-cli/src/hotreload/generated_protocol.rs \
   runtime/swift-preview-host/Sources/SwiftPreviewHost/GeneratedProtocol.swift

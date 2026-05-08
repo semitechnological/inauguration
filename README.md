@@ -8,13 +8,13 @@
 - **Runtime hot reload system** for SwiftUI (daemon + preview host bridge).
 - **CLI (`in`)** for build, test, benchmark, plugin installation, and daily dev workflows.
 
-The `in` binary embeds the Rust hybrid pipeline and dispatch; **Apple’s `swift` toolchain is still required** for `swift build` emit, package resolution, and host-specific compilation.
+The `in` binary ships **all Rust runtime logic that crates.io installs**: hybrid compiler wave (stub timings + SIL pass), **`in run` / `in dev` hotreload daemon** (notify → Unix socket → NDJSON metrics). **`swift`** / **`swiftc`** remain separate (`swift build` emit, preview **`swift run`** client). **`compiler/ocaml-front`** is not linked into `in`; it powers experiments via **`in test`** (runs opam/dune in-tree).
 
 ## Repository layout
 
 - `compiler/rust-driver`: concurrent orchestrator, pipeline, SIL analysis, batch compile path.
 - `compiler/ocaml-front`: Swift subset front-end, diagnostics, artifact emission.
-- `runtime/hotreload-daemon`: watcher, patch/restart supervisor, metrics emitter.
+- `runtime/hotreload-daemon`: thin `cargo run` wrapper + integration tests (daemon sources live in `in-cli`, embedded into `in`).
 - `runtime/swift-preview-host`: Swift package receiving and applying reload envelopes.
 - `in-cli`: user-facing command line binary (`in`).
 - `plugins/registry`: installable project accelerators (aurorality, crepuscularity).
