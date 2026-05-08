@@ -1,5 +1,6 @@
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -40,6 +41,8 @@ pub struct RuntimeMetric {
     pub target: String,
     pub compatible: bool,
     pub reason: String,
+    pub compile_check_ms: u64,
+    pub compile_cache_hit: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -146,6 +149,46 @@ pub fn compile_check(path: &Path) -> bool {
     )
 }
 
+#[derive(Debug, Clone)]
+struct CompileCacheEntry {
+    modified_ms: u128,
+    ok: bool,
+}
+
+type CompileCache = HashMap<String, CompileCacheEntry>;
+
+fn modified_ms(path: &Path) -> Option<u128> {
+    path.metadata()
+        .ok()?
+        .modified()
+        .ok()?
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|dur| dur.as_millis())
+}
+
+fn compile_check_cached(path: &Path, cache: &mut CompileCache) -> (bool, bool, u64) {
+    let start = std::time::Instant::now();
+    let key = path.to_string_lossy().to_string();
+    let Some(current_ms) = modified_ms(path) else {
+        return (false, false, start.elapsed().as_millis() as u64);
+    };
+    if let Some(entry) = cache.get(&key) {
+        if entry.modified_ms == current_ms {
+            return (entry.ok, true, start.elapsed().as_millis() as u64);
+        }
+    }
+    let ok = compile_check(path);
+    cache.insert(
+        key,
+        CompileCacheEntry {
+            modified_ms: current_ms,
+            ok,
+        },
+    );
+    (ok, false, start.elapsed().as_millis() as u64)
+}
+
 pub fn apply_restart_supervisor(mut patch: ReloadPatch, compile_ok: bool) -> (ReloadPatch, String) {
     if !compile_ok {
         patch.compatible = false;
@@ -203,9 +246,12 @@ async fn emit_patch(
     symbols: &[String],
     metrics_path: &Path,
     pool: &ClientPool,
+    compile_cache: &mut CompileCache,
 ) -> Result<ReloadPatch, DaemonError> {
+    let (compile_ok, compile_cache_hit, compile_check_ms) =
+        compile_check_cached(Path::new(target), compile_cache);
     let (patch, reason) =
-        apply_restart_supervisor(plan_patch(target, symbols), compile_check(Path::new(target)));
+        apply_restart_supervisor(plan_patch(target, symbols), compile_ok);
     let envelope = PatchEnvelope {
         protocol_version: 1,
         patch_id: patch_id_for(target),
@@ -218,6 +264,8 @@ async fn emit_patch(
         target: patch.target.clone(),
         compatible: patch.compatible,
         reason,
+        compile_check_ms,
+        compile_cache_hit,
     };
     append_metric(metrics_path, &metric).await?;
     let line = serde_json::to_string(&envelope)?;
@@ -248,6 +296,7 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), DaemonError> {
             }
         })?;
     watcher.watch(&watch_root, RecursiveMode::Recursive)?;
+    let mut compile_cache: CompileCache = HashMap::new();
 
     loop {
         match rx.recv().await {
@@ -259,7 +308,14 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), DaemonError> {
                 }
                 if let Some(target) = latest.take() {
                     let symbols = symbols_for_path(&target);
-                    let _ = emit_patch(&target, &symbols, &config.metrics_path, &pool).await?;
+                    let _ = emit_patch(
+                        &target,
+                        &symbols,
+                        &config.metrics_path,
+                        &pool,
+                        &mut compile_cache,
+                    )
+                    .await?;
                 }
             }
             None => return Ok(()),
@@ -302,6 +358,18 @@ mod tests {
         assert_eq!(reason, "compile_failed");
     }
 
+    #[test]
+    fn compile_check_cache_hits_on_unchanged_file() {
+        let path = std::env::temp_dir().join(format!("compile-cache-{}.swift", now_ms()));
+        std::fs::write(&path, "struct X {}").expect("write swift");
+        let mut cache = CompileCache::new();
+        let first = compile_check_cached(&path, &mut cache);
+        let second = compile_check_cached(&path, &mut cache);
+        assert!(!first.1);
+        assert!(second.1);
+        let _ = std::fs::remove_file(path);
+    }
+
     #[tokio::test]
     async fn metric_file_is_written() {
         let path = std::env::temp_dir().join(format!("hotreload-metric-{}.ndjson", now_ms()));
@@ -311,6 +379,8 @@ mod tests {
             target: "ContentView.swift".to_string(),
             compatible: true,
             reason: "patch_applied".to_string(),
+            compile_check_ms: 1,
+            compile_cache_hit: false,
         };
         append_metric(&path, &metric).await.expect("metric write");
         let content = tokio::fs::read_to_string(&path).await.expect("metric read");
@@ -336,6 +406,7 @@ mod tests {
             &["body".to_string()],
             &metrics_path,
             &pool,
+            &mut CompileCache::new(),
         )
         .await
         .expect("patch emitted");

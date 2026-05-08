@@ -1,4 +1,6 @@
 use clap::{Parser, Subcommand};
+use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use thiserror::Error;
@@ -48,6 +50,11 @@ enum Commands {
     Test,
     #[command(about = "Check required tools")]
     Doctor,
+    #[command(about = "Summarize hotreload metrics")]
+    Bench {
+        #[arg(long, default_value = ".brisk/hotreload/metrics/latest.ndjson")]
+        metrics: String,
+    },
 }
 
 fn main() {
@@ -71,6 +78,7 @@ fn run() -> Result<()> {
         } => cmd_run(&root, &watch_root, &socket, &metrics, debounce_ms),
         Commands::Test => cmd_test(&root),
         Commands::Doctor => cmd_doctor(),
+        Commands::Bench { metrics } => cmd_bench(&root, &metrics),
     }
 }
 
@@ -169,6 +177,64 @@ fn cmd_doctor() -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug, Deserialize)]
+struct BenchMetric {
+    compatible: bool,
+    reason: String,
+    compile_check_ms: u64,
+    compile_cache_hit: bool,
+}
+
+fn percentile(mut values: Vec<u64>, p: f64) -> u64 {
+    if values.is_empty() {
+        return 0;
+    }
+    values.sort_unstable();
+    let idx = ((values.len() - 1) as f64 * p).round() as usize;
+    values[idx]
+}
+
+fn cmd_bench(root: &Path, metrics: &str) -> Result<()> {
+    let path = root.join(metrics);
+    let content = std::fs::read_to_string(&path)?;
+    let mut rows = Vec::new();
+    for line in content.lines().map(str::trim).filter(|line| !line.is_empty()) {
+        if let Ok(m) = serde_json::from_str::<BenchMetric>(line) {
+            rows.push(m);
+        }
+    }
+    if rows.is_empty() {
+        return Err(InError::Message(format!(
+            "no valid metrics rows found at {}",
+            path.display()
+        )));
+    }
+    let total = rows.len();
+    let compatible = rows.iter().filter(|m| m.compatible).count();
+    let cache_hits = rows.iter().filter(|m| m.compile_cache_hit).count();
+    let mut reasons: BTreeMap<String, usize> = BTreeMap::new();
+    for row in &rows {
+        *reasons.entry(row.reason.clone()).or_insert(0) += 1;
+    }
+    let compile_times: Vec<u64> = rows.iter().map(|m| m.compile_check_ms).collect();
+    println!("rows: {total}");
+    println!(
+        "compatible_rate: {:.2}%",
+        (compatible as f64 / total as f64) * 100.0
+    );
+    println!(
+        "compile_cache_hit_rate: {:.2}%",
+        (cache_hits as f64 / total as f64) * 100.0
+    );
+    println!("compile_check_ms p50: {}", percentile(compile_times.clone(), 0.50));
+    println!("compile_check_ms p95: {}", percentile(compile_times, 0.95));
+    println!("reasons:");
+    for (reason, count) in reasons {
+        println!("  {reason}: {count}");
+    }
+    Ok(())
+}
+
 fn run_cmd(cmd: &mut Command) -> Result<()> {
     let status = cmd
         .stdin(Stdio::inherit())
@@ -219,6 +285,17 @@ mod tests {
                 assert_eq!(debounce_ms, 60);
             }
             _ => panic!("expected run command"),
+        }
+    }
+
+    #[test]
+    fn parse_bench_subcommand_defaults() {
+        let cli = Cli::try_parse_from(["in", "bench"]).expect("cli parse");
+        match cli.command {
+            Commands::Bench { metrics } => {
+                assert_eq!(metrics, ".brisk/hotreload/metrics/latest.ndjson");
+            }
+            _ => panic!("expected bench command"),
         }
     }
 }
