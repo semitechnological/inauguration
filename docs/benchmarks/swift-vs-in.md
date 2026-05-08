@@ -5,7 +5,7 @@ Each metric uses median of `1` runs.
 
 ## Benchmark Environment
 
-- Generated (UTC): `2026-05-08T13:46:30Z`
+- Generated (UTC): `2026-05-08T13:50:33Z`
 - Host OS: `Darwin`
 - Kernel: `25.4.0`
 - CPU: `Apple M5 Pro`
@@ -21,6 +21,6 @@ Target: arm64-apple-macosx26.0`
 
 | Example | swiftc(ms) | swift build(ms) | in(ms) | hybrid-cli(ms) | in/swift-build | in-stage-total(ms) | in-driver-overhead(ms) | in-wrapper-overhead(ms) | loss bucket | swift build ok | in ok |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---|:---:|:---:|
-| `/Users/undivisible/projects/inauguration/../aurorality/examples/counter/Sources/App.swift` | 184.65 | 1112.77 | 273.30 | 7.33 | 0.246 | 0.016 | 273.282 | 265.965 | win | ✅ | ✅ |
-| `/Users/undivisible/projects/inauguration/../aurorality/examples/basic/Sources/App.swift` | 184.20 | 964.87 | 278.76 | 8.44 | 0.289 | 0.013 | 278.742 | 270.314 | win | ✅ | ✅ |
-| `/Users/undivisible/projects/inauguration/../aurorality/examples/hyperchat/Sources/HyperChatRootView.swift` | 11706.98 | 451.48 | 365.42 | 6.89 | 0.809 | 0.010 | 365.410 | 358.535 | win | ✅ | ✅ |
+| `/Users/undivisible/projects/inauguration/../aurorality/examples/counter/Sources/App.swift` | 289.04 | 1062.41 | 839.31 | 9.87 | 0.790 | 0.020 | 839.294 | 829.440 | win | ✅ | ✅ |
+| `/Users/undivisible/projects/inauguration/../aurorality/examples/basic/Sources/App.swift` | 172.78 | 874.69 | 8.04 | 6.10 | 0.009 | 0.016 | 8.019 | 1.933 | win | ✅ | ✅ |
+| `/Users/undivisible/projects/inauguration/../aurorality/examples/hyperchat/Sources/HyperChatRootView.swift` | 9147.85 | 351.10 | 8.15 | 5.52 | 0.023 | 0.015 | 8.139 | 2.637 | win | ✅ | ✅ |

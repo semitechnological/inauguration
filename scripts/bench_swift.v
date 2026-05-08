@@ -204,13 +204,11 @@ fn main() {
 	root := os.getenv_opt('BENCH_ROOT') or { os.getwd() }
 	aurorality_root := os.getenv_opt('AURORALITY_ROOT') or { os.join_path(root, '..', 'aurorality') }
 	default_in_bin := os.join_path(root, 'in-cli', 'target', 'debug', if os.user_os() == 'windows' { 'in.exe' } else { 'in' })
-	if !os.exists(default_in_bin) {
-		println('building local in-cli binary for benchmark...')
-		build_local := run_with_status('cargo build in-cli', os.join_path(root, 'in-cli'), 'cargo build')
-		if !build_local.ok {
-			eprintln('failed to build local in-cli binary')
-			exit(1)
-		}
+	println('building local in-cli binary for benchmark...')
+	build_local := run_with_status('cargo build in-cli', os.join_path(root, 'in-cli'), 'cargo build')
+	if !build_local.ok {
+		eprintln('failed to build local in-cli binary')
+		exit(1)
 	}
 	in_bin := os.getenv_opt('IN_BIN') or {
 		if os.exists(default_in_bin) {
@@ -224,14 +222,12 @@ fn main() {
 	} else {
 		'hybrid-cli'
 	})
-	if !os.exists(hybrid_cli_bin) {
-		println('building hybrid-cli binary for benchmark...')
-		build_hybrid := run_with_status('cargo build hybrid-cli', os.join_path(root, 'compiler', 'rust-driver'),
-			'cargo build -p hybrid-cli')
-		if !build_hybrid.ok {
-			eprintln('failed to build hybrid-cli binary')
-			exit(1)
-		}
+	println('building hybrid-cli binary for benchmark...')
+	build_hybrid := run_with_status('cargo build hybrid-cli', os.join_path(root, 'compiler', 'rust-driver'),
+		'cargo build -p hybrid-cli')
+	if !build_hybrid.ok {
+		eprintln('failed to build hybrid-cli binary')
+		exit(1)
 	}
 	out_dir := os.join_path(root, 'docs', 'benchmarks')
 	out_md := os.join_path(out_dir, 'swift-vs-in.md')
