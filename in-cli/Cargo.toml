@@ -9,6 +9,11 @@ readme = "README.md"
 keywords = ["swift", "compiler", "cli", "toolchain"]
 categories = ["development-tools", "command-line-utilities"]
 
+[features]
+default = []
+# Requires OCaml 5.x + opam (`OCAMLOPT`, `OPAM_SWITCH_PREFIX`) at build time — see docs/architecture/interop-roadmap.md
+experimental-ocaml-interop = ["dep:ocaml-interop"]
+
 [lib]
 name = "inauguration"
 path = "src/lib.rs"
@@ -19,6 +24,7 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+ocaml-interop = { version = "0.12", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
@@ -26,3 +32,6 @@ tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt-multi
 
 [target.'cfg(unix)'.dependencies]
 notify = "8"
+
+[build-dependencies]
+equilibrium-ffi = "0.1"

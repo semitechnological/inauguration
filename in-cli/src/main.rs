@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use inauguration::hybrid_core::ChangeEvent;
 use inauguration::hybrid_pipeline::run_wave_with_timings;
 use inauguration::hybrid_scheduler::BuildScheduler;
@@ -6,6 +6,7 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Instant;
@@ -30,6 +31,14 @@ struct Cli {
     command: Commands,
 }
 
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum PreviewClientKind {
+    /// SwiftPM preview-host-client against PreviewHost (SwiftUI-capable).
+    Swift,
+    /// Rust Unix socket reader — validates NDJSON envelopes; no SwiftUI.
+    Rust,
+}
+
 #[derive(Subcommand, Debug)]
 enum Commands {
     #[command(about = "Run hybrid compiler pipeline")]
@@ -52,7 +61,22 @@ enum Commands {
         no_emit: bool,
     },
     #[command(about = "Run full local dev loop (daemon + client)")]
-    Dev,
+    Dev {
+        #[arg(
+            long = "preview-client",
+            value_enum,
+            default_value_t = PreviewClientKind::Swift,
+            help = "Swift PreviewHost vs Rust protocol validator"
+        )]
+        preview_client: PreviewClientKind,
+    },
+    #[command(
+        about = "Run OCaml Swift subset checker on a source file (workspace only; stdin source, argv hint path)"
+    )]
+    Ocaml {
+        #[arg(default_value = "stdin.swift")]
+        path: String,
+    },
     #[command(about = "Run hotreload daemon only")]
     Run {
         #[arg(long, default_value = "apps/sample-swiftui")]
@@ -111,7 +135,10 @@ fn run() -> Result<()> {
             verbose,
             no_emit,
         } => cmd_build(&invocation_cwd, &path, &module_id, verbose, no_emit),
-        Commands::Dev => cmd_dev(&workspace_root(invocation_cwd.clone())?),
+        Commands::Dev { preview_client } => {
+            cmd_dev(&workspace_root(invocation_cwd.clone())?, preview_client)
+        }
+        Commands::Ocaml { path } => cmd_ocaml(&workspace_root(invocation_cwd.clone())?, &path),
         Commands::Run {
             watch_root,
             socket,
@@ -496,7 +523,7 @@ fn staging_emit_note(summary: &StageSummary, swift_products_dir: Option<&Path>) 
     format!(" -> {}", parts.join("; "))
 }
 
-fn cmd_dev(root: &Path) -> Result<()> {
+fn cmd_dev(root: &Path, preview_client: PreviewClientKind) -> Result<()> {
     use std::time::Duration;
 
     #[cfg(unix)]
@@ -523,25 +550,41 @@ fn cmd_dev(root: &Path) -> Result<()> {
             };
             let daemon = tokio::spawn(inauguration::hotreload::run_daemon(config));
             tokio::time::sleep(Duration::from_secs(1)).await;
-            let swift_root = root.join("runtime/swift-preview-host");
-            let sock_arg = socket.to_string_lossy().to_string();
-            let status = tokio::task::spawn_blocking(move || {
-                Command::new("swift")
-                    .current_dir(swift_root)
-                    .args(["run", "swift-preview-host-client", sock_arg.as_str()])
-                    .status()
-            })
-            .await
-            .map_err(|e| InError::Message(format!("swift task join: {e}")))?;
+            let client_result = match preview_client {
+                PreviewClientKind::Swift => {
+                    let swift_root = root.join("runtime/swift-preview-host");
+                    let sock_arg = socket.to_string_lossy().to_string();
+                    let status = tokio::task::spawn_blocking(move || {
+                        Command::new("swift")
+                            .current_dir(swift_root)
+                            .args(["run", "swift-preview-host-client", sock_arg.as_str()])
+                            .status()
+                    })
+                    .await
+                    .map_err(|e| InError::Message(format!("swift task join: {e}")))?;
+                    let status =
+                        status.map_err(|e| InError::Message(format!("swift spawn: {e}")))?;
+                    if status.success() {
+                        Ok(())
+                    } else {
+                        Err(InError::Message(format!(
+                            "swift preview host client exited with {status}"
+                        )))
+                    }
+                }
+                PreviewClientKind::Rust => {
+                    let sock_path = socket.clone();
+                    let inner = tokio::task::spawn_blocking(move || {
+                        inauguration::preview_client::run_unix_preview_client(&sock_path)
+                            .map_err(|e| InError::Message(e.to_string()))
+                    })
+                    .await
+                    .map_err(|e| InError::Message(format!("rust preview client join: {e}")))?;
+                    inner
+                }
+            };
             daemon.abort();
-            let status = status.map_err(|e| InError::Message(format!("swift spawn: {e}")))?;
-            if status.success() {
-                Ok(())
-            } else {
-                Err(InError::Message(format!(
-                    "swift preview host client exited with {status}"
-                )))
-            }
+            client_result
         })
     }
     #[cfg(not(unix))]
@@ -549,6 +592,42 @@ fn cmd_dev(root: &Path) -> Result<()> {
         Err(InError::Message(
             "`in dev` requires Unix (hotreload uses AF_UNIX)".into(),
         ))
+    }
+}
+
+fn cmd_ocaml(root: &Path, path: &str) -> Result<()> {
+    let ocaml_root = root.join("compiler/ocaml-front");
+    if !ocaml_root.is_dir() {
+        return Err(InError::Message(
+            "`in ocaml` requires compiler/ocaml-front (inauguration workspace)".into(),
+        ));
+    }
+    let invocation_cwd = cwd()?;
+    let resolved = if Path::new(path).is_absolute() {
+        PathBuf::from(path)
+    } else {
+        invocation_cwd.join(path)
+    };
+    let source = fs::read_to_string(&resolved)?;
+    let mut child = Command::new("opam")
+        .current_dir(&ocaml_root)
+        .args(["exec", "--", "dune", "exec", "ocaml-front", "--"])
+        .arg(resolved.to_string_lossy().to_string())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(|e| InError::Message(format!("spawn ocaml-front: {e}")))?;
+    let mut stdin = child.stdin.take().expect("piped stdin");
+    stdin.write_all(source.as_bytes())?;
+    drop(stdin);
+    let status = child.wait()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(InError::Message(format!(
+            "ocaml-front exited with {status}"
+        )))
     }
 }
 

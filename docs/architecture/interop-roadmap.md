@@ -12,6 +12,8 @@ This doc ties optional embedding work to concrete crates and repo paths. Nothing
 
 ## OCaml ↔ Rust
 
+Build with **`cargo build --manifest-path in-cli/Cargo.toml --features experimental-ocaml-interop`** only when OCaml 5.x / opam are available (otherwise `ocaml-sys` build scripts fail). Default crates.io builds omit this feature.
+
 **Goal:** Either keep OCaml as a **library callable from Rust** or keep **subprocess** (simplest, GC isolation).
 
 | Crate | Best when | Notes |
@@ -38,10 +40,14 @@ Equilibrium (`../equilibrium`, crate **`equilibrium-ffi`**) compiles foreign sou
 
 ```toml
 [build-dependencies]
-equilibrium-ffi = { path = "../../equilibrium" }
+equilibrium-ffi = "0.1"
 ```
 
-Pin paths relative to `in-cli` or a workspace root `crates/protocol-gen`.
+Pinned from crates.io in `in-cli/build.rs` (workspace probe). Local path fallbacks stay documented for polyglot experiments.
+
+### swift-rs (macOS Swift linkage)
+
+Add **`swift-rs`** + **`build-dependencies swift-rs` with `features = ["build"]`**, then **`SwiftLinker`** in `build.rs` against `runtime/swift-preview-host` once you expose `@_cdecl` entrypoints from a **static** Swift library (see swift-rs README). Today `in dev --preview-client rust` avoids Swift linkage by using the Rust socket client.
 
 ## Swift preview host client
 

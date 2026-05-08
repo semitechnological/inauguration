@@ -83,8 +83,10 @@ Publishing: `in-cli` is the standalone crate **`inauguration`** on crates.io; hy
 ```bash
 in build
 in build --path ../aurorality/examples
-in dev
+in dev                              # Swift preview-host-client (default)
+in dev --preview-client rust        # Rust NDJSON socket client (no SwiftUI)
 in run
+in ocaml path/to/File.swift         # OCaml Swift subset checker (workspace + opam)
 in test
 in doctor
 in bench
