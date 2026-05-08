@@ -65,8 +65,8 @@ enum Commands {
         #[arg(
             long = "preview-client",
             value_enum,
-            default_value_t = PreviewClientKind::Swift,
-            help = "Swift PreviewHost vs Rust protocol validator"
+            default_value_t = PreviewClientKind::Rust,
+            help = "Rust socket client (default) vs Swift PreviewHost"
         )]
         preview_client: PreviewClientKind,
     },

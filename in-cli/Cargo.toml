@@ -22,6 +22,10 @@ path = "src/lib.rs"
 name = "in"
 path = "src/main.rs"
 
+[[bin]]
+name = "protocol-gen"
+path = "src/bin/protocol_gen.rs"
+
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 ocaml-interop = { version = "0.12", optional = true }
@@ -32,6 +36,3 @@ tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt-multi
 
 [target.'cfg(unix)'.dependencies]
 notify = "8"
-
-[build-dependencies]
-equilibrium-ffi = "0.1"

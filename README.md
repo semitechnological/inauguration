@@ -8,7 +8,7 @@
 - **Runtime hot reload system** for SwiftUI (daemon + preview host bridge).
 - **CLI (`in`)** for build, test, benchmark, plugin installation, and daily dev workflows.
 
-The `in` binary ships **all Rust runtime logic that crates.io installs**: hybrid compiler wave (stub timings + SIL pass), **`in run` / `in dev` hotreload daemon** (notify → Unix socket → NDJSON metrics). **`swift`** / **`swiftc`** remain separate (`swift build` emit, preview **`swift run`** client). **`compiler/ocaml-front`** is not linked into `in`; it powers experiments via **`in test`** (runs opam/dune in-tree).
+The `in` binary ships **all Rust runtime logic that crates.io installs**: hybrid compiler wave (stub timings + SIL pass), **`in run` / `in dev` hotreload daemon** (notify → Unix socket → NDJSON metrics). **`in dev`** defaults to the **Rust** preview socket client; use **`--preview-client swift`** when you need the SwiftPM **`PreviewHost`** bridge and SwiftUI. **`swift`** / **`swiftc`** remain separate for **`swift build`** emit. **`compiler/ocaml-front`** is not linked into `in`; it powers experiments via **`in test`** (runs opam/dune in-tree). Protocol enum codegen is **`cargo run --manifest-path in-cli/Cargo.toml --bin protocol-gen`** (reads `shared/protocol/events.schema.json`).
 
 ## Repository layout
 
@@ -83,8 +83,8 @@ Publishing: `in-cli` is the standalone crate **`inauguration`** on crates.io; hy
 ```bash
 in build
 in build --path ../aurorality/examples
-in dev                              # Swift preview-host-client (default)
-in dev --preview-client rust        # Rust NDJSON socket client (no SwiftUI)
+in dev                              # Rust NDJSON socket client (default)
+in dev --preview-client swift       # Swift PreviewHost + SwiftUI
 in run
 in ocaml path/to/File.swift         # OCaml Swift subset checker (workspace + opam)
 in test
@@ -108,7 +108,7 @@ cd compiler/rust-driver && cargo test --all
 cd compiler/ocaml-front && eval "$(opam env --switch=default)" && dune runtest
 cd runtime/swift-preview-host && swift build -Xswiftc -warnings-as-errors && swift test
 cd runtime/hotreload-daemon && cargo test
-./scripts/check-protocol-models.sh
+./scripts/check-protocol-models.sh # runs protocol-gen (Rust) then git diff
 ```
 
 ## Benchmarking

@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-v -gc none run shared/protocol/generate_models.v
+cargo run --quiet --manifest-path in-cli/Cargo.toml --bin protocol-gen -- "$ROOT"
 
 git diff --exit-code -- \
   in-cli/src/hotreload/generated_protocol.rs \
