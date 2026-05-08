@@ -1,0 +1,46 @@
+{
+  "rows": [
+    {
+      "example": "/Users/undivisible/projects/inauguration/../aurorality/examples/counter/Sources/App.swift",
+      "module": "Counter",
+      "swiftc_ok": false,
+      "swiftc_ms": 302.33,
+      "swiftpkg_ok": true,
+      "swiftpkg_ms": 6680.43,
+      "in_ok": true,
+      "in_ms": 332.7,
+      "speed_ratio_in_over_swiftpkg": 0.05,
+      "swiftc_error": "/Users/undivisible/projects/aurorality/examples/counter/Sources/App.swift:2:8: error: no such module 'Aurorality'\n  1 | import SwiftUI\n  2 | import Aurorality\n    |        `- error: no such module 'Aurorality'\n  3 | \n  4 | @main",
+      "swiftpkg_error": "warning: 'aurorality': found 1 file(s) which are unhandled; explicitly declare them as resources or exclude from the target\n    /Users/undivisible/projects/aurorality/scripts/sync-uniffi.sh",
+      "in_error": "Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s\n     Running `target/debug/hybrid-cli --path /Users/undivisible/projects/inauguration/../aurorality/examples/counter/Sources/App.swift --module-id Counter`"
+    },
+    {
+      "example": "/Users/undivisible/projects/inauguration/../aurorality/examples/basic/Sources/App.swift",
+      "module": "Basic",
+      "swiftc_ok": false,
+      "swiftc_ms": 335.08,
+      "swiftpkg_ok": true,
+      "swiftpkg_ms": 1380.58,
+      "in_ok": true,
+      "in_ms": 260.87,
+      "speed_ratio_in_over_swiftpkg": 0.189,
+      "swiftc_error": "/Users/undivisible/projects/aurorality/examples/basic/Sources/App.swift:2:8: error: no such module 'Aurorality'\n 1 | import SwiftUI\n 2 | import Aurorality\n   |        `- error: no such module 'Aurorality'\n 3 | \n 4 | @main",
+      "swiftpkg_error": "",
+      "in_error": "Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.02s\n     Running `target/debug/hybrid-cli --path /Users/undivisible/projects/inauguration/../aurorality/examples/basic/Sources/App.swift --module-id Basic`"
+    },
+    {
+      "example": "/Users/undivisible/projects/inauguration/../aurorality/examples/hyperchat/Sources/HyperChatRootView.swift",
+      "module": "HyperChat",
+      "swiftc_ok": false,
+      "swiftc_ms": 11036.34,
+      "swiftpkg_ok": true,
+      "swiftpkg_ms": 987.35,
+      "in_ok": true,
+      "in_ms": 498.54,
+      "speed_ratio_in_over_swiftpkg": 0.505,
+      "swiftc_error": "/Users/undivisible/projects/aurorality/examples/hyperchat/Sources/HyperChatRootView.swift:8:26: error: cannot find type 'HyperChatModel' in scope\n  6 | /// Native chat shell + sidebar; detail can switch between **Messages** (model-driven) or **Template (live)** (`AurorState` fed by [`HotReloadClient`](https://)).\n  7 | struct HyperChatRootView: View {\n  8 |     @Bindable var model: HyperChatModel\n    |                          `- error: cannot find type 'HyperChatModel' in scope\n  9 |     @Binda",
+      "swiftpkg_error": "warning: 'aurorality': found 1 file(s) which are unhandled; explicitly declare them as resources or exclude from the target\n    /Users/undivisible/projects/aurorality/scripts/sync-uniffi.sh",
+      "in_error": "Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.01s\n     Running `target/debug/hybrid-cli --path /Users/undivisible/projects/inauguration/../aurorality/examples/hyperchat/Sources/HyperChatRootView.swift --module-id HyperChat`"
+    }
+  ]
+}
