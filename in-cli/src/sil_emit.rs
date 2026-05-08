@@ -1,8 +1,13 @@
 //! Extract textual SIL from Swift sources via `swiftc` for native `in build`.
 //!
-//! This shells out to Apple's `swiftc` **only** as a SIL producer; orchestration, SIL passes,
-//! and staging policy stay in `in`. Fully self-hosted SIL generation would replace this module.
+//! This shells out to **`swiftc`** (Apple toolchain by default, or **`IN_SWIFTC`**) **only** as a SIL
+//! producer; orchestration, SIL passes, and staging policy stay in `in`.
+//!
+//! Optional **`vendor/swift`** fork (see `docs/vendor-swift.md`): **`IN_SWIFT_EMIT_SIL_STDOUT=1`** adds
+//! **`-Xfrontend -inauguration-emit-sil-to-stdout`** so SIL prints to stdout after Swift’s SIL pipeline.
+//! Stock **`swiftc`** rejects that frontend flag — use only with **`patches/vendor-swift/inauguration-emit-sil-stdout.patch`** applied.
 
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -178,6 +183,16 @@ fn macos_sdk_path() -> Option<String> {
     if s.is_empty() { None } else { Some(s) }
 }
 
+fn swiftc_executable() -> OsString {
+    std::env::var_os("IN_SWIFTC").unwrap_or_else(|| OsString::from("swiftc"))
+}
+
+fn inauguration_emit_sil_via_stdout() -> bool {
+    std::env::var("IN_SWIFT_EMIT_SIL_STDOUT")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
 fn append_extra_swiftc_args(cmd: &mut Command) {
     let Ok(flags) = std::env::var("IN_SWIFTC_FLAGS") else {
         return;
@@ -312,7 +327,10 @@ fn run_swiftc_emit_sil(
     let out_file =
         std::env::temp_dir().join(format!("inauguration-sil-{}.sil", std::process::id()));
 
-    let mut cmd = Command::new("swiftc");
+    let swiftc_bin = swiftc_executable();
+    let stdout_mode = inauguration_emit_sil_via_stdout();
+
+    let mut cmd = Command::new(&swiftc_bin);
     cmd.arg("-emit-sil");
     cmd.arg("-O");
     cmd.arg("-suppress-warnings");
@@ -322,6 +340,10 @@ fn run_swiftc_emit_sil(
         cmd.arg("-whole-module-optimization");
     }
     cmd.arg("-o").arg(&out_file);
+
+    if stdout_mode {
+        cmd.arg("-Xfrontend").arg("-inauguration-emit-sil-to-stdout");
+    }
 
     #[cfg(target_os = "macos")]
     if let Some(sdk) = macos_sdk_path() {
@@ -349,27 +371,42 @@ fn run_swiftc_emit_sil(
 
     let output = cmd.output().map_err(|e| {
         SilEmitError::Msg(format!(
-            "failed to spawn swiftc (install Swift toolchain): {e}"
+            "failed to spawn {} (set IN_SWIFTC or install a Swift toolchain): {e}",
+            swiftc_bin.to_string_lossy()
         ))
     })?;
 
     if !output.status.success() {
         let _ = fs::remove_file(&out_file);
         return Err(SilEmitError::Msg(format!(
-            "swiftc -emit-sil failed ({}) for {} inputs\nstderr:\n{}",
+            "{} -emit-sil failed ({}) for {} inputs\nstderr:\n{}",
+            swiftc_bin.to_string_lossy(),
             output.status,
             inputs.len(),
             String::from_utf8_lossy(&output.stderr)
         )));
     }
 
-    let sil = fs::read_to_string(&out_file).map_err(|e| {
-        let _ = fs::remove_file(&out_file);
-        SilEmitError::Msg(format!(
-            "read emitted SIL: {e}; stderr:\n{}",
-            String::from_utf8_lossy(&output.stderr)
-        ))
-    })?;
+    let sil = if stdout_mode {
+        let from_stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        if !from_stdout.trim().is_empty() {
+            from_stdout
+        } else {
+            fs::read_to_string(&out_file).map_err(|e| {
+                SilEmitError::Msg(format!(
+                    "read emitted SIL: patched swiftc printed empty stdout and temp file unreadable ({e}); stderr:\n{}",
+                    String::from_utf8_lossy(&output.stderr)
+                ))
+            })?
+        }
+    } else {
+        fs::read_to_string(&out_file).map_err(|e| {
+            SilEmitError::Msg(format!(
+                "read emitted SIL: {e}; stderr:\n{}",
+                String::from_utf8_lossy(&output.stderr)
+            ))
+        })?
+    };
     let _ = fs::remove_file(&out_file);
 
     if sil.trim().is_empty() {
