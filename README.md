@@ -77,7 +77,7 @@ Writes:
 
 The markdown benchmark report includes:
 - `Benchmark Environment` (host specs + tool versions) for reproducibility.
-- `Easy Copy/Paste` table with 3 columns (`Example`, `swift build(ms)`, `in(ms)`) for quick sharing.
+- `Easy Copy/Paste` table with exactly 3 columns (`Example`, `swift build(ms)`, `in(ms)`) for quick sharing.
 
 ## Acknowledgements
 

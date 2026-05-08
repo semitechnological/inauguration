@@ -64,6 +64,12 @@ struct BenchEnv {
 	hybrid_cli_bin string
 }
 
+struct ExampleCase {
+	path string
+	module string
+	display string
+}
+
 fn run_timed(cwd string, cmd string) RunResult {
 	start := time.now()
 	wrapped := 'cd "${cwd}" && ${cmd}'
@@ -240,23 +246,31 @@ fn main() {
 	os.mkdir_all(out_dir) or { panic(err) }
 
 	examples := [
-		os.join_path(aurorality_root, 'examples', 'counter', 'Sources', 'App.swift') + ':Counter',
-		os.join_path(aurorality_root, 'examples', 'basic', 'Sources', 'App.swift') + ':Basic',
-		os.join_path(aurorality_root, 'examples', 'hyperchat', 'Sources', 'HyperChatRootView.swift') + ':HyperChat',
+		ExampleCase{
+			path: os.join_path(aurorality_root, 'examples', 'counter', 'Sources', 'App.swift')
+			module: 'Counter'
+			display: 'aurorality/examples/counter'
+		},
+		ExampleCase{
+			path: os.join_path(aurorality_root, 'examples', 'basic', 'Sources', 'App.swift')
+			module: 'Basic'
+			display: 'aurorality/examples/basic'
+		},
+		ExampleCase{
+			path: os.join_path(aurorality_root, 'examples', 'hyperchat', 'Sources', 'HyperChatRootView.swift')
+			module: 'HyperChat'
+			display: 'aurorality/examples/hyperchat'
+		},
 	]
 
 	mut rows := []BenchRow{}
-	for idx, entry in examples {
-		parts := entry.split(':')
-		if parts.len < 2 {
-			continue
-		}
-		path := parts[0]
-		module_name := parts[1]
+	for idx, example in examples {
+		path := example.path
+		module_name := example.module
 		println('[${idx + 1}/${examples.len}] benchmarking ${module_name} (${path})')
 		if !os.exists(path) {
 			rows << BenchRow{
-				example: path
+				example: example.display
 				module: module_name
 			}
 			continue
@@ -357,7 +371,7 @@ fn main() {
 		println('     in-stages: ast=${in_stage_ast_ms:.3f} frontend=${in_stage_frontend_ms:.3f} sil=${in_stage_sil_ms:.3f} total=${in_stage_total_ms:.3f} driver-overhead=${in_driver_overhead_ms:.3f} wrapper-overhead=${in_wrapper_overhead_ms:.3f} loss=${loss_bucket}')
 
 		rows << BenchRow{
-			example: path
+			example: example.display
 			module: module_name
 			swiftc_ok: swiftc_ok
 			swiftc_ms: swiftc_ms
@@ -382,10 +396,10 @@ fn main() {
 	}
 
 	env := gather_env(root, bench_runs, warmup_runs, in_bin, hybrid_cli_bin)
-	mut easy_md := '| Example | swift build(ms) | in(ms) | in faster |\n'
-	easy_md += '|---|---:|---:|:---:|\n'
+	mut easy_md := '| Example | swift build(ms) | in(ms) |\n'
+	easy_md += '|---|---:|---:|\n'
 	for row in rows {
-		easy_md += '| `${row.example}` | ${row.swiftpkg_ms:.2f} | ${row.in_ms:.2f} | ${if row.in_ms <= row.swiftpkg_ms { '✅' } else { '❌' }} |\n'
+		easy_md += '| `${row.example}` | ${row.swiftpkg_ms:.2f} | ${row.in_ms:.2f} |\n'
 	}
 
 	doc := BenchDoc{
