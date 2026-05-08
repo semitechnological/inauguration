@@ -337,7 +337,7 @@ fn main() {
 			if pkg_root != '' {
 				_ = run_with_status('warm swift build ${warm_name}', pkg_root, 'swift build')
 			}
-			_ = run_with_status('warm in build ${warm_name}', root, '"${in_bin}" build --verbose --no-emit --path "${path}" --module-id "${module_name}"')
+			_ = run_with_status('warm in build ${warm_name}', root, '"${in_bin}" build --verbose --path "${path}" --module-id "${module_name}"')
 			_ = run_with_status('warm hybrid-cli ${warm_name}', os.join_path(root, 'compiler', 'rust-driver'),
 				'"${hybrid_cli_bin}" --path "${path}" --module-id "${module_name}"')
 		}
@@ -358,7 +358,7 @@ fn main() {
 				}
 			}
 
-			in_last = run_with_status('in build ${run_name}', root, '"${in_bin}" build --verbose --no-emit --path "${path}" --module-id "${module_name}"')
+			in_last = run_with_status('in build ${run_name}', root, '"${in_bin}" build --verbose --path "${path}" --module-id "${module_name}"')
 			in_samples << in_last.ms
 			in_stage_samples << parse_in_stages(in_last.output)
 			if !in_last.ok {
@@ -449,7 +449,7 @@ fn main() {
 	}
 
 	env := gather_env(root, bench_runs, warmup_runs, in_bin, hybrid_cli_bin)
-	mut easy_md := '| Example | swift build median (min–max ms) | in median (min–max ms) |\n'
+	mut easy_md := '| Example | SwiftPM swift build median (min–max ms) | in native median (min–max ms) |\n'
 	easy_md += '|---|---:|---:|\n'
 	for row in rows {
 		easy_md += '| `${row.example}` | ${row.swiftpkg_ms:.2f} (${row.swiftpkg_ms_min:.2f}–${row.swiftpkg_ms_max:.2f}) | ${row.in_ms:.2f} (${row.in_ms_min:.2f}–${row.in_ms_max:.2f}) |\n'
@@ -467,7 +467,7 @@ fn main() {
 	for warm_idx in 0 .. warmup_runs {
 		warm_name := '${warm_idx + 1}/${warmup_runs}'
 		_ = run_with_status('warm toolchain swift build ${warm_name}', toolchain_path, 'swift build')
-		_ = run_with_status('warm toolchain in build ${warm_name}', root, '"${in_bin}" build --verbose --no-emit --path "${toolchain_path}" --module-id "SwiftCompilerSources"')
+		_ = run_with_status('warm toolchain in build ${warm_name}', root, '"${in_bin}" build --verbose --path "${toolchain_path}" --module-id "SwiftCompilerSources"')
 	}
 	for run_idx in 0 .. bench_runs {
 		run_name := '${run_idx + 1}/${bench_runs}'
@@ -476,7 +476,7 @@ fn main() {
 		if !toolchain_swift_last.ok {
 			toolchain_swift_all_ok = false
 		}
-		toolchain_in_last = run_with_status('toolchain in build ${run_name}', root, '"${in_bin}" build --verbose --no-emit --path "${toolchain_path}" --module-id "SwiftCompilerSources"')
+		toolchain_in_last = run_with_status('toolchain in build ${run_name}', root, '"${in_bin}" build --verbose --path "${toolchain_path}" --module-id "SwiftCompilerSources"')
 		toolchain_in_samples << toolchain_in_last.ms
 		if !toolchain_in_last.ok {
 			toolchain_in_all_ok = false
@@ -499,7 +499,7 @@ fn main() {
 		in_error: short_err(toolchain_in_last.output)
 		swiftpkg_error: short_err(toolchain_swift_last.output)
 	}
-	mut toolchain_easy_md := '| Example | swift build median (min–max ms) | in median (min–max ms) |\n'
+	mut toolchain_easy_md := '| Example | SwiftPM swift build median (min–max ms) | in native median (min–max ms) |\n'
 	toolchain_easy_md += '|---|---:|---:|\n'
 	toolchain_easy_md += '| `${toolchain_row.example}` | ${toolchain_row.swiftpkg_ms:.2f} (${toolchain_row.swiftpkg_ms_min:.2f}–${toolchain_row.swiftpkg_ms_max:.2f}) | ${toolchain_row.in_ms:.2f} (${toolchain_row.in_ms_min:.2f}–${toolchain_row.in_ms_max:.2f}) |\n'
 
@@ -513,7 +513,9 @@ fn main() {
 	os.write_file(out_json, json.encode_pretty(doc)) or { panic(err) }
 
 	mut md := '# Swift Compiler vs in Pipeline Benchmark\n\n'
-	md += 'Measured with: raw `swiftc -typecheck`, package-context `swift build`, and `in build`.\n'
+	md += 'Measured with: raw `swiftc -typecheck`, package-context **`swift build`** (SwiftPM reference — Apple toolchain), and **`in build`** default (**native hybrid pipeline only**, no SwiftPM).\n'
+	md += '**in** column = inauguration compile path (scheduler + SIL passes today); **swift build** = legacy SwiftPM baseline until native codegen fully replaces it.\n'
+	md += '**hybrid-cli** matches the native wave harness without the **`in`** CLI wrapper overhead.\n'
 	md += 'Wall times: **median** over `${bench_runs}` timed runs; **min–max** across those runs shown in parentheses next to medians (easy tables) or inline (detail table).\n\n'
 	md += '## Benchmark Environment\n\n'
 	md += '- Generated (UTC): `${env.generated_at_utc}`\n'
@@ -536,7 +538,7 @@ fn main() {
 	md += '## Swift Toolchain (Compiler Sources) Benchmark\n\n'
 	md += toolchain_easy_md + '\n'
 
-	md += '| Example | swiftc med (min–max) | swift build med (min–max) | in med (min–max) | hybrid-cli med (min–max) | in/swift-build | in-stage-total(ms) | in-driver-overhead(ms) | in-wrapper-overhead(ms) | loss bucket | swift build ok | in ok |\n'
+	md += '| Example | swiftc med (min–max) | SwiftPM med (min–max) | in native med (min–max) | hybrid-cli med (min–max) | native÷SwiftPM | in-stage-total(ms) | in-driver-overhead(ms) | in-wrapper-overhead(ms) | loss bucket | swift build ok | in ok |\n'
 	md += '|---|---:|---:|---:|---:|---:|---:|---:|---:|---|:---:|:---:|\n'
 	for row in rows {
 		md += '| `${row.example}` | ${row.swiftc_ms:.2f} (${row.swiftc_ms_min:.2f}–${row.swiftc_ms_max:.2f}) | ${row.swiftpkg_ms:.2f} (${row.swiftpkg_ms_min:.2f}–${row.swiftpkg_ms_max:.2f}) | ${row.in_ms:.2f} (${row.in_ms_min:.2f}–${row.in_ms_max:.2f}) | ${row.hybrid_cli_ms:.2f} (${row.hybrid_cli_ms_min:.2f}–${row.hybrid_cli_ms_max:.2f}) | ${row.speed_ratio_in_over_swiftpkg:.3f} | ${row.in_stage_total_ms:.3f} | ${row.in_driver_overhead_ms:.3f} | ${row.in_wrapper_overhead_ms:.3f} | ${row.loss_bucket} | ${if row.swiftpkg_ok { '✅' } else { '❌' }} | ${if row.in_ok { '✅' } else { '❌' }} |\n'

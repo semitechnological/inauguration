@@ -23,8 +23,8 @@ enum InError {
 
 #[derive(Parser, Debug)]
 #[command(name = "in")]
-#[command(version = "0.1.1")]
-#[command(about = "inauguration v0.1.1")]
+#[command(version = "0.2.0")]
+#[command(about = "inauguration v0.2.0")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -54,10 +54,10 @@ enum Commands {
         verbose: bool,
         #[arg(
             long,
-            default_value_t = false,
-            help = "Skip swift build artifact emission"
+            action = clap::ArgAction::SetTrue,
+            help = "After the native pipeline, run SwiftPM swift build and stage products (toolchain fallback)"
         )]
-        no_emit: bool,
+        swiftpm: bool,
     },
     #[command(about = "Run full local dev loop (daemon + client)")]
     Dev {
@@ -130,8 +130,8 @@ fn run() -> Result<()> {
             path,
             module_id,
             verbose,
-            no_emit,
-        } => cmd_build(&invocation_cwd, &path, &module_id, verbose, no_emit),
+            swiftpm,
+        } => cmd_build(&invocation_cwd, &path, &module_id, verbose, swiftpm),
         Commands::Dev { preview_client } => {
             cmd_dev(&workspace_root(invocation_cwd.clone())?, preview_client)
         }
@@ -162,7 +162,7 @@ fn cmd_build(
     path: &str,
     module_id: &str,
     verbose: bool,
-    no_emit: bool,
+    swiftpm: bool,
 ) -> Result<()> {
     let start = Instant::now();
     let resolved = if Path::new(path).is_absolute() {
@@ -175,7 +175,7 @@ fn cmd_build(
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
     let wall = format!("{elapsed_ms:.3}ms");
     let mut emit_note = String::new();
-    if !no_emit {
+    if swiftpm {
         if let Some(package_root) = find_package_root(&resolved) {
             let build_result = if verbose {
                 run_cmd(
@@ -244,6 +244,20 @@ fn cmd_build(
 }
 
 fn run_pipeline_for_path(path: &Path, module_id: &str, verbose: bool) -> Result<()> {
+    let pipeline_start = std::time::Instant::now();
+
+    let swift_frontend_emit_us = {
+        let emit_start = std::time::Instant::now();
+        let sil_source =
+            inauguration::sil_emit::emit_textual_sil(path, module_id).map_err(|e| {
+                InError::Message(format!(
+                    "{e}. Hint: use `in build --swiftpm` for SwiftPM emit, or pass extra `swiftc` flags via IN_SWIFTC_FLAGS."
+                ))
+            })?;
+        let emit_us = emit_start.elapsed().as_micros() as u64;
+        (sil_source, emit_us)
+    };
+
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -255,13 +269,22 @@ fn run_pipeline_for_path(path: &Path, module_id: &str, verbose: bool) -> Result<
         hash: "dev".to_string(),
         timestamp_ms: 0,
     };
-    let (count, timings) = runtime
+
+    let (sil_source, swift_frontend_emit_us) = swift_frontend_emit_us;
+
+    let (count, mut timings) = runtime
         .block_on(run_wave_with_timings(
             &scheduler,
             &event,
-            "sil @main\nentry:\ndebug_value %0\n%1 = integer_literal $Builtin.Int64, 1\n%2 = function_ref @helper",
+            sil_source.as_str(),
         ))
         .map_err(|err| InError::Message(format!("pipeline failed: {err}")))?;
+
+    timings.swift_frontend_us = timings
+        .swift_frontend_us
+        .saturating_add(swift_frontend_emit_us);
+    timings.total_us = pipeline_start.elapsed().as_micros() as u64;
+
     if verbose {
         println!(
             "    Finished `in` compiler pipeline (tasks: {count}) in {:.3}ms",
@@ -273,7 +296,7 @@ fn run_pipeline_for_path(path: &Path, module_id: &str, verbose: bool) -> Result<
             (timings.ast_refresh_us as f64) / 1000.0
         );
         println!(
-            "      - swift frontend: {:.3}ms",
+            "      - swift frontend (swiftc -emit-sil): {:.3}ms",
             (timings.swift_frontend_us as f64) / 1000.0
         );
         println!(
@@ -910,13 +933,23 @@ mod tests {
                 path,
                 module_id,
                 verbose,
-                no_emit,
+                swiftpm,
             } => {
                 assert_eq!(path, "Foo.swift");
                 assert_eq!(module_id, "Foo");
                 assert!(!verbose);
-                assert!(!no_emit);
+                assert!(!swiftpm);
             }
+            _ => panic!("expected build command"),
+        }
+    }
+
+    #[test]
+    fn parse_build_swiftpm_flag() {
+        let cli = Cli::try_parse_from(["in", "build", "--path", "Foo.swift", "--swiftpm"])
+            .expect("cli parse");
+        match cli.command {
+            Commands::Build { swiftpm, .. } => assert!(swiftpm),
             _ => panic!("expected build command"),
         }
     }

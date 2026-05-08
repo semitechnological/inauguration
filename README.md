@@ -8,7 +8,7 @@
 - **Hot reload** path for SwiftUI: daemon plus preview host bridge.
 - **`in` CLI** for daily workflows: build, dev loop, tests, benchmarks, plugins.
 
-The published **`in`** binary bundles the hybrid compile wave, hotreload daemon, and socket-based dev preview. **`in dev`** uses a lightweight client by default; pass **`--preview-client swift`** when you want the SwiftPM preview host. Regular **`swift build`** / **`swiftc`** stay on the normal Swift toolchain.
+The published **`in`** binary bundles the hybrid compile wave (native default for **`in build`**), hotreload daemon, and socket-based dev preview. **`in dev`** uses a lightweight client by default; pass **`--preview-client swift`** when you want the SwiftPM preview host. Use **`in build --swiftpm`** only when you need SwiftPM **`swift build`** plus staging as a fallback alongside the native pipeline.
 
 Hotreload wire formats live under **`shared/protocol`**; regenerators and benchmark helpers live in **`in-cli`** and **`scripts`** (see **`scripts/check-protocol-models.sh`** and **`./scripts/bench-swift.sh`**).
 
@@ -27,12 +27,14 @@ Hotreload wire formats live under **`shared/protocol`**; regenerators and benchm
 
 ## `in build` and SwiftPM staging (macOS/Linux)
 
-After a successful **`swift build`** for a package (when the target path lives under a directory that contains `Package.swift`), `in` creates predictable links under the package root:
+Default **`in build`** runs the native hybrid pipeline: it gathers Swift sources (single file, **`Sources/`** tree when a **`Package.swift`** is present), runs **`swiftc -emit-sil`** into textual SIL, then applies inauguration SIL passes on that IR (Apple **`swiftc`** is only the SIL producer until a self-hosted frontend lands). With **`--swiftpm`**, **`in`** additionally runs **`swift build`** and stages outputs for runnable artifacts.
+
+After a successful **`swift build`** inside that optional step (when the target path resolves under a directory that contains `Package.swift`), **`in`** creates predictable links under the package root:
 
 - **`.build/bin`**: runnable products — executable files (excluding typical non-binaries such as `.dylib`, `.a`, `.swiftmodule`, `.json`, `.txt`) plus **`.app`** bundles.
 - **`.build/artifacts`**: auxiliary outputs such as **`.xctest`**, **`.dSYM`**, **`.bundle`**, **`.product`**, and loose **`.plist`** files (e.g. entitlements).
 
-Those directories are emptied on each `in build`, then repopulated with **symlinks** to the real SwiftPM layout from `swift build --show-bin-path`. SwiftPM plumbing (e.g. `Modules`, `ModuleCache`, `index`, `description.json`) is not staged. On non-Unix targets, staging is skipped.
+Those directories are emptied on each **`in build --swiftpm`**, then repopulated with **symlinks** to the real SwiftPM layout from **`swift build --show-bin-path`**. SwiftPM plumbing (e.g. `Modules`, `ModuleCache`, `index`, `description.json`) is not staged. On non-Unix targets, staging is skipped.
 
 ## Install CLI (pick one)
 
@@ -85,7 +87,7 @@ Publishing: **`inauguration`** crate ships from **`in-cli`**; sources stay align
 
 ```bash
 in build
-in build --path ../aurorality/examples
+in build --swiftpm --path ../aurorality/examples   # native pipeline + SwiftPM emit + staging
 in dev
 in dev --preview-client swift       # Swift preview host + SwiftUI path
 in run
@@ -131,27 +133,27 @@ Writes:
 - `docs/benchmarks/swift-vs-in.md`
 - `docs/benchmarks/swift-vs-in.json`
 
-The markdown report records host/tool versions and tables where each cell is **median wall ms** over `BENCH_RUNS` timed iterations, with **min–max** in parentheses. Authoritative numbers: [`docs/benchmarks/swift-vs-in.md`](docs/benchmarks/swift-vs-in.md) (+ [`swift-vs-in.json`](docs/benchmarks/swift-vs-in.json)).
+The markdown report records host/tool versions and tables where each cell is **median wall ms** over `BENCH_RUNS` timed iterations, with **min–max** in parentheses. **`in build`** timings use the **native** pipeline only (default CLI); **SwiftPM `swift build`** is a separate baseline column until native codegen fully replaces the Apple driver. **`swiftc -typecheck`** is a single-file probe (often fails on SwiftUI-heavy files; harness continues). Details: [`docs/benchmarks/swift-vs-in.md`](docs/benchmarks/swift-vs-in.md) (+ [`swift-vs-in.json`](docs/benchmarks/swift-vs-in.json)).
 
 ### Latest Benchmark Snapshot
 
 Median over three runs; parentheses = min–max on those same runs (see linked doc for full detail).
 
-Generated (UTC): `2026-05-08T17:08:24Z` · macOS · Apple M5 Pro · Swift 6.3 · rustc 1.94.1 · V 0.5.0
+Generated (UTC): `2026-05-08T17:33:08Z` · macOS · Apple M5 Pro · Swift 6.3 · rustc 1.94.1 · V 0.5.0
 
-| Example | swift build median (min–max ms) | in median (min–max ms) |
+| Example | SwiftPM swift build median (min–max ms) | in native median (min–max ms) |
 |---|---:|---:|
-| `aurorality/examples/counter` | 877.09 (807.85–904.97) | 7.26 (7.20–7.54) |
-| `aurorality/examples/basic` | 871.34 (869.49–887.34) | 7.52 (6.47–7.90) |
-| `aurorality/examples/hyperchat` | 355.74 (350.24–355.87) | 7.39 (6.65–7.52) |
+| `aurorality/examples/counter` | 861.50 (765.89–880.09) | 6.55 (6.29–7.27) |
+| `aurorality/examples/basic` | 766.08 (755.90–782.55) | 6.48 (6.20–6.68) |
+| `aurorality/examples/hyperchat` | 357.75 (318.10–367.59) | 7.35 (6.30–7.82) |
 
-Swift compiler sources package vs `in`:
+Swift compiler sources package vs **`in`** native:
 
-| Example | swift build median (min–max ms) | in median (min–max ms) |
+| Example | SwiftPM swift build median (min–max ms) | in native median (min–max ms) |
 |---|---:|---:|
-| `vendor/swift/SwiftCompilerSources` | 327.44 (324.32–335.10) | 6.56 (6.56–6.75) |
+| `vendor/swift/SwiftCompilerSources` | 319.42 (318.84–321.45) | 6.25 (6.23–6.36) |
 
-`SwiftCompilerSources` is a library product package, so SwiftPM may place library products under its build tree; **`in build` still stages runnable and artifact-like outputs** into `.build/bin` and `.build/artifacts` when present in the `swift build --show-bin-path` directory.
+Staging under **`.build/bin`** / **`.build/artifacts`** applies only when using **`in build --swiftpm`** (SwiftPM emit step).
 
 ## Acknowledgements
 

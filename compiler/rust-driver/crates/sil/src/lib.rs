@@ -12,13 +12,36 @@ pub struct SilAnalysisReport {
     pub call_edges: Vec<(String, String)>,
 }
 
+fn parse_sil_function_header(line: &str) -> Option<String> {
+    if !line.starts_with("sil ") {
+        return None;
+    }
+    let rest = line.strip_prefix("sil ")?;
+    let at = rest.find('@')?;
+    let tail = &rest[at + 1..];
+    let name = tail
+        .split(|c: char| c.is_whitespace() || c == '(')
+        .next()
+        .unwrap_or("")
+        .trim_end_matches(':')
+        .to_string();
+    if name.is_empty() {
+        None
+    } else {
+        Some(name)
+    }
+}
+
 pub fn parse_textual_sil(input: &str) -> SilArtifact {
     let mut function_id = String::from("unknown");
     let mut cfg_blocks = Vec::new();
     let mut instructions = Vec::new();
     for line in input.lines().map(str::trim).filter(|line| !line.is_empty()) {
-        if let Some(rest) = line.strip_prefix("sil @") {
-            function_id = rest.to_string();
+        if line.starts_with("//") {
+            continue;
+        }
+        if let Some(fid) = parse_sil_function_header(line) {
+            function_id = fid;
         } else if line.ends_with(':') {
             cfg_blocks.push(line.trim_end_matches(':').to_string());
         } else {
