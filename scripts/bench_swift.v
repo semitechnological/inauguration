@@ -37,6 +37,14 @@ struct BenchRow {
 	in_driver_overhead_ms f64
 	in_wrapper_overhead_ms f64
 	loss_bucket string
+	swiftc_ms_min f64
+	swiftc_ms_max f64
+	swiftpkg_ms_min f64
+	swiftpkg_ms_max f64
+	in_ms_min f64
+	in_ms_max f64
+	hybrid_cli_ms_min f64
+	hybrid_cli_ms_max f64
 	swiftc_error string
 	swiftpkg_error string
 	in_error string
@@ -70,8 +78,12 @@ struct ToolchainRow {
 	example string
 	swiftpkg_ok bool
 	swiftpkg_ms f64
+	swiftpkg_ms_min f64
+	swiftpkg_ms_max f64
 	in_ok bool
 	in_ms f64
+	in_ms_min f64
+	in_ms_max f64
 	in_error string
 	swiftpkg_error string
 }
@@ -121,6 +133,23 @@ fn median_ms(values []f64) f64 {
 		return sorted[mid]
 	}
 	return (sorted[mid - 1] + sorted[mid]) / 2.0
+}
+
+fn min_max_ms(values []f64) (f64, f64) {
+	if values.len == 0 {
+		return 0.0, 0.0
+	}
+	mut lo := values[0]
+	mut hi := values[0]
+	for v in values {
+		if v < lo {
+			lo = v
+		}
+		if v > hi {
+			hi = v
+		}
+	}
+	return lo, hi
 }
 
 fn find_package_root(path string) string {
@@ -346,6 +375,10 @@ fn main() {
 		swiftpkg_ms := median_ms(swiftpkg_samples)
 		in_ms := median_ms(in_samples)
 		hybrid_ms := median_ms(hybrid_samples)
+		swiftc_min, swiftc_max := min_max_ms(swiftc_samples)
+		swiftpkg_min, swiftpkg_max := min_max_ms(swiftpkg_samples)
+		in_min, in_max := min_max_ms(in_samples)
+		hybrid_min, hybrid_max := min_max_ms(hybrid_samples)
 		swiftpkg_ok := if pkg_root != '' { swiftpkg_last.ok && swiftpkg_all_ok } else { false }
 		in_ok := in_last.ok && in_all_ok
 		hybrid_ok := hybrid_last.ok && hybrid_all_ok
@@ -401,6 +434,14 @@ fn main() {
 			in_driver_overhead_ms: in_driver_overhead_ms
 			in_wrapper_overhead_ms: in_wrapper_overhead_ms
 			loss_bucket: loss_bucket
+			swiftc_ms_min: swiftc_min
+			swiftc_ms_max: swiftc_max
+			swiftpkg_ms_min: swiftpkg_min
+			swiftpkg_ms_max: swiftpkg_max
+			in_ms_min: in_min
+			in_ms_max: in_max
+			hybrid_cli_ms_min: hybrid_min
+			hybrid_cli_ms_max: hybrid_max
 			swiftc_error: short_err(swiftc_last.output)
 			swiftpkg_error: short_err(swiftpkg_last.output)
 			in_error: short_err(in_last.output)
@@ -408,10 +449,10 @@ fn main() {
 	}
 
 	env := gather_env(root, bench_runs, warmup_runs, in_bin, hybrid_cli_bin)
-	mut easy_md := '| Example | swift build(ms) | in(ms) |\n'
+	mut easy_md := '| Example | swift build median (min–max ms) | in median (min–max ms) |\n'
 	easy_md += '|---|---:|---:|\n'
 	for row in rows {
-		easy_md += '| `${row.example}` | ${row.swiftpkg_ms:.2f} | ${row.in_ms:.2f} |\n'
+		easy_md += '| `${row.example}` | ${row.swiftpkg_ms:.2f} (${row.swiftpkg_ms_min:.2f}–${row.swiftpkg_ms_max:.2f}) | ${row.in_ms:.2f} (${row.in_ms_min:.2f}–${row.in_ms_max:.2f}) |\n'
 	}
 
 	toolchain_path := os.join_path(root, 'vendor', 'swift', 'SwiftCompilerSources')
@@ -441,18 +482,26 @@ fn main() {
 			toolchain_in_all_ok = false
 		}
 	}
+	t_swift_med := median_ms(toolchain_swift_samples)
+	t_in_med := median_ms(toolchain_in_samples)
+	t_swift_lo, t_swift_hi := min_max_ms(toolchain_swift_samples)
+	t_in_lo, t_in_hi := min_max_ms(toolchain_in_samples)
 	toolchain_row := ToolchainRow{
 		example: 'vendor/swift/SwiftCompilerSources'
 		swiftpkg_ok: toolchain_swift_last.ok && toolchain_swift_all_ok
-		swiftpkg_ms: median_ms(toolchain_swift_samples)
+		swiftpkg_ms: t_swift_med
+		swiftpkg_ms_min: t_swift_lo
+		swiftpkg_ms_max: t_swift_hi
 		in_ok: toolchain_in_last.ok && toolchain_in_all_ok
-		in_ms: median_ms(toolchain_in_samples)
+		in_ms: t_in_med
+		in_ms_min: t_in_lo
+		in_ms_max: t_in_hi
 		in_error: short_err(toolchain_in_last.output)
 		swiftpkg_error: short_err(toolchain_swift_last.output)
 	}
-	mut toolchain_easy_md := '| Example | swift build(ms) | in(ms) |\n'
+	mut toolchain_easy_md := '| Example | swift build median (min–max ms) | in median (min–max ms) |\n'
 	toolchain_easy_md += '|---|---:|---:|\n'
-	toolchain_easy_md += '| `${toolchain_row.example}` | ${toolchain_row.swiftpkg_ms:.2f} | ${toolchain_row.in_ms:.2f} |\n'
+	toolchain_easy_md += '| `${toolchain_row.example}` | ${toolchain_row.swiftpkg_ms:.2f} (${toolchain_row.swiftpkg_ms_min:.2f}–${toolchain_row.swiftpkg_ms_max:.2f}) | ${toolchain_row.in_ms:.2f} (${toolchain_row.in_ms_min:.2f}–${toolchain_row.in_ms_max:.2f}) |\n'
 
 	doc := BenchDoc{
 		env: env
@@ -465,7 +514,7 @@ fn main() {
 
 	mut md := '# Swift Compiler vs in Pipeline Benchmark\n\n'
 	md += 'Measured with: raw `swiftc -typecheck`, package-context `swift build`, and `in build`.\n'
-	md += 'Each metric uses median of `${bench_runs}` runs.\n\n'
+	md += 'Wall times: **median** over `${bench_runs}` timed runs; **min–max** across those runs shown in parentheses next to medians (easy tables) or inline (detail table).\n\n'
 	md += '## Benchmark Environment\n\n'
 	md += '- Generated (UTC): `${env.generated_at_utc}`\n'
 	md += '- Host OS: `${env.host_os}`\n'
@@ -487,10 +536,10 @@ fn main() {
 	md += '## Swift Toolchain (Compiler Sources) Benchmark\n\n'
 	md += toolchain_easy_md + '\n'
 
-	md += '| Example | swiftc(ms) | swift build(ms) | in(ms) | hybrid-cli(ms) | in/swift-build | in-stage-total(ms) | in-driver-overhead(ms) | in-wrapper-overhead(ms) | loss bucket | swift build ok | in ok |\n'
+	md += '| Example | swiftc med (min–max) | swift build med (min–max) | in med (min–max) | hybrid-cli med (min–max) | in/swift-build | in-stage-total(ms) | in-driver-overhead(ms) | in-wrapper-overhead(ms) | loss bucket | swift build ok | in ok |\n'
 	md += '|---|---:|---:|---:|---:|---:|---:|---:|---:|---|:---:|:---:|\n'
 	for row in rows {
-		md += '| `${row.example}` | ${row.swiftc_ms:.2f} | ${row.swiftpkg_ms:.2f} | ${row.in_ms:.2f} | ${row.hybrid_cli_ms:.2f} | ${row.speed_ratio_in_over_swiftpkg:.3f} | ${row.in_stage_total_ms:.3f} | ${row.in_driver_overhead_ms:.3f} | ${row.in_wrapper_overhead_ms:.3f} | ${row.loss_bucket} | ${if row.swiftpkg_ok { '✅' } else { '❌' }} | ${if row.in_ok { '✅' } else { '❌' }} |\n'
+		md += '| `${row.example}` | ${row.swiftc_ms:.2f} (${row.swiftc_ms_min:.2f}–${row.swiftc_ms_max:.2f}) | ${row.swiftpkg_ms:.2f} (${row.swiftpkg_ms_min:.2f}–${row.swiftpkg_ms_max:.2f}) | ${row.in_ms:.2f} (${row.in_ms_min:.2f}–${row.in_ms_max:.2f}) | ${row.hybrid_cli_ms:.2f} (${row.hybrid_cli_ms_min:.2f}–${row.hybrid_cli_ms_max:.2f}) | ${row.speed_ratio_in_over_swiftpkg:.3f} | ${row.in_stage_total_ms:.3f} | ${row.in_driver_overhead_ms:.3f} | ${row.in_wrapper_overhead_ms:.3f} | ${row.loss_bucket} | ${if row.swiftpkg_ok { '✅' } else { '❌' }} | ${if row.in_ok { '✅' } else { '❌' }} |\n'
 	}
 	os.write_file(out_md, md) or { panic(err) }
 

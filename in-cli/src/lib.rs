@@ -8,8 +8,4 @@ pub mod hybrid_core;
 pub mod hybrid_pipeline;
 pub mod hybrid_scheduler;
 pub mod hybrid_sil;
-
-/// When built with `--features experimental-ocaml-interop`, links OCaml interop (needs OCaml at compile time).
-#[cfg(feature = "experimental-ocaml-interop")]
-#[doc(hidden)]
-pub use ocaml_interop;
+pub mod swift_subset;

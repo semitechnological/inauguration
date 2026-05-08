@@ -130,7 +130,7 @@ mod tests {
     }
 
     #[test]
-    fn summarizes_ocaml_frontend_artifact_json() {
+    fn summarizes_frontend_artifact_json() {
         let summary = summarize_frontend_artifact(
             r#"{
   "format_version": 1,

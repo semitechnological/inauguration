@@ -1,3 +1,0 @@
-(lang dune 3.14)
-(name ocaml_front)
-(generate_opam_files true)

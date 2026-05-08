@@ -6,7 +6,6 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Instant;
@@ -24,8 +23,8 @@ enum InError {
 
 #[derive(Parser, Debug)]
 #[command(name = "in")]
-#[command(version = "0.1.0")]
-#[command(about = "inauguration v0.1.0")]
+#[command(version = "0.1.1")]
+#[command(about = "inauguration v0.1.1")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -70,9 +69,7 @@ enum Commands {
         )]
         preview_client: PreviewClientKind,
     },
-    #[command(
-        about = "Run OCaml Swift subset checker on a source file (workspace only; stdin source, argv hint path)"
-    )]
+    #[command(about = "Swift subset parse/check → JSON artifact (Rust; legacy subcommand name)")]
     Ocaml {
         #[arg(default_value = "stdin.swift")]
         path: String,
@@ -138,7 +135,7 @@ fn run() -> Result<()> {
         Commands::Dev { preview_client } => {
             cmd_dev(&workspace_root(invocation_cwd.clone())?, preview_client)
         }
-        Commands::Ocaml { path } => cmd_ocaml(&workspace_root(invocation_cwd.clone())?, &path),
+        Commands::Ocaml { path } => cmd_ocaml(&invocation_cwd, &path),
         Commands::Run {
             watch_root,
             socket,
@@ -238,11 +235,7 @@ fn cmd_build(
             println!("    Finished `in build` in {wall}{emit_note}");
         }
         println!("in.build_wall_ms={elapsed_ms:.3}");
-    } else if result.is_ok() {
-        println!(
-            "\x1b[32m✓\x1b[0m \x1b[36min build\x1b[0m {display_target} \x1b[2m({wall}{emit_note})\x1b[0m"
-        );
-    } else {
+    } else if result.is_err() {
         println!(
             "\x1b[31m✗\x1b[0m \x1b[36min build\x1b[0m {display_target} \x1b[2m({wall})\x1b[0m"
         );
@@ -595,39 +588,21 @@ fn cmd_dev(root: &Path, preview_client: PreviewClientKind) -> Result<()> {
     }
 }
 
-fn cmd_ocaml(root: &Path, path: &str) -> Result<()> {
-    let ocaml_root = root.join("compiler/ocaml-front");
-    if !ocaml_root.is_dir() {
-        return Err(InError::Message(
-            "`in ocaml` requires compiler/ocaml-front (inauguration workspace)".into(),
-        ));
-    }
-    let invocation_cwd = cwd()?;
+fn cmd_ocaml(invocation_cwd: &Path, path: &str) -> Result<()> {
     let resolved = if Path::new(path).is_absolute() {
         PathBuf::from(path)
     } else {
         invocation_cwd.join(path)
     };
     let source = fs::read_to_string(&resolved)?;
-    let mut child = Command::new("opam")
-        .current_dir(&ocaml_root)
-        .args(["exec", "--", "dune", "exec", "ocaml-front", "--"])
-        .arg(resolved.to_string_lossy().to_string())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .map_err(|e| InError::Message(format!("spawn ocaml-front: {e}")))?;
-    let mut stdin = child.stdin.take().expect("piped stdin");
-    stdin.write_all(source.as_bytes())?;
-    drop(stdin);
-    let status = child.wait()?;
-    if status.success() {
+    let display = resolved.to_string_lossy().to_string();
+    let (json, ok) = inauguration::swift_subset::analyze_source(&display, &source)
+        .map_err(|e| InError::Message(format!("serialize frontend artifact: {e}")))?;
+    println!("{json}");
+    if ok {
         Ok(())
     } else {
-        Err(InError::Message(format!(
-            "ocaml-front exited with {status}"
-        )))
+        Err(InError::Message("frontend diagnostics failed".into()))
     }
 }
 
@@ -677,10 +652,9 @@ fn cmd_test(root: &Path) -> Result<()> {
             .current_dir(root.join("compiler").join("rust-driver")),
     )?;
     run_cmd(
-        Command::new("bash")
-            .arg("-lc")
-            .arg("eval \"$(opam env --switch=default)\" && dune runtest")
-            .current_dir(root.join("compiler").join("ocaml-front")),
+        Command::new("cargo")
+            .arg("test")
+            .current_dir(root.join("in-cli")),
     )?;
     run_cmd(
         Command::new("swift")
@@ -702,7 +676,7 @@ fn cmd_test(root: &Path) -> Result<()> {
 }
 
 fn cmd_doctor() -> Result<()> {
-    for tool in ["cargo", "swift", "opam", "dune", "rg"] {
+    for tool in ["cargo", "swift", "rg"] {
         let status = Command::new("/usr/bin/which")
             .arg(tool)
             .stdout(Stdio::null())

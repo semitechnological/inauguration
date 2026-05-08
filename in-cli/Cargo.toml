@@ -1,6 +1,6 @@
 [package]
 name = "inauguration"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 license = "MPL-2.0"
 description = "Swift developer toolchain CLI (hybrid compiler pipeline, staging, plugins)"
@@ -8,11 +8,6 @@ repository = "https://github.com/semitechnological/inauguration"
 readme = "README.md"
 keywords = ["swift", "compiler", "cli", "toolchain"]
 categories = ["development-tools", "command-line-utilities"]
-
-[features]
-default = []
-# Requires OCaml 5.x + opam (`OCAMLOPT`, `OPAM_SWITCH_PREFIX`) at build time — see docs/architecture/interop-roadmap.md
-experimental-ocaml-interop = ["dep:ocaml-interop"]
 
 [lib]
 name = "inauguration"
@@ -28,7 +23,6 @@ path = "src/bin/protocol_gen.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
-ocaml-interop = { version = "0.12", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

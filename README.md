@@ -131,34 +131,25 @@ Writes:
 - `docs/benchmarks/swift-vs-in.md`
 - `docs/benchmarks/swift-vs-in.json`
 
-The markdown benchmark report includes:
-- `Benchmark Environment` (host specs + tool versions) for reproducibility.
-- `Easy Copy/Paste` table with exactly 3 columns (`Example`, `swift build(ms)`, `in(ms)`) for quick sharing.
+The markdown report records host/tool versions and tables where each cell is **median wall ms** over `BENCH_RUNS` timed iterations, with **min–max** in parentheses. Authoritative numbers: [`docs/benchmarks/swift-vs-in.md`](docs/benchmarks/swift-vs-in.md) (+ [`swift-vs-in.json`](docs/benchmarks/swift-vs-in.json)).
 
 ### Latest Benchmark Snapshot
 
-Generated (UTC): `2026-05-08T16:53:07Z`
+Median over three runs; parentheses = min–max on those same runs (see linked doc for full detail).
 
-Environment:
-- OS: `macOS 26.5`
-- CPU: `Apple M5 Pro`
-- Memory: `48 GB`
-- Swift: `6.3`
-- Rustc: `rustc 1.94.1 (e408947bf 2026-03-25)`
-- Cargo: `cargo 1.94.1 (29ea6fb6a 2026-03-24)`
-- V: `V 0.5.0 e2f5d6c`
+Generated (UTC): `2026-05-08T17:08:24Z` · macOS · Apple M5 Pro · Swift 6.3 · rustc 1.94.1 · V 0.5.0
 
-| Example | swift build(ms) | in(ms) |
+| Example | swift build median (min–max ms) | in median (min–max ms) |
 |---|---:|---:|
-| `aurorality/examples/counter` | 852.58 | 8.11 |
-| `aurorality/examples/basic` | 958.66 | 7.29 |
-| `aurorality/examples/hyperchat` | 365.90 | 7.76 |
+| `aurorality/examples/counter` | 877.09 (807.85–904.97) | 7.26 (7.20–7.54) |
+| `aurorality/examples/basic` | 871.34 (869.49–887.34) | 7.52 (6.47–7.90) |
+| `aurorality/examples/hyperchat` | 355.74 (350.24–355.87) | 7.39 (6.65–7.52) |
 
-Swift compiler sources (`swift` toolchain package) vs `in`:
+Swift compiler sources package vs `in`:
 
-| Example | swift build(ms) | in(ms) |
+| Example | swift build median (min–max ms) | in median (min–max ms) |
 |---|---:|---:|
-| `vendor/swift/SwiftCompilerSources` | 354.11 | 7.41 |
+| `vendor/swift/SwiftCompilerSources` | 327.44 (324.32–335.10) | 6.56 (6.56–6.75) |
 
 `SwiftCompilerSources` is a library product package, so SwiftPM may place library products under its build tree; **`in build` still stages runnable and artifact-like outputs** into `.build/bin` and `.build/artifacts` when present in the `swift build --show-bin-path` directory.
 
