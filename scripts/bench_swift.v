@@ -45,11 +45,13 @@ struct BenchRow {
 struct BenchDoc {
 	env BenchEnv
 	rows []BenchRow
+	easy_markdown string
 }
 
 struct BenchEnv {
 	generated_at_utc string
 	bench_runs int
+	warmup_runs int
 	host_os string
 	host_kernel string
 	cpu string
@@ -171,7 +173,7 @@ fn classify_loss(swiftpkg_ms f64, in_ms f64, in_driver_overhead_ms f64, in_stage
 	return 'ast-refresh-stage'
 }
 
-fn gather_env(root string, bench_runs int, in_bin string, hybrid_cli_bin string) BenchEnv {
+fn gather_env(root string, bench_runs int, warmup_runs int, in_bin string, hybrid_cli_bin string) BenchEnv {
 	host_os := command_output(root, 'uname -s')
 	host_kernel := command_output(root, 'uname -r')
 	cpu := if os.user_os() == 'macos' {
@@ -187,6 +189,7 @@ fn gather_env(root string, bench_runs int, in_bin string, hybrid_cli_bin string)
 	return BenchEnv{
 		generated_at_utc: command_output(root, 'date -u +"%Y-%m-%dT%H:%M:%SZ"')
 		bench_runs: bench_runs
+		warmup_runs: warmup_runs
 		host_os: host_os
 		host_kernel: host_kernel
 		cpu: cpu
@@ -233,6 +236,7 @@ fn main() {
 	out_md := os.join_path(out_dir, 'swift-vs-in.md')
 	out_json := os.join_path(out_dir, 'swift-vs-in.json')
 	bench_runs := os.getenv_opt('BENCH_RUNS') or { '3' }.int()
+	warmup_runs := os.getenv_opt('BENCH_WARMUP_RUNS') or { '1' }.int()
 	os.mkdir_all(out_dir) or { panic(err) }
 
 	examples := [
@@ -271,6 +275,17 @@ fn main() {
 		mut swiftpkg_all_ok := true
 		mut in_all_ok := true
 		mut hybrid_all_ok := true
+
+		for warm_idx in 0 .. warmup_runs {
+			warm_name := '${warm_idx + 1}/${warmup_runs}'
+			_ = run_with_status('warm swiftc ${warm_name}', root, 'swiftc -typecheck "${path}"')
+			if pkg_root != '' {
+				_ = run_with_status('warm swift build ${warm_name}', pkg_root, 'swift build')
+			}
+			_ = run_with_status('warm in build ${warm_name}', root, '"${in_bin}" build --path "${path}" --module-id "${module_name}"')
+			_ = run_with_status('warm hybrid-cli ${warm_name}', os.join_path(root, 'compiler', 'rust-driver'),
+				'"${hybrid_cli_bin}" --path "${path}" --module-id "${module_name}"')
+		}
 
 		for run_idx in 0 .. bench_runs {
 			run_name := '${run_idx + 1}/${bench_runs}'
@@ -366,10 +381,17 @@ fn main() {
 		}
 	}
 
-	env := gather_env(root, bench_runs, in_bin, hybrid_cli_bin)
+	env := gather_env(root, bench_runs, warmup_runs, in_bin, hybrid_cli_bin)
+	mut easy_md := '| Example | swift build(ms) | in(ms) | in faster |\n'
+	easy_md += '|---|---:|---:|:---:|\n'
+	for row in rows {
+		easy_md += '| `${row.example}` | ${row.swiftpkg_ms:.2f} | ${row.in_ms:.2f} | ${if row.in_ms <= row.swiftpkg_ms { '✅' } else { '❌' }} |\n'
+	}
+
 	doc := BenchDoc{
 		env: env
 		rows: rows
+		easy_markdown: easy_md
 	}
 	os.write_file(out_json, json.encode_pretty(doc)) or { panic(err) }
 
@@ -387,8 +409,13 @@ fn main() {
 	md += '- Cargo: `${env.cargo_version}`\n'
 	md += '- V: `${env.v_version}`\n'
 	md += '- BENCH_RUNS: `${env.bench_runs}`\n'
+	md += '- BENCH_WARMUP_RUNS: `${env.warmup_runs}`\n'
 	md += '- in binary: `${env.in_bin}`\n'
 	md += '- hybrid-cli binary: `${env.hybrid_cli_bin}`\n\n'
+
+	md += '## Easy Copy/Paste\n\n'
+	md += easy_md + '\n'
+
 	md += '| Example | swiftc(ms) | swift build(ms) | in(ms) | hybrid-cli(ms) | in/swift-build | in-stage-total(ms) | in-driver-overhead(ms) | in-wrapper-overhead(ms) | loss bucket | swift build ok | in ok |\n'
 	md += '|---|---:|---:|---:|---:|---:|---:|---:|---:|---|:---:|:---:|\n'
 	for row in rows {

@@ -64,12 +64,20 @@ cd runtime/hotreload-daemon && cargo test
 ./scripts/bench-swift.sh
 ```
 
+Useful knobs:
+
+```bash
+BENCH_WARMUP_RUNS=1 BENCH_RUNS=3 ./scripts/bench-swift.sh
+```
+
 Writes:
 
 - `docs/benchmarks/swift-vs-in.md`
 - `docs/benchmarks/swift-vs-in.json`
 
-The markdown benchmark report includes a `Benchmark Environment` section (host specs + tool versions) so timing comparisons remain reproducible.
+The markdown benchmark report includes:
+- `Benchmark Environment` (host specs + tool versions) for reproducibility.
+- `Easy Copy/Paste` table with 3 columns (`Example`, `swift build(ms)`, `in(ms)`) for quick sharing.
 
 ## Acknowledgements
 

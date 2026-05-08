@@ -5,7 +5,7 @@ Each metric uses median of `1` runs.
 
 ## Benchmark Environment
 
-- Generated (UTC): `2026-05-08T13:50:33Z`
+- Generated (UTC): `2026-05-08T13:57:26Z`
 - Host OS: `Darwin`
 - Kernel: `25.4.0`
 - CPU: `Apple M5 Pro`
@@ -16,11 +16,20 @@ Target: arm64-apple-macosx26.0`
 - Cargo: `cargo 1.94.1 (29ea6fb6a 2026-03-24)`
 - V: `V 0.5.0 e2f5d6c`
 - BENCH_RUNS: `1`
+- BENCH_WARMUP_RUNS: `1`
 - in binary: `/Users/undivisible/projects/inauguration/in-cli/target/debug/in`
 - hybrid-cli binary: `/Users/undivisible/projects/inauguration/compiler/rust-driver/target/debug/hybrid-cli`
 
+## Easy Copy/Paste
+
+| Example | swift build(ms) | in(ms) | in faster |
+|---|---:|---:|:---:|
+| `/Users/undivisible/projects/inauguration/../aurorality/examples/counter/Sources/App.swift` | 1097.83 | 9.17 | ✅ |
+| `/Users/undivisible/projects/inauguration/../aurorality/examples/basic/Sources/App.swift` | 939.48 | 7.63 | ✅ |
+| `/Users/undivisible/projects/inauguration/../aurorality/examples/hyperchat/Sources/HyperChatRootView.swift` | 321.51 | 6.82 | ✅ |
+
 | Example | swiftc(ms) | swift build(ms) | in(ms) | hybrid-cli(ms) | in/swift-build | in-stage-total(ms) | in-driver-overhead(ms) | in-wrapper-overhead(ms) | loss bucket | swift build ok | in ok |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---|:---:|:---:|
-| `/Users/undivisible/projects/inauguration/../aurorality/examples/counter/Sources/App.swift` | 289.04 | 1062.41 | 839.31 | 9.87 | 0.790 | 0.020 | 839.294 | 829.440 | win | ✅ | ✅ |
-| `/Users/undivisible/projects/inauguration/../aurorality/examples/basic/Sources/App.swift` | 172.78 | 874.69 | 8.04 | 6.10 | 0.009 | 0.016 | 8.019 | 1.933 | win | ✅ | ✅ |
-| `/Users/undivisible/projects/inauguration/../aurorality/examples/hyperchat/Sources/HyperChatRootView.swift` | 9147.85 | 351.10 | 8.15 | 5.52 | 0.023 | 0.015 | 8.139 | 2.637 | win | ✅ | ✅ |
+| `/Users/undivisible/projects/inauguration/../aurorality/examples/counter/Sources/App.swift` | 161.85 | 1097.83 | 9.17 | 7.24 | 0.008 | 0.016 | 9.158 | 1.938 | win | ✅ | ✅ |
+| `/Users/undivisible/projects/inauguration/../aurorality/examples/basic/Sources/App.swift` | 157.76 | 939.48 | 7.63 | 6.41 | 0.008 | 0.016 | 7.613 | 1.224 | win | ✅ | ✅ |
+| `/Users/undivisible/projects/inauguration/../aurorality/examples/hyperchat/Sources/HyperChatRootView.swift` | 9169.57 | 321.51 | 6.82 | 4.81 | 0.021 | 0.015 | 6.804 | 2.005 | win | ✅ | ✅ |
