@@ -79,6 +79,25 @@ The markdown benchmark report includes:
 - `Benchmark Environment` (host specs + tool versions) for reproducibility.
 - `Easy Copy/Paste` table with exactly 3 columns (`Example`, `swift build(ms)`, `in(ms)`) for quick sharing.
 
+### Latest Benchmark Snapshot
+
+Generated (UTC): `2026-05-08T14:54:26Z`
+
+Environment:
+- OS: `macOS 26.5`
+- CPU: `Apple M5 Pro`
+- Memory: `48 GB`
+- Swift: `6.3`
+- Rustc: `rustc 1.94.1 (e408947bf 2026-03-25)`
+- Cargo: `cargo 1.94.1 (29ea6fb6a 2026-03-24)`
+- V: `V 0.5.0 e2f5d6c`
+
+| Example | swift build(ms) | in(ms) |
+|---|---:|---:|
+| `aurorality/examples/counter` | 791.89 | 6.70 |
+| `aurorality/examples/basic` | 788.33 | 6.75 |
+| `aurorality/examples/hyperchat` | 320.29 | 6.85 |
+
 ## Acknowledgements
 
 - `brisk` for build orchestration patterns and command UX inspiration.
