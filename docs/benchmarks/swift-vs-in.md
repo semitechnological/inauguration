@@ -5,7 +5,7 @@ Each metric uses median of `1` runs.
 
 ## Benchmark Environment
 
-- Generated (UTC): `2026-05-08T13:57:26Z`
+- Generated (UTC): `2026-05-08T14:54:26Z`
 - Host OS: `Darwin`
 - Kernel: `25.4.0`
 - CPU: `Apple M5 Pro`
@@ -22,14 +22,14 @@ Target: arm64-apple-macosx26.0`
 
 ## Easy Copy/Paste
 
-| Example | swift build(ms) | in(ms) | in faster |
-|---|---:|---:|:---:|
-| `/Users/undivisible/projects/inauguration/../aurorality/examples/counter/Sources/App.swift` | 1097.83 | 9.17 | ✅ |
-| `/Users/undivisible/projects/inauguration/../aurorality/examples/basic/Sources/App.swift` | 939.48 | 7.63 | ✅ |
-| `/Users/undivisible/projects/inauguration/../aurorality/examples/hyperchat/Sources/HyperChatRootView.swift` | 321.51 | 6.82 | ✅ |
+| Example | swift build(ms) | in(ms) |
+|---|---:|---:|
+| `aurorality/examples/counter` | 791.89 | 6.70 |
+| `aurorality/examples/basic` | 788.33 | 6.75 |
+| `aurorality/examples/hyperchat` | 320.29 | 6.85 |
 
 | Example | swiftc(ms) | swift build(ms) | in(ms) | hybrid-cli(ms) | in/swift-build | in-stage-total(ms) | in-driver-overhead(ms) | in-wrapper-overhead(ms) | loss bucket | swift build ok | in ok |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---|:---:|:---:|
-| `/Users/undivisible/projects/inauguration/../aurorality/examples/counter/Sources/App.swift` | 161.85 | 1097.83 | 9.17 | 7.24 | 0.008 | 0.016 | 9.158 | 1.938 | win | ✅ | ✅ |
-| `/Users/undivisible/projects/inauguration/../aurorality/examples/basic/Sources/App.swift` | 157.76 | 939.48 | 7.63 | 6.41 | 0.008 | 0.016 | 7.613 | 1.224 | win | ✅ | ✅ |
-| `/Users/undivisible/projects/inauguration/../aurorality/examples/hyperchat/Sources/HyperChatRootView.swift` | 9169.57 | 321.51 | 6.82 | 4.81 | 0.021 | 0.015 | 6.804 | 2.005 | win | ✅ | ✅ |
+| `aurorality/examples/counter` | 166.48 | 791.89 | 6.70 | 4.28 | 0.008 | 0.015 | 6.688 | 2.419 | win | ✅ | ✅ |
+| `aurorality/examples/basic` | 153.36 | 788.33 | 6.75 | 4.58 | 0.009 | 0.016 | 6.730 | 2.171 | win | ✅ | ✅ |
+| `aurorality/examples/hyperchat` | 9078.82 | 320.29 | 6.85 | 4.67 | 0.021 | 0.015 | 6.835 | 2.181 | win | ✅ | ✅ |
