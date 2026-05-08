@@ -5,6 +5,7 @@ use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::Instant;
 use thiserror::Error;
 
 type Result<T> = std::result::Result<T, InError>;
@@ -30,10 +31,14 @@ struct Cli {
 enum Commands {
     #[command(about = "Run hybrid compiler pipeline")]
     Build {
-        #[arg(long, default_value = "App.swift", help = "Swift file or directory")]
+        #[arg(long, default_value = ".", help = "Swift file or package directory")]
         path: String,
         #[arg(long, default_value = "App")]
         module_id: String,
+        #[arg(long, default_value_t = false, help = "Show detailed stage timing output")]
+        verbose: bool,
+        #[arg(long, default_value_t = false, help = "Skip swift build artifact emission")]
+        no_emit: bool,
     },
     #[command(about = "Run full local dev loop (daemon + client)")]
     Dev,
@@ -87,9 +92,15 @@ fn main() {
 
 fn run() -> Result<()> {
     let cli = Cli::parse();
-    let root = cwd()?;
+    let invocation_cwd = cwd()?;
+    let root = workspace_root(invocation_cwd.clone())?;
     match cli.command {
-        Commands::Build { path, module_id } => cmd_build(&root, &path, &module_id),
+        Commands::Build {
+            path,
+            module_id,
+            verbose,
+            no_emit,
+        } => cmd_build(&root, &invocation_cwd, &path, &module_id, verbose, no_emit),
         Commands::Dev => cmd_dev(&root),
         Commands::Run {
             watch_root,
@@ -104,20 +115,133 @@ fn run() -> Result<()> {
     }
 }
 
-fn cmd_build(root: &Path, path: &str, module_id: &str) -> Result<()> {
+fn cmd_build(
+    root: &Path,
+    invocation_cwd: &Path,
+    path: &str,
+    module_id: &str,
+    verbose: bool,
+    no_emit: bool,
+) -> Result<()> {
+    let start = Instant::now();
     let rust_driver = root.join("compiler").join("rust-driver");
     ensure_hybrid_cli_built(&rust_driver)?;
+    let resolved = if Path::new(path).is_absolute() {
+        PathBuf::from(path)
+    } else {
+        invocation_cwd.join(path)
+    };
+    let display_target = resolved.display();
     let mut cmd = Command::new(hybrid_cli_path(&rust_driver));
-    let resolved = root.join(path);
     cmd.arg("--path")
-        .arg(if resolved.exists() {
-            resolved
-        } else {
-            PathBuf::from(path)
-        })
+        .arg(&resolved)
         .arg("--module-id")
         .arg(module_id);
-    run_cmd(cmd.current_dir(rust_driver))
+
+    let result = if verbose {
+        println!("   Compiling {display_target} with `in` pipeline");
+        run_cmd(cmd.current_dir(rust_driver))
+    } else {
+        run_cmd_silent(cmd.current_dir(rust_driver))
+    };
+
+    let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+    let wall = format!("{elapsed_ms:.3}ms");
+    let mut emit_note = String::new();
+    if !no_emit {
+        if let Some(package_root) = find_package_root(&resolved) {
+            let build_result = if verbose {
+                run_cmd(Command::new("swift").arg("build").current_dir(&package_root))
+            } else {
+                run_cmd_silent(Command::new("swift").arg("build").current_dir(&package_root))
+            };
+            build_result?;
+            let bin_dir = swift_bin_path(&package_root)?;
+            let executables = swift_executables_in_dir(&bin_dir);
+            emit_note = if executables.is_empty() {
+                format!(" -> {} (no executable product; library artifacts built)", bin_dir.display())
+            } else {
+                format!(" -> {} [{}]", bin_dir.display(), executables.join(", "))
+            };
+        }
+    }
+
+    if verbose {
+        if result.is_ok() {
+            println!("    Finished `in build` in {wall}{emit_note}");
+        }
+        println!("in.build_wall_ms={wall}");
+    } else if result.is_ok() {
+        println!(
+            "\x1b[32m✓\x1b[0m \x1b[36min build\x1b[0m {display_target} \x1b[2m({wall}{emit_note})\x1b[0m"
+        );
+    } else {
+        println!(
+            "\x1b[31m✗\x1b[0m \x1b[36min build\x1b[0m {display_target} \x1b[2m({wall})\x1b[0m"
+        );
+    }
+    result
+}
+
+fn find_package_root(path: &Path) -> Option<PathBuf> {
+    let mut current = if path.is_dir() {
+        path.to_path_buf()
+    } else {
+        path.parent()?.to_path_buf()
+    };
+    loop {
+        if current.join("Package.swift").exists() {
+            return Some(current);
+        }
+        if !current.pop() {
+            return None;
+        }
+    }
+}
+
+fn swift_bin_path(package_root: &Path) -> Result<PathBuf> {
+    let output = Command::new("swift")
+        .arg("build")
+        .arg("--show-bin-path")
+        .current_dir(package_root)
+        .output()?;
+    if output.status.success() {
+        Ok(PathBuf::from(
+            String::from_utf8_lossy(&output.stdout).trim().to_string(),
+        ))
+    } else {
+        Err(InError::Message(format!(
+            "swift build --show-bin-path failed with status {}",
+            output.status
+        )))
+    }
+}
+
+fn swift_executables_in_dir(bin_dir: &Path) -> Vec<String> {
+    let mut bins = Vec::new();
+    let Ok(entries) = fs::read_dir(bin_dir) else {
+        return bins;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(metadata) = fs::metadata(&path) {
+                if metadata.permissions().mode() & 0o111 == 0 {
+                    continue;
+                }
+            }
+        }
+        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+            bins.push(name.to_string());
+        }
+    }
+    bins.sort();
+    bins
 }
 
 fn hybrid_cli_path(rust_driver: &Path) -> PathBuf {
@@ -377,6 +501,23 @@ fn run_cmd(cmd: &mut Command) -> Result<()> {
     }
 }
 
+fn run_cmd_silent(cmd: &mut Command) -> Result<()> {
+    let output = cmd.output()?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if stderr.is_empty() {
+            Err(InError::Message(format!(
+                "command failed with status {}",
+                output.status
+            )))
+        } else {
+            Err(InError::Message(stderr))
+        }
+    }
+}
+
 #[allow(dead_code)]
 fn path_as_os(path: &Path) -> &OsStr {
     path.as_os_str()
@@ -384,6 +525,26 @@ fn path_as_os(path: &Path) -> &OsStr {
 
 fn cwd() -> Result<PathBuf> {
     Ok(std::env::current_dir()?)
+}
+
+fn workspace_root(start: PathBuf) -> Result<PathBuf> {
+    let mut current = start.as_path();
+    loop {
+        let has_rust_driver = current.join("compiler").join("rust-driver").is_dir();
+        let has_runtime = current.join("runtime").is_dir();
+        let has_in_cli = current.join("in-cli").is_dir();
+        if has_rust_driver && has_runtime && has_in_cli {
+            return Ok(current.to_path_buf());
+        }
+        match current.parent() {
+            Some(parent) => current = parent,
+            None => {
+                return Err(InError::Message(
+                    "could not locate inauguration workspace root (expected compiler/rust-driver, runtime, and in-cli)".to_string(),
+                ))
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -398,9 +559,13 @@ mod tests {
             Commands::Build {
                 path,
                 module_id,
+                verbose,
+                no_emit,
             } => {
                 assert_eq!(path, "Foo.swift");
                 assert_eq!(module_id, "Foo");
+                assert!(!verbose);
+                assert!(!no_emit);
             }
             _ => panic!("expected build command"),
         }

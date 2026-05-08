@@ -45,7 +45,9 @@ struct BenchRow {
 struct BenchDoc {
 	env BenchEnv
 	rows []BenchRow
+	toolchain_row ToolchainRow
 	easy_markdown string
+	toolchain_easy_markdown string
 }
 
 struct BenchEnv {
@@ -62,6 +64,16 @@ struct BenchEnv {
 	v_version string
 	in_bin string
 	hybrid_cli_bin string
+}
+
+struct ToolchainRow {
+	example string
+	swiftpkg_ok bool
+	swiftpkg_ms f64
+	in_ok bool
+	in_ms f64
+	in_error string
+	swiftpkg_error string
 }
 
 struct ExampleCase {
@@ -296,7 +308,7 @@ fn main() {
 			if pkg_root != '' {
 				_ = run_with_status('warm swift build ${warm_name}', pkg_root, 'swift build')
 			}
-			_ = run_with_status('warm in build ${warm_name}', root, '"${in_bin}" build --path "${path}" --module-id "${module_name}"')
+			_ = run_with_status('warm in build ${warm_name}', root, '"${in_bin}" build --verbose --no-emit --path "${path}" --module-id "${module_name}"')
 			_ = run_with_status('warm hybrid-cli ${warm_name}', os.join_path(root, 'compiler', 'rust-driver'),
 				'"${hybrid_cli_bin}" --path "${path}" --module-id "${module_name}"')
 		}
@@ -317,7 +329,7 @@ fn main() {
 				}
 			}
 
-			in_last = run_with_status('in build ${run_name}', root, '"${in_bin}" build --path "${path}" --module-id "${module_name}"')
+			in_last = run_with_status('in build ${run_name}', root, '"${in_bin}" build --verbose --no-emit --path "${path}" --module-id "${module_name}"')
 			in_samples << in_last.ms
 			in_stage_samples << parse_in_stages(in_last.output)
 			if !in_last.ok {
@@ -402,10 +414,52 @@ fn main() {
 		easy_md += '| `${row.example}` | ${row.swiftpkg_ms:.2f} | ${row.in_ms:.2f} |\n'
 	}
 
+	toolchain_path := os.join_path(root, 'vendor', 'swift', 'SwiftCompilerSources')
+	println('benchmarking swift compiler sources package (${toolchain_path})')
+	mut toolchain_swift_samples := []f64{}
+	mut toolchain_in_samples := []f64{}
+	mut toolchain_swift_last := RunResult{}
+	mut toolchain_in_last := RunResult{}
+	mut toolchain_swift_all_ok := true
+	mut toolchain_in_all_ok := true
+
+	for warm_idx in 0 .. warmup_runs {
+		warm_name := '${warm_idx + 1}/${warmup_runs}'
+		_ = run_with_status('warm toolchain swift build ${warm_name}', toolchain_path, 'swift build')
+		_ = run_with_status('warm toolchain in build ${warm_name}', root, '"${in_bin}" build --verbose --no-emit --path "${toolchain_path}" --module-id "SwiftCompilerSources"')
+	}
+	for run_idx in 0 .. bench_runs {
+		run_name := '${run_idx + 1}/${bench_runs}'
+		toolchain_swift_last = run_with_status('toolchain swift build ${run_name}', toolchain_path, 'swift build')
+		toolchain_swift_samples << toolchain_swift_last.ms
+		if !toolchain_swift_last.ok {
+			toolchain_swift_all_ok = false
+		}
+		toolchain_in_last = run_with_status('toolchain in build ${run_name}', root, '"${in_bin}" build --verbose --no-emit --path "${toolchain_path}" --module-id "SwiftCompilerSources"')
+		toolchain_in_samples << toolchain_in_last.ms
+		if !toolchain_in_last.ok {
+			toolchain_in_all_ok = false
+		}
+	}
+	toolchain_row := ToolchainRow{
+		example: 'vendor/swift/SwiftCompilerSources'
+		swiftpkg_ok: toolchain_swift_last.ok && toolchain_swift_all_ok
+		swiftpkg_ms: median_ms(toolchain_swift_samples)
+		in_ok: toolchain_in_last.ok && toolchain_in_all_ok
+		in_ms: median_ms(toolchain_in_samples)
+		in_error: short_err(toolchain_in_last.output)
+		swiftpkg_error: short_err(toolchain_swift_last.output)
+	}
+	mut toolchain_easy_md := '| Example | swift build(ms) | in(ms) |\n'
+	toolchain_easy_md += '|---|---:|---:|\n'
+	toolchain_easy_md += '| `${toolchain_row.example}` | ${toolchain_row.swiftpkg_ms:.2f} | ${toolchain_row.in_ms:.2f} |\n'
+
 	doc := BenchDoc{
 		env: env
 		rows: rows
+		toolchain_row: toolchain_row
 		easy_markdown: easy_md
+		toolchain_easy_markdown: toolchain_easy_md
 	}
 	os.write_file(out_json, json.encode_pretty(doc)) or { panic(err) }
 
@@ -429,6 +483,9 @@ fn main() {
 
 	md += '## Easy Copy/Paste\n\n'
 	md += easy_md + '\n'
+
+	md += '## Swift Toolchain (Compiler Sources) Benchmark\n\n'
+	md += toolchain_easy_md + '\n'
 
 	md += '| Example | swiftc(ms) | swift build(ms) | in(ms) | hybrid-cli(ms) | in/swift-build | in-stage-total(ms) | in-driver-overhead(ms) | in-wrapper-overhead(ms) | loss bucket | swift build ok | in ok |\n'
 	md += '|---|---:|---:|---:|---:|---:|---:|---:|---:|---|:---:|:---:|\n'

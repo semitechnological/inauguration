@@ -27,6 +27,26 @@
 cargo install --path in-cli --bin in --force
 ```
 
+Wax (Homebrew-compatible parity):
+
+```bash
+wax tap semitechnological/tap
+wax install inauguration
+```
+
+Homebrew tap (fallback):
+
+```bash
+brew tap semitechnological/tap
+brew install inauguration
+```
+
+Direct install script:
+
+```bash
+./scripts/install.sh
+```
+
 ## Core commands
 
 ```bash
@@ -81,7 +101,7 @@ The markdown benchmark report includes:
 
 ### Latest Benchmark Snapshot
 
-Generated (UTC): `2026-05-08T14:54:26Z`
+Generated (UTC): `2026-05-08T15:52:26Z`
 
 Environment:
 - OS: `macOS 26.5`
@@ -94,9 +114,17 @@ Environment:
 
 | Example | swift build(ms) | in(ms) |
 |---|---:|---:|
-| `aurorality/examples/counter` | 791.89 | 6.70 |
-| `aurorality/examples/basic` | 788.33 | 6.75 |
-| `aurorality/examples/hyperchat` | 320.29 | 6.85 |
+| `aurorality/examples/counter` | 824.24 | 7.49 |
+| `aurorality/examples/basic` | 879.75 | 7.06 |
+| `aurorality/examples/hyperchat` | 330.71 | 7.18 |
+
+Swift compiler sources (`swift` toolchain package) vs `in`:
+
+| Example | swift build(ms) | in(ms) |
+|---|---:|---:|
+| `vendor/swift/SwiftCompilerSources` | 327.42 | 12.48 |
+
+`SwiftCompilerSources` is a library product package, so `in build` emits library artifacts in `.build/.../debug` rather than a standalone executable binary.
 
 ## Acknowledgements
 

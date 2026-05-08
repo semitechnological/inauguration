@@ -41,6 +41,24 @@ fn main() {
         "sil @main\nentry:\ndebug_value %0\n%1 = integer_literal $Builtin.Int64, 1\n%2 = function_ref @helper",
     )) {
         Ok((count, timings)) => {
+            println!(
+                "    Finished `in` compiler pipeline (tasks: {count}) in {:.3}ms",
+                (timings.total_us as f64) / 1000.0
+            );
+            println!("      Stage timings:");
+            println!(
+                "      - ast refresh: {:.3}ms",
+                (timings.ast_refresh_us as f64) / 1000.0
+            );
+            println!(
+                "      - swift frontend: {:.3}ms",
+                (timings.swift_frontend_us as f64) / 1000.0
+            );
+            println!(
+                "      - sil analysis: {:.3}ms",
+                (timings.sil_analysis_us as f64) / 1000.0
+            );
+            println!("      - total: {:.3}ms", (timings.total_us as f64) / 1000.0);
             println!("processed tasks: {count}");
             println!(
                 "stage.ast_refresh_ms={:.3}",
@@ -123,6 +141,12 @@ fn run_batch(root: &str) -> Result<(), String> {
             |a, b| (a.0 + b.0, a.1 + b.1, a.2 + b.2, a.3 + b.3, a.4 + b.4),
         );
     println!("batch files: {}", files.len());
+    println!(
+        "    Finished batch `in` compiler pipeline (files: {}, tasks: {}) in {:.3}ms",
+        files.len(),
+        processed,
+        (total_us as f64) / 1000.0
+    );
     println!("batch processed tasks: {processed}");
     println!("batch stage.ast_refresh_ms={:.3}", (ast_us as f64) / 1000.0);
     println!(
