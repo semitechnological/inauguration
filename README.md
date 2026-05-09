@@ -152,19 +152,29 @@ Copied from **`docs/benchmarks/swift-vs-in.md`** Easy Copy tables after **`./scr
 
 Median over three runs; parentheses = min–max on those same runs.
 
-Generated (UTC): `2026-05-08T17:47:35Z` · macOS · Apple M5 Pro · Swift 6.3 · rustc 1.94.1 · V 0.5.0
+Generated (UTC): `2026-05-09T13:40:10Z` · macOS · Apple M5 Pro · Swift 6.3 · rustc 1.94.1 · V 0.5.0
 
 | Example | SwiftPM swift build median (min–max ms) | in native median (min–max ms) |
 |---|---:|---:|
-| `aurorality/examples/counter` | 783.30 (771.19–787.43) | 1362.89 (1355.16–1390.69) |
-| `aurorality/examples/basic` | 841.17 (800.40–841.66) | 1513.38 (1394.81–1695.28) |
-| `aurorality/examples/hyperchat` | 351.80 (348.86–447.35) | 1421.84 (1405.69–1723.92) |
+| `aurorality/examples/counter` | 977.06 (969.39–1027.76) | 1789.80 (1703.27–1803.60) |
+| `aurorality/examples/basic` | 998.06 (960.92–1087.47) | 1887.60 (1753.75–2044.03) |
+| `aurorality/examples/hyperchat` | 424.45 (408.78–441.66) | 1776.65 (1659.63–1871.78) |
 
 Swift compiler sources package vs **`in`** native:
 
 | Example | SwiftPM swift build median (min–max ms) | in native median (min–max ms) |
 |---|---:|---:|
-| `vendor/swift/SwiftCompilerSources` | 410.68 (393.83–412.89) | 613.21 (576.84–631.83) |
+| `vendor/swift/SwiftCompilerSources` | 441.80 (421.76–443.66) | 627.60 (626.41–656.08) |
+
+**Reading the harness:** the detail table in [`docs/benchmarks/swift-vs-in.md`](docs/benchmarks/swift-vs-in.md) labels a **loss bucket**. On small SwiftUI examples it is usually **`swift-frontend-stage`**: almost all wall time is Apple **`swiftc`** emitting textual SIL before the in-tree scheduler runs. **`hybrid-cli`** in the same report stays on the order of **single-digit ms**, which matches “Rust wave + SIL parse” being cheap today compared to **`swiftc`**.
+
+**Where to optimize the compiler next (highest leverage):**
+
+1. **Shrink or bypass `swiftc` on the hot path** — cache SIL keyed by inputs, tighter incremental **`swiftc`** flags where sound, and widen **`swift_subset`** / **`IN_NATIVE_SWIFT_SIL=try`** so simple files never spawn **`swiftc`**.
+2. **Failure-heavy UI sources** — when **`in build`** exits non-zero (see HyperChat row: **`in ok` ❌** in the detail table), investigate early diagnostics vs work still done in **`sil_emit`** / driver so we do not pay full subprocess cost for unsupported shapes.
+3. **After emit is cheap** — then profile **`parse_textual_sil`**, debug-instruction stripping, and call-graph extraction in `in-cli` (today a few ms on these samples); **`compiler/rust-driver`** pipeline stages matter more for batch / driver-scale work.
+
+**`in bench`** reads **`.brisk/hotreload/metrics/latest.ndjson`** (compile-check rows from **`in dev`**). Run it from the repo root after a dev session that produced metrics, or pass **`--metrics <path>`** when summarizing another NDJSON file.
 
 Staging under **`.build/bin`** / **`.build/artifacts`** applies only when using **`in build --swiftpm`** (SwiftPM emit step).
 

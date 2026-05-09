@@ -420,6 +420,7 @@ fn parse_function_body(inner: &str) -> Result<Vec<Stmt>, String> {
     Ok(stmts)
 }
 
+#[allow(clippy::type_complexity)]
 fn parse_fn_block(block: &str) -> Result<(String, Vec<(String, Typ)>, Typ, Vec<Stmt>), String> {
     let t = trim(block);
     let rest = t

@@ -20,6 +20,7 @@ pub mod swift_subset;
 #[cfg(test)]
 mod in_pipeline_tests {
     use crate::compiler::{driver, icore, tree_front};
+    use crate::hybrid_sil;
     use crate::in_lang_parse;
     use crate::lower_core;
     use crate::parser_registry::ParserId;
@@ -109,5 +110,12 @@ fn main() -> void { let seed: Int = 0; return; }
         let module = tree_front::parse_polyglot_file(ParserId::Java, &path).expect("parse Java");
         let sil = driver::lower_unified_module(&module, "App");
         assert!(sil.contains("sil @main"), "sil:\n{sil}");
+        let artifact = hybrid_sil::parse_textual_sil(&sil);
+        let cleaned = hybrid_sil::remove_debug_insts(&artifact);
+        let report = hybrid_sil::extract_call_graph(&cleaned);
+        assert!(
+            !artifact.instructions.is_empty() || !report.call_edges.is_empty(),
+            "hybrid_sil should see instructions or call edges from lowered Java SIL; sil:\n{sil}"
+        );
     }
 }

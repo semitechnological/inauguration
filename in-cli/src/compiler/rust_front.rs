@@ -66,13 +66,13 @@ fn lower_fn(f: syn::ItemFn) -> Decl {
         .sig
         .inputs
         .iter()
-        .filter_map(|arg| match arg {
+        .map(|arg| match arg {
             syn::FnArg::Typed(pat_ty) => {
                 let pname = pattern_name(&pat_ty.pat)
                     .unwrap_or_else(|| format!("arg_{}", params_fallback_idx(&pat_ty.pat)));
-                Some((pname, map_type(&pat_ty.ty)))
+                (pname, map_type(&pat_ty.ty))
             }
-            syn::FnArg::Receiver(_) => Some(("self".to_string(), Typ::Named("Self".to_string()))),
+            syn::FnArg::Receiver(_) => ("self".to_string(), Typ::Named("Self".to_string())),
         })
         .collect();
     let ret = match &f.sig.output {

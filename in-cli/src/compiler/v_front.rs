@@ -289,7 +289,7 @@ fn parse_fn_body<'a>(
     let mut body_lines: Vec<String> = Vec::new();
     let mut depth = brace_depth_scan(header);
     if depth == 0 {
-        while let Some(raw) = lines.next() {
+        for raw in lines.by_ref() {
             let t = strip_comment(raw).trim();
             if t.is_empty() {
                 continue;
@@ -546,7 +546,7 @@ fn parse_match_stmt(lines: &[String], start: usize) -> (Stmt, usize) {
         if let Some((pat, body_src)) = parse_match_branch(t) {
             arms.push(MatchArm {
                 pattern: pat,
-                body: parse_v_stmts(&vec![body_src.to_string()]),
+                body: parse_v_stmts(&[body_src.to_string()]),
             });
         }
     }
@@ -597,10 +597,8 @@ fn parse_let_like(t: &str) -> Option<(String, Option<Typ>, &str)> {
         let lhs = lhs.trim().trim_start_matches("mut ").trim();
         let (name, explicit_ty) = parse_decl_name_and_type(lhs)?;
         // Bare `id = expr` is assignment, not a declaration (use `:=` or `name type =`).
-        if explicit_ty.is_none() {
-            return None;
-        }
-        let hint = explicit_ty.or_else(|| infer_type_hint(rhs.trim()));
+        let explicit = explicit_ty?;
+        let hint = Some(explicit).or_else(|| infer_type_hint(rhs.trim()));
         return Some((name, hint, rhs.trim()));
     }
     None
@@ -785,10 +783,9 @@ pub fn main() {
                 then_body,
                 ..
             } = s
+                && matches!(cond, Expr::Ident(c) if c == "score > 10")
             {
-                if matches!(cond, Expr::Ident(c) if c == "score > 10") {
-                    return Some((then_body.as_slice(), else_body.as_slice()));
-                }
+                return Some((then_body.as_slice(), else_body.as_slice()));
             }
             None
         });
@@ -817,10 +814,10 @@ pub fn main() {
             )
         }));
         let m_stmt = body.iter().find_map(|s| {
-            if let Stmt::Match { scrutinee, arms } = s {
-                if matches!(scrutinee, Expr::Ident(v) if v == "score") {
-                    return Some(arms.as_slice());
-                }
+            if let Stmt::Match { scrutinee, arms } = s
+                && matches!(scrutinee, Expr::Ident(v) if v == "score")
+            {
+                return Some(arms.as_slice());
             }
             None
         });

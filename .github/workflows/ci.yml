@@ -66,6 +66,7 @@ jobs:
   in-test-linux:
     name: in test (linux)
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     env:
       IN_TEST_SKIP_SWIFT: "1"
     steps:
@@ -83,6 +84,7 @@ jobs:
   in-test-macos:
     name: in test (macos)
     runs-on: macos-latest
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -98,6 +100,7 @@ jobs:
   hybrid-libs:
     name: Hybrid library crates
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

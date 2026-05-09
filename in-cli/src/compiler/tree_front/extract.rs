@@ -168,10 +168,8 @@ fn dedup_fns(decls: Vec<Decl>) -> Vec<Decl> {
     let mut seen = HashSet::new();
     let mut out = Vec::new();
     for d in decls {
-        if let Decl::Function { name, .. } = &d {
-            if seen.insert(name.clone()) {
-                out.push(d);
-            }
+        if let Decl::Function { name, .. } = &d && seen.insert(name.clone()) {
+            out.push(d);
         }
     }
     out
@@ -193,12 +191,7 @@ fn collect_kinds<'a>(root: Node<'a>, kinds: &[&str], out: &mut Vec<Node<'a>>) {
 
 fn first_named<'a>(n: Node<'a>, kind: &str) -> Option<Node<'a>> {
     let mut w = n.walk();
-    for ch in n.named_children(&mut w) {
-        if ch.kind() == kind {
-            return Some(ch);
-        }
-    }
-    None
+    n.named_children(&mut w).find(|ch| ch.kind() == kind)
 }
 
 fn named_descendant<'a>(root: Node<'a>, kind: &str) -> Option<Node<'a>> {
@@ -631,11 +624,11 @@ fn extract_elixir(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
         {
             continue;
         }
-        if let Some(second) = kids.get(1).copied() {
-            if second.kind() == "identifier" || second.kind() == "keyword" {
-                let nm = normalize_entry(node_txt(src, second).trim());
-                out.push(decl_fn(nm, vec![], Typ::Void));
-            }
+        if let Some(second) = kids.get(1).copied()
+            && (second.kind() == "identifier" || second.kind() == "keyword")
+        {
+            let nm = normalize_entry(node_txt(src, second).trim());
+            out.push(decl_fn(nm, vec![], Typ::Void));
         }
     }
     Ok(out)

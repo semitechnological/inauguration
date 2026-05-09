@@ -855,16 +855,28 @@ fn run_test_step(step: &'static str, cmd: &mut Command) -> Result<()> {
 }
 
 fn cmd_doctor() -> Result<()> {
-    for tool in ["cargo", "swift", "rg"] {
-        let status = Command::new("/usr/bin/which")
+    println!("in {}", env!("CARGO_PKG_VERSION"));
+    println!("PATH tools (need cargo, bash for in test; curl for in update remote fallback; swift unless IN_TEST_SKIP_SWIFT):");
+    for tool in ["cargo", "rustc", "bash", "curl", "swift", "rg"] {
+        let status = Command::new("which")
             .arg(tool)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status()?;
         if status.success() {
-            println!("ok: {tool}");
+            println!("  ok: {tool}");
         } else {
-            println!("missing: {tool}");
+            println!("  missing: {tool}");
+        }
+    }
+    for (bin, arg) in [("cargo", "--version"), ("rustc", "--version")] {
+        if let Ok(out) = Command::new(bin).arg(arg).output()
+            && out.status.success()
+        {
+            let line = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !line.is_empty() {
+                println!("{line}");
+            }
         }
     }
     Ok(())
