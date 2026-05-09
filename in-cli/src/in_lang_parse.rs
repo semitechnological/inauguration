@@ -1,6 +1,7 @@
-//! `.in` v0: line-oriented `struct` / `fn` declarations (no `func`), brace-depth-0 filtering.
+//! `.in` v0.2: top-level `struct` / `fn` with multiline struct bodies and minimal `fn` bodies.
 
 use crate::core_ir::{Decl, Typ, UnifiedModule};
+use crate::swift_subset::{Expr, Stmt};
 use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
@@ -21,30 +22,49 @@ fn trim(s: &str) -> &str {
     s.trim()
 }
 
-/// Keep only top-level `fn` / `struct` lines for the line-oriented `.in` subset.
-pub fn filter_top_level_in_decl_lines(source: &str) -> String {
+/// Split source into complete top-level `struct` / `fn` declaration blocks (brace-balanced at depth 0).
+pub fn split_top_level_decl_blocks(source: &str) -> Vec<String> {
     let mut depth = 0i32;
-    let mut out = String::new();
+    let mut current: Option<Vec<String>> = None;
+    let mut out = Vec::new();
     for raw_line in source.lines() {
         let t = raw_line.trim();
-        if t.is_empty() {
-            continue;
-        }
-        if t.starts_with("//") {
-            continue;
-        }
-        let at_zero = depth == 0;
         let delta = brace_delta(raw_line);
-        if at_zero && (t.starts_with("fn ") || t.starts_with("struct ")) {
-            out.push_str(t);
-            out.push('\n');
+
+        if current.is_none() {
+            if t.is_empty() || t.starts_with("//") {
+                continue;
+            }
+            if depth == 0 && (t.starts_with("fn ") || t.starts_with("struct ")) {
+                current = Some(vec![t.to_string()]);
+                depth += delta;
+                if depth == 0 {
+                    let buf = current.take().expect("just set");
+                    out.push(buf.join("\n"));
+                }
+                continue;
+            }
+            continue;
+        }
+
+        if !(t.is_empty() || t.starts_with("//")) {
+            current.as_mut().expect("inside decl").push(t.to_string());
         }
         depth += delta;
         if depth < 0 {
             depth = 0;
         }
+        if depth == 0 {
+            let buf = current.take().expect("inside decl");
+            out.push(buf.join("\n"));
+        }
     }
     out
+}
+
+/// Legacy: line-oriented filter (single-line decls only). Prefer [`split_top_level_decl_blocks`].
+pub fn filter_top_level_in_decl_lines(source: &str) -> String {
+    split_top_level_decl_blocks(source).join("\n")
 }
 
 fn split_and_trim(sep: char, s: &str) -> Vec<String> {
@@ -104,67 +124,343 @@ fn parse_fn_header(after_fn_keyword: &str) -> (String, Vec<(String, Typ)>, Typ) 
     }
 }
 
-/// `struct Name { }` or `struct Name { Int id; String label }` — fields only on same line as `{`/`}`.
-fn parse_struct_line(line: &str) -> (String, Vec<(String, Typ)>) {
-    let rest = line.strip_prefix("struct ").map(trim).unwrap_or("");
-    let (name, body_opt) = match (rest.find('{'), rest.rfind('}')) {
-        (Some(i), Some(j)) if j > i => {
-            let n = trim(&rest[..i]).to_string();
-            let inner = trim(&rest[i + 1..j]);
-            (n, Some(inner.to_string()))
+fn brace_content_after_open(s: &str, open_idx: usize) -> Option<&str> {
+    if open_idx >= s.len() || !s[open_idx..].starts_with('{') {
+        return None;
+    }
+    let mut d = 0i32;
+    let mut in_string = false;
+    let mut escape = false;
+    for (i, c) in s[open_idx..].char_indices() {
+        let abs = open_idx + i;
+        if escape {
+            escape = false;
+            continue;
         }
-        _ => {
-            let n = rest
-                .find('{')
-                .map(|i| trim(&rest[..i]).to_string())
-                .unwrap_or_else(|| rest.to_string());
-            (n, None)
-        }
-    };
-
-    let mut fields = Vec::new();
-    if let Some(inner) = body_opt {
-        if !inner.is_empty() {
-            for part in inner.split(';') {
-                let seg = trim(part);
-                if seg.is_empty() {
-                    continue;
-                }
-                // `Type fieldName` — type is all but last token (supports `String long_name`).
-                let tokens: Vec<&str> = seg.split_whitespace().collect();
-                if tokens.len() < 2 {
-                    continue;
-                }
-                let field_name = tokens[tokens.len() - 1].to_string();
-                let ty_str = tokens[..tokens.len() - 1].join(" ");
-                fields.push((field_name, parse_in_type(&ty_str)));
+        if in_string {
+            if c == '\\' {
+                escape = true;
+            } else if c == '"' {
+                in_string = false;
             }
+            continue;
+        }
+        match c {
+            '"' => in_string = true,
+            '{' => d += 1,
+            '}' => {
+                d -= 1;
+                if d == 0 {
+                    return Some(&s[open_idx + 1..abs]);
+                }
+            }
+            _ => {}
         }
     }
-    (name, fields)
+    None
 }
 
-fn parse_filtered(source: &str) -> UnifiedModule {
+fn find_fn_body_open_brace(rest: &str) -> Option<usize> {
+    let mut paren = 0i32;
+    let mut saw_open_paren = false;
+    let mut in_string = false;
+    let mut escape = false;
+    for (i, c) in rest.char_indices() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        if in_string {
+            if c == '\\' {
+                escape = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => in_string = true,
+            '(' => {
+                paren += 1;
+                saw_open_paren = true;
+            }
+            ')' => paren -= 1,
+            '{' if paren == 0 && saw_open_paren => return Some(i),
+            _ => {}
+        }
+    }
+    None
+}
+
+fn strip_line_comment_outside_strings(seg: &str) -> &str {
+    let mut in_string = false;
+    let mut escape = false;
+    for (i, c) in seg.char_indices() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        if in_string {
+            if c == '\\' {
+                escape = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => in_string = true,
+            '/' => {
+                if seg.get(i + 1..).is_some_and(|t| t.starts_with('/')) {
+                    return trim(&seg[..i]);
+                }
+            }
+            _ => {}
+        }
+    }
+    seg
+}
+
+fn split_struct_field_segments(inner: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut start = 0usize;
+    let mut in_string = false;
+    let mut escape = false;
+    for (i, c) in inner.char_indices() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        if in_string {
+            if c == '\\' {
+                escape = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => in_string = true,
+            ';' | '\n' => {
+                let piece = trim(&inner[start..i]);
+                if !piece.is_empty() {
+                    out.push(piece);
+                }
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    let tail = trim(&inner[start..]);
+    if !tail.is_empty() {
+        out.push(tail);
+    }
+    out
+}
+
+fn parse_struct_fields_inner(inner: &str) -> Result<Vec<(String, Typ)>, String> {
+    let mut fields = Vec::new();
+    for raw_seg in split_struct_field_segments(inner) {
+        let seg = strip_line_comment_outside_strings(raw_seg);
+        let seg = trim(seg);
+        if seg.is_empty() {
+            continue;
+        }
+        if seg.starts_with("fn ") {
+            return Err(format!(
+                ".in: `fn` not allowed inside struct body (got `{seg}`)"
+            ));
+        }
+        let tokens: Vec<&str> = seg.split_whitespace().collect();
+        if tokens.len() < 2 {
+            return Err(format!(".in: invalid struct field `{seg}`"));
+        }
+        let field_name = tokens[tokens.len() - 1].to_string();
+        let ty_str = tokens[..tokens.len() - 1].join(" ");
+        fields.push((field_name, parse_in_type(&ty_str)));
+    }
+    Ok(fields)
+}
+
+fn parse_struct_block(block: &str) -> Result<(String, Vec<(String, Typ)>), String> {
+    let t = trim(block);
+    let rest = t
+        .strip_prefix("struct ")
+        .ok_or_else(|| ".in: expected `struct`".to_string())?;
+    let open = rest
+        .find('{')
+        .ok_or_else(|| ".in: struct must contain `{`".to_string())?;
+    let name = trim(&rest[..open]).to_string();
+    let inner = brace_content_after_open(rest, open)
+        .ok_or_else(|| ".in: unclosed `struct { ... }`".to_string())?;
+    let fields = parse_struct_fields_inner(inner)?;
+    Ok((name, fields))
+}
+
+fn parse_expr(s: &str) -> Expr {
+    let s = trim(s);
+    if s == "true" {
+        return Expr::BoolLit(true);
+    }
+    if s == "false" {
+        return Expr::BoolLit(false);
+    }
+    if let Ok(n) = s.parse::<i64>() {
+        return Expr::IntLit(n);
+    }
+    if s.len() >= 2 && s.starts_with('"') && s.ends_with('"') {
+        return Expr::StringLit(s[1..s.len() - 1].to_string());
+    }
+    Expr::Ident(s.to_string())
+}
+
+fn split_function_statements(body: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut start = 0usize;
+    let mut in_string = false;
+    let mut escape = false;
+    for (i, c) in body.char_indices() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        if in_string {
+            if c == '\\' {
+                escape = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => in_string = true,
+            ';' => {
+                let stmt = trim(&body[start..i]);
+                if !stmt.is_empty() {
+                    let stmt = strip_line_comment_outside_strings(stmt);
+                    let stmt = trim(stmt);
+                    if !stmt.is_empty() && !stmt.starts_with("//") {
+                        out.push(stmt.to_string());
+                    }
+                }
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    let tail = trim(&body[start..]);
+    if !tail.is_empty() {
+        let tail = strip_line_comment_outside_strings(tail);
+        let tail = trim(tail);
+        if !tail.is_empty() && !tail.starts_with("//") {
+            out.push(tail.to_string());
+        }
+    }
+    out
+}
+
+fn parse_let_stmt(s: &str) -> Result<Stmt, String> {
+    let rest = trim(s)
+        .strip_prefix("let ")
+        .ok_or_else(|| ".in: internal let parse".to_string())?;
+    let rest = trim(rest);
+    let eq_pos = rest
+        .find('=')
+        .ok_or_else(|| ".in: `let` needs `=`".to_string())?;
+    let lhs = trim(&rest[..eq_pos]);
+    let rhs = trim(&rest[eq_pos + 1..]);
+    let (name, typ) = if let Some(colon) = lhs.rfind(':') {
+        let name_part = trim(&lhs[..colon]);
+        let ty_part = trim(&lhs[colon + 1..]);
+        if name_part.is_empty() {
+            return Err(".in: `let` binding name missing".into());
+        }
+        (name_part.to_string(), Some(parse_in_type(ty_part)))
+    } else {
+        if lhs.is_empty() {
+            return Err(".in: `let` binding name missing".into());
+        }
+        (lhs.to_string(), None)
+    };
+    Ok(Stmt::Let(name, typ, parse_expr(rhs)))
+}
+
+fn parse_return_stmt(s: &str) -> Result<Stmt, String> {
+    let rest = trim(s)
+        .strip_prefix("return")
+        .ok_or_else(|| ".in: internal return parse".to_string())?;
+    let rest = trim(rest);
+    if rest.is_empty() || rest == ";" {
+        return Ok(Stmt::Return(None));
+    }
+    Ok(Stmt::Return(Some(parse_expr(rest))))
+}
+
+fn parse_stmt_line(line: &str) -> Result<Stmt, String> {
+    let s = trim(line);
+    if s.is_empty() {
+        return Err(".in: empty statement".into());
+    }
+    if s.starts_with("let ") {
+        return parse_let_stmt(s);
+    }
+    if s.starts_with("return")
+        && (s.len() == 6 || s.chars().nth(6).is_some_and(|c| c.is_whitespace()))
+    {
+        return parse_return_stmt(s);
+    }
+    Ok(Stmt::Expr(parse_expr(s)))
+}
+
+fn parse_function_body(inner: &str) -> Result<Vec<Stmt>, String> {
+    let mut stmts = Vec::new();
+    for part in split_function_statements(inner) {
+        stmts.push(parse_stmt_line(&part)?);
+    }
+    Ok(stmts)
+}
+
+fn parse_fn_block(block: &str) -> Result<(String, Vec<(String, Typ)>, Typ, Vec<Stmt>), String> {
+    let t = trim(block);
+    let rest = t
+        .strip_prefix("fn ")
+        .ok_or_else(|| ".in: expected `fn`".to_string())?;
+    if let Some(brace_idx) = find_fn_body_open_brace(rest) {
+        let header = trim(&rest[..brace_idx]);
+        let (name, params, ret) = parse_fn_header(header);
+        let body_inner = brace_content_after_open(rest, brace_idx)
+            .ok_or_else(|| ".in: unclosed `{` in function body".to_string())?;
+        let body = parse_function_body(body_inner)?;
+        Ok((name, params, ret, body))
+    } else {
+        let (name, params, ret) = parse_fn_header(rest);
+        Ok((name, params, ret, Vec::new()))
+    }
+}
+
+fn parse_module_from_blocks(blocks: &[String]) -> Result<UnifiedModule, String> {
     let mut decls = Vec::new();
-    for raw_line in source.split('\n') {
-        let line = trim(raw_line);
+    for block in blocks {
+        let line = trim(block);
         if line.is_empty() {
             continue;
         }
-        if let Some(rest) = line.strip_prefix("fn ") {
-            let (name, params, ret) = parse_fn_header(rest);
+        if line.starts_with("fn ") {
+            let (name, params, ret, body) = parse_fn_block(block)?;
             decls.push(Decl::Function {
                 name,
                 params,
                 ret,
-                body: Vec::new(),
+                body,
             });
         } else if line.starts_with("struct ") {
-            let (name, fields) = parse_struct_line(line);
+            let (name, fields) = parse_struct_block(block)?;
             decls.push(Decl::Struct { name, fields });
+        } else {
+            return Err(".in: expected top-level `fn` or `struct`".into());
         }
     }
-    UnifiedModule { decls }
+    Ok(UnifiedModule { decls })
 }
 
 fn collect_struct_names(module: &UnifiedModule) -> Vec<String> {
@@ -203,10 +499,24 @@ fn type_known(structs: &HashSet<&str>, t: &Typ) -> bool {
     }
 }
 
-/// Parse and validate `.in` v0 source; returns human-readable errors as strings.
+fn validate_stmt_types(fn_name: &str, structs: &HashSet<&str>, stmt: &Stmt) -> Result<(), String> {
+    match stmt {
+        Stmt::Let(_, Some(ty), _) => {
+            if !type_known(structs, ty) {
+                return Err(format!(
+                    ".in: unknown type in `let` annotation in fn {fn_name}"
+                ));
+            }
+        }
+        Stmt::Let(_, None, _) | Stmt::Return(None) | Stmt::Return(Some(_)) | Stmt::Expr(_) => {}
+    }
+    Ok(())
+}
+
+/// Parse and validate `.in` v0.2 source; returns human-readable errors as strings.
 pub fn parse_in_source(source: &str) -> Result<UnifiedModule, String> {
-    let filtered = filter_top_level_in_decl_lines(source);
-    let module = parse_filtered(&filtered);
+    let blocks = split_top_level_decl_blocks(source);
+    let module = parse_module_from_blocks(&blocks)?;
     if module.decls.is_empty() {
         return Err(".in: no top-level struct or fn after filtering".into());
     }
@@ -236,7 +546,10 @@ pub fn parse_in_source(source: &str) -> Result<UnifiedModule, String> {
                 }
             }
             Decl::Function {
-                name, params, ret, ..
+                name,
+                params,
+                ret,
+                body,
             } => {
                 for (param, ty) in params {
                     if !type_known(&struct_set, ty) {
@@ -245,6 +558,9 @@ pub fn parse_in_source(source: &str) -> Result<UnifiedModule, String> {
                 }
                 if !type_known(&struct_set, ret) {
                     return Err(format!(".in: unknown return type in fn {name}",));
+                }
+                for st in body {
+                    validate_stmt_types(name, &struct_set, st)?;
                 }
             }
         }
@@ -271,9 +587,11 @@ struct Outer {
 }
 fn main() -> void
 "#;
-        let f = filter_top_level_in_decl_lines(src);
-        assert!(f.contains("fn main"));
-        assert!(!f.contains("fn inner"));
+        let blocks = split_top_level_decl_blocks(src);
+        assert_eq!(blocks.len(), 2);
+        assert!(blocks[1].contains("main"));
+        let err = parse_in_source(src).expect_err("struct with fn inside");
+        assert!(err.contains("fn") || err.contains("struct"));
     }
 
     #[test]
@@ -293,10 +611,8 @@ fn main() -> void
 
     #[test]
     fn struct_parses_inline_fields() {
-        let m = parse_in_source(
-            "struct Box { Int x; String label }\nfn main() -> void\n",
-        )
-        .expect("ok");
+        let m =
+            parse_in_source("struct Box { Int x; String label }\nfn main() -> void\n").expect("ok");
         let st = m.decls.iter().find_map(|d| match d {
             Decl::Struct { name, fields } if name == "Box" => Some(fields.clone()),
             _ => None,
@@ -308,8 +624,103 @@ fn main() -> void
     }
 
     #[test]
+    fn struct_parses_multiline_fields() {
+        let src = r#"
+struct Card {
+  Int rank
+  String suit
+}
+fn main() -> void
+"#;
+        let m = parse_in_source(src).expect("parse");
+        let fields = match &m.decls[0] {
+            Decl::Struct { name, fields } if name == "Card" => fields.clone(),
+            _ => panic!("expected Card"),
+        };
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0].0, "rank");
+        assert_eq!(fields[1].0, "suit");
+    }
+
+    #[test]
+    fn struct_skips_field_line_comments() {
+        let src = r#"
+struct S {
+  Int a // id
+  String b
+}
+fn main() -> void
+"#;
+        let m = parse_in_source(src).expect("ok");
+        let fields = match &m.decls[0] {
+            Decl::Struct { fields, .. } => fields,
+            _ => panic!("struct"),
+        };
+        assert_eq!(fields.len(), 2);
+    }
+
+    #[test]
     fn struct_field_type_must_be_known() {
         let err = parse_in_source("struct Bad { Unknown z }\nfn main() -> void\n").expect_err("ty");
         assert!(err.contains("unknown type") || err.contains("Bad"));
+    }
+
+    #[test]
+    fn fn_body_let_and_return() {
+        use crate::swift_subset::Expr;
+        let src = r#"
+fn bump() -> Int {
+  let x: Int = 1;
+  return x;
+}
+fn main() -> void { return; }
+"#;
+        let m = parse_in_source(src).expect("ok");
+        let bump = m.decls.iter().find_map(|d| match d {
+            Decl::Function { name, body, .. } if name == "bump" => Some(body.clone()),
+            _ => None,
+        });
+        let body = bump.expect("bump");
+        assert_eq!(body.len(), 2);
+        assert!(
+            matches!(&body[0], Stmt::Let(n, Some(Typ::Int), Expr::IntLit(1)) if n == "x"),
+            "{body:?}"
+        );
+        assert!(
+            matches!(&body[1], Stmt::Return(Some(Expr::Ident(x))) if x == "x"),
+            "{body:?}"
+        );
+    }
+
+    #[test]
+    fn fn_body_infers_let_without_type() {
+        use crate::swift_subset::Expr;
+        let src = "fn f() -> void { let n = 0; return; }\nfn main() -> void\n";
+        let m = parse_in_source(src).expect("ok");
+        let body = match m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "f"))
+        {
+            Some(Decl::Function { body, .. }) => body,
+            _ => panic!("f"),
+        };
+        assert!(matches!(&body[0], Stmt::Let(name, None, Expr::IntLit(0)) if name == "n"));
+    }
+
+    #[test]
+    fn expr_statement_parsed() {
+        use crate::swift_subset::Expr;
+        let src = "fn g() -> void { 42; return; }\nfn main() -> void\n";
+        let m = parse_in_source(src).expect("ok");
+        let body = match m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "g"))
+        {
+            Some(Decl::Function { body, .. }) => body,
+            _ => panic!("g"),
+        };
+        assert!(matches!(&body[0], Stmt::Expr(Expr::IntLit(42))));
     }
 }

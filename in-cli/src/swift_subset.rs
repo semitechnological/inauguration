@@ -24,6 +24,8 @@ pub enum Expr {
 pub enum Stmt {
     Let(String, Option<Typ>, Expr),
     Return(Option<Expr>),
+    /// Evaluated for side effects (e.g. `.in` expression statements).
+    Expr(Expr),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

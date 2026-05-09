@@ -1,6 +1,14 @@
-// Minimal `.in` v0 sample: top-level struct + helper `fn` + required `fn main`
+// Minimal `.in` v0.2 sample: multiline struct, helper `fn`, body statements, required `fn main`
 // (`in-cli/src/in_lang_parse.rs`).
 // Hermetic CI: `./scripts/check-in-lang-sample.sh` — no swiftc.
-struct Session { Int id }
-fn note(text: String) -> void
-fn main() -> void
+struct Session {
+  Int id
+  String label
+}
+fn note(text: String) -> void {
+  return;
+}
+fn main() -> void {
+  let seed: Int = 0;
+  return;
+}

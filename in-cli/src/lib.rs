@@ -31,4 +31,21 @@ mod in_pipeline_tests {
             "expected textual SIL to declare @main, got:\n{sil}"
         );
     }
+
+    #[test]
+    fn in_sample_shape_lowers_main_body() {
+        let src = r#"
+struct Session {
+  Int id
+  String label
+}
+fn note(text: String) -> void { return; }
+fn main() -> void { let seed: Int = 0; return; }
+"#;
+        let module = in_lang_parse::parse_in_source(src).expect("parse .in");
+        let sil = lower_core::lower_to_textual_sil(&module, "App");
+        assert!(sil.contains("integer_literal $Builtin.Int64, 0"));
+        assert!(sil.contains("function_ref @note"));
+        assert!(sil.contains("return %"));
+    }
 }
