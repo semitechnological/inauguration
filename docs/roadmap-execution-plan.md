@@ -38,7 +38,7 @@ Suggested **program order**: **B0** (CI unblocks everyone) → **C0** (parity gu
 
 | Phase | Scope | Key files |
 |-------|--------|-----------|
-| **A0** | Document subset vs swiftc graph in metrics **`reason`** / optional field; avoid double subset work in **`emit_patch`** if cheap. | `daemon_impl.rs`, `sil_emit.rs` |
+| **A0** | **Done:** `sil_subset_call_edges_detail` + **`sil_graph=*`** tags on daemon **`reason`** (subset vs unavailable vs skipped compile, etc.). Double subset work unchanged for now. | `daemon_impl.rs` |
 | **A1** | Pass capped **`SilAnalysisReport`** (or callee set) into **`plan_patch_with_sil_graph`**; rules e.g. downgrade only if callees intersect **changed symbol names** (needs name ↔ file mapping—may be stubbed first). | `daemon_impl.rs`, `hybrid_sil.rs` |
 | **A2** | Optional **`swiftc`** SIL graph behind env + **timing** in metrics; unify input resolution with **`combined_swift_sources_for_path`**. | `sil_emit.rs`, `daemon_impl.rs` |
 | **A3** | Multi-function **`SilArtifact`** stability; protocol optional fields for host tooling; mirror **`compiler/rust-driver/crates/sil`**. | `hybrid_sil.rs`, `shared/protocol/`, rust-driver `sil` |
@@ -73,7 +73,7 @@ Suggested **program order**: **B0** (CI unblocks everyone) → **C0** (parity gu
 
 | Phase | Scope |
 |-------|--------|
-| **B0** | Add CI job: **`in test`** on **macos-latest** (full), and/or **`IN_TEST_SKIP_SWIFT=1 in test`** on **ubuntu-latest** after building **`in`** (`cargo build --release -p inauguration --bin in` + `PATH`). |
+| **B0** | **Done in CI:** jobs **`in-test-linux`** (`IN_TEST_SKIP_SWIFT=1`) + **`in-test-macos`** (full), build `in` then `in test`. |
 | **B1** | **`in doctor`**: check `bash`, `curl`, `swift`, `cargo` versions; print whether remote **`in update`** would work. |
 | **B2** | Optional **`IN_TEST_SKIP_PROTOCOL=1`** / staged modes if script deps are heavy for sandboxes. |
 | **B3** | Document “airgapped” path: no network → use checkout **`in update`** only. |
@@ -102,7 +102,7 @@ Suggested **program order**: **B0** (CI unblocks everyone) → **C0** (parity gu
 
 | Phase | Scope |
 |-------|--------|
-| **C0** | CI script or test vectors: **parity** check pipeline JSON / SIL snippets between rust-driver and in-cli (or documented manual sync checklist each release). |
+| **C0** | **Partial:** job **`hybrid-libs`** runs `cargo test -p hybrid-pipeline -p hybrid-sil -p hybrid-core -p hybrid-scheduler` on ubuntu. (Byte-diff parity still future.) |
 | **C1** | Align **`total_us`** semantics + document two clocks if both are kept (`wave_us` vs `pipeline_us`). |
 | **C2** | Criterion bench: **`parse_textual_sil` + `extract_call_graph`** on representative SIL blobs. |
 | **C3** | **`parse_frontend_artifact`**: unified schema / version field for Swift artifact + icore + nested pipeline bundle. |
@@ -125,7 +125,7 @@ Suggested **program order**: **B0** (CI unblocks everyone) → **C0** (parity gu
 
 | Phase | Scope |
 |-------|--------|
-| **D0** | Pick **one** Tree-sitter language for **end-to-end** tests: source → `UnifiedModule` → textual SIL → `hybrid_sil` graph (per future-work v0). |
+| **D0** | **Started:** `java_tree_front_lowers_to_textual_sil` — Java file → `tree_front` → `lower_unified_module` → asserts `sil @main`. Extend with **`hybrid_sil`** graph pass when needed. |
 | **D1** | Deepen **Rust/Go/V** bodies toward CFG-aware lowering where tests demand it. |
 | **D2** | **`icoreVersion`**: conservative v1 + fixture-driven lowering tests for tool-generated IR. |
 | **D3** | rust-driver mirrors new **`ParserId`** / Core IR contracts as fronts stabilize (**C0** dependency). |
@@ -134,13 +134,13 @@ Suggested **program order**: **B0** (CI unblocks everyone) → **C0** (parity gu
 
 ## Consolidated priority backlog (suggested)
 
-1. **B0** — CI runs **`in test`** (split macOS full / Linux skip-swift). *Unblocks confidence.*
-2. **C0** — Parity guardrail for hybrid pipeline + SIL. *Prevents drift.*
-3. **A0** — Metrics/reason contract for SIL graph source + doc stub vs semantic graph. *Clarifies behavior.*
-4. **D0** — One Tree-sitter e2e lowering track. *Proves the stack.*
-5. **A1** — Structured graph into **`plan_patch`** with conservative rules + tests. *User-visible reload quality.*
-6. **C2** + **C1** — Benches + timing semantics. *Perf story.*
-7. **A2** / **A3** — Optional swiftc graph + multi-fn SIL model + protocol. *Larger bet.*
+1. ~~**B0**~~ — CI **`in-test-linux`** / **`in-test-macos`** land **`in test`**.
+2. ~~**C0**~~ (partial) — **`hybrid-libs`** job; still want byte/vector parity later.
+3. ~~**A0**~~ — **`sil_graph=*`** reason tags from subset detail path.
+4. ~~**D0**~~ (started) — Java tree → SIL test; add **`hybrid_sil`** hop next.
+5. **A1** — Structured graph into **`plan_patch`** with conservative rules + tests.
+6. **C2** + **C1** — Benches + timing semantics.
+7. **A2** / **A3** — Optional swiftc graph + multi-fn SIL + protocol.
 
 ---
 

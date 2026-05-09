@@ -62,3 +62,44 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: in build (.icore sample)
         run: ./scripts/check-icore-sample.sh
+
+  in-test-linux:
+    name: in test (linux)
+    runs-on: ubuntu-latest
+    env:
+      IN_TEST_SKIP_SWIFT: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build in binary
+        run: cargo build --release --bin in
+        working-directory: in-cli
+      - name: Add in binary to PATH
+        run: echo "$PWD/target/release" >> "$GITHUB_PATH"
+        working-directory: in-cli
+      - name: Run in test
+        run: in test
+
+  in-test-macos:
+    name: in test (macos)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build in binary
+        run: cargo build --release --bin in
+        working-directory: in-cli
+      - name: Add in binary to PATH
+        run: echo "$PWD/target/release" >> "$GITHUB_PATH"
+        working-directory: in-cli
+      - name: Run in test
+        run: in test
+
+  hybrid-libs:
+    name: Hybrid library crates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test hybrid library crates
+        run: cd compiler/rust-driver && cargo test -p hybrid-pipeline -p hybrid-sil -p hybrid-core -p hybrid-scheduler

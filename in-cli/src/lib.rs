@@ -19,9 +19,29 @@ pub mod swift_subset;
 
 #[cfg(test)]
 mod in_pipeline_tests {
-    use crate::compiler::{driver, icore};
+    use crate::compiler::{driver, icore, tree_front};
     use crate::in_lang_parse;
     use crate::lower_core;
+    use crate::parser_registry::ParserId;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TempDirGuard {
+        path: PathBuf,
+    }
+
+    impl TempDirGuard {
+        fn new(path: PathBuf) -> Self {
+            Self { path }
+        }
+    }
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
 
     #[test]
     fn minimal_in_source_to_sil_contains_main() {
@@ -61,6 +81,32 @@ fn main() -> void { let seed: Int = 0; return; }
             ]
         }"#;
         let module = icore::parse_icore_source(j).expect("icore");
+        let sil = driver::lower_unified_module(&module, "App");
+        assert!(sil.contains("sil @main"), "sil:\n{sil}");
+    }
+
+    #[test]
+    fn java_tree_front_lowers_to_textual_sil() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock before UNIX_EPOCH")
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!(
+            "inauguration-java-tree-front-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let _guard = TempDirGuard::new(temp_dir.clone());
+
+        let path = temp_dir.join("Hello.java");
+        fs::write(
+            &path,
+            "public class Hello { public static void main(String[] args) { } }",
+        )
+        .expect("write Java source");
+
+        let module = tree_front::parse_polyglot_file(ParserId::Java, &path).expect("parse Java");
         let sil = driver::lower_unified_module(&module, "App");
         assert!(sil.contains("sil @main"), "sil:\n{sil}");
     }

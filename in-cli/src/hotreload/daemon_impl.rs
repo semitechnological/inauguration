@@ -250,26 +250,37 @@ fn compile_check_swift(path: &Path) -> bool {
     sil_emit::compile_check_swift_path(path)
 }
 
-/// Best-effort gate before emitting a reload patch: Swift uses [`sil_emit::compile_check_swift_path`]
-/// (**`IN_NATIVE_SWIFT_SIL`**: in-tree subset first on `try`/`only`, else **`swiftc -typecheck`**); Core IR paths use
-/// [`parser_registry::parse_with_resolved`] (`.in` / `.icore` / polyglot).
-/// When path is Swift and sources match **`swift_subset`**, derive SIL in-process and count call-graph edges (`function_ref`).
-/// Returns **`None`** if not subset-shaped (no extra `swiftc` / emit work).
-fn sil_subset_call_edge_count(path: &Path) -> Option<u32> {
+/// Best-effort subset SIL observability detail used by hotreload reason strings.
+/// Returns `(edges, tag)` where `edges` is present only when subset SIL extraction succeeds.
+fn sil_subset_call_edges_detail(path: &Path) -> (Option<u32>, &'static str) {
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
     if ext != "swift" {
-        return None;
+        return (None, "sil_graph=non_swift");
     }
-    let combined = sil_emit::combined_swift_sources_for_path(path).ok()?;
-    let sil = native_swift_sil::try_emit_in_tree_sil(&combined, "App")?;
+    let Ok(combined) = sil_emit::combined_swift_sources_for_path(path) else {
+        return (None, "sil_graph=no_combined_sources");
+    };
+    let Some(sil) = native_swift_sil::try_emit_in_tree_sil(&combined, "App") else {
+        return (None, "sil_graph=subset_unavailable");
+    };
     let artifact = hybrid_sil::parse_textual_sil(&sil);
     let cleaned = hybrid_sil::remove_debug_insts(&artifact);
     let n = hybrid_sil::extract_call_graph(&cleaned).call_edges.len();
-    Some(n as u32)
+    let n = n as u32;
+    if n > 0 {
+        (Some(n), "sil_graph=subset")
+    } else {
+        (Some(n), "sil_graph=subset_zero_edges")
+    }
+}
+
+#[cfg(test)]
+fn sil_subset_call_edge_count(path: &Path) -> Option<u32> {
+    sil_subset_call_edges_detail(path).0
 }
 
 pub fn compile_check(path: &Path) -> bool {
@@ -399,13 +410,14 @@ async fn emit_patch(
 ) -> Result<ReloadPatch, DaemonError> {
     let (compile_ok, compile_cache_hit, compile_check_ms) =
         compile_check_cached(Path::new(target), compile_cache);
-    let sil_call_edges = if compile_ok {
-        sil_subset_call_edge_count(Path::new(target))
+    let (sil_call_edges, sil_graph_tag) = if compile_ok {
+        sil_subset_call_edges_detail(Path::new(target))
     } else {
-        None
+        (None, "sil_graph=skipped_compile_fail")
     };
     let patch = plan_patch_with_sil_graph(target, symbols, sil_call_edges);
     let (patch, mut reason) = apply_restart_supervisor(patch, compile_ok);
+    reason = format!("{reason}|{sil_graph_tag}");
     if let Some(n) = sil_call_edges {
         reason = format!("{reason}|sil_call_edges={n}");
     }
