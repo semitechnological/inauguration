@@ -10,6 +10,7 @@
 //! Orchestration and SIL passes stay in `in`; full Swift remains out of tree for non-subset sources.
 
 use crate::native_swift_sil::{NativeSwiftSilMode, native_swift_sil_mode_from_env};
+use serde_json::Value as JsonValue;
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -50,7 +51,8 @@ fn collect_sources_dir(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), SilEmit
     Ok(())
 }
 
-/// All `*.swift` files under `<pkg>/Sources` (flat Package convention).
+/// All `*.swift` files under `<pkg>/Sources` plus codegen under `<pkg>/Generated` when present
+/// (SwiftPM targets often list both; sibling-only resolution would miss `Generated/`).
 fn collect_package_sources(pkg: &Path) -> Result<Vec<PathBuf>, SilEmitError> {
     let sources = pkg.join("Sources");
     if !sources.is_dir() {
@@ -61,7 +63,12 @@ fn collect_package_sources(pkg: &Path) -> Result<Vec<PathBuf>, SilEmitError> {
     }
     let mut out = Vec::new();
     collect_sources_dir(&sources, &mut out)?;
+    let generated = pkg.join("Generated");
+    if generated.is_dir() {
+        collect_sources_dir(&generated, &mut out)?;
+    }
     out.sort();
+    out.dedup();
     if out.is_empty() {
         return Err(SilEmitError::Msg(format!(
             "no .swift files under {}",
@@ -80,7 +87,16 @@ fn collect_package_sources_flexible(pkg: &Path) -> Result<Vec<PathBuf>, SilEmitE
     if swift_nested.is_dir() {
         let mut out = Vec::new();
         collect_sources_dir(&swift_nested, &mut out)?;
+        let generated = pkg.join("Generated");
+        if generated.is_dir() {
+            collect_sources_dir(&generated, &mut out)?;
+        }
+        let generated_l = pkg.join("generated");
+        if generated_l.is_dir() {
+            collect_sources_dir(&generated_l, &mut out)?;
+        }
         out.sort();
+        out.dedup();
         if out.is_empty() {
             return Err(SilEmitError::Msg(format!(
                 "no .swift files under {}",
@@ -145,11 +161,13 @@ fn resolve_swift_inputs(path: &Path) -> Result<Vec<PathBuf>, SilEmitError> {
                 "native build expects a .swift file or a directory with Swift sources".into(),
             ));
         }
-        if let Some(sibs) = collect_swift_siblings_in_sources_parent(path) {
-            return Ok(sibs);
-        }
+        // Prefer full package source roots (Sources/, Generated/, swift/Sources/) when a
+        // Package.swift exists; sibling-only sets miss SPM-listed paths outside `Sources/`.
         if let Some(pkg) = package_root_with_sources_for(path) {
             return collect_package_sources_flexible(&pkg);
+        }
+        if let Some(sibs) = collect_swift_siblings_in_sources_parent(path) {
+            return Ok(sibs);
         }
         return Ok(vec![path.to_path_buf()]);
     }
@@ -197,21 +215,24 @@ fn append_extra_swiftc_args(cmd: &mut Command) {
     }
 }
 
-/// Clang modules declared via SwiftPM `systemLibrary(path: "generated")` need explicit `-fmodule-map-file`.
-fn append_generated_clang_flags(cmd: &mut Command, pkg: &Path) {
-    let generated_dir = pkg.join("generated");
-    if !generated_dir.is_dir() {
+/// Add `-Xcc -fmodule-map-file=…` (+ `-Xcc -I`) for each `*.modulemap` in `dir`.
+///
+/// When `skip_default_modulemap` is true, omits `module.modulemap` so named maps (e.g. UniFFI
+/// `fooFFI.modulemap`) are used without duplicating an umbrella map.
+fn append_modulemap_clang_flags(cmd: &mut Command, dir: &Path, skip_default_modulemap: bool) {
+    if !dir.is_dir() {
         return;
     }
-    let Ok(rd) = fs::read_dir(&generated_dir) else {
+    let Ok(rd) = fs::read_dir(dir) else {
         return;
     };
     let mut maps = Vec::new();
     for entry in rd.flatten() {
         let p = entry.path();
         if p.extension().and_then(|x| x.to_str()) == Some("modulemap") {
-            // Skip umbrella maps that duplicate named `Foo.modulemap` entries (common in UniFFI layouts).
-            if p.file_name().and_then(|s| s.to_str()) == Some("module.modulemap") {
+            if skip_default_modulemap
+                && p.file_name().and_then(|s| s.to_str()) == Some("module.modulemap")
+            {
                 continue;
             }
             maps.push(p);
@@ -222,8 +243,55 @@ fn append_generated_clang_flags(cmd: &mut Command, pkg: &Path) {
         cmd.arg("-Xcc")
             .arg(format!("-fmodule-map-file={}", m.display()));
     }
-    cmd.arg("-Xcc")
-        .arg(format!("-I{}", generated_dir.display()));
+    cmd.arg("-Xcc").arg(format!("-I{}", dir.display()));
+}
+
+/// SwiftPM `systemLibrary(path: "generated")` and local `FFI/` maps, plus file-system dependency
+/// roots listed in `.build/workspace-state.json` (their `generated/` trees).
+fn append_package_clang_module_flags(cmd: &mut Command, pkg: &Path) {
+    let generated_dir = pkg.join("generated");
+    if generated_dir.is_dir() {
+        append_modulemap_clang_flags(cmd, &generated_dir, true);
+    }
+    let ffi_dir = pkg.join("FFI");
+    if ffi_dir.is_dir() {
+        append_modulemap_clang_flags(cmd, &ffi_dir, false);
+    }
+    append_workspace_dependency_generated_clang(cmd, pkg);
+}
+
+fn append_workspace_dependency_generated_clang(cmd: &mut Command, pkg: &Path) {
+    let ws = pkg.join(".build").join("workspace-state.json");
+    let Ok(raw) = fs::read_to_string(&ws) else {
+        return;
+    };
+    let Ok(v) = serde_json::from_str::<JsonValue>(&raw) else {
+        return;
+    };
+    let Some(deps) = v
+        .get("object")
+        .and_then(|o| o.get("dependencies"))
+        .and_then(|d| d.as_array())
+    else {
+        return;
+    };
+    for dep in deps {
+        let Some(st) = dep.get("state") else {
+            continue;
+        };
+        let Some(path_s) = st.get("path").and_then(|p| p.as_str()) else {
+            continue;
+        };
+        let root = Path::new(path_s);
+        let dep_generated = root.join("generated");
+        if dep_generated.is_dir() {
+            append_modulemap_clang_flags(cmd, &dep_generated, true);
+        }
+        let dep_generated_cap = root.join("Generated");
+        if dep_generated_cap.is_dir() {
+            append_modulemap_clang_flags(cmd, &dep_generated_cap, true);
+        }
+    }
 }
 
 /// Closest ancestor containing `Package.swift` (used for optional `swift build` prep).
@@ -319,7 +387,7 @@ fn load_combined_sources(inputs: &[PathBuf]) -> Result<String, SilEmitError> {
     Ok(parts.join("\n\n"))
 }
 
-/// Same Swift source set [`emit_textual_sil`] uses for `path` (siblings under `Sources/`, package tree, or single file).
+/// Same Swift source set [`emit_textual_sil`] uses for `path` (package `Sources/` + `Generated/`, `Sources/` siblings without `Package.swift`, or a single file).
 pub fn combined_swift_sources_for_path(path: &Path) -> Result<String, SilEmitError> {
     let inputs = resolve_swift_inputs(path)?;
     load_combined_sources(&inputs)
@@ -347,7 +415,7 @@ fn run_swiftc_typecheck(
         cmd.arg("-target").arg(triple);
     }
     if let Some(pkg) = package_root_for_clang {
-        append_generated_clang_flags(&mut cmd, pkg);
+        append_package_clang_module_flags(&mut cmd, pkg);
     }
     for inc in module_includes {
         cmd.arg("-I").arg(inc);
@@ -440,7 +508,7 @@ fn run_swiftc_emit_sil(
     }
 
     if let Some(pkg) = package_root_for_clang {
-        append_generated_clang_flags(&mut cmd, pkg);
+        append_package_clang_module_flags(&mut cmd, pkg);
     }
 
     for inc in module_includes {
@@ -489,10 +557,14 @@ fn run_swiftc_emit_sil(
 
 /// Emit canonical textual SIL for the Swift inputs implied by `path` / `module_id`.
 ///
-/// Input resolution: `.swift` files under a parent named `Sources/` compile together (SwiftPM-style
-/// examples without a local `Package.swift`). Otherwise uses `Sources/` or `swift/Sources/` under the
-/// nearest `Package.swift` root. Clang `systemLibrary` deps get `-Xcc -fmodule-map-file` / `-Xcc -I`
-/// from `<pkg>/generated` when present (skips duplicate `module.modulemap`).
+/// Input resolution: under a `Package.swift` root, collects `Sources/**` plus `Generated/**` when
+/// present (SwiftPM targets often list both). Without a package, all `*.swift` siblings under a
+/// `Sources/` directory compile together (examples with no `Package.swift`). Otherwise uses
+/// `Sources/` or `swift/Sources/` under the nearest package root.
+///
+/// Clang / C module maps: `<pkg>/generated` (skips default `module.modulemap` when other maps
+/// exist, UniFFI-style), `<pkg>/FFI` (includes `module.modulemap` for `systemLibrary` targets), and
+/// each file-system dependency’s `generated/` / `Generated/` from `.build/workspace-state.json`.
 ///
 /// When **`IN_NATIVE_SWIFT_SIL`** is **`try`** or **`only`**, attempts in-tree subset SIL first.
 ///

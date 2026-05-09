@@ -282,6 +282,7 @@ fn main() {
 	out_dir := os.join_path(root, 'docs', 'benchmarks')
 	out_md := os.join_path(out_dir, 'swift-vs-in.md')
 	out_json := os.join_path(out_dir, 'swift-vs-in.json')
+	swiftc_bench_sh := os.join_path(root, 'scripts', 'swiftc-bench-typecheck.sh')
 	bench_runs := os.getenv_opt('BENCH_RUNS') or { '3' }.int()
 	warmup_runs := os.getenv_opt('BENCH_WARMUP_RUNS') or { '1' }.int()
 	os.mkdir_all(out_dir) or { panic(err) }
@@ -333,9 +334,12 @@ fn main() {
 
 		for warm_idx in 0 .. warmup_runs {
 			warm_name := '${warm_idx + 1}/${warmup_runs}'
-			_ = run_with_status('warm swiftc ${warm_name}', root, 'swiftc -typecheck "${path}"')
 			if pkg_root != '' {
 				_ = run_with_status('warm swift build ${warm_name}', pkg_root, 'swift build')
+				_ = run_with_status('warm swiftc ${warm_name}', root,
+					'SKIP_SWIFT_BUILD=1 bash "${swiftc_bench_sh}" "${pkg_root}"')
+			} else {
+				_ = run_with_status('warm swiftc ${warm_name}', root, 'swiftc -typecheck "${path}"')
 			}
 			_ = run_with_status('warm in build ${warm_name}', root, '"${in_bin}" build --verbose --path "${path}" --module-id "${module_name}"')
 			_ = run_with_status('warm hybrid-cli ${warm_name}', os.join_path(root, 'compiler', 'rust-driver'),
@@ -344,18 +348,20 @@ fn main() {
 
 		for run_idx in 0 .. bench_runs {
 			run_name := '${run_idx + 1}/${bench_runs}'
-			swiftc_last = run_with_status('swiftc ${run_name}', root, 'swiftc -typecheck "${path}"')
-			swiftc_samples << swiftc_last.ms
-			if !swiftc_last.ok {
-				swiftc_all_ok = false
-			}
-
 			if pkg_root != '' {
 				swiftpkg_last = run_with_status('swift build ${run_name}', pkg_root, 'swift build')
 				swiftpkg_samples << swiftpkg_last.ms
 				if !swiftpkg_last.ok {
 					swiftpkg_all_ok = false
 				}
+				swiftc_last = run_with_status('swiftc ${run_name}', root,
+					'SKIP_SWIFT_BUILD=1 bash "${swiftc_bench_sh}" "${pkg_root}"')
+			} else {
+				swiftc_last = run_with_status('swiftc ${run_name}', root, 'swiftc -typecheck "${path}"')
+			}
+			swiftc_samples << swiftc_last.ms
+			if !swiftc_last.ok {
+				swiftc_all_ok = false
 			}
 
 			in_last = run_with_status('in build ${run_name}', root, '"${in_bin}" build --verbose --path "${path}" --module-id "${module_name}"')
@@ -513,7 +519,7 @@ fn main() {
 	os.write_file(out_json, json.encode_pretty(doc)) or { panic(err) }
 
 	mut md := '# Swift Compiler vs in Pipeline Benchmark\n\n'
-	md += 'Measured with: raw `swiftc -typecheck`, package-context **`swift build`** (SwiftPM reference — Apple toolchain), and **`in build`** default (**native hybrid pipeline only**, no SwiftPM).\n'
+	md += 'Measured with: **`swiftc -typecheck`** on a single file when there is no local `Package.swift`; when there is a package, **`scripts/swiftc-bench-typecheck.sh`** (same Sources + Generated inputs and Clang flags idea as `in-cli` **`sil_emit`**) after a timed **`swift build`**. Also package-context **`swift build`** (SwiftPM reference) and **`in build`** default (**native hybrid pipeline only**, no SwiftPM).\n'
 	md += '**in** column = inauguration compile path (scheduler + SIL passes today); **swift build** = legacy SwiftPM baseline until native codegen fully replaces it.\n'
 	md += '**hybrid-cli** matches the native wave harness without the **`in`** CLI wrapper overhead.\n'
 	md += 'Wall times: **median** over `${bench_runs}` timed runs; **min–max** across those runs shown in parentheses next to medians (easy tables) or inline (detail table).\n\n'

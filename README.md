@@ -139,6 +139,8 @@ CI stays on **`protocol-gen` (Rust)** via **`scripts/check-protocol-models.sh`**
 
 [`scripts/bench-swift.sh`](scripts/bench-swift.sh) exports **`BENCH_ROOT`** to the repository root and runs **`v -gc none run "$BENCH_ROOT/scripts/bench_swift.v`**. The shell driver exports defaults when unset: **`BENCH_RUNS=3`**, **`BENCH_WARMUP_RUNS=1`**. Override via the environment (`BENCH_RUNS`, `BENCH_WARMUP_RUNS`). If bare **`v run`** fails with missing **`gc.h`**, use **`v -gc none`** (as this script does) or install Boehm **`gc`** development headers.
 
+For SwiftPM examples, the harness times **`swiftc -typecheck`** via [`scripts/swiftc-bench-typecheck.sh`](scripts/swiftc-bench-typecheck.sh): same **`Sources/`** + **`Generated/`** inputs and Clang **`-Xcc`** / **`-I`** layout as **`in-cli`** **`sil_emit`** (`.build/.../debug/Modules`, local **`generated/`** / **`FFI/`**, dependency **`generated/`** from **`.build/workspace-state.json`**), so the **`swiftc`** column matches SIL emit instead of typechecking one primary file in isolation.
+
 Writes:
 
 - `docs/benchmarks/swift-vs-in.md`
