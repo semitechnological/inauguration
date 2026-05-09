@@ -141,21 +141,23 @@ The markdown report records host/tool versions and tables where each cell is **m
 
 ### Latest Benchmark Snapshot
 
-Median over three runs; parentheses = min–max on those same runs (see linked doc for full detail).
+Copied from **`docs/benchmarks/swift-vs-in.md`** Easy Copy tables after **`./scripts/bench-swift.sh`**. Re-run script and paste here + commit when refreshing.
 
-Generated (UTC): `2026-05-08T17:33:08Z` · macOS · Apple M5 Pro · Swift 6.3 · rustc 1.94.1 · V 0.5.0
+Median over three runs; parentheses = min–max on those same runs.
+
+Generated (UTC): `2026-05-08T17:47:35Z` · macOS · Apple M5 Pro · Swift 6.3 · rustc 1.94.1 · V 0.5.0
 
 | Example | SwiftPM swift build median (min–max ms) | in native median (min–max ms) |
 |---|---:|---:|
-| `aurorality/examples/counter` | 861.50 (765.89–880.09) | 6.55 (6.29–7.27) |
-| `aurorality/examples/basic` | 766.08 (755.90–782.55) | 6.48 (6.20–6.68) |
-| `aurorality/examples/hyperchat` | 357.75 (318.10–367.59) | 7.35 (6.30–7.82) |
+| `aurorality/examples/counter` | 783.30 (771.19–787.43) | 1362.89 (1355.16–1390.69) |
+| `aurorality/examples/basic` | 841.17 (800.40–841.66) | 1513.38 (1394.81–1695.28) |
+| `aurorality/examples/hyperchat` | 351.80 (348.86–447.35) | 1421.84 (1405.69–1723.92) |
 
 Swift compiler sources package vs **`in`** native:
 
 | Example | SwiftPM swift build median (min–max ms) | in native median (min–max ms) |
 |---|---:|---:|
-| `vendor/swift/SwiftCompilerSources` | 319.42 (318.84–321.45) | 6.25 (6.23–6.36) |
+| `vendor/swift/SwiftCompilerSources` | 410.68 (393.83–412.89) | 613.21 (576.84–631.83) |
 
 Staging under **`.build/bin`** / **`.build/artifacts`** applies only when using **`in build --swiftpm`** (SwiftPM emit step).
 
