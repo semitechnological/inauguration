@@ -11,6 +11,7 @@
 
 use crate::native_swift_sil::{NativeSwiftSilMode, native_swift_sil_mode_from_env};
 use serde_json::Value as JsonValue;
+use std::collections::HashSet;
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -25,15 +26,30 @@ pub enum SilEmitError {
     Msg(String),
 }
 
-/// Nearest ancestor directory containing `Package.swift` whose `Sources/**/*.swift` set is non-empty.
-fn package_root_with_sources_for(path: &Path) -> Option<PathBuf> {
-    let mut dir = path.parent()?;
+/// SwiftPM root `P` where `path` lives under `P/Sources/...` or `P/swift/Sources/...` and `P` has
+/// `Package.swift`. Skips unrelated monorepo roots above nested examples (e.g. `examples/counter`
+/// without its own manifest must not resolve to the parent repo package).
+fn package_root_containing_swift_file(path: &Path) -> Option<PathBuf> {
+    let mut cur = path.parent()?;
     loop {
-        if dir.join("Package.swift").exists() && collect_package_sources_flexible(dir).is_ok() {
-            return Some(dir.to_path_buf());
+        if cur.join("Package.swift").exists() {
+            let in_sources = path.starts_with(cur.join("Sources"));
+            let in_swift_sources = path.starts_with(cur.join("swift").join("Sources"));
+            if (in_sources || in_swift_sources) && collect_package_sources_flexible(cur).is_ok() {
+                return Some(cur.to_path_buf());
+            }
         }
-        dir = dir.parent()?;
+        cur = cur.parent()?;
     }
+}
+
+fn dedup_swift_paths(paths: &mut Vec<PathBuf>) {
+    paths.sort();
+    let mut seen: HashSet<PathBuf> = HashSet::new();
+    paths.retain(|p| {
+        let key = fs::canonicalize(p).unwrap_or_else(|_| p.clone());
+        seen.insert(key)
+    });
 }
 
 fn collect_sources_dir(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), SilEmitError> {
@@ -67,8 +83,7 @@ fn collect_package_sources(pkg: &Path) -> Result<Vec<PathBuf>, SilEmitError> {
     if generated.is_dir() {
         collect_sources_dir(&generated, &mut out)?;
     }
-    out.sort();
-    out.dedup();
+    dedup_swift_paths(&mut out);
     if out.is_empty() {
         return Err(SilEmitError::Msg(format!(
             "no .swift files under {}",
@@ -95,8 +110,7 @@ fn collect_package_sources_flexible(pkg: &Path) -> Result<Vec<PathBuf>, SilEmitE
         if generated_l.is_dir() {
             collect_sources_dir(&generated_l, &mut out)?;
         }
-        out.sort();
-        out.dedup();
+        dedup_swift_paths(&mut out);
         if out.is_empty() {
             return Err(SilEmitError::Msg(format!(
                 "no .swift files under {}",
@@ -163,7 +177,7 @@ fn resolve_swift_inputs(path: &Path) -> Result<Vec<PathBuf>, SilEmitError> {
         }
         // Prefer full package source roots (Sources/, Generated/, swift/Sources/) when a
         // Package.swift exists; sibling-only sets miss SPM-listed paths outside `Sources/`.
-        if let Some(pkg) = package_root_with_sources_for(path) {
+        if let Some(pkg) = package_root_containing_swift_file(path) {
             return collect_package_sources_flexible(&pkg);
         }
         if let Some(sibs) = collect_swift_siblings_in_sources_parent(path) {
@@ -275,6 +289,7 @@ fn append_workspace_dependency_generated_clang(cmd: &mut Command, pkg: &Path) {
     else {
         return;
     };
+    let mut seen_generated: HashSet<PathBuf> = HashSet::new();
     for dep in deps {
         let Some(st) = dep.get("state") else {
             continue;
@@ -283,13 +298,13 @@ fn append_workspace_dependency_generated_clang(cmd: &mut Command, pkg: &Path) {
             continue;
         };
         let root = Path::new(path_s);
-        let dep_generated = root.join("generated");
-        if dep_generated.is_dir() {
-            append_modulemap_clang_flags(cmd, &dep_generated, true);
-        }
-        let dep_generated_cap = root.join("Generated");
-        if dep_generated_cap.is_dir() {
-            append_modulemap_clang_flags(cmd, &dep_generated_cap, true);
+        for sub in [root.join("generated"), root.join("Generated")] {
+            if sub.is_dir() {
+                let key = fs::canonicalize(&sub).unwrap_or_else(|_| sub.clone());
+                if seen_generated.insert(key) {
+                    append_modulemap_clang_flags(cmd, &sub, true);
+                }
+            }
         }
     }
 }
@@ -307,6 +322,12 @@ fn nearest_package_root(path: &Path) -> Option<PathBuf> {
         }
         dir = dir.parent()?.to_path_buf();
     }
+}
+
+/// Package root for `swift build` prep and Clang flags: prefer a manifest that actually owns the
+/// Swift file, else fall back to any ancestor `Package.swift` (nested examples without a manifest).
+fn package_hint_for_swift_tooling(path: &Path) -> Option<PathBuf> {
+    package_root_containing_swift_file(path).or_else(|| nearest_package_root(path))
 }
 
 fn swift_build_prep(pkg: &Path) -> Result<(), SilEmitError> {
@@ -433,7 +454,7 @@ fn run_swiftc_typecheck(
 
 /// First **`swiftc -typecheck`** (with generated flags from package root if any); on failure run **`swift build`** then retry with **`-I`** from `.build` (same strategy as [`emit_textual_sil`]).
 fn run_swiftc_typecheck_with_package_retry(path: &Path, inputs: &[PathBuf]) -> bool {
-    let pkg_hint = nearest_package_root(path);
+    let pkg_hint = package_hint_for_swift_tooling(path);
     let pkg_clang = pkg_hint.as_deref();
     if run_swiftc_typecheck(inputs, &[], pkg_clang) {
         return true;
@@ -588,7 +609,7 @@ pub fn emit_textual_sil(path: &Path, module_id: &str) -> Result<String, SilEmitE
         NativeSwiftSilMode::Off => {}
     }
 
-    let pkg_hint = nearest_package_root(path);
+    let pkg_hint = package_hint_for_swift_tooling(path);
     let pkg_clang = pkg_hint.as_deref();
     match run_swiftc_emit_sil(&inputs, module_id, &[], pkg_clang) {
         Ok(s) => Ok(s),

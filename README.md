@@ -146,34 +146,34 @@ Writes:
 - `docs/benchmarks/swift-vs-in.md`
 - `docs/benchmarks/swift-vs-in.json`
 
-The markdown report records host/tool versions and tables where each cell is **median wall ms** over `BENCH_RUNS` timed iterations, with **min–max** in parentheses. **`in build`** timings use the **native** pipeline only (default CLI); **SwiftPM `swift build`** is a separate baseline column until native codegen fully replaces the Apple driver. **`swiftc -typecheck`** is a single-file probe (often fails on SwiftUI-heavy files; harness continues). Details: [`docs/benchmarks/swift-vs-in.md`](docs/benchmarks/swift-vs-in.md) (+ [`swift-vs-in.json`](docs/benchmarks/swift-vs-in.json)).
+The markdown report records host/tool versions and tables where each cell is **median wall ms** over `BENCH_RUNS` timed iterations, with **min–max** in parentheses. **`in build`** timings use the **native** pipeline only (default CLI); **SwiftPM `swift build`** is a separate baseline column until native codegen fully replaces the Apple driver. **`swiftc`** uses a single-file probe only when there is no enclosing **`Package.swift`**; otherwise see **`swiftc-bench-typecheck.sh`** above. Details: [`docs/benchmarks/swift-vs-in.md`](docs/benchmarks/swift-vs-in.md) (+ [`swift-vs-in.json`](docs/benchmarks/swift-vs-in.json)).
 
 ### Latest Benchmark Snapshot
 
 Copied from **`docs/benchmarks/swift-vs-in.md`** Easy Copy tables after **`./scripts/bench-swift.sh`**. Re-run script and paste here + commit when refreshing.
 
-Median over three runs; parentheses = min–max on those same runs.
+Median over timed runs (`BENCH_RUNS`, default 3); parentheses = min–max on those same runs.
 
-Generated (UTC): `2026-05-09T13:40:10Z` · macOS · Apple M5 Pro · Swift 6.3 · rustc 1.94.1 · V 0.5.0
+Generated (UTC): `2026-05-09T14:04:13Z` · macOS · Apple M5 Pro · Swift 6.3 · rustc 1.94.1 · V 0.5.0 · `BENCH_RUNS=2`
 
 | Example | SwiftPM swift build median (min–max ms) | in native median (min–max ms) |
 |---|---:|---:|
-| `aurorality/examples/counter` | 977.06 (969.39–1027.76) | 1789.80 (1703.27–1803.60) |
-| `aurorality/examples/basic` | 998.06 (960.92–1087.47) | 1887.60 (1753.75–2044.03) |
-| `aurorality/examples/hyperchat` | 424.45 (408.78–441.66) | 1776.65 (1659.63–1871.78) |
+| `aurorality/examples/counter` | 915.18 (913.74–916.62) | 1661.45 (1580.50–1742.39) |
+| `aurorality/examples/basic` | 963.68 (873.88–1053.48) | 1695.06 (1589.27–1800.85) |
+| `aurorality/examples/hyperchat` | 359.42 (357.01–361.83) | 3615.55 (3587.73–3643.36) |
 
 Swift compiler sources package vs **`in`** native:
 
 | Example | SwiftPM swift build median (min–max ms) | in native median (min–max ms) |
 |---|---:|---:|
-| `vendor/swift/SwiftCompilerSources` | 441.80 (421.76–443.66) | 627.60 (626.41–656.08) |
+| `vendor/swift/SwiftCompilerSources` | 384.87 (384.25–385.49) | 609.08 (597.95–620.21) |
 
 **Reading the harness:** the detail table in [`docs/benchmarks/swift-vs-in.md`](docs/benchmarks/swift-vs-in.md) labels a **loss bucket**. On small SwiftUI examples it is usually **`swift-frontend-stage`**: almost all wall time is Apple **`swiftc`** emitting textual SIL before the in-tree scheduler runs. **`hybrid-cli`** in the same report stays on the order of **single-digit ms**, which matches “Rust wave + SIL parse” being cheap today compared to **`swiftc`**.
 
 **Where to optimize the compiler next (highest leverage):**
 
 1. **Shrink or bypass `swiftc` on the hot path** — cache SIL keyed by inputs, tighter incremental **`swiftc`** flags where sound, and widen **`swift_subset`** / **`IN_NATIVE_SWIFT_SIL=try`** so simple files never spawn **`swiftc`**.
-2. **Failure-heavy UI sources** — when **`in build`** exits non-zero (see HyperChat row: **`in ok` ❌** in the detail table), investigate early diagnostics vs work still done in **`sil_emit`** / driver so we do not pay full subprocess cost for unsupported shapes.
+2. **Failure-heavy UI sources** — when **`in build`** exits non-zero for a package, investigate early diagnostics vs work still done in **`sil_emit`** / driver so we do not pay full subprocess cost for unsupported shapes (see detail table **`in ok`** column).
 3. **After emit is cheap** — then profile **`parse_textual_sil`**, debug-instruction stripping, and call-graph extraction in `in-cli` (today a few ms on these samples); **`compiler/rust-driver`** pipeline stages matter more for batch / driver-scale work.
 
 **`in bench`** reads **`.brisk/hotreload/metrics/latest.ndjson`** (compile-check rows from **`in dev`**). Run it from the repo root after a dev session that produced metrics, or pass **`--metrics <path>`** when summarizing another NDJSON file.

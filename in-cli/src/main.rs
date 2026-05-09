@@ -291,7 +291,7 @@ fn run_pipeline_for_path(
         (sil_source, emit_us)
     };
 
-    let runtime = tokio::runtime::Builder::new_multi_thread()
+    let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|err| InError::Message(format!("failed to build runtime: {err}")))?;
