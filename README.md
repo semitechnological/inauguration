@@ -22,7 +22,7 @@ Hotreload wire formats live under **`shared/protocol`**; regenerators and benchm
 - `runtime/swift-preview-host`: Swift package receiving and applying reload envelopes.
 - `plugins/registry`: installable project accelerators (aurorality, crepuscularity).
 - `scripts`: operational scripts (dev loop, compiler benchmark harness).
-- `docs/architecture`: architecture and local runbooks ([interop roadmap](docs/architecture/interop-roadmap.md)).
+- `docs/architecture`: architecture and local runbooks ([interop roadmap](docs/architecture/interop-roadmap.md), [native Swift master plan](docs/architecture/native-swift-master-plan.md)).
 - `docs/benchmarks`: benchmark reports and generated comparison artifacts.
 - `apps/native-subset-sample`: tiny Swift-shaped sample for the **in-tree** subset compiler (no **`swiftc`** when **`IN_NATIVE_SWIFT_SIL=only`**).
 
