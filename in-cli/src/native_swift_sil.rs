@@ -1,7 +1,53 @@
 //! In-tree Swift **subset** → textual SIL (no `swiftc`). Uses `swift_subset` parse/check at file scope
 //! only so nested `func` bodies are not mistaken for top-level declarations.
+//!
+//! **`IN_NATIVE_SWIFT_SIL`** mode (shared with [`crate::sil_emit`] and hot reload compile gate):
+//! **`try`** / **`1`** / **`true`**, **`only`** / **`2`** / **`strict`**, else **off**.
 
 use crate::swift_subset::{self, Decl, Diagnostic};
+
+/// Same semantics as [`crate::sil_emit`] for **`IN_NATIVE_SWIFT_SIL`**.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeSwiftSilMode {
+    Off,
+    Try,
+    Only,
+}
+
+pub fn native_swift_sil_mode_from_env() -> NativeSwiftSilMode {
+    match std::env::var("IN_NATIVE_SWIFT_SIL") {
+        Ok(v) if v == "try" || v == "1" || v.eq_ignore_ascii_case("true") => {
+            NativeSwiftSilMode::Try
+        }
+        Ok(v) if v == "only" || v == "2" || v.eq_ignore_ascii_case("strict") => {
+            NativeSwiftSilMode::Only
+        }
+        _ => NativeSwiftSilMode::Off,
+    }
+}
+
+fn subset_program_if_valid(combined_sources: &str) -> Option<Vec<Decl>> {
+    let filtered = filter_top_level_decl_lines(combined_sources);
+    let program = swift_subset::parse(&filtered);
+    if !swift_subset::check(&program).is_empty() {
+        return None;
+    }
+    if program.is_empty() {
+        return None;
+    }
+    let has_main = program
+        .iter()
+        .any(|d| matches!(d, Decl::Function(f) if f.name == "main"));
+    if !has_main {
+        return None;
+    }
+    Some(program)
+}
+
+/// **`swift_subset`** parse + check + top-level **`main`**, without emitting SIL.
+pub fn swift_subset_typecheck_ok(combined_sources: &str) -> bool {
+    subset_program_if_valid(combined_sources).is_some()
+}
 
 fn brace_delta(line: &str) -> i32 {
     let mut n = 0i32;
@@ -93,21 +139,7 @@ fn program_to_textual_sil(program: &[Decl], _module_id: &str) -> String {
 /// If the combined sources are a valid **subset** program (checker clean, includes `main`), emit SIL.
 /// Otherwise returns `Ok(None)` so `sil_emit` can fall back to `swiftc` when mode is `try`.
 pub fn try_emit_in_tree_sil(combined_sources: &str, module_id: &str) -> Option<String> {
-    let filtered = filter_top_level_decl_lines(combined_sources);
-    let program = swift_subset::parse(&filtered);
-    let diags = swift_subset::check(&program);
-    if !diags.is_empty() {
-        return None;
-    }
-    if program.is_empty() {
-        return None;
-    }
-    let has_main = program
-        .iter()
-        .any(|d| matches!(d, Decl::Function(f) if f.name == "main"));
-    if !has_main {
-        return None;
-    }
+    let program = subset_program_if_valid(combined_sources)?;
     Some(program_to_textual_sil(&program, module_id))
 }
 
@@ -189,5 +221,16 @@ func main() -> Void
             pa < pz,
             "main block should list callees in sorted order; got:\n{sil}"
         );
+    }
+
+    #[test]
+    fn swift_subset_typecheck_ok_matches_try_emit_gate() {
+        let ok = "struct U\nfunc main() -> Void\n";
+        assert!(swift_subset_typecheck_ok(ok));
+        assert!(try_emit_in_tree_sil(ok, "App").is_some());
+
+        let no_main = "struct X\n";
+        assert!(!swift_subset_typecheck_ok(no_main));
+        assert!(try_emit_in_tree_sil(no_main, "App").is_none());
     }
 }

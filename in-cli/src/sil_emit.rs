@@ -5,8 +5,11 @@
 //! - **`IN_NATIVE_SWIFT_SIL=only`**: require the in-tree path (no **`swiftc`**).
 //! - **`IN_SWIFTC`**: override the **`swiftc`** binary when falling back.
 //!
+//! Hot reload compile gate uses the same policy via [`compile_check_swift_path`] (including **`swift build`** + **`-I`** retry when **`swiftc -typecheck`** fails inside a package, same as emit).
+//!
 //! Orchestration and SIL passes stay in `in`; full Swift remains out of tree for non-subset sources.
 
+use crate::native_swift_sil::{NativeSwiftSilMode, native_swift_sil_mode_from_env};
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -316,23 +319,91 @@ fn load_combined_sources(inputs: &[PathBuf]) -> Result<String, SilEmitError> {
     Ok(parts.join("\n\n"))
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum NativeSwiftSilMode {
-    Off,
-    Try,
-    Only,
+/// Same Swift source set [`emit_textual_sil`] uses for `path` (siblings under `Sources/`, package tree, or single file).
+pub fn combined_swift_sources_for_path(path: &Path) -> Result<String, SilEmitError> {
+    let inputs = resolve_swift_inputs(path)?;
+    load_combined_sources(&inputs)
 }
 
-fn native_swift_sil_mode_from_env() -> NativeSwiftSilMode {
-    match std::env::var("IN_NATIVE_SWIFT_SIL") {
-        Ok(v) if v == "try" || v == "1" || v.eq_ignore_ascii_case("true") => {
-            NativeSwiftSilMode::Try
-        }
-        Ok(v) if v == "only" || v == "2" || v.eq_ignore_ascii_case("strict") => {
-            NativeSwiftSilMode::Only
-        }
-        _ => NativeSwiftSilMode::Off,
+/// Same flag ordering idea as [`run_swiftc_emit_sil`]: generated Clang flags from package, then **`-I`**, then extra swiftc args, then primaries.
+fn run_swiftc_typecheck(
+    inputs: &[PathBuf],
+    module_includes: &[PathBuf],
+    package_root_for_clang: Option<&Path>,
+) -> bool {
+    if inputs.is_empty() {
+        return false;
     }
+    let swiftc_bin = swiftc_executable();
+    let mut cmd = Command::new(&swiftc_bin);
+    cmd.arg("-typecheck");
+    #[cfg(target_os = "macos")]
+    if let Some(sdk) = macos_sdk_path() {
+        cmd.arg("-sdk").arg(sdk);
+    }
+    if let Ok(triple) = std::env::var("IN_SWIFT_TARGET")
+        && !triple.is_empty()
+    {
+        cmd.arg("-target").arg(triple);
+    }
+    if let Some(pkg) = package_root_for_clang {
+        append_generated_clang_flags(&mut cmd, pkg);
+    }
+    for inc in module_includes {
+        cmd.arg("-I").arg(inc);
+    }
+    append_extra_swiftc_args(&mut cmd);
+    for p in inputs {
+        cmd.arg(p);
+    }
+    cmd.stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// First **`swiftc -typecheck`** (with generated flags from package root if any); on failure run **`swift build`** then retry with **`-I`** from `.build` (same strategy as [`emit_textual_sil`]).
+fn run_swiftc_typecheck_with_package_retry(path: &Path, inputs: &[PathBuf]) -> bool {
+    let pkg_hint = nearest_package_root(path);
+    let pkg_clang = pkg_hint.as_deref();
+    if run_swiftc_typecheck(inputs, &[], pkg_clang) {
+        return true;
+    }
+    let Some(pkg) = pkg_hint else {
+        return false;
+    };
+    if swift_build_prep(&pkg).is_err() {
+        return false;
+    }
+    let includes = module_import_paths_after_build(&pkg);
+    run_swiftc_typecheck(inputs, &includes, Some(pkg.as_path()))
+}
+
+/// Hot reload / tooling gate: same **`IN_NATIVE_SWIFT_SIL`** policy as SIL emit (`subset` first on try/only, else **`swiftc -typecheck`**).
+pub fn compile_check_swift_path_with_mode(path: &Path, mode: NativeSwiftSilMode) -> bool {
+    let Ok(inputs) = resolve_swift_inputs(path) else {
+        return false;
+    };
+    let Ok(combined) = load_combined_sources(&inputs) else {
+        return false;
+    };
+    match mode {
+        NativeSwiftSilMode::Only => crate::native_swift_sil::swift_subset_typecheck_ok(&combined),
+        NativeSwiftSilMode::Try => {
+            if crate::native_swift_sil::swift_subset_typecheck_ok(&combined) {
+                true
+            } else {
+                run_swiftc_typecheck_with_package_retry(path, &inputs)
+            }
+        }
+        NativeSwiftSilMode::Off => run_swiftc_typecheck_with_package_retry(path, &inputs),
+    }
+}
+
+/// Like [`compile_check_swift_path_with_mode`] using **`IN_NATIVE_SWIFT_SIL`** from the environment.
+pub fn compile_check_swift_path(path: &Path) -> bool {
+    compile_check_swift_path_with_mode(path, native_swift_sil_mode_from_env())
 }
 
 fn run_swiftc_emit_sil(
@@ -509,5 +580,29 @@ mod tests {
         let sil = crate::native_swift_sil::emit_in_tree_sil_or_diagnose(&src, "App").unwrap();
         assert!(sil.contains("sil @main"));
         assert!(sil.contains("function_ref @helper"));
+    }
+
+    #[test]
+    fn compile_check_only_accepts_subset_with_main() {
+        let dir = std::env::temp_dir().join(format!("in-compile-only-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let ok_path = dir.join("ok.swift");
+        let mut f = fs::File::create(&ok_path).unwrap();
+        writeln!(f, "struct User").unwrap();
+        writeln!(f, "func main() -> Void").unwrap();
+        assert!(compile_check_swift_path_with_mode(
+            &ok_path,
+            NativeSwiftSilMode::Only
+        ));
+
+        let bad = dir.join("bad.swift");
+        let mut f2 = fs::File::create(&bad).unwrap();
+        writeln!(f2, "struct X {{}}").unwrap();
+        assert!(!compile_check_swift_path_with_mode(
+            &bad,
+            NativeSwiftSilMode::Only
+        ));
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

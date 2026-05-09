@@ -508,7 +508,35 @@ fn validate_stmt_types(fn_name: &str, structs: &HashSet<&str>, stmt: &Stmt) -> R
                 ));
             }
         }
-        Stmt::Let(_, None, _) | Stmt::Return(None) | Stmt::Return(Some(_)) | Stmt::Expr(_) => {}
+        Stmt::Let(_, None, _)
+        | Stmt::Assign(_, _)
+        | Stmt::Return(None)
+        | Stmt::Return(Some(_))
+        | Stmt::Expr(_) => {}
+        Stmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            for nested in then_body {
+                validate_stmt_types(fn_name, structs, nested)?;
+            }
+            for nested in else_body {
+                validate_stmt_types(fn_name, structs, nested)?;
+            }
+        }
+        Stmt::Loop { body, .. } => {
+            for nested in body {
+                validate_stmt_types(fn_name, structs, nested)?;
+            }
+        }
+        Stmt::Match { arms, .. } => {
+            for arm in arms {
+                for nested in &arm.body {
+                    validate_stmt_types(fn_name, structs, nested)?;
+                }
+            }
+        }
     }
     Ok(())
 }

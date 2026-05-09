@@ -2,7 +2,6 @@ use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
@@ -13,7 +12,10 @@ use tokio::sync::{Mutex, mpsc};
 use tokio::time::sleep;
 
 use super::generated_protocol::PatchType;
+use crate::hybrid_sil;
+use crate::native_swift_sil;
 use crate::parser_registry::{self, ParserCli, ResolvedBuildParser};
+use crate::sil_emit;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ReloadPatch {
@@ -40,6 +42,9 @@ pub struct RuntimeMetric {
     pub reason: String,
     pub compile_check_ms: u64,
     pub compile_cache_hit: bool,
+    /// Count of `function_ref` edges from [`hybrid_sil::extract_call_graph`] when in-tree subset SIL exists (no `swiftc`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sil_call_edges: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -106,13 +111,28 @@ pub fn patch_id_for(path: &str) -> String {
 }
 
 pub fn plan_patch(path: &str, changed_symbols: &[String]) -> ReloadPatch {
-    let patch_type = if changed_symbols.iter().any(|s| s.contains("body")) {
+    plan_patch_with_sil_graph(path, changed_symbols, None)
+}
+
+/// Plan reload patch shape. When **`sil_call_edges`** is **`Some(n)`** with **`n > 0`** (subset SIL had `function_ref` edges) and the path is not **`App.swift`**, **`FullModule`** downgrades to **`ViewBody`** so preview can try hot patch instead of forced restart.
+pub fn plan_patch_with_sil_graph(
+    path: &str,
+    changed_symbols: &[String],
+    sil_call_edges: Option<u32>,
+) -> ReloadPatch {
+    let mut patch_type = if changed_symbols.iter().any(|s| s.contains("body")) {
         PatchType::ViewBody
     } else if changed_symbols.iter().any(|s| s.contains("modifier")) {
         PatchType::Modifier
     } else {
         PatchType::FullModule
     };
+    if matches!(patch_type, PatchType::FullModule)
+        && sil_call_edges.is_some_and(|n| n > 0)
+        && !path.ends_with("App.swift")
+    {
+        patch_type = PatchType::ViewBody;
+    }
     let compatible = !path.ends_with("App.swift") && !matches!(patch_type, PatchType::FullModule);
     ReloadPatch {
         target: path.to_string(),
@@ -218,19 +238,31 @@ fn classify_change(path: &str, graph: &mut QueryGraph) -> Vec<String> {
 }
 
 fn compile_check_swift(path: &Path) -> bool {
-    matches!(
-        Command::new("swiftc")
-            .arg("-typecheck")
-            .arg(path)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status(),
-        Ok(status) if status.success()
-    )
+    sil_emit::compile_check_swift_path(path)
 }
 
-/// Best-effort gate before emitting a reload patch: `swiftc -typecheck` for Swift SIL emit paths;
-/// for Core IR paths, [`parser_registry::parse_with_resolved`] (including `.in` / `.icore` / Tree-sitter polyglot).
+/// Best-effort gate before emitting a reload patch: Swift uses [`sil_emit::compile_check_swift_path`]
+/// (**`IN_NATIVE_SWIFT_SIL`**: in-tree subset first on `try`/`only`, else **`swiftc -typecheck`**); Core IR paths use
+/// [`parser_registry::parse_with_resolved`] (`.in` / `.icore` / polyglot).
+/// When path is Swift and sources match **`swift_subset`**, derive SIL in-process and count call-graph edges (`function_ref`).
+/// Returns **`None`** if not subset-shaped (no extra `swiftc` / emit work).
+fn sil_subset_call_edge_count(path: &Path) -> Option<u32> {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if ext != "swift" {
+        return None;
+    }
+    let combined = sil_emit::combined_swift_sources_for_path(path).ok()?;
+    let sil = native_swift_sil::try_emit_in_tree_sil(&combined, "App")?;
+    let artifact = hybrid_sil::parse_textual_sil(&sil);
+    let cleaned = hybrid_sil::remove_debug_insts(&artifact);
+    let n = hybrid_sil::extract_call_graph(&cleaned).call_edges.len();
+    Some(n as u32)
+}
+
 pub fn compile_check(path: &Path) -> bool {
     if !path.exists() {
         return false;
@@ -358,7 +390,16 @@ async fn emit_patch(
 ) -> Result<ReloadPatch, DaemonError> {
     let (compile_ok, compile_cache_hit, compile_check_ms) =
         compile_check_cached(Path::new(target), compile_cache);
-    let (patch, reason) = apply_restart_supervisor(plan_patch(target, symbols), compile_ok);
+    let sil_call_edges = if compile_ok {
+        sil_subset_call_edge_count(Path::new(target))
+    } else {
+        None
+    };
+    let patch = plan_patch_with_sil_graph(target, symbols, sil_call_edges);
+    let (patch, mut reason) = apply_restart_supervisor(patch, compile_ok);
+    if let Some(n) = sil_call_edges {
+        reason = format!("{reason}|sil_call_edges={n}");
+    }
     let envelope = PatchEnvelope {
         protocol_version: 1,
         patch_id: patch_id_for(target),
@@ -374,6 +415,7 @@ async fn emit_patch(
         reason,
         compile_check_ms,
         compile_cache_hit,
+        sil_call_edges,
     };
     append_metric(metrics_path, &metric).await?;
     let line = serde_json::to_string(&envelope)?;
@@ -442,6 +484,23 @@ mod tests {
     fn app_file_forces_restart_path() {
         let patch = plan_patch("SampleApp.swift", &[]);
         assert!(!patch.compatible);
+    }
+
+    #[test]
+    fn sil_graph_downgrades_full_module_to_view_body_for_hot_patch() {
+        let p = plan_patch_with_sil_graph("Sources/Helper.swift", &[], Some(2));
+        assert_eq!(p.patch_type, PatchType::ViewBody);
+        assert!(p.compatible);
+        let (out, reason) = apply_restart_supervisor(p, true);
+        assert!(out.compatible);
+        assert_eq!(reason, "patch_applied");
+    }
+
+    #[test]
+    fn sil_graph_does_not_downgrade_app_swift() {
+        let p = plan_patch_with_sil_graph("Sources/App.swift", &[], Some(5));
+        assert_eq!(p.patch_type, PatchType::FullModule);
+        assert!(!p.compatible);
     }
 
     #[test]
@@ -554,11 +613,28 @@ mod tests {
             reason: "patch_applied".to_string(),
             compile_check_ms: 1,
             compile_cache_hit: false,
+            sil_call_edges: None,
         };
         append_metric(&path, &metric).await.expect("metric write");
         let content = tokio::fs::read_to_string(&path).await.expect("metric read");
         assert!(content.contains("ContentView.swift"));
         let _ = tokio::fs::remove_file(path).await;
+    }
+
+    #[test]
+    fn sil_subset_call_edge_count_sees_function_ref() {
+        let dir = std::env::temp_dir().join(format!("hotreload-sil-edges-{}", now_ms()));
+        let _ = std::fs::create_dir_all(&dir);
+        let f = dir.join("App.swift");
+        std::fs::write(
+            &f,
+            "struct User\nfunc helper() -> Void\nfunc main(user: User) -> Void\n",
+        )
+        .expect("write subset swift");
+        let n = sil_subset_call_edge_count(&f).expect("subset sil + graph");
+        assert!(n >= 1, "expected main→helper edge, got {n}");
+        let _ = std::fs::remove_file(&f);
+        let _ = std::fs::remove_dir(&dir);
     }
 
     #[tokio::test]

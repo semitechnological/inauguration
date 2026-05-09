@@ -18,14 +18,55 @@ pub enum Expr {
     StringLit(String),
     BoolLit(bool),
     Ident(String),
+    Unary {
+        op: String,
+        expr: Box<Expr>,
+    },
+    Binary {
+        op: String,
+        lhs: Box<Expr>,
+        rhs: Box<Expr>,
+    },
+    Call {
+        callee: Box<Expr>,
+        args: Vec<Expr>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Stmt {
     Let(String, Option<Typ>, Expr),
+    Assign(String, Expr),
     Return(Option<Expr>),
+    If {
+        cond: Expr,
+        then_body: Vec<Stmt>,
+        else_body: Vec<Stmt>,
+    },
+    Loop {
+        kind: LoopKind,
+        cond: Option<Expr>,
+        body: Vec<Stmt>,
+    },
+    Match {
+        scrutinee: Expr,
+        arms: Vec<MatchArm>,
+    },
     /// Evaluated for side effects (e.g. `.in` expression statements).
     Expr(Expr),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LoopKind {
+    For,
+    While,
+    Infinite,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchArm {
+    pub pattern: String,
+    pub body: Vec<Stmt>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

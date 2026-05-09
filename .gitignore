@@ -2,6 +2,9 @@
 **/target/
 **/.build/
 
+# Ephemeral rustc metadata from compile-check probes in in-cli (never commit)
+in-cli/libcompile_check_rs*.rmeta
+
 # OCaml/opam artifacts
 **/_build/
 **/.opam-switch/

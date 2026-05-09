@@ -34,6 +34,25 @@ fn lower_expr(e: &Expr, env: &HashMap<String, usize>, ssa: &mut usize, out: &mut
             out.push_str(&format!("%{id} = integer_literal $Builtin.Int64, 0\n"));
             id
         }
+        Expr::Unary { expr, .. } => lower_expr(expr, env, ssa, out),
+        Expr::Binary { lhs, rhs, .. } => {
+            let _ = lower_expr(lhs, env, ssa, out);
+            let _ = lower_expr(rhs, env, ssa, out);
+            let id = *ssa;
+            *ssa += 1;
+            out.push_str(&format!("%{id} = integer_literal $Builtin.Int64, 0\n"));
+            id
+        }
+        Expr::Call { callee, args } => {
+            let _ = lower_expr(callee, env, ssa, out);
+            for arg in args {
+                let _ = lower_expr(arg, env, ssa, out);
+            }
+            let id = *ssa;
+            *ssa += 1;
+            out.push_str(&format!("%{id} = integer_literal $Builtin.Int64, 0\n"));
+            id
+        }
     }
 }
 
@@ -58,8 +77,39 @@ fn lower_stmts_into(
                 let id = lower_expr(e, &env, ssa, &mut out);
                 env.insert(name.clone(), id);
             }
+            Stmt::Assign(name, e) => {
+                let id = lower_expr(e, &env, ssa, &mut out);
+                env.insert(name.clone(), id);
+            }
             Stmt::Expr(e) => {
                 let _ = lower_expr(e, &env, ssa, &mut out);
+            }
+            Stmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                let _ = lower_expr(cond, &env, ssa, &mut out);
+                out.push_str("// if.then\n");
+                out.push_str(&lower_stmts_into(params, then_body, ssa, false));
+                if !else_body.is_empty() {
+                    out.push_str("// if.else\n");
+                    out.push_str(&lower_stmts_into(params, else_body, ssa, false));
+                }
+            }
+            Stmt::Loop { cond, body, .. } => {
+                if let Some(c) = cond {
+                    let _ = lower_expr(c, &env, ssa, &mut out);
+                }
+                out.push_str("// loop.body\n");
+                out.push_str(&lower_stmts_into(params, body, ssa, false));
+            }
+            Stmt::Match { scrutinee, arms } => {
+                let _ = lower_expr(scrutinee, &env, ssa, &mut out);
+                for arm in arms {
+                    out.push_str("// match.arm\n");
+                    out.push_str(&lower_stmts_into(params, &arm.body, ssa, false));
+                }
             }
             Stmt::Return(None) => {
                 let id = *ssa;

@@ -99,6 +99,9 @@ enum Commands {
     },
     #[command(about = "Run test suites")]
     Test,
+    /// Reinstall the `in` CLI from the enclosing inauguration checkout (`cargo install --path in-cli`).
+    #[command(visible_alias = "self-update")]
+    Update,
     #[command(about = "Check required tools")]
     Doctor,
     #[command(about = "Summarize hotreload metrics")]
@@ -162,6 +165,7 @@ fn run() -> Result<()> {
             debounce_ms,
         ),
         Commands::Test => cmd_test(&workspace_root(invocation_cwd.clone())?),
+        Commands::Update => cmd_update(&workspace_root(invocation_cwd.clone())?),
         Commands::Doctor => cmd_doctor(),
         Commands::Bench { metrics } => {
             cmd_bench(&workspace_root(invocation_cwd.clone())?, &metrics)
@@ -686,39 +690,112 @@ fn cmd_run(
 }
 
 fn cmd_test(root: &Path) -> Result<()> {
-    run_cmd(
+    run_test_step(
+        "protocol models (scripts/check-protocol-models.sh)",
         Command::new("bash")
             .arg("scripts/check-protocol-models.sh")
             .current_dir(root),
     )?;
-    run_cmd(
+    run_test_step(
+        "compiler/rust-driver (cargo test --all)",
         Command::new("cargo")
             .arg("test")
             .arg("--all")
             .current_dir(root.join("compiler").join("rust-driver")),
     )?;
-    run_cmd(
+    run_test_step(
+        "in-cli (cargo test)",
         Command::new("cargo")
             .arg("test")
             .current_dir(root.join("in-cli")),
     )?;
-    run_cmd(
+    run_test_step(
+        "runtime/swift-preview-host (swift package clean)",
         Command::new("swift")
             .arg("package")
             .arg("clean")
             .current_dir(root.join("runtime").join("swift-preview-host")),
     )?;
-    run_cmd(
+    run_test_step(
+        "runtime/swift-preview-host (swift test)",
         Command::new("swift")
             .arg("test")
             .current_dir(root.join("runtime").join("swift-preview-host")),
     )?;
-    run_cmd(
+    run_test_step(
+        "runtime/hotreload-daemon (cargo test)",
         Command::new("cargo")
             .arg("test")
             .current_dir(root.join("runtime").join("hotreload-daemon")),
     )?;
     Ok(())
+}
+
+fn cmd_update(root: &Path) -> Result<()> {
+    let in_cli = root.join("in-cli");
+    let manifest = in_cli.join("Cargo.toml");
+    if !manifest.is_file() {
+        return Err(InError::Message(format!(
+            "`in update` expected {} (run from inside an inauguration checkout)",
+            manifest.display()
+        )));
+    }
+
+    let start = Instant::now();
+    println!("Reinstalling `in` from {} …", in_cli.display());
+
+    let mut cmd = Command::new("cargo");
+    cmd.arg("install").arg("--path").arg(&in_cli).arg("--force");
+    if in_cli.join("Cargo.lock").is_file() {
+        cmd.arg("--locked");
+    }
+    if let Ok(bin_dir) = std::env::var("IN_INSTALL_DIR") {
+        let trimmed = bin_dir.trim();
+        if !trimmed.is_empty() {
+            let bin_path = PathBuf::from(trimmed);
+            if let Some(root_dir) = bin_path.parent() {
+                cmd.arg("--root").arg(root_dir);
+            }
+        }
+    }
+
+    run_cmd(&mut cmd)?;
+
+    println!(
+        "`in` updated in {:.1}s (same version as in-cli/Cargo.toml).",
+        start.elapsed().as_secs_f64()
+    );
+    Ok(())
+}
+
+fn run_test_step(step: &'static str, cmd: &mut Command) -> Result<()> {
+    let prog = cmd.get_program().to_string_lossy().into_owned();
+    let cwd = cmd
+        .get_current_dir()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "(default)".to_string());
+    let status = cmd
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()
+        .map_err(|e| {
+            let mut msg =
+                format!("{step}: failed to start `{prog}` (cwd={cwd}): {e}");
+            if e.kind() == std::io::ErrorKind::NotFound {
+                msg.push_str(
+                    " — from an inauguration checkout run `in update` (or `cargo install --path in-cli --force`).",
+                );
+            }
+            InError::Message(msg)
+        })?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(InError::Message(format!(
+            "{step}: `{prog}` exited with {status}"
+        )))
+    }
 }
 
 fn cmd_doctor() -> Result<()> {
@@ -1027,6 +1104,14 @@ mod tests {
                 assert_eq!(metrics, ".brisk/hotreload/metrics/latest.ndjson");
             }
             _ => panic!("expected bench command"),
+        }
+    }
+
+    #[test]
+    fn parse_update_and_self_update_alias() {
+        for argv in [["in", "update"], ["in", "self-update"]] {
+            let cli = Cli::try_parse_from(argv).expect("cli parse");
+            assert!(matches!(cli.command, Commands::Update));
         }
     }
 
