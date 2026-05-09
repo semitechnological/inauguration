@@ -139,6 +139,44 @@ fn parse_func_header(after_func_keyword: &str) -> FnDecl {
     }
 }
 
+/// Strip Swift access keywords from the start of a line (subset lexer).
+/// Repeats up to 4 times so degenerate input cannot loop forever.
+fn strip_leading_access_modifiers(mut line: &str) -> &str {
+    // Longest first so `fileprivate` is not mistaken for `private`.
+    const ACCESS: &[&str] = &["fileprivate", "internal", "private", "public", "open"];
+
+    fn strip_one_token_prefixed_by_keyword<'a>(s: &'a str, kw: &str) -> Option<&'a str> {
+        let s = trim(s);
+        if !s.starts_with(kw) {
+            return None;
+        }
+        let tail = &s[kw.len()..];
+        if tail.is_empty() {
+            return Some("");
+        }
+        if tail.starts_with(' ') {
+            Some(trim(tail.trim_start_matches(' ')))
+        } else {
+            None
+        }
+    }
+
+    for _ in 0..4 {
+        let mut peeled = false;
+        for kw in ACCESS {
+            if let Some(rest) = strip_one_token_prefixed_by_keyword(line, kw) {
+                line = rest;
+                peeled = true;
+                break;
+            }
+        }
+        if !peeled {
+            break;
+        }
+    }
+    trim(line)
+}
+
 fn parse_struct_line(line: &str) -> StructDecl {
     let raw = trim(&line[7.min(line.len())..]);
     let name = raw
@@ -154,7 +192,12 @@ fn parse_struct_line(line: &str) -> StructDecl {
 /// Parse minimal Swift-ish subset (line-oriented; matches OCaml `parser.ml`).
 pub fn parse(source: &str) -> Program {
     let mut acc = Vec::new();
-    for line in source.split('\n').map(trim) {
+    for raw_line in source.split('\n') {
+        let line = trim(raw_line);
+        if line.is_empty() {
+            continue;
+        }
+        let line = strip_leading_access_modifiers(line);
         if line.is_empty() {
             continue;
         }
@@ -415,5 +458,47 @@ mod tests {
         let (j2, ok) = analyze_source("App.swift", src).unwrap();
         assert!(ok);
         assert_eq!(j2, json);
+    }
+
+    #[test]
+    fn parse_accepts_public_func_and_private_struct() {
+        let program = parse("public func main() -> Void\nprivate struct User");
+        assert_eq!(program.len(), 2);
+        match &program[0] {
+            Decl::Function(f) => {
+                assert_eq!(f.name, "main");
+                assert_eq!(f.ret, Typ::Void);
+            }
+            _ => panic!("expected function"),
+        }
+        match &program[1] {
+            Decl::Struct(s) => assert_eq!(s.name, "User"),
+            _ => panic!("expected struct"),
+        }
+    }
+
+    #[test]
+    fn parse_strips_sequential_access_modifiers() {
+        // Invalid Swift (duplicate ACL); strip every leading keyword from the allow-list.
+        let program = parse("public private internal open func main() -> Void");
+        assert_eq!(program.len(), 1);
+        match &program[0] {
+            Decl::Function(f) => {
+                assert_eq!(f.name, "main");
+                assert_eq!(f.ret, Typ::Void);
+            }
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn parse_access_modifier_strip_bounded_at_four_iterations() {
+        let program = parse(
+            "public private public private public func surplus() -> Void",
+        );
+        assert!(
+            program.is_empty(),
+            "fifth modifier should remain and prevent func recognition",
+        );
     }
 }
