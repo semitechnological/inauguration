@@ -37,7 +37,7 @@ This document is the phased roadmap for growing inauguration’s **Rust-first** 
 **Deliverables**
 
 - Frozen **subset grammar** (`docs/architecture/subset-grammar.md`): what is guaranteed under `IN_NATIVE_SWIFT_SIL=only`.
-- **`scripts/`** or **`cargo xtask`** checklist: “mirror hybrid_* from rust-driver → in-cli” to reduce drift (even if manual at first).
+- Manual hybrid mirror checklist: **[contributing-hybrid-mirror.md](../contributing-hybrid-mirror.md)** (diff examples; drift breaks publish parity).
 - CI job matrix entry: **`IN_NATIVE_SWIFT_SIL=only`** build of **`apps/native-subset-sample`** (no **`swiftc`** required on runner).
 
 **Exit criteria**
