@@ -30,6 +30,8 @@ This document is the phased roadmap for growing inauguration’s **Rust-first** 
 
 **Test surface (subset/SIL slice)** is thin (~6 targeted tests across `swift_subset`, `native_swift_sil`, `sil_emit`); expand with each phase.
 
+Also see [**multi-frontend IR**](multi-frontend-ir.md) (`UnifiedModule`, `.in` parser id, resolution order).
+
 ---
 
 ## Phase 0 — Contracts and tooling (1–2 weeks)

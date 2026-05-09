@@ -1,42 +1,43 @@
-# Multi-frontend IR (Core contract)
+# Multi-frontend IR (conceptual)
 
-Several **source fronts** (`.in` today, Swift gather + SIL emit by default) converge on one **cross-frontend** representation before optional lowering. This doc names the contract and how **parser resolution** picks a front.
+Multiple source languages can feed the same hybrid pipeline by lowering to **textual SIL** that `hybrid_sil` already parses (`sil @…`, `bbN:`, `function_ref @…`, unique SSA ids across the merged module).
 
-## `UnifiedModule` / core decls
+## `UnifiedModule` (v0 schema)
 
-The **core IR** is a single-module view:
+Rust type: `in_cli::core_ir::UnifiedModule`.
 
-- **`UnifiedModule`** — ordered list of top-level **`Decl`** values.
-- **`Decl`**
-  - **`Struct`** — name + field list `(name, Typ)` (fields may be empty where the front does not parse them yet).
-  - **`Function`** — name, parameters `(name, Typ)`, return **`Typ`**, **body** as `Vec<Stmt>` (often empty until that front grows statements).
-- **`Typ`**, **`Stmt`** — shared with the Swift subset checker today (re-exported from `swift_subset` into `core_ir` so one type universe backs multiple parsers).
+| Field | Meaning |
+|-------|--------|
+| `decls: Vec<Decl>` | Top-level declarations in source order (before lowering sorts functions for SIL). |
 
-Lowers (e.g. to **textual SIL** stubs) take **`&UnifiedModule`** and treat missing bodies as templates until statement lowering exists.
+**`Decl` variants (v0)**
 
-## `ParserId` (extensible table)
+| Variant | Fields | Notes |
+|---------|--------|-------|
+| `Struct` | `name`, `fields: Vec<(String, Typ)>` | v0 `.in` parser emits empty `fields`; checker still validates field types when non-empty. |
+| `Function` | `name`, `params`, `ret`, `body` | `body` may be empty until a front fills statements; lowering uses signatures + names only for stub SIL. |
 
-| `ParserId` | Source kind | Status |
-|------------|-------------|--------|
-| **`In`** | `.in` v0 line-oriented (`fn` / `struct`) | **Active** |
-| *future* **`Python`** | e.g. `.in.py` or magic-line dispatch | Reserved |
-| *future* **`Ruby`** | e.g. `.in.rb` or magic-line dispatch | Reserved |
+**`Typ`**: `Int`, `String`, `Bool`, `Void`, `Named(String)` — shared with `swift_subset` today for consistency.
 
-New fronts extend the enum, implement **`SourceParser::parse_to_core`**, and return **`UnifiedModule`** so the rest of the pipeline stays parser-agnostic.
+## `ParserId` (extensible)
 
-## Resolution order (`in build`)
+| Id | Source | Entry |
+|----|--------|--------|
+| `In` | `.in` files | `in_lang_parse` → `UnifiedModule` → `lower_core::lower_to_textual_sil` |
 
-Today’s resolution order is deterministic and documented in code comments:
+Future rows: Python, Ruby, etc., each implementing `SourceParser` and gaining a `ParserId` variant when wired.
 
-1. **`--parser in`** ⇒ **`.in` front** (`ParserId::In`).
-2. **`IN_PARSER=in`** (env) ⇒ same as (1) when CLI is `auto`.
-3. **`--parser auto`** (default) + path extension **`.in`** ⇒ **`.in` front**.
-4. Otherwise ⇒ **Swift SIL emit** path (gather Swift sources, `swiftc` and/or **`IN_NATIVE_SWIFT_SIL`** subset); **no** `UnifiedModule` from the registry — lowering uses SIL, not core IR.
+## Resolution order for `in build`
 
-Future: optional **magic first line** or second extension could force a front before falling back to Swift.
+1. **`--parser in`** — force the `.in` front (even if the extension is not `.in`).
+2. **Environment** — `IN_PARSER=in` (same effect as forcing the in-parser when set).
+3. **Path** — if `--parser auto` (default), a path ending in **`.in`** selects `ParserId::In`.
+4. **Magic line** (stub) — future first-line marker in source before extension fallback.
+5. Otherwise **Swift** path: `sil_emit::emit_textual_sil` (`swiftc` and/or `IN_NATIVE_SWIFT_SIL` subset).
+
+Documented in `in-cli/src/parser_registry.rs` as `resolve_parser_id`.
 
 ## Related
 
-- `.in` surface: [in-language.md](in-language.md).
-- Swift subset contract: [subset-grammar.md](subset-grammar.md).
-- Polyglot embedding context: [interop-roadmap.md](interop-roadmap.md).
+- [in-language.md](in-language.md) — `.in` v0 grammar and ideology vs crepuscularity.
+- [native-swift-master-plan.md](native-swift-master-plan.md) — Rust-first Swift / subset roadmap.

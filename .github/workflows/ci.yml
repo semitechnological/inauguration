@@ -36,3 +36,29 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: IN_NATIVE_SWIFT_SIL=only in build
         run: ./scripts/check-native-subset-sample.sh
+
+  in-lang-sample:
+    name: In-lang sample (no swiftc)
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: in build (.in v0 sample)
+        run: ./scripts/check-in-lang-sample.sh
+
+  in-lang-sample:
+    name: .in sample (no swiftc)
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: in build --parser in hello.in
+        run: ./scripts/check-in-lang-sample.sh

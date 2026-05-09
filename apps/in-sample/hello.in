@@ -1,0 +1,6 @@
+// Minimal `.in` v0 sample: top-level struct + helper `fn` + required `fn main`
+// (`in-cli/src/in_lang_parse.rs`).
+// Hermetic CI: `./scripts/check-in-lang-sample.sh` — no swiftc.
+struct Session {}
+fn note(text: String) -> void
+fn main() -> void

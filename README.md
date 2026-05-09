@@ -25,10 +25,13 @@ Hotreload wire formats live under **`shared/protocol`**; regenerators and benchm
 - `docs/architecture`: architecture and local runbooks ([interop roadmap](docs/architecture/interop-roadmap.md), [native Swift master plan](docs/architecture/native-swift-master-plan.md), [`.in` language](docs/architecture/in-language.md), [multi-frontend IR](docs/architecture/multi-frontend-ir.md)). Hybrid `in-cli` ↔ `rust-driver` mirror: [docs/contributing-hybrid-mirror.md](docs/contributing-hybrid-mirror.md).
 - `docs/benchmarks`: benchmark reports and generated comparison artifacts.
 - `apps/native-subset-sample`: tiny Swift-shaped sample for the **in-tree** subset compiler (no **`swiftc`** when **`IN_NATIVE_SWIFT_SIL=only`**).
+- `apps/in-sample`: minimal **`.in` v0** module (struct + helper **`fn`** + **`fn main`**); run **`./scripts/check-in-lang-sample.sh`** (**`in build --parser in --path …`**) — no **`swiftc`**.
 
 ## `in build` and SwiftPM staging (macOS/Linux)
 
 Default **`in build`** runs the native hybrid pipeline: it gathers Swift sources (single file, **`Sources/`** tree when a **`Package.swift`** is present), emits **textual SIL**, then applies inauguration SIL passes. By default SIL comes from **`swiftc -emit-sil`** (toolchain on **`PATH`**, or override with **`IN_SWIFTC`**).
+
+**`.in` v0 (no `swiftc`):** **`in build --path apps/in-sample/hello.in --module-id App`** — default **`--parser auto`** selects the `.in` front from the file extension; use **`--parser in`** or **`IN_PARSER=in`** to force. Sample + script: **`apps/in-sample/hello.in`**, **`./scripts/check-in-lang-sample.sh`** (CI job **`in-lang-sample`**). Core IR → same stub SIL path as the Swift subset ([`docs/architecture/in-language.md`](docs/architecture/in-language.md)).
 
 **In-tree subset (Rust, no `swiftc`):** set **`IN_NATIVE_SWIFT_SIL=try`** to try the line-oriented **`swift_subset`** front first and fall back to **`swiftc`** when the source is not a valid subset. Use **`IN_NATIVE_SWIFT_SIL=only`** to require the in-tree path (CI or hermetic checks). Contracted syntax: **[docs/architecture/subset-grammar.md](docs/architecture/subset-grammar.md)**; sample **`apps/native-subset-sample/App.swift`**; local check **`./scripts/check-native-subset-sample.sh`**. With **`--swiftpm`**, **`in`** additionally runs **`swift build`** and stages outputs for runnable artifacts.
 
@@ -90,6 +93,7 @@ Publishing: **`inauguration`** crate ships from **`in-cli`**; sources stay align
 
 ```bash
 in build
+in build --parser in --path apps/in-sample/hello.in --module-id App
 in build --swiftpm --path ../aurorality/examples   # native pipeline + SwiftPM emit + staging
 in dev
 in dev --preview-client swift       # Swift preview host + SwiftUI path
@@ -118,6 +122,7 @@ cd runtime/swift-preview-host && swift build -Xswiftc -warnings-as-errors && swi
 cd runtime/hotreload-daemon && cargo test
 ./scripts/check-protocol-models.sh # runs protocol-gen (Rust) then git diff
 ./scripts/check-native-subset-sample.sh # IN_NATIVE_SWIFT_SIL=only; no swiftc
+./scripts/check-in-lang-sample.sh       # in build --parser in; no swiftc
 # Optional: same outputs via V (header comment differs); not run in CI.
 v -gc none run shared/protocol/generate_models.v "$(pwd)"   # omit "$(pwd)" to walk up to repo root
 ```

@@ -3,11 +3,15 @@
 #[cfg(unix)]
 pub mod preview_client;
 
+pub mod core_ir;
 pub mod hotreload;
 pub mod hybrid_core;
 pub mod hybrid_pipeline;
 pub mod hybrid_scheduler;
 pub mod hybrid_sil;
+pub mod in_lang_parse;
+pub mod lower_core;
 pub mod native_swift_sil;
+pub mod parser_registry;
 pub mod sil_emit;
 pub mod swift_subset;

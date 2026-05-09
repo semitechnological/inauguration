@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use inauguration::hybrid_core::ChangeEvent;
 use inauguration::hybrid_pipeline::run_wave_with_timings;
 use inauguration::hybrid_scheduler::BuildScheduler;
+use inauguration::parser_registry::{self, ParserCli};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
@@ -58,6 +59,13 @@ enum Commands {
             help = "After the native pipeline, run SwiftPM swift build and stage products (toolchain fallback)"
         )]
         swiftpm: bool,
+        #[arg(
+            long,
+            value_enum,
+            default_value_t = ParserCli::Auto,
+            help = "`auto`: `.in` extension or IN_PARSER=in uses the .in front; `in` forces it"
+        )]
+        parser: ParserCli,
     },
     #[command(about = "Run full local dev loop (daemon + client)")]
     Dev {
@@ -131,7 +139,8 @@ fn run() -> Result<()> {
             module_id,
             verbose,
             swiftpm,
-        } => cmd_build(&invocation_cwd, &path, &module_id, verbose, swiftpm),
+            parser,
+        } => cmd_build(&invocation_cwd, &path, &module_id, verbose, swiftpm, parser),
         Commands::Dev { preview_client } => {
             cmd_dev(&workspace_root(invocation_cwd.clone())?, preview_client)
         }
@@ -163,6 +172,7 @@ fn cmd_build(
     module_id: &str,
     verbose: bool,
     swiftpm: bool,
+    parser: ParserCli,
 ) -> Result<()> {
     let start = Instant::now();
     let resolved = if Path::new(path).is_absolute() {
@@ -171,62 +181,60 @@ fn cmd_build(
         invocation_cwd.join(path)
     };
     let display_target = resolved.display();
-    let result = run_pipeline_for_path(&resolved, module_id, verbose);
+    let result = run_pipeline_for_path(&resolved, module_id, verbose, parser);
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
     let wall = format!("{elapsed_ms:.3}ms");
     let mut emit_note = String::new();
-    if swiftpm {
-        if let Some(package_root) = find_package_root(&resolved) {
-            let build_result = if verbose {
-                run_cmd(
-                    Command::new("swift")
-                        .arg("build")
-                        .current_dir(&package_root),
-                )
-            } else {
-                run_cmd_silent(
-                    Command::new("swift")
-                        .arg("build")
-                        .current_dir(&package_root),
-                )
-            };
-            build_result?;
-            let bin_dir = swift_bin_path(&package_root)?;
-            #[cfg(unix)]
-            {
-                match stage_swift_products(&package_root, &bin_dir) {
-                    Ok(summary) => emit_note = staging_emit_note(&summary, Some(&bin_dir)),
-                    Err(e) => {
-                        let executables = swift_executables_in_dir(&bin_dir);
-                        emit_note = if executables.is_empty() {
-                            format!(
-                                " -> {} (no executable product; library artifacts built); staging failed: {}",
-                                bin_dir.display(),
-                                e
-                            )
-                        } else {
-                            format!(
-                                " -> {} [{}]; staging failed: {}",
-                                bin_dir.display(),
-                                executables.join(", "),
-                                e
-                            )
-                        };
-                    }
+    if swiftpm && let Some(package_root) = find_package_root(&resolved) {
+        let build_result = if verbose {
+            run_cmd(
+                Command::new("swift")
+                    .arg("build")
+                    .current_dir(&package_root),
+            )
+        } else {
+            run_cmd_silent(
+                Command::new("swift")
+                    .arg("build")
+                    .current_dir(&package_root),
+            )
+        };
+        build_result?;
+        let bin_dir = swift_bin_path(&package_root)?;
+        #[cfg(unix)]
+        {
+            match stage_swift_products(&package_root, &bin_dir) {
+                Ok(summary) => emit_note = staging_emit_note(&summary, Some(&bin_dir)),
+                Err(e) => {
+                    let executables = swift_executables_in_dir(&bin_dir);
+                    emit_note = if executables.is_empty() {
+                        format!(
+                            " -> {} (no executable product; library artifacts built); staging failed: {}",
+                            bin_dir.display(),
+                            e
+                        )
+                    } else {
+                        format!(
+                            " -> {} [{}]; staging failed: {}",
+                            bin_dir.display(),
+                            executables.join(", "),
+                            e
+                        )
+                    };
                 }
             }
-            #[cfg(not(unix))]
-            {
-                let executables = swift_executables_in_dir(&bin_dir);
-                emit_note = if executables.is_empty() {
-                    format!(
-                        " -> {} (no executable product; library artifacts built)",
-                        bin_dir.display()
-                    )
-                } else {
-                    format!(" -> {} [{}]", bin_dir.display(), executables.join(", "))
-                };
-            }
+        }
+        #[cfg(not(unix))]
+        {
+            let executables = swift_executables_in_dir(&bin_dir);
+            emit_note = if executables.is_empty() {
+                format!(
+                    " -> {} (no executable product; library artifacts built)",
+                    bin_dir.display()
+                )
+            } else {
+                format!(" -> {} [{}]", bin_dir.display(), executables.join(", "))
+            };
         }
     }
 
@@ -243,17 +251,30 @@ fn cmd_build(
     result
 }
 
-fn run_pipeline_for_path(path: &Path, module_id: &str, verbose: bool) -> Result<()> {
+fn run_pipeline_for_path(
+    path: &Path,
+    module_id: &str,
+    verbose: bool,
+    parser: ParserCli,
+) -> Result<()> {
     let pipeline_start = std::time::Instant::now();
+    let resolved = parser_registry::resolve_parser_id(path, parser);
 
-    let swift_frontend_emit_us = {
+    let (sil_source, swift_frontend_emit_us) = {
         let emit_start = std::time::Instant::now();
-        let sil_source =
-            inauguration::sil_emit::emit_textual_sil(path, module_id).map_err(|e| {
+        let sil_source = match parser_registry::parse_with_resolved(resolved, path) {
+            Ok(Some(module)) => inauguration::lower_core::lower_to_textual_sil(&module, module_id),
+            Ok(None) => inauguration::sil_emit::emit_textual_sil(path, module_id).map_err(|e| {
                 InError::Message(format!(
-                    "{e}. Hint: use `in build --swiftpm` for SwiftPM emit, or pass extra `swiftc` flags via IN_SWIFTC_FLAGS."
+                    "{e}. Hint: use `in build --swiftpm` for SwiftPM emit, pass extra `swiftc` flags via IN_SWIFTC_FLAGS, or for `.in` sources use `in build --parser in` or set IN_PARSER=in."
                 ))
-            })?;
+            })?,
+            Err(e) => {
+                return Err(InError::Message(format!(
+                    "{e}. Hint: for `.in` sources use `in build --parser in` or set IN_PARSER=in, and ensure `fn main() -> void` is present."
+                )));
+            }
+        };
         let emit_us = emit_start.elapsed().as_micros() as u64;
         (sil_source, emit_us)
     };
@@ -269,8 +290,6 @@ fn run_pipeline_for_path(path: &Path, module_id: &str, verbose: bool) -> Result<
         hash: "dev".to_string(),
         timestamp_ms: 0,
     };
-
-    let (sil_source, swift_frontend_emit_us) = swift_frontend_emit_us;
 
     let (count, mut timings) = runtime
         .block_on(run_wave_with_timings(
@@ -369,10 +388,10 @@ fn swift_executables_in_dir(bin_dir: &Path) -> Vec<String> {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            if let Ok(metadata) = fs::metadata(&path) {
-                if metadata.permissions().mode() & 0o111 == 0 {
-                    continue;
-                }
+            if let Ok(metadata) = fs::metadata(&path)
+                && metadata.permissions().mode() & 0o111 == 0
+            {
+                continue;
             }
         }
         if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
@@ -590,13 +609,12 @@ fn cmd_dev(root: &Path, preview_client: PreviewClientKind) -> Result<()> {
                 }
                 PreviewClientKind::Rust => {
                     let sock_path = socket.clone();
-                    let inner = tokio::task::spawn_blocking(move || {
+                    tokio::task::spawn_blocking(move || {
                         inauguration::preview_client::run_unix_preview_client(&sock_path)
                             .map_err(|e| InError::Message(e.to_string()))
                     })
                     .await
-                    .map_err(|e| InError::Message(format!("rust preview client join: {e}")))?;
-                    inner
+                    .map_err(|e| InError::Message(format!("rust preview client join: {e}")))?
                 }
             };
             daemon.abort();
@@ -923,6 +941,7 @@ fn workspace_root(start: PathBuf) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use inauguration::parser_registry::ParserCli;
 
     #[test]
     fn parse_build_subcommand() {
@@ -934,11 +953,13 @@ mod tests {
                 module_id,
                 verbose,
                 swiftpm,
+                parser,
             } => {
                 assert_eq!(path, "Foo.swift");
                 assert_eq!(module_id, "Foo");
                 assert!(!verbose);
                 assert!(!swiftpm);
+                assert!(matches!(parser, ParserCli::Auto));
             }
             _ => panic!("expected build command"),
         }
@@ -950,6 +971,16 @@ mod tests {
             .expect("cli parse");
         match cli.command {
             Commands::Build { swiftpm, .. } => assert!(swiftpm),
+            _ => panic!("expected build command"),
+        }
+    }
+
+    #[test]
+    fn parse_build_parser_in_flag() {
+        let cli = Cli::try_parse_from(["in", "build", "--path", "hello.in", "--parser", "in"])
+            .expect("cli parse");
+        match cli.command {
+            Commands::Build { parser, .. } => assert!(matches!(parser, ParserCli::In)),
             _ => panic!("expected build command"),
         }
     }
