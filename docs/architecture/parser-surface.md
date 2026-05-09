@@ -1,6 +1,6 @@
 # Parser surface (`in build`)
 
-`in-cli/src/parser_registry.rs` resolves which **front** runs before the hybrid SIL pipeline. **Implemented** Core IR fronts: **`.in`**, **`.icore` (JSON)**. Every other tracked extension is a **stub** (clear error, no `swiftc`) until a parser lands — see [general-compiler.md](general-compiler.md).
+`in-cli/src/parser_registry.rs` resolves which **front** runs before the hybrid SIL pipeline. **Full** Core IR fronts: **`.in`**, **`.icore` (JSON)**. Dedicated language fronts now include **Rust** (`compiler::rust_front`), **Go** (`compiler::go_front`), and **V** (`compiler::v_front`) with real function/struct lowering plus bounded body subsets (not full language semantics yet). Other tracked extensions use **`compiler::tree_front`** (**Tree-sitter** grammars → signature-level `UnifiedModule`; bodies empty until deeper lowering lands). Parser ids without a wired grammar return an error that directs callers to `.icore` — see [general-compiler.md](general-compiler.md).
 
 Resolution order is documented in the `parser_registry` module rustdoc. Summary:
 
@@ -16,7 +16,7 @@ Resolution order is documented in the `parser_registry` module rustdoc. Summary:
 - `#!in parser=auto` — defer to steps 3–5.  
 - `#!in parser=<slug>` — force a tracked front when `<slug>` matches a [`ParserId`](../../in-cli/src/parser_registry.rs) (`java`, `cpp`, `objc`, …). Unrecognized values are ignored (fall through).
 
-## Extension → front (stubs unless noted)
+## Extension → front (dedicated front when available, otherwise Tree-sitter polyglot)
 
 | Family | Extensions | `ParserId` |
 |--------|------------|------------|
@@ -38,8 +38,9 @@ Resolution order is documented in the `parser_registry` module rustdoc. Summary:
 | Perl | `pl`, `pm` | `perl` |
 | JavaScript | `js`, `mjs`, `cjs`, `jsx` | `javascript` |
 | TypeScript | `ts`, `tsx`, `mts`, `cts` | `typescript` |
-| Go | `go` | `go` |
-| Rust | `rs` | `rust` |
+| Go | `go` | `go` (**dedicated** `compiler::go_front`) |
+| V | `v` | `v` (**dedicated** `compiler::v_front`) |
+| Rust | `rs` | `rust` (**dedicated** `compiler::rust_front`) |
 | Zig | `zig` | `zig` |
 | Dart | `dart` | `dart` |
 | Lua | `lua` | `lua` |
@@ -56,7 +57,7 @@ Resolution order is documented in the `parser_registry` module rustdoc. Summary:
 
 **`.swift`** is **not** in this table: it selects the Swift SIL path (`swiftc` or `IN_NATIVE_SWIFT_SIL` subset), not Core IR.
 
-**`.h` headers** map to **`c`**; some Objective-C headers share `.h` — today that is ambiguous and defaults to the C-like stub.
+**`.h` headers** map to **`c`**; some Objective-C headers share `.h` — ambiguous paths stay **`c`** Tree-sitter (`function_definition` extraction).
 
 ## Compiler roadmap (honest scope)
 

@@ -7,11 +7,11 @@
 //!    If it starts with `#!in parser=` (after trimming):
 //!    - `parser=in` → `.in` front (overrides extension and `IN_PARSER`).
 //!    - `parser=auto` → continue with normal `auto` rules below.
-//!    - `parser=<slug>` for any other known slug → that front (often a **stub** until lowered to
-//!      Core IR); see [`ParserId::as_str`] and [parser-surface.md](../../docs/architecture/parser-surface.md).
+//!    - `parser=<slug>` for any other known slug → that front (Tree-sitter polyglot or icore-only);
+//!      see [`ParserId::as_str`] and [parser-surface.md](../../docs/architecture/parser-surface.md).
 //! 3. **`IN_PARSER=in`** or **`IN_PARSER=icore`** (case-insensitive): force that Core IR front.
 //! 4. **Known extension** (`.in`, `.icore`, `.java`, …): [`ResolvedBuildParser::CoreIr`]
-//!    with the matching [`ParserId`] (implemented: [`ParserId::In`], [`ParserId::Icore`]; others stub).
+//!    with the matching [`ParserId`] (full: [`ParserId::In`], [`ParserId::Icore`]; others: Tree-sitter).
 //! 5. Otherwise: Swift SIL emit path (`swiftc` or subset env).
 
 use crate::core_ir::UnifiedModule;
@@ -21,8 +21,9 @@ use std::fmt;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
-/// In-tree source front identifier. Implemented fronts: [`ParserId::In`], [`ParserId::Icore`].
-/// Other variants return [`ParserRegistryError::NotImplemented`] until a parser lands.
+/// In-tree source front identifier. Full parsers: [`ParserId::In`], [`ParserId::Icore`].
+/// Other [`ParserId`] values use [`crate::compiler::tree_front`] (Tree-sitter → signature
+/// [`UnifiedModule`]) where a grammar is wired; otherwise an error directs callers to `.icore`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ParserId {
     /// `.in` v0 — implemented.
@@ -51,6 +52,7 @@ pub enum ParserId {
     TypeScript,
     // Systems / other curly-brace
     Go,
+    V,
     Rust,
     Zig,
     Dart,
@@ -91,6 +93,7 @@ impl ParserId {
             ParserId::JavaScript => "javascript",
             ParserId::TypeScript => "typescript",
             ParserId::Go => "go",
+            ParserId::V => "v",
             ParserId::Rust => "rust",
             ParserId::Zig => "zig",
             ParserId::Dart => "dart",
@@ -120,7 +123,7 @@ impl ParserId {
                 "dynamic OO / scripting"
             }
             ParserId::JavaScript | ParserId::TypeScript => "ECMAScript-shaped",
-            ParserId::Go | ParserId::Rust | ParserId::Zig => "systems / curly-brace",
+            ParserId::Go | ParserId::V | ParserId::Rust | ParserId::Zig => "systems / curly-brace",
             ParserId::Dart | ParserId::Lua => "OO / embeddable",
             ParserId::Clojure | ParserId::Elixir | ParserId::Erlang | ParserId::Haskell => {
                 "functional"
@@ -156,6 +159,7 @@ pub fn parser_id_from_extension(ext: &str) -> Option<ParserId> {
         "js" | "mjs" | "cjs" | "jsx" => Some(ParserId::JavaScript),
         "ts" | "tsx" | "mts" | "cts" => Some(ParserId::TypeScript),
         "go" => Some(ParserId::Go),
+        "v" => Some(ParserId::V),
         "rs" => Some(ParserId::Rust),
         "zig" => Some(ParserId::Zig),
         "dart" => Some(ParserId::Dart),
@@ -188,6 +192,7 @@ pub fn parser_id_from_magic_token(token: &str) -> Option<ParserId> {
             "kotlin" => Some(ParserId::Kotlin),
             "typescript" => Some(ParserId::TypeScript),
             "javascript" => Some(ParserId::JavaScript),
+            "vlang" => Some(ParserId::V),
             "cplusplus" | "c++" => Some(ParserId::Cpp),
             "icore" => Some(ParserId::Icore),
             _ => None,
@@ -300,19 +305,12 @@ pub fn resolve_parser_id(path: &Path, cli: ParserCli) -> ResolvedBuildParser {
 #[derive(Debug)]
 pub enum ParserRegistryError {
     Msg(String),
-    NotImplemented(ParserId),
 }
 
 impl fmt::Display for ParserRegistryError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ParserRegistryError::Msg(s) => write!(f, "{s}"),
-            ParserRegistryError::NotImplemented(id) => write!(
-                f,
-                "parser front `{}` ({}) is not implemented — use `.in`, `.icore`, or `.swift`; see docs/architecture/parser-surface.md",
-                id.as_str(),
-                id.family_label()
-            ),
         }
     }
 }
@@ -347,7 +345,22 @@ pub fn parse_with_resolved(
                 .map_err(ParserRegistryError::Msg)
                 .map(Some)
         }
-        ResolvedBuildParser::CoreIr(id) => Err(ParserRegistryError::NotImplemented(id)),
+        ResolvedBuildParser::CoreIr(ParserId::Go) => crate::compiler::go_front::parse_go_file(path)
+            .map_err(ParserRegistryError::Msg)
+            .map(Some),
+        ResolvedBuildParser::CoreIr(ParserId::V) => crate::compiler::v_front::parse_v_file(path)
+            .map_err(ParserRegistryError::Msg)
+            .map(Some),
+        ResolvedBuildParser::CoreIr(ParserId::Rust) => {
+            crate::compiler::rust_front::parse_rust_file(path)
+                .map_err(ParserRegistryError::Msg)
+                .map(Some)
+        }
+        ResolvedBuildParser::CoreIr(id) => {
+            crate::compiler::tree_front::parse_polyglot_file(id, path)
+                .map_err(ParserRegistryError::Msg)
+                .map(Some)
+        }
     }
 }
 
@@ -401,10 +414,26 @@ mod tests {
     }
 
     #[test]
-    fn auto_resolves_java_extension_to_stub() {
+    fn auto_resolves_java_extension_to_core_ir() {
         assert!(matches!(
             resolve_parser_id(Path::new("Foo.java"), ParserCli::Auto),
             ResolvedBuildParser::CoreIr(ParserId::Java)
+        ));
+    }
+
+    #[test]
+    fn auto_resolves_v_extension_to_core_ir() {
+        assert!(matches!(
+            resolve_parser_id(Path::new("main.v"), ParserCli::Auto),
+            ResolvedBuildParser::CoreIr(ParserId::V)
+        ));
+    }
+
+    #[test]
+    fn auto_resolves_go_extension_to_core_ir() {
+        assert!(matches!(
+            resolve_parser_id(Path::new("main.go"), ParserCli::Auto),
+            ResolvedBuildParser::CoreIr(ParserId::Go)
         ));
     }
 
@@ -498,16 +527,78 @@ mod tests {
     }
 
     #[test]
-    fn stub_java_front_errors_with_stable_variant() {
-        let path = temp_file_path("stub.java");
-        std::fs::write(&path, "").ok();
+    fn polyglot_java_class_without_methods_errors() {
+        let path = temp_file_path("empty.java");
+        std::fs::write(&path, "class X {}\n").expect("write temp");
         let err = parse_with_resolved(ResolvedBuildParser::CoreIr(ParserId::Java), &path)
-            .expect_err("stub java");
-        assert!(matches!(
-            err,
-            ParserRegistryError::NotImplemented(ParserId::Java)
-        ));
+            .expect_err("no methods");
+        assert!(matches!(err, ParserRegistryError::Msg(s) if s.contains("zero functions")));
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn polyglot_clojure_returns_icore_hint() {
+        let path = temp_file_path("sample.clj");
+        std::fs::write(&path, "(ns user)\n").expect("write temp");
+        let err = parse_with_resolved(ResolvedBuildParser::CoreIr(ParserId::Clojure), &path)
+            .expect_err("clojure has no wired grammar");
+        assert!(matches!(err, ParserRegistryError::Msg(s) if s.contains("icore")));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn polyglot_java_static_void_main_ok() {
+        let path = temp_file_path("entry.java");
+        std::fs::write(
+            &path,
+            "class X { public static void main(String[] a) { } }\n",
+        )
+        .expect("write temp");
+        let m = parse_with_resolved(ResolvedBuildParser::CoreIr(ParserId::Java), &path)
+            .expect("parse")
+            .expect("module");
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            matches!(m.decls.as_slice(), [crate::core_ir::Decl::Function { name, .. }] if name == "main")
+        );
+    }
+
+    #[test]
+    fn v_front_parses_main_function() {
+        let path = temp_file_path("main.v");
+        std::fs::write(
+            &path,
+            "module main\nfn main() {\n    x := 1\n    return\n}\n",
+        )
+        .expect("write temp");
+        let m = parse_with_resolved(ResolvedBuildParser::CoreIr(ParserId::V), &path)
+            .expect("parse")
+            .expect("module");
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            m.decls.iter().any(
+                |d| matches!(d, crate::core_ir::Decl::Function { name, .. } if name == "main")
+            )
+        );
+    }
+
+    #[test]
+    fn go_front_parses_main_function() {
+        let path = temp_file_path("main.go");
+        std::fs::write(
+            &path,
+            "package main\nfunc main() {\n    x := 1\n    return\n}\n",
+        )
+        .expect("write temp");
+        let m = parse_with_resolved(ResolvedBuildParser::CoreIr(ParserId::Go), &path)
+            .expect("parse")
+            .expect("module");
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            m.decls.iter().any(
+                |d| matches!(d, crate::core_ir::Decl::Function { name, .. } if name == "main")
+            )
+        );
     }
 
     #[test]

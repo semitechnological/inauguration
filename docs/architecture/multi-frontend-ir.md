@@ -4,7 +4,7 @@ Multiple source languages can feed the same hybrid pipeline by lowering to **tex
 
 ## Textual SIL merge caveat (`hybrid_sil`)
 
-`parse_textual_sil` is a **single-artifact** scan: the **`function_id`** it keeps is whichever **`sil @name`** line appeared **last** in the input. All basic blocks and instructions from the entire string are flattened into that one view, and **`extract_call_graph`** reports edges **from that `function_id` only**. Emitters that concatenate several functions (native subset, `lower_core`) rely on this and typically place **`sil @main` last** so graph extraction still names the merged slice `main`. For full detail see [in-language.md](in-language.md#hybrid_sil-and-merged-textual-sil).
+`parse_textual_sil` is a **single-artifact** scan: the top-level **`function_id`** is still whichever **`sil @name`** line appeared **last** in the input, and basic blocks / instructions stay one flattened list. **`extract_call_graph`**, however, can attribute each instruction to the **active `sil @…` at parse time** via parallel **`instruction_callers`** (when populated by `parse_textual_sil`); legacy artifacts with empty callers keep the old behavior (**every edge uses `function_id` only**). Emitters still typically place **`sil @main` last** so single-function views line up with `main`. For full detail see [in-language.md](in-language.md#hybrid_sil-and-merged-textual-sil).
 
 ## `UnifiedModule` (v0 schema, v0.2 extensions TBD)
 
@@ -29,7 +29,7 @@ Rust type: `in_cli::core_ir::UnifiedModule`.
 |----|--------|--------|
 | `In` | `.in` files (and `#!in parser=in`) | `in_lang_parse` → `UnifiedModule` → `compiler::driver` / `lower_core` |
 | `Icore` | `.icore` files (and `#!in parser=icore`) | `compiler::icore` → `UnifiedModule` → same lowering |
-| `c`, `cpp`, `java`, `python`, … | Known extensions or `#!in parser=<slug>` | **Stub** — [`ParserRegistryError::NotImplemented`](../../in-cli/src/parser_registry.rs); see [parser-surface.md](parser-surface.md). |
+| `c`, `cpp`, `java`, `python`, … | Known extensions or `#!in parser=<slug>` | **Tree-sitter polyglot** — [`compiler::tree_front`](../../in-cli/src/compiler/tree_front/mod.rs) grammar-backed AST → signature `UnifiedModule` (empty bodies v0); icore-only ids documented in [parser-surface.md](parser-surface.md). |
 
 ## Resolution order for `in build`
 
@@ -38,13 +38,13 @@ See **`in-cli/src/parser_registry.rs`** (`resolve_parser_id`) and [parser-surfac
 1. **`--parser in`** — force the `.in` front.  
 2. **Magic first line** — `#!in parser=in` | `auto` | `<slug>`.  
 3. **`IN_PARSER=in`**.  
-4. **Extension map** — `.in`, `.java`, `.cpp`, … → Core IR path (stubs except `.in`).  
+4. **Extension map** — `.in`, `.icore`, `.java`, `.cpp`, … → Core IR path (full parsers for `.in`/`.icore`; Tree-sitter for other wired extensions).  
 5. Otherwise **Swift** path: `sil_emit::emit_textual_sil` (`swiftc` and/or `IN_NATIVE_SWIFT_SIL` subset).
 
 ## Related
 
 - [general-compiler.md](general-compiler.md) — multi-language driver, **icore**, roadmap.  
-- [parser-surface.md](parser-surface.md) — extension + magic-line routing, stub fronts.  
+- [parser-surface.md](parser-surface.md) — extension + magic-line routing, Tree-sitter vs full fronts.  
 - [in-language.md](in-language.md) — `.in` v0 vs v0.2 targets, grammar, `hybrid_sil` note.
 - [native-swift-master-plan.md](native-swift-master-plan.md) — Rust-first Swift / subset roadmap.
 - [README · `in build` / `.in`](../README.md#in-build-and-swiftpm-staging-macoslinux) — CLI flags and sample commands (no duplicate install steps here).

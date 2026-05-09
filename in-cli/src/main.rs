@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use inauguration::hybrid_core::ChangeEvent;
 use inauguration::hybrid_pipeline::run_wave_with_timings;
 use inauguration::hybrid_scheduler::BuildScheduler;
-use inauguration::parser_registry::{self, ParserCli, ParserRegistryError};
+use inauguration::parser_registry::{self, ParserCli};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
@@ -276,14 +276,7 @@ fn run_pipeline_for_path(
                 ))
             })?,
             Err(e) => {
-                let hint = match &e {
-                    ParserRegistryError::NotImplemented(id) => format!(
-                        "This path resolved to the `{}` front ({}). Use `.in`, `.icore`, or `.swift`, or see docs/architecture/parser-surface.md.",
-                        id.as_str(),
-                        id.family_label()
-                    ),
-                    _ => "Hint: for `.in` use `fn main() -> void`; for `.icore` see docs/architecture/general-compiler.md.".to_string(),
-                };
+                let hint = "Hint: for `.in` use `fn main() -> void`; for `.icore` see docs/architecture/general-compiler.md; polyglot Core IR uses Tree-sitter grammars (signature-level IR). Unsupported languages need `.icore`.";
                 return Err(InError::Message(format!("{e}. {hint}")));
             }
         };

@@ -13,6 +13,7 @@ use tokio::sync::{Mutex, mpsc};
 use tokio::time::sleep;
 
 use super::generated_protocol::PatchType;
+use crate::parser_registry::{self, ParserCli, ResolvedBuildParser};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ReloadPatch {
@@ -216,10 +217,7 @@ fn classify_change(path: &str, graph: &mut QueryGraph) -> Vec<String> {
     combined
 }
 
-pub fn compile_check(path: &Path) -> bool {
-    if !path.exists() {
-        return false;
-    }
+fn compile_check_swift(path: &Path) -> bool {
     matches!(
         Command::new("swiftc")
             .arg("-typecheck")
@@ -229,6 +227,34 @@ pub fn compile_check(path: &Path) -> bool {
             .status(),
         Ok(status) if status.success()
     )
+}
+
+/// Best-effort gate before emitting a reload patch: `swiftc -typecheck` for Swift SIL emit paths;
+/// for Core IR paths, [`parser_registry::parse_with_resolved`] (including `.in` / `.icore` / Tree-sitter polyglot).
+pub fn compile_check(path: &Path) -> bool {
+    if !path.exists() {
+        return false;
+    }
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if ext == "swift" {
+        return compile_check_swift(path);
+    }
+    let resolved = parser_registry::resolve_parser_id(path, ParserCli::Auto);
+    match resolved {
+        ResolvedBuildParser::SwiftSilEmit => compile_check_swift(path),
+        ResolvedBuildParser::CoreIr(_) => parser_registry::parse_with_resolved(resolved, path)
+            .map(|m| m.is_some())
+            .unwrap_or(false),
+    }
+}
+
+fn extension_triggers_hotreload_notify(ext: &str) -> bool {
+    let el = ext.to_ascii_lowercase();
+    el == "swift" || parser_registry::parser_id_from_extension(&el).is_some()
 }
 
 #[derive(Debug, Clone)]
@@ -366,12 +392,12 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), DaemonError> {
         notify::recommended_watcher(move |result: notify::Result<Event>| {
             if let Ok(event) = result {
                 for path in event.paths {
-                    let is_swift = path
+                    let notify = path
                         .extension()
                         .and_then(|ext| ext.to_str())
-                        .map(|ext| ext == "swift")
+                        .map(extension_triggers_hotreload_notify)
                         .unwrap_or(false);
-                    if is_swift {
+                    if notify {
                         let _ = tx_watch.blocking_send(path.to_string_lossy().to_string());
                     }
                 }
@@ -479,6 +505,31 @@ mod tests {
         assert!(!first.1);
         assert!(second.1);
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn compile_check_rust_with_main_succeeds_via_rust_front() {
+        let path = std::env::temp_dir().join(format!("compile-check-rs-{}.rs", now_ms()));
+        std::fs::write(&path, "fn main() {}\n").expect("write rust");
+        assert!(compile_check(&path));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn compile_check_rust_without_main_fails() {
+        let path = std::env::temp_dir().join(format!("compile-check-rs-empty-{}.rs", now_ms()));
+        std::fs::write(&path, "// no main\n").expect("write rust");
+        assert!(!compile_check(&path));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn extension_triggers_notify_for_swift_in_and_java() {
+        assert!(extension_triggers_hotreload_notify("swift"));
+        assert!(extension_triggers_hotreload_notify("SWIFT"));
+        assert!(extension_triggers_hotreload_notify("in"));
+        assert!(extension_triggers_hotreload_notify("java"));
+        assert!(!extension_triggers_hotreload_notify("md"));
     }
 
     #[test]

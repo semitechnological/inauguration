@@ -16,13 +16,129 @@ pub enum PipelineError {
     InvalidFrontendArtifact(#[from] serde_json::Error),
 }
 
-#[allow(dead_code)] // Used only by unit tests; `in` binary invokes `run_wave_with_timings` only.
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FrontendArtifactSummary {
     pub structs: usize,
     pub functions: usize,
     pub diagnostics: usize,
     pub success: bool,
+    pub core_ir_decls: usize,
+    pub parser_id: Option<String>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedFrontendArtifact {
+    pub summary: FrontendArtifactSummary,
+    pub textual_sil: Option<String>,
+}
+
+fn parser_id_from_value(value: &Value) -> Option<String> {
+    ["parser", "frontend"]
+        .into_iter()
+        .find_map(|key| value.get(key).and_then(Value::as_str).map(str::to_string))
+        .or_else(|| {
+            value
+                .pointer("/pipeline/parser")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+}
+
+fn textual_sil_from_value(value: &Value) -> Option<String> {
+    let s = value
+        .get("textual_sil")
+        .or_else(|| value.pointer("/pipeline/textual_sil"))
+        .and_then(Value::as_str)?;
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn icore_or_core_ir_decls(value: &Value) -> Option<&Vec<Value>> {
+    value
+        .pointer("/core_ir/decls")
+        .and_then(Value::as_array)
+        .or_else(|| {
+            if value.get("icoreVersion").is_some() {
+                value.get("decls").and_then(Value::as_array)
+            } else {
+                None
+            }
+        })
+}
+
+fn symbol_counts_swift_style(value: &Value) -> Option<(usize, usize)> {
+    let symbols = value.get("symbols")?;
+    if !symbols.is_object() {
+        return None;
+    }
+    let structs = value
+        .pointer("/symbols/structs")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    let functions = value
+        .pointer("/symbols/functions")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    Some((structs, functions))
+}
+
+fn decl_kind_counts(decls: &[Value]) -> (usize, usize, usize) {
+    let mut structs = 0usize;
+    let mut functions = 0usize;
+    for d in decls {
+        match d.get("kind").and_then(Value::as_str) {
+            Some("struct") => structs += 1,
+            Some("function") => functions += 1,
+            _ => {}
+        }
+    }
+    let total = decls.len();
+    (structs, functions, total)
+}
+
+#[allow(dead_code)]
+pub fn parse_frontend_artifact(json: &str) -> Result<ParsedFrontendArtifact, PipelineError> {
+    let value: Value = serde_json::from_str(json)?;
+
+    let diagnostics = value
+        .get("diagnostics")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    let success = value
+        .get("success")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let parser_id = parser_id_from_value(&value);
+    let textual_sil = textual_sil_from_value(&value);
+
+    let (structs, functions, core_ir_decls) =
+        if let Some((s, f)) = symbol_counts_swift_style(&value) {
+            let core_ir_decls = icore_or_core_ir_decls(&value).map_or(0, Vec::len);
+            (s, f, core_ir_decls)
+        } else if let Some(decls) = icore_or_core_ir_decls(&value) {
+            let (s, f, total) = decl_kind_counts(decls);
+            (s, f, total)
+        } else {
+            (0, 0, 0)
+        };
+
+    Ok(ParsedFrontendArtifact {
+        summary: FrontendArtifactSummary {
+            structs,
+            functions,
+            diagnostics,
+            success,
+            core_ir_decls,
+            parser_id,
+        },
+        textual_sil,
+    })
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -35,29 +151,23 @@ pub struct StageTimings {
 
 #[allow(dead_code)]
 pub fn summarize_frontend_artifact(json: &str) -> Result<FrontendArtifactSummary, PipelineError> {
-    let value: Value = serde_json::from_str(json)?;
-    let structs = value
-        .pointer("/symbols/structs")
-        .and_then(Value::as_array)
-        .map_or(0, std::vec::Vec::len);
-    let functions = value
-        .pointer("/symbols/functions")
-        .and_then(Value::as_array)
-        .map_or(0, std::vec::Vec::len);
-    let diagnostics = value
-        .get("diagnostics")
-        .and_then(Value::as_array)
-        .map_or(0, std::vec::Vec::len);
-    let success = value
-        .get("success")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    Ok(FrontendArtifactSummary {
-        structs,
-        functions,
-        diagnostics,
-        success,
-    })
+    Ok(parse_frontend_artifact(json)?.summary)
+}
+
+#[allow(dead_code)]
+pub async fn run_wave_with_timings_from_frontend(
+    scheduler: &BuildScheduler,
+    event: &ChangeEvent,
+    frontend_json: Option<&str>,
+    sil_fallback: &str,
+) -> Result<(usize, StageTimings), PipelineError> {
+    let sil_source = match frontend_json {
+        Some(raw) => parse_frontend_artifact(raw)?
+            .textual_sil
+            .unwrap_or_else(|| sil_fallback.to_string()),
+        None => sil_fallback.to_string(),
+    };
+    run_wave_with_timings(scheduler, event, &sil_source).await
 }
 
 #[allow(dead_code)]
@@ -109,6 +219,7 @@ pub async fn run_wave_with_timings(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hybrid_sil::{extract_call_graph, parse_textual_sil};
 
     #[tokio::test]
     async fn runs_three_task_wave() {
@@ -150,5 +261,81 @@ mod tests {
         assert_eq!(summary.functions, 2);
         assert_eq!(summary.diagnostics, 0);
         assert!(summary.success);
+        assert_eq!(summary.core_ir_decls, 0);
+        assert_eq!(summary.parser_id, None);
+    }
+
+    #[test]
+    fn parses_icore_bundle_with_embedded_sil() {
+        let parsed = parse_frontend_artifact(
+            r#"{
+  "icoreVersion": 1,
+  "parser": "icore",
+  "decls": [
+    { "kind": "struct", "name": "S", "fields": [] },
+    { "kind": "function", "name": "main", "params": [], "return": "Void", "body": [] }
+  ],
+  "textual_sil": "sil @main\nbb0:\n%0 = integer_literal $Builtin.Int64, 0\n",
+  "success": true
+}"#,
+        )
+        .expect("icore artifact parses");
+        assert_eq!(parsed.summary.core_ir_decls, 2);
+        assert_eq!(parsed.summary.structs, 1);
+        assert_eq!(parsed.summary.functions, 1);
+        assert_eq!(parsed.summary.parser_id.as_deref(), Some("icore"));
+        let sil = parsed.textual_sil.expect("embedded sil");
+        assert!(sil.contains("sil @main"));
+        assert!(sil.contains("bb0:"));
+    }
+
+    #[test]
+    fn textual_sil_nested_under_pipeline() {
+        let parsed = parse_frontend_artifact(
+            r#"{
+  "success": true,
+  "pipeline": { "textual_sil": "sil @main\nbb0:\n%0 = function_ref @foo\n", "parser": "bundle" }
+}"#,
+        )
+        .expect("bundle parses");
+        assert_eq!(parsed.summary.parser_id.as_deref(), Some("bundle"));
+        assert!(parsed.textual_sil.unwrap().contains("function_ref @foo"));
+    }
+
+    #[test]
+    fn embedded_sil_matches_in_cli_core_ir_shape() {
+        let artifact = r#"{"textual_sil":"sil @main\nbb0:\n%0 = function_ref @from_artifact\n"}"#;
+        let sil = parse_frontend_artifact(artifact)
+            .expect("parse")
+            .textual_sil
+            .expect("sil");
+        let report = extract_call_graph(&parse_textual_sil(&sil));
+        assert!(
+            report
+                .call_edges
+                .iter()
+                .any(|(_, callee)| callee == "from_artifact")
+        );
+    }
+
+    #[tokio::test]
+    async fn wave_from_frontend_runs_three_tasks() {
+        let scheduler = BuildScheduler::default();
+        let artifact = r#"{"success":true,"textual_sil":"sil @main\nbb0:\n%0 = integer_literal $Builtin.Int64, 1\n"}"#;
+        let (count, timings) = run_wave_with_timings_from_frontend(
+            &scheduler,
+            &ChangeEvent {
+                path: "x.in".into(),
+                module_id: "M".into(),
+                hash: "h".into(),
+                timestamp_ms: 0,
+            },
+            Some(artifact),
+            "",
+        )
+        .await
+        .expect("wave");
+        assert_eq!(count, 3);
+        assert!(timings.total_us <= 50_000_000);
     }
 }
