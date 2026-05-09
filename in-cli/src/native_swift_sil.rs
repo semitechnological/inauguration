@@ -44,6 +44,11 @@ pub fn filter_top_level_decl_lines(source: &str) -> String {
     out
 }
 
+/// Emit textual SIL for the subset program. Helpers are emitted first, then `@main` last so
+/// [`crate::hybrid_sil::parse_textual_sil`] (which keeps only the last `sil @` name as
+/// [`SilArtifact::function_id`](crate::hybrid_sil::SilArtifact)) still labels the merged artifact as `main` for
+/// [`crate::hybrid_sil::extract_call_graph`]. SSA ids are unique across the whole string because that parser
+/// concatenates instructions from every function into one list.
 fn program_to_textual_sil(program: &[Decl], _module_id: &str) -> String {
     let mut fn_names: Vec<String> = program
         .iter()
@@ -60,22 +65,30 @@ fn program_to_textual_sil(program: &[Decl], _module_id: &str) -> String {
         .filter(|n| *n != "main")
         .collect();
 
+    let mut ssa = 0usize;
     for name in &fn_names {
         if *name == "main" {
             continue;
         }
-        sil.push_str(&format!("sil @{name}\nbb0:\n%0 = integer_literal $Builtin.Int64, 0\n"));
+        let v = ssa;
+        ssa += 1;
+        sil.push_str(&format!(
+            "sil @{name}\nbb0:\n%{v} = integer_literal $Builtin.Int64, 0\nbb1:\nreturn %{v} : $Builtin.Int64\n"
+        ));
     }
 
     sil.push_str("sil @main\nbb0:\n");
-    let mut tmp = 0usize;
     for callee in &helpers {
+        let r = ssa;
+        ssa += 1;
         sil.push_str(&format!(
-            "%{tmp} = function_ref @{callee} : $@convention(thin)\n"
+            "%{r} = function_ref @{callee} : $@convention(thin)\n"
         ));
-        tmp += 1;
     }
-    sil.push_str("%ret = integer_literal $Builtin.Int64, 0\n");
+    let ret = ssa;
+    sil.push_str(&format!(
+        "%{ret} = integer_literal $Builtin.Int64, 0\n"
+    ));
     sil
 }
 
@@ -155,5 +168,27 @@ func main() -> Void
         assert!(sil.contains("sil @main"));
         assert!(sil.contains("sil @helper"));
         assert!(sil.contains("function_ref @helper"));
+        assert!(
+            sil.contains("bb1:\nreturn %0 : $Builtin.Int64")
+                || sil.contains("bb1:\r\nreturn %0 : $Builtin.Int64"),
+            "helper should close bb0 with bb1 + ret-ish line: {sil:?}"
+        );
+        assert_eq!(
+            sil.matches("\n%0 = integer_literal").count(),
+            1,
+            "at most one definition of %0 across emitted functions: {sil:?}"
+        );
+    }
+
+    #[test]
+    fn emit_subset_sil_orders_function_refs_by_sorted_helper_name() {
+        let src = "func zeta() -> Void\nfunc alpha() -> Void\nfunc main() -> Void\n";
+        let sil = try_emit_in_tree_sil(src, "M").expect("sil");
+        let pa = sil.find("function_ref @alpha").expect("alpha ref");
+        let pz = sil.find("function_ref @zeta").expect("zeta ref");
+        assert!(
+            pa < pz,
+            "main block should list callees in sorted order; got:\n{sil}"
+        );
     }
 }
