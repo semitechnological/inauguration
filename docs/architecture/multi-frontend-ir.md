@@ -2,7 +2,11 @@
 
 Multiple source languages can feed the same hybrid pipeline by lowering to **textual SIL** that `hybrid_sil` already parses (`sil @…`, `bbN:`, `function_ref @…`, unique SSA ids across the merged module).
 
-## `UnifiedModule` (v0 schema)
+## Textual SIL merge caveat (`hybrid_sil`)
+
+`parse_textual_sil` is a **single-artifact** scan: the **`function_id`** it keeps is whichever **`sil @name`** line appeared **last** in the input. All basic blocks and instructions from the entire string are flattened into that one view, and **`extract_call_graph`** reports edges **from that `function_id` only**. Emitters that concatenate several functions (native subset, `lower_core`) rely on this and typically place **`sil @main` last** so graph extraction still names the merged slice `main`. For full detail see [in-language.md](in-language.md#hybrid_sil-and-merged-textual-sil).
+
+## `UnifiedModule` (v0 schema, v0.2 extensions TBD)
 
 Rust type: `in_cli::core_ir::UnifiedModule`.
 
@@ -14,8 +18,8 @@ Rust type: `in_cli::core_ir::UnifiedModule`.
 
 | Variant | Fields | Notes |
 |---------|--------|-------|
-| `Struct` | `name`, `fields: Vec<(String, Typ)>` | v0 `.in` parser emits empty `fields`; checker still validates field types when non-empty. |
-| `Function` | `name`, `params`, `ret`, `body` | `body` may be empty until a front fills statements; lowering uses signatures + names only for stub SIL. |
+| `Struct` | `name`, `fields: Vec<(String, Typ)>` | **`.in` v0**: fields populated only from a **single-line** `struct Name { … }` body (see [in-language.md](in-language.md)). **Target v0.2**: multiline field blocks between braces. |
+| `Function` | `name`, `params`, `ret`, `body` | **`.in` v0**: `body` is always empty. **Target v0.2**: statement list once the parser grows. Lowering today uses signatures + names only for stub SIL. |
 
 **`Typ`**: `Int`, `String`, `Bool`, `Void`, `Named(String)` — shared with `swift_subset` today for consistency.
 
@@ -39,5 +43,6 @@ Documented in `in-cli/src/parser_registry.rs` as `resolve_parser_id`.
 
 ## Related
 
-- [in-language.md](in-language.md) — `.in` v0 grammar and ideology vs crepuscularity.
+- [in-language.md](in-language.md) — `.in` v0 vs v0.2 targets, grammar, `hybrid_sil` note.
 - [native-swift-master-plan.md](native-swift-master-plan.md) — Rust-first Swift / subset roadmap.
+- [README · `in build` / `.in`](../README.md#in-build-and-swiftpm-staging-macoslinux) — CLI flags and sample commands (no duplicate install steps here).

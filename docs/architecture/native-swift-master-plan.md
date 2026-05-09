@@ -32,6 +32,8 @@ This document is the phased roadmap for growing inauguration’s **Rust-first** 
 
 Also see [**multi-frontend IR**](multi-frontend-ir.md) (`UnifiedModule`, `.in` parser id, resolution order).
 
+**`.in` / Core IR (snapshot):** v0 is headers-only **`fn`** bodies plus **single-line** struct field lists in Core IR → **`lower_core`** stub SIL (same merged-string caveat as the subset emitter: last **`sil @`** wins for `hybrid_sil`’s single-function id). Roadmap for multiline structs, real bodies, and parser discovery lives in [**in-language**](in-language.md) (v0.2 targets).
+
 ---
 
 ## Phase 0 — Contracts and tooling (1–2 weeks)
