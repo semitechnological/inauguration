@@ -30,7 +30,7 @@ Hotreload wire formats live under **`shared/protocol`**; regenerators and benchm
 
 Default **`in build`** runs the native hybrid pipeline: it gathers Swift sources (single file, **`Sources/`** tree when a **`Package.swift`** is present), emits **textual SIL**, then applies inauguration SIL passes. By default SIL comes from **`swiftc -emit-sil`** (toolchain on **`PATH`**, or override with **`IN_SWIFTC`**).
 
-**In-tree subset (Rust, no `swiftc`):** set **`IN_NATIVE_SWIFT_SIL=try`** to try the line-oriented **`swift_subset`** front first and fall back to **`swiftc`** when the source is not a valid subset. Use **`IN_NATIVE_SWIFT_SIL=only`** to require the in-tree path (CI or hermetic checks). See **`apps/native-subset-sample/App.swift`**. With **`--swiftpm`**, **`in`** additionally runs **`swift build`** and stages outputs for runnable artifacts.
+**In-tree subset (Rust, no `swiftc`):** set **`IN_NATIVE_SWIFT_SIL=try`** to try the line-oriented **`swift_subset`** front first and fall back to **`swiftc`** when the source is not a valid subset. Use **`IN_NATIVE_SWIFT_SIL=only`** to require the in-tree path (CI or hermetic checks). Contracted syntax: **[docs/architecture/subset-grammar.md](docs/architecture/subset-grammar.md)**; sample **`apps/native-subset-sample/App.swift`**; local check **`./scripts/check-native-subset-sample.sh`**. With **`--swiftpm`**, **`in`** additionally runs **`swift build`** and stages outputs for runnable artifacts.
 
 After a successful **`swift build`** inside that optional step (when the target path resolves under a directory that contains `Package.swift`), **`in`** creates predictable links under the package root:
 
@@ -117,6 +117,7 @@ cd in-cli && cargo test
 cd runtime/swift-preview-host && swift build -Xswiftc -warnings-as-errors && swift test
 cd runtime/hotreload-daemon && cargo test
 ./scripts/check-protocol-models.sh # runs protocol-gen (Rust) then git diff
+./scripts/check-native-subset-sample.sh # IN_NATIVE_SWIFT_SIL=only; no swiftc
 # Optional: same outputs via V (header comment differs); not run in CI.
 v -gc none run shared/protocol/generate_models.v "$(pwd)"   # omit "$(pwd)" to walk up to repo root
 ```

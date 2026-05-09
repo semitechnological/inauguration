@@ -36,13 +36,14 @@ This document is the phased roadmap for growing inauguration’s **Rust-first** 
 
 **Deliverables**
 
-- Frozen **subset grammar** appendix in this doc or `docs/architecture/subset-grammar.md`: what is guaranteed under `IN_NATIVE_SWIFT_SIL=only`.
+- Frozen **subset grammar** (`docs/architecture/subset-grammar.md`): what is guaranteed under `IN_NATIVE_SWIFT_SIL=only`.
 - **`scripts/`** or **`cargo xtask`** checklist: “mirror hybrid_* from rust-driver → in-cli” to reduce drift (even if manual at first).
 - CI job matrix entry: **`IN_NATIVE_SWIFT_SIL=only`** build of **`apps/native-subset-sample`** (no **`swiftc`** required on runner).
 
 **Exit criteria**
 
-- Contributors can answer “is this in subset?” without reading Rust.
+- Contributors can answer “is this in subset?” without reading Rust: see **[subset-grammar.md](subset-grammar.md)** (frozen contract for `IN_NATIVE_SWIFT_SIL=only`).
+- CI job **`native-subset-sample`** (`.github/workflows/ci.yml`) exercises `apps/native-subset-sample` with **`IN_NATIVE_SWIFT_SIL=only`** on Ubuntu and macOS (no **`swiftc`** invocation on the success path).
 
 ---
 
@@ -158,4 +159,5 @@ Hand-off contract between agents: **`Program` AST type** in **`swift_subset`**, 
 - `in-cli/src/hotreload/daemon_impl.rs`
 - `compiler/rust-driver/crates/pipeline/src/lib.rs`, `sil/src/lib.rs`, `scheduler/src/lib.rs`, `core/src/lib.rs`
 - `apps/native-subset-sample/App.swift`
+- `docs/architecture/subset-grammar.md`
 - `docs/architecture/interop-roadmap.md`

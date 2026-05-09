@@ -23,3 +23,16 @@ jobs:
       - name: Test hybrid-cli package
         run: cargo test -p hybrid-cli
         working-directory: compiler/rust-driver
+
+  native-subset-sample:
+    name: Native subset sample (no swiftc)
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: IN_NATIVE_SWIFT_SIL=only in build
+        run: ./scripts/check-native-subset-sample.sh
