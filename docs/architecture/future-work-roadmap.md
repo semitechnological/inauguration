@@ -43,6 +43,7 @@ The near-term goal is not to finish every language at once. It is to keep parser
 
 ## See also
 
+- [../roadmap-execution-plan.md](../roadmap-execution-plan.md) — cross-stream execution order (SIL, CI, rust-driver mirror, polyglot).
 - [general-compiler.md](general-compiler.md) — umbrella model for the general hybrid compiler.
 - [parser-surface.md](parser-surface.md) — parser ids, extension routing, magic lines, Tree-sitter vs icore-only ids.
 - [multi-frontend-ir.md](multi-frontend-ir.md) — `UnifiedModule`, `ParserId`, and the current `hybrid_sil` caveat.
