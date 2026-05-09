@@ -32,14 +32,14 @@ fn package_root_with_sources_for(path: &Path) -> Option<PathBuf> {
     }
 }
 
-fn collect_sources_dir(pkg: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), SilEmitError> {
+fn collect_sources_dir(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), SilEmitError> {
     if !dir.is_dir() {
         return Ok(());
     }
     for entry in fs::read_dir(dir)? {
         let p = entry?.path();
         if p.is_dir() {
-            collect_sources_dir(pkg, &p, out)?;
+            collect_sources_dir(&p, out)?;
         } else if p.extension().and_then(|s| s.to_str()) == Some("swift") {
             out.push(p);
         }
@@ -57,7 +57,7 @@ fn collect_package_sources(pkg: &Path) -> Result<Vec<PathBuf>, SilEmitError> {
         )));
     }
     let mut out = Vec::new();
-    collect_sources_dir(pkg, &sources, &mut out)?;
+    collect_sources_dir(&sources, &mut out)?;
     out.sort();
     if out.is_empty() {
         return Err(SilEmitError::Msg(format!(
@@ -76,7 +76,7 @@ fn collect_package_sources_flexible(pkg: &Path) -> Result<Vec<PathBuf>, SilEmitE
     let swift_nested = pkg.join("swift/Sources");
     if swift_nested.is_dir() {
         let mut out = Vec::new();
-        collect_sources_dir(pkg, &swift_nested, &mut out)?;
+        collect_sources_dir(&swift_nested, &mut out)?;
         out.sort();
         if out.is_empty() {
             return Err(SilEmitError::Msg(format!(
@@ -106,11 +106,7 @@ fn collect_swift_siblings_in_sources_parent(path: &Path) -> Option<Vec<PathBuf>>
         }
     }
     out.sort();
-    if out.is_empty() {
-        None
-    } else {
-        Some(out)
-    }
+    if out.is_empty() { None } else { Some(out) }
 }
 
 fn collect_swift_shallow(
@@ -220,11 +216,11 @@ fn append_generated_clang_flags(cmd: &mut Command, pkg: &Path) {
     }
     maps.sort();
     for m in maps {
-        cmd
-            .arg("-Xcc")
+        cmd.arg("-Xcc")
             .arg(format!("-fmodule-map-file={}", m.display()));
     }
-    cmd.arg("-Xcc").arg(format!("-I{}", generated_dir.display()));
+    cmd.arg("-Xcc")
+        .arg(format!("-I{}", generated_dir.display()));
 }
 
 /// Closest ancestor containing `Package.swift` (used for optional `swift build` prep).
@@ -329,7 +325,9 @@ enum NativeSwiftSilMode {
 
 fn native_swift_sil_mode_from_env() -> NativeSwiftSilMode {
     match std::env::var("IN_NATIVE_SWIFT_SIL") {
-        Ok(v) if v == "try" || v == "1" || v.eq_ignore_ascii_case("true") => NativeSwiftSilMode::Try,
+        Ok(v) if v == "try" || v == "1" || v.eq_ignore_ascii_case("true") => {
+            NativeSwiftSilMode::Try
+        }
         Ok(v) if v == "only" || v == "2" || v.eq_ignore_ascii_case("strict") => {
             NativeSwiftSilMode::Only
         }
@@ -364,10 +362,10 @@ fn run_swiftc_emit_sil(
         cmd.arg("-sdk").arg(sdk);
     }
 
-    if let Ok(triple) = std::env::var("IN_SWIFT_TARGET") {
-        if !triple.is_empty() {
-            cmd.arg("-target").arg(triple);
-        }
+    if let Ok(triple) = std::env::var("IN_SWIFT_TARGET")
+        && !triple.is_empty()
+    {
+        cmd.arg("-target").arg(triple);
     }
 
     if let Some(pkg) = package_root_for_clang {

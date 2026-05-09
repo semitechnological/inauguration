@@ -15,3 +15,20 @@ pub mod native_swift_sil;
 pub mod parser_registry;
 pub mod sil_emit;
 pub mod swift_subset;
+
+#[cfg(test)]
+mod in_pipeline_tests {
+    use crate::in_lang_parse;
+    use crate::lower_core;
+
+    #[test]
+    fn minimal_in_source_to_sil_contains_main() {
+        let src = "fn main() -> void\n";
+        let module = in_lang_parse::parse_in_source(src).expect("parse .in");
+        let sil = lower_core::lower_to_textual_sil(&module, "App");
+        assert!(
+            sil.contains("sil @main"),
+            "expected textual SIL to declare @main, got:\n{sil}"
+        );
+    }
+}

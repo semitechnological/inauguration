@@ -255,10 +255,8 @@ fn compile_check_cached(path: &Path, cache: &mut CompileCache) -> (bool, bool, u
     let Some(current_ms) = modified_ms(path) else {
         return (false, false, start.elapsed().as_millis() as u64);
     };
-    if let Some(entry) = cache.get(&key) {
-        if entry.modified_ms == current_ms {
-            return (entry.ok, true, start.elapsed().as_millis() as u64);
-        }
+    if let Some(entry) = cache.get(&key) && entry.modified_ms == current_ms {
+        return (entry.ok, true, start.elapsed().as_millis() as u64);
     }
     let ok = compile_check(path);
     cache.insert(
