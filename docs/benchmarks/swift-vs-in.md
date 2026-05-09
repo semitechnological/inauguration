@@ -7,7 +7,7 @@ Wall times: **median** over `3` timed runs; **min–max** across those runs show
 
 ## Benchmark Environment
 
-- Generated (UTC): `2026-05-08T17:47:35Z`
+- Generated (UTC): `2026-05-09T02:42:45Z`
 - Host OS: `Darwin`
 - Kernel: `25.4.0`
 - CPU: `Apple M5 Pro`
@@ -26,18 +26,18 @@ Target: arm64-apple-macosx26.0`
 
 | Example | SwiftPM swift build median (min–max ms) | in native median (min–max ms) |
 |---|---:|---:|
-| `aurorality/examples/counter` | 783.30 (771.19–787.43) | 1362.89 (1355.16–1390.69) |
-| `aurorality/examples/basic` | 841.17 (800.40–841.66) | 1513.38 (1394.81–1695.28) |
-| `aurorality/examples/hyperchat` | 351.80 (348.86–447.35) | 1421.84 (1405.69–1723.92) |
+| `aurorality/examples/counter` | 835.77 (807.60–1007.26) | 1486.51 (1421.22–1536.50) |
+| `aurorality/examples/basic` | 773.02 (756.07–841.40) | 1403.61 (1358.42–1454.95) |
+| `aurorality/examples/hyperchat` | 349.00 (344.37–393.56) | 1433.38 (1415.83–1448.71) |
 
 ## Swift Toolchain (Compiler Sources) Benchmark
 
 | Example | SwiftPM swift build median (min–max ms) | in native median (min–max ms) |
 |---|---:|---:|
-| `vendor/swift/SwiftCompilerSources` | 410.68 (393.83–412.89) | 613.21 (576.84–631.83) |
+| `vendor/swift/SwiftCompilerSources` | 352.07 (340.88–357.04) | 521.68 (514.37–619.41) |
 
 | Example | swiftc med (min–max) | SwiftPM med (min–max) | in native med (min–max) | hybrid-cli med (min–max) | native÷SwiftPM | in-stage-total(ms) | in-driver-overhead(ms) | in-wrapper-overhead(ms) | loss bucket | swift build ok | in ok |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---|:---:|:---:|
-| `aurorality/examples/counter` | 147.72 (146.48–169.94) | 783.30 (771.19–787.43) | 1362.89 (1355.16–1390.69) | 5.43 (5.23–5.58) | 1.740 | 1356.723 | 6.164 | 1357.460 | swift-frontend-stage | ✅ | ✅ |
-| `aurorality/examples/basic` | 147.17 (140.65–157.94) | 841.17 (800.40–841.66) | 1513.38 (1394.81–1695.28) | 5.54 (5.22–6.64) | 1.799 | 1506.350 | 7.034 | 1507.846 | swift-frontend-stage | ✅ | ✅ |
-| `aurorality/examples/hyperchat` | 9513.92 (9318.64–9657.45) | 351.80 (348.86–447.35) | 1421.84 (1405.69–1723.92) | 5.39 (5.15–5.65) | 4.042 | 0.000 | 1421.843 | 1416.452 | driver-overhead | ✅ | ❌ |
+| `aurorality/examples/counter` | 158.73 (158.15–182.21) | 835.77 (807.60–1007.26) | 1486.51 (1421.22–1536.50) | 5.38 (5.36–6.98) | 1.779 | 1478.132 | 8.375 | 1481.131 | swift-frontend-stage | ✅ | ✅ |
+| `aurorality/examples/basic` | 145.50 (142.32–149.73) | 773.02 (756.07–841.40) | 1403.61 (1358.42–1454.95) | 5.11 (5.09–5.95) | 1.816 | 1397.578 | 6.032 | 1398.498 | swift-frontend-stage | ✅ | ✅ |
+| `aurorality/examples/hyperchat` | 9605.26 (9241.43–9691.60) | 349.00 (344.37–393.56) | 1433.38 (1415.83–1448.71) | 5.97 (5.45–6.40) | 4.107 | 0.000 | 1433.380 | 1427.405 | driver-overhead | ✅ | ❌ |
