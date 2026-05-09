@@ -1,0 +1,199 @@
+google-fonts "Inter" "JetBrains Mono"
+
+div min-h-screen overflow-x-hidden antialiased crepus-twilight-page
+	main max-w-[896px] sm:max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 min-w-0
+		div flex items-center gap-3 pt-6 sm:pt-8 pb-2 crepus-entrance crepus-e1
+			a href="./index.html" flex items-center gap-3 group shrink-0 no-underline crepus-t-text hover:opacity-90
+				img src="./static/favicon.svg" alt="" w-9 h-9 sm:w-10 sm:h-10 shrink-0 rounded-lg
+				span text-sm sm:text-base font-semibold tracking-tight
+					"inauguration"
+		section pt-6 pb-12 sm:pt-10 sm:pb-20 md:pt-12 md:pb-24 crepus-entrance crepus-e2 bg-gradient-to-br from-zinc-950 via-zinc-900 to-black rounded-2xl p-6 sm:p-8 lg:p-12 mx-4 sm:mx-6 lg:mx-8 animate-sunset
+			div grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_min(100%,420px)] gap-6 sm:gap-8 lg:gap-12 items-start
+				div max-w-3xl min-w-0
+					h1 text-3xl sm:text-4xl md:text-5xl font-bold crepus-t-text tracking-tight leading-[1.08] mb-4 sm:mb-6 text-pretty
+						"Faster "
+						span font-extrabold border-b-2 pb-0.5 crepus-t-icon border-[var(--cp-accent)]
+							"Swift"
+						span
+							" dev workflows"
+					p text-base sm:text-lg md:text-xl crepus-t-muted leading-relaxed max-w-2xl mb-6 sm:mb-10
+						span
+							"Hybrid compiler pipeline, SIL passes, SwiftUI hot reload, and the "
+						code text-sm sm:text-base crepus-t-text opacity-90
+							"in"
+						span
+							" CLI — plus multi-front experiments (Swift subset, "
+						code text-sm sm:text-base crepus-t-text opacity-90
+							".in"
+						span
+							", Core IR)."
+					div flex flex-wrap gap-3 items-start flex-col sm:flex-row sm:items-center mb-6 sm:mb-0
+						a href="./docs/index.html" no-underline inline-flex items-center gap-2 px-5 py-2.5 rounded-lg crepus-t-btn-primary text-sm font-semibold
+							"Architecture docs"
+							span opacity-80
+								"→"
+						a href="https://github.com/semitechnological/inauguration" no-underline inline-flex items-center px-5 py-2.5 rounded-lg crepus-t-btn-ghost text-sm font-medium transition-colors hover:bg-[var(--cp-elevated)] rel="noopener noreferrer" target="_blank"
+							"GitHub"
+					div mt-4 sm:mt-8 flex flex-col items-stretch w-full max-w-xl gap-4 sm:gap-5
+						p text-xs font-semibold uppercase tracking-widest crepus-t-muted m-0 text-center sm:text-left
+							"One workspace"
+						div grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-5 text-center
+							div flex flex-col items-center gap-2
+								span material-symbols-outlined crepus-toolchain-icon text-[var(--cp-accent)]
+									"memory"
+								span text-xs crepus-t-muted leading-snug
+									"in-cli"
+							div flex flex-col items-center gap-2
+								span material-symbols-outlined crepus-toolchain-icon text-[var(--cp-accent)]
+									"account_tree"
+								span text-xs crepus-t-muted leading-snug
+									"rust-driver"
+							div flex flex-col items-center gap-2
+								span material-symbols-outlined crepus-toolchain-icon text-[var(--cp-accent)]
+									"bolt"
+								span text-xs crepus-t-muted leading-snug
+									"Hot reload"
+							div flex flex-col items-center gap-2
+								span material-symbols-outlined crepus-toolchain-icon text-[var(--cp-accent)]
+									"integration_instructions"
+								span text-xs crepus-t-muted leading-snug
+									".in / IR"
+				div w-full min-w-0 mx-auto lg:mx-0 lg:place-self-center order-last lg:order-none min-h-[320px]
+					div rounded-xl border overflow-hidden shadow-xl crepus-t-border crepus-t-card
+						div flex items-center gap-2 px-3 sm:px-4 py-2.5 sm:py-3 border-b crepus-t-border bg-[var(--cp-code)]
+							span flex gap-1.5 shrink-0
+								span w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full opacity-50 bg-[var(--cp-muted)]
+								span w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full opacity-40 bg-[var(--cp-muted)]
+								span w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full opacity-30 bg-[var(--cp-muted)]
+							span text-xs font-mono crepus-t-muted ml-1 truncate
+								"terminal"
+						pre font-mono text-[11px] sm:text-[13px] leading-relaxed p-3 sm:p-4 m-0 crepus-t-pre whitespace-pre overflow-x-visible
+							"# Native hybrid build
+$ in build --path apps/sample-swiftui
+
+# .in front (no swiftc)
+$ in build --path apps/in-sample/hello.in --module-id App
+
+# Full test suite
+$ in test"
+
+		section py-10 sm:py-14 border-t crepus-t-border crepus-entrance crepus-e3
+			div flex flex-col lg:flex-row lg:items-stretch gap-5 sm:gap-6 lg:gap-8
+				div flex-1 rounded-xl p-5 sm:p-8 crepus-t-card
+					p text-xs font-semibold uppercase tracking-widest crepus-t-muted mb-3 sm:mb-4
+						"Roadmap highlights"
+					p text-xl sm:text-2xl md:text-3xl font-semibold crepus-t-text leading-snug mb-4 sm:mb-5
+						"Richer .in bodies, rust-driver depth, reload latency."
+					p text-sm crepus-t-muted m-0 leading-relaxed
+						"See architecture markdown for .in v0.2, Core IR lowering caveats (stub SIL, hybrid_sil last sil @ wins), and the native Swift master plan."
+				div flex-1 grid gap-4 sm:grid-cols-2
+					div rounded-xl p-4 sm:p-5 crepus-t-card
+						h3 text-sm font-semibold crepus-t-text mb-2
+							"Crepuscularity web"
+						p text-xs crepus-t-muted leading-relaxed m-0
+							"This page uses the same twilight shell as crepuscularity docs-site: .crepus + wasm32 + markdown from docs/."
+					div rounded-xl p-4 sm:p-5 crepus-t-card
+						h3 text-sm font-semibold crepus-t-text mb-2
+							"Hermetic checks"
+						p text-xs crepus-t-muted leading-relaxed m-0
+							"Scripts for subset and .in samples; CI mirrors local expectations."
+					div rounded-xl p-4 sm:p-5 crepus-t-card
+						h3 text-sm font-semibold crepus-t-text mb-2
+							"Protocol"
+						p text-xs crepus-t-muted leading-relaxed m-0
+							"Rust protocol-gen is canonical; V bench drivers stay for comparisons."
+					div rounded-xl p-4 sm:p-5 crepus-t-card
+						h3 text-sm font-semibold crepus-t-text mb-2
+							"Plugins"
+						p text-xs crepus-t-muted leading-relaxed m-0
+							"Registry profiles (aurorality, crepuscularity) ship beside the core CLI."
+
+		section py-10 sm:py-14 border-t crepus-t-border crepus-entrance crepus-e4
+			div flex flex-col md:flex-row md:items-end md:justify-between gap-5 sm:gap-6 mb-7 sm:mb-10
+				div
+					h2 text-lg font-semibold crepus-t-text mb-1
+						"Documentation"
+					p text-sm crepus-t-muted m-0 max-w-xl
+						"Markdown from the repo is rendered to HTML on crepus web build (flat symlinks under docs/)."
+				a href="./docs/index.html" no-underline text-sm font-medium crepus-t-text hover:opacity-85 transition-colors border-b border-transparent hover:border-[var(--cp-accent)]
+					"View all →"
+			div grid gap-4 sm:grid-cols-2 lg:grid-cols-3
+				a href="./docs/in-language.html" doc-card no-underline crepus-t-text hover:opacity-95
+					span text-xs font-mono crepus-t-muted
+						"in-language.md"
+					span text-base font-semibold mt-2 block
+						".in language"
+					span text-xs crepus-t-muted mt-1 block
+						"v0 / v0.2 surface"
+				a href="./docs/multi-frontend-ir.html" doc-card no-underline crepus-t-text hover:opacity-95
+					span text-xs font-mono crepus-t-muted
+						"multi-frontend-ir.md"
+					span text-base font-semibold mt-2 block
+						"Multi-frontend IR"
+					span text-xs crepus-t-muted mt-1 block
+						"Unified module"
+				a href="./docs/native-swift-master-plan.html" doc-card no-underline crepus-t-text hover:opacity-95
+					span text-xs font-mono crepus-t-muted
+						"native-swift-master-plan.md"
+					span text-base font-semibold mt-2 block
+						"Native Swift plan"
+					span text-xs crepus-t-muted mt-1 block
+						"Pipeline goals"
+				a href="./docs/subset-grammar.html" doc-card no-underline crepus-t-text hover:opacity-95
+					span text-xs font-mono crepus-t-muted
+						"subset-grammar.md"
+					span text-base font-semibold mt-2 block
+						"Swift subset"
+					span text-xs crepus-t-muted mt-1 block
+						"Contracted syntax"
+				a href="./docs/interop-roadmap.html" doc-card no-underline crepus-t-text hover:opacity-95
+					span text-xs font-mono crepus-t-muted
+						"interop-roadmap.md"
+					span text-base font-semibold mt-2 block
+						"Interop roadmap"
+					span text-xs crepus-t-muted mt-1 block
+						"Future bridges"
+				a href="./docs/contributing-hybrid-mirror.html" doc-card no-underline crepus-t-text hover:opacity-95
+					span text-xs font-mono crepus-t-muted
+						"contributing-hybrid-mirror.md"
+					span text-base font-semibold mt-2 block
+						"Hybrid mirror"
+					span text-xs crepus-t-muted mt-1 block
+						"in-cli ↔ rust-driver"
+
+	footer border-t py-8 sm:py-10 crepus-t-border crepus-entrance crepus-e6
+		div max-w-full sm:max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 footer-row
+			div flex flex-col gap-2
+				a href="./index.html" flex items-center gap-2 no-underline crepus-t-text hover:opacity-90
+					img src="./static/favicon.svg" alt="" w-7 h-7 shrink-0 rounded-md
+					span text-sm font-medium
+						"inauguration"
+				span text-xs crepus-t-muted
+					"Static site — crepuscularity-web (sibling ../crepuscularity)"
+			nav flex flex-wrap gap-x-5 gap-y-2 text-xs crepus-t-muted items-center justify-start sm:justify-end
+				a href="./docs/index.html" no-underline crepus-t-muted hover:text-[var(--cp-fg)] transition-colors
+					"Docs"
+				a href="https://crates.io/crates/inauguration" no-underline crepus-t-muted hover:text-[var(--cp-fg)] transition-colors rel="noopener noreferrer" target="_blank"
+					"Crates.io"
+				a href="https://github.com/semitechnological/inauguration" no-underline crepus-t-muted hover:text-[var(--cp-fg)] transition-colors rel="noopener noreferrer" target="_blank"
+					"GitHub"
+
+@keyframes sunset {
+	0% { background: linear-gradient(to bottom right, #1f1f23, #121217, #08080b); }
+	25% { background: linear-gradient(to bottom right, #2a1a1d, #3a2020, #1a1115); }
+	50% { background: linear-gradient(to bottom right, #4a251f, #7a3b1f, #2a1420); }
+	75% { background: linear-gradient(to bottom right, #3a1d33, #522a54, #1d1126); }
+	100% { background: linear-gradient(to bottom right, #1f1f23, #14141a, #09090d); }
+}
+.animate-sunset {
+	animation: sunset 24s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.animate-sunset {
+		animation: none;
+	}
+}
+
+.footer-row flex flex-col sm:flex-row justify-between gap-4 sm:gap-6 sm:items-center
+.doc-card group flex flex-col rounded-xl p-4 sm:p-5 transition-colors duration-200 crepus-t-card hover:border-[var(--cp-accent)]

@@ -11,3 +11,7 @@
 
 # Vendored upstream source (local reference only)
 vendor/swift/
+
+# crepuscularity-web docs site output
+docs-site/dist/
+docs-site/.crepus-cache/
