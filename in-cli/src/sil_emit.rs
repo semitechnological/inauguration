@@ -11,12 +11,15 @@
 
 use crate::native_swift_sil::{NativeSwiftSilMode, native_swift_sil_mode_from_env};
 use serde_json::Value as JsonValue;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use thiserror::Error;
+
+static SWIFT_SIL_TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Error)]
 pub enum SilEmitError {
@@ -52,6 +55,38 @@ fn dedup_swift_paths(paths: &mut Vec<PathBuf>) {
     });
 }
 
+/// `swiftc` disambiguates private declarations across primaries using the **basename** only; two
+/// files like `AST/Registration.swift` and `SIL/Registration.swift` cannot share one WMO
+/// `-emit-sil` invocation. Split into unique-basename batch vs per-file groups for duplicates.
+fn partition_inputs_by_basename(inputs: &[PathBuf]) -> (Vec<PathBuf>, Vec<Vec<PathBuf>>) {
+    let mut groups: BTreeMap<String, Vec<PathBuf>> = BTreeMap::new();
+    for p in inputs {
+        let name = p
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_string();
+        groups.entry(name).or_default().push(p.clone());
+    }
+    let mut singles = Vec::new();
+    let mut multis = Vec::new();
+    for (_, mut g) in groups {
+        g.sort();
+        if g.len() == 1 {
+            singles.push(g.pop().expect("one path"));
+        } else {
+            multis.push(g);
+        }
+    }
+    singles.sort();
+    multis.sort_by(|a, b| {
+        let ba = a.first().and_then(|p| p.file_name());
+        let bb = b.first().and_then(|p| p.file_name());
+        ba.cmp(&bb)
+    });
+    (singles, multis)
+}
+
 fn collect_sources_dir(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), SilEmitError> {
     if !dir.is_dir() {
         return Ok(());
@@ -65,6 +100,47 @@ fn collect_sources_dir(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), SilEmit
         }
     }
     Ok(())
+}
+
+/// When `path` is under `<pkg>/Sources/`, prefer the SwiftPM-style target directory: if the first
+/// path segment under `Sources/` is a directory (e.g. `Sources/Foo/Bar.swift`), collect only that
+/// subtree so we do not merge unrelated targets (e.g. `SwiftPreviewHost` vs `SwiftPreviewHostClient`
+/// both exporting `@main`). If the first segment is a file in `Sources/`, collect all of `Sources/`.
+fn collect_package_sources_for_input_file(pkg: &Path, path: &Path) -> Result<Vec<PathBuf>, SilEmitError> {
+    let sources = fs::canonicalize(pkg.join("Sources")).map_err(|_| {
+        SilEmitError::Msg(format!("no Sources/ under {}", pkg.display()))
+    })?;
+    let rel = path.strip_prefix(&sources).map_err(|_| {
+        SilEmitError::Msg(format!(
+            "path {} is not under {}",
+            path.display(),
+            sources.display()
+        ))
+    })?;
+    let mut out = Vec::new();
+    match rel.components().next() {
+        Some(std::path::Component::Normal(name)) => {
+            let candidate = sources.join(name);
+            if candidate.is_dir() {
+                collect_sources_dir(&candidate, &mut out)?;
+            } else {
+                collect_sources_dir(&sources, &mut out)?;
+            }
+        }
+        _ => collect_sources_dir(&sources, &mut out)?,
+    }
+    let generated = pkg.join("Generated");
+    if generated.is_dir() {
+        collect_sources_dir(&generated, &mut out)?;
+    }
+    dedup_swift_paths(&mut out);
+    if out.is_empty() {
+        return Err(SilEmitError::Msg(format!(
+            "no .swift files under {}",
+            sources.display()
+        )));
+    }
+    Ok(out)
 }
 
 /// All `*.swift` files under `<pkg>/Sources` plus codegen under `<pkg>/Generated` when present
@@ -175,15 +251,20 @@ fn resolve_swift_inputs(path: &Path) -> Result<Vec<PathBuf>, SilEmitError> {
                 "native build expects a .swift file or a directory with Swift sources".into(),
             ));
         }
+        let path = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
         // Prefer full package source roots (Sources/, Generated/, swift/Sources/) when a
         // Package.swift exists; sibling-only sets miss SPM-listed paths outside `Sources/`.
-        if let Some(pkg) = package_root_containing_swift_file(path) {
+        if let Some(pkg) = package_root_containing_swift_file(&path) {
+            let pkg_sources = fs::canonicalize(pkg.join("Sources")).unwrap_or_else(|_| pkg.join("Sources"));
+            if path.starts_with(&pkg_sources) {
+                return collect_package_sources_for_input_file(&pkg, &path);
+            }
             return collect_package_sources_flexible(&pkg);
         }
-        if let Some(sibs) = collect_swift_siblings_in_sources_parent(path) {
+        if let Some(sibs) = collect_swift_siblings_in_sources_parent(&path) {
             return Ok(sibs);
         }
-        return Ok(vec![path.to_path_buf()]);
+        return Ok(vec![path]);
     }
 
     if path.join("Package.swift").exists() {
@@ -452,11 +533,42 @@ fn run_swiftc_typecheck(
         .unwrap_or(false)
 }
 
+fn run_swiftc_typecheck_partitioned(
+    inputs: &[PathBuf],
+    module_includes: &[PathBuf],
+    package_root_for_clang: Option<&Path>,
+) -> bool {
+    if inputs.is_empty() {
+        return false;
+    }
+    let (singles, multis) = partition_inputs_by_basename(inputs);
+    if multis.is_empty() {
+        return run_swiftc_typecheck(inputs, module_includes, package_root_for_clang);
+    }
+    let ok_singles = singles.is_empty()
+        || run_swiftc_typecheck(&singles, module_includes, package_root_for_clang);
+    let ok_multis = multis.iter().all(|group| {
+        group.iter().all(|p| {
+            run_swiftc_typecheck(std::slice::from_ref(p), module_includes, package_root_for_clang)
+        })
+    });
+    ok_singles && ok_multis
+}
+
 /// First **`swiftc -typecheck`** (with generated flags from package root if any); on failure run **`swift build`** then retry with **`-I`** from `.build` (same strategy as [`emit_textual_sil`]).
 fn run_swiftc_typecheck_with_package_retry(path: &Path, inputs: &[PathBuf]) -> bool {
     let pkg_hint = package_hint_for_swift_tooling(path);
     let pkg_clang = pkg_hint.as_deref();
-    if run_swiftc_typecheck(inputs, &[], pkg_clang) {
+    let warm_includes: Vec<PathBuf> = pkg_hint
+        .as_ref()
+        .map(|p| module_import_paths_after_build(p))
+        .unwrap_or_default();
+    let first_includes: &[PathBuf] = if warm_includes.is_empty() {
+        &[]
+    } else {
+        &warm_includes
+    };
+    if run_swiftc_typecheck_partitioned(inputs, first_includes, pkg_clang) {
         return true;
     }
     let Some(pkg) = pkg_hint else {
@@ -466,7 +578,7 @@ fn run_swiftc_typecheck_with_package_retry(path: &Path, inputs: &[PathBuf]) -> b
         return false;
     }
     let includes = module_import_paths_after_build(&pkg);
-    run_swiftc_typecheck(inputs, &includes, Some(pkg.as_path()))
+    run_swiftc_typecheck_partitioned(inputs, &includes, Some(pkg.as_path()))
 }
 
 /// Hot reload / tooling gate: same **`IN_NATIVE_SWIFT_SIL`** policy as SIL emit (`subset` first on try/only, else **`swiftc -typecheck`**).
@@ -495,14 +607,18 @@ pub fn compile_check_swift_path(path: &Path) -> bool {
     compile_check_swift_path_with_mode(path, native_swift_sil_mode_from_env())
 }
 
-fn run_swiftc_emit_sil(
+fn run_swiftc_emit_sil_batch(
     inputs: &[PathBuf],
     module_id: &str,
     module_includes: &[PathBuf],
     package_root_for_clang: Option<&Path>,
 ) -> Result<String, SilEmitError> {
-    let out_file =
-        std::env::temp_dir().join(format!("inauguration-sil-{}.sil", std::process::id()));
+    let seq = SWIFT_SIL_TMP_SEQ.fetch_add(1, Ordering::Relaxed);
+    let out_file = std::env::temp_dir().join(format!(
+        "inauguration-sil-{}-{}.sil",
+        std::process::id(),
+        seq
+    ));
 
     let swiftc_bin = swiftc_executable();
 
@@ -576,6 +692,48 @@ fn run_swiftc_emit_sil(
     Ok(sil)
 }
 
+fn run_swiftc_emit_sil(
+    inputs: &[PathBuf],
+    module_id: &str,
+    module_includes: &[PathBuf],
+    package_root_for_clang: Option<&Path>,
+) -> Result<String, SilEmitError> {
+    if inputs.is_empty() {
+        return Err(SilEmitError::Msg(
+            "no Swift inputs for swiftc -emit-sil".into(),
+        ));
+    }
+    let (singles, multis) = partition_inputs_by_basename(inputs);
+    if multis.is_empty() {
+        return run_swiftc_emit_sil_batch(
+            inputs,
+            module_id,
+            module_includes,
+            package_root_for_clang,
+        );
+    }
+    let mut fragments: Vec<String> = Vec::new();
+    if !singles.is_empty() {
+        fragments.push(run_swiftc_emit_sil_batch(
+            &singles,
+            module_id,
+            module_includes,
+            package_root_for_clang,
+        )?);
+    }
+    for group in multis {
+        for p in group {
+            fragments.push(run_swiftc_emit_sil_batch(
+                std::slice::from_ref(&p),
+                module_id,
+                module_includes,
+                package_root_for_clang,
+            )?);
+        }
+    }
+    Ok(fragments.join("\n\n// inauguration: sil fragment (basename-partitioned emit)\n\n"))
+}
+
 /// Emit canonical textual SIL for the Swift inputs implied by `path` / `module_id`.
 ///
 /// Input resolution: under a `Package.swift` root, collects `Sources/**` plus `Generated/**` when
@@ -589,9 +747,10 @@ fn run_swiftc_emit_sil(
 ///
 /// When **`IN_NATIVE_SWIFT_SIL`** is **`try`** or **`only`**, attempts in-tree subset SIL first.
 ///
-/// Tries `swiftc -emit-sil` directly; if that fails for package dependency reasons and we know a
-/// `Package.swift` root, runs one **`swift build`** to populate `.build/**/Modules`, then retries
-/// with `-I` for those directories (SwiftPM is dependency prep only, not the SIL producer path).
+/// Tries `swiftc -emit-sil` directly (partitioning primaries that share a basename). When a
+/// package root is known, passes **`-I`** paths from an existing **`.build/**/Modules`** tree on the
+/// first attempt so a prior **`swift build`** (e.g. from CI or a benchmark warm-up) is honored.
+/// On failure, runs **`swift build`** in that package, then retries with refreshed **`-I`** paths.
 pub fn emit_textual_sil(path: &Path, module_id: &str) -> Result<String, SilEmitError> {
     let inputs = resolve_swift_inputs(path)?;
     let combined = load_combined_sources(&inputs)?;
@@ -611,7 +770,16 @@ pub fn emit_textual_sil(path: &Path, module_id: &str) -> Result<String, SilEmitE
 
     let pkg_hint = package_hint_for_swift_tooling(path);
     let pkg_clang = pkg_hint.as_deref();
-    match run_swiftc_emit_sil(&inputs, module_id, &[], pkg_clang) {
+    let warm_includes: Vec<PathBuf> = pkg_hint
+        .as_ref()
+        .map(|p| module_import_paths_after_build(p))
+        .unwrap_or_default();
+    let first_includes: &[PathBuf] = if warm_includes.is_empty() {
+        &[]
+    } else {
+        &warm_includes
+    };
+    match run_swiftc_emit_sil(&inputs, module_id, first_includes, pkg_clang) {
         Ok(s) => Ok(s),
         Err(first_err) => {
             let Some(pkg) = pkg_hint else {
@@ -647,6 +815,20 @@ mod tests {
     }
 
     #[test]
+    fn partition_inputs_splits_duplicate_basenames() {
+        let a = PathBuf::from("/proj/Sources/A/Foo.swift");
+        let b = PathBuf::from("/proj/Sources/B/Foo.swift");
+        let c = PathBuf::from("/proj/Sources/Bar.swift");
+        let (singles, multis) = partition_inputs_by_basename(&[a.clone(), b.clone(), c.clone()]);
+        assert_eq!(singles.len(), 1);
+        assert_eq!(singles[0], c);
+        assert_eq!(multis.len(), 1);
+        assert_eq!(multis[0].len(), 2);
+        assert!(multis[0].contains(&a));
+        assert!(multis[0].contains(&b));
+    }
+
+    #[test]
     fn resolve_example_sources_dir_collects_siblings() {
         let base = std::env::temp_dir().join(format!("in-sil-ex-{}", std::process::id()));
         let sources = base.join("Sources");
@@ -657,8 +839,10 @@ mod tests {
         writeln!(fs::File::create(&b).unwrap(), "import Foundation").unwrap();
         let v = resolve_swift_inputs(&a).unwrap();
         assert_eq!(v.len(), 2);
-        assert!(v.contains(&a));
-        assert!(v.contains(&b));
+        let ca = fs::canonicalize(&a).unwrap();
+        let cb = fs::canonicalize(&b).unwrap();
+        assert!(v.contains(&ca));
+        assert!(v.contains(&cb));
         let _ = fs::remove_dir_all(&base);
     }
 

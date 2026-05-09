@@ -31,7 +31,7 @@ Hotreload wire formats live under **`shared/protocol`**; regenerators and benchm
 
 ## `in build` and SwiftPM staging (macOS/Linux)
 
-Default **`in build`** runs the native hybrid pipeline: it gathers Swift sources (single file, **`Sources/`** tree when a **`Package.swift`** is present), emits **textual SIL**, then applies inauguration SIL passes. By default SIL comes from **`swiftc -emit-sil`** (toolchain on **`PATH`**, or override with **`IN_SWIFTC`**).
+Default **`in build`** runs the native hybrid pipeline: it gathers Swift sources (single file; under **`Package.swift`**, the **`Sources/<target>/`** tree that contains the entry file so unrelated targets are not merged; plus **`Generated/`** when present), emits **textual SIL**, then applies inauguration SIL passes. By default SIL comes from **`swiftc -emit-sil`** (toolchain on **`PATH`**, or override with **`IN_SWIFTC`**). **`swiftc`** rejects duplicate **basenames** across primaries; the driver splits those emits and concatenates SIL fragments.
 
 **Core IR fronts (no `swiftc`):** **`.in`** — **`in build --path apps/in-sample/hello.in --module-id App`**; default **`--parser auto`** uses the extension; **`--parser in`** or **`IN_PARSER=in`** force that front. **`.icore` (JSON)** — **[`docs/architecture/general-compiler.md`](docs/architecture/general-compiler.md)**; **`in build --path apps/icore-sample/min.icore --module-id App`** or **`--parser icore`** / **`IN_PARSER=icore`**. Dedicated fronts now exist for **Rust** (`.rs`, `syn` + `rustc` validation), **Go** (`.go`), and **V** (`.v` / `vlang` magic token), each lowering real top-level declarations plus a bounded statement subset (declarations/assignments/returns and control-flow markers), not full language semantics yet. Other tracked polyglot extensions still route through Tree-sitter extraction; ids without a wired grammar return an `.icore` hint. For a single file, **`#!in parser=in`**, **`#!in parser=icore`**, or **`#!in parser=<slug>`** selects the front. See **[`docs/architecture/parser-surface.md`](docs/architecture/parser-surface.md)** and **[`docs/architecture/general-compiler.md`](docs/architecture/general-compiler.md)** for the exact matrix and roadmap.
 
@@ -152,21 +152,21 @@ The markdown report records host/tool versions and tables where each cell is **m
 
 Copied from **`docs/benchmarks/swift-vs-in.md`** Easy Copy tables after **`./scripts/bench-swift.sh`**. Re-run script and paste here + commit when refreshing.
 
-Median over timed runs (`BENCH_RUNS`, default 3); parentheses = min–max on those same runs.
+Median over `BENCH_RUNS` timed iterations (default 3); parentheses = min–max on those same runs.
 
-Generated (UTC): `2026-05-09T14:04:13Z` · macOS · Apple M5 Pro · Swift 6.3 · rustc 1.94.1 · V 0.5.0 · `BENCH_RUNS=2`
-
-| Example | SwiftPM swift build median (min–max ms) | in native median (min–max ms) |
-|---|---:|---:|
-| `aurorality/examples/counter` | 915.18 (913.74–916.62) | 1661.45 (1580.50–1742.39) |
-| `aurorality/examples/basic` | 963.68 (873.88–1053.48) | 1695.06 (1589.27–1800.85) |
-| `aurorality/examples/hyperchat` | 359.42 (357.01–361.83) | 3615.55 (3587.73–3643.36) |
-
-Swift compiler sources package vs **`in`** native:
+Generated (UTC): `2026-05-09T14:19:19Z` · macOS · Apple M5 Pro · Swift 6.3 · rustc 1.94.1 · V 0.5.0
 
 | Example | SwiftPM swift build median (min–max ms) | in native median (min–max ms) |
 |---|---:|---:|
-| `vendor/swift/SwiftCompilerSources` | 384.87 (384.25–385.49) | 609.08 (597.95–620.21) |
+| `aurorality/examples/counter` | 984.37 (952.47–1004.23) | 548.29 (540.68–578.89) |
+| `aurorality/examples/basic` | 943.56 (936.91–1000.56) | 559.43 (541.97–608.84) |
+| `aurorality/examples/hyperchat` | 433.33 (386.77–614.14) | 4334.97 (3155.60–4571.39) |
+
+Second SwiftPM package (in-tree preview host; replaces vendor-only Swift compiler sources, which need a full Ninja Swift build and are not a portable **`in build`** probe):
+
+| Example | SwiftPM swift build median (min–max ms) | in native median (min–max ms) |
+|---|---:|---:|
+| `runtime/swift-preview-host` | 681.30 (647.08–781.19) | 771.99 (725.52–774.55) |
 
 **Reading the harness:** the detail table in [`docs/benchmarks/swift-vs-in.md`](docs/benchmarks/swift-vs-in.md) labels a **loss bucket**. On small SwiftUI examples it is usually **`swift-frontend-stage`**: almost all wall time is Apple **`swiftc`** emitting textual SIL before the in-tree scheduler runs. **`hybrid-cli`** in the same report stays on the order of **single-digit ms**, which matches “Rust wave + SIL parse” being cheap today compared to **`swiftc`**.
 

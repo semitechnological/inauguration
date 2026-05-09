@@ -461,8 +461,10 @@ fn main() {
 		easy_md += '| `${row.example}` | ${row.swiftpkg_ms:.2f} (${row.swiftpkg_ms_min:.2f}–${row.swiftpkg_ms_max:.2f}) | ${row.in_ms:.2f} (${row.in_ms_min:.2f}–${row.in_ms_max:.2f}) |\n'
 	}
 
-	toolchain_path := os.join_path(root, 'vendor', 'swift', 'SwiftCompilerSources')
-	println('benchmarking swift compiler sources package (${toolchain_path})')
+	toolchain_pkg := os.join_path(root, 'runtime', 'swift-preview-host')
+	toolchain_swift_file := os.join_path(toolchain_pkg, 'Sources', 'SwiftPreviewHost', 'PreviewHost.swift')
+	toolchain_module := 'SwiftPreviewHost'
+	println('benchmarking SwiftPM package (${toolchain_pkg})')
 	mut toolchain_swift_samples := []f64{}
 	mut toolchain_in_samples := []f64{}
 	mut toolchain_swift_last := RunResult{}
@@ -472,17 +474,17 @@ fn main() {
 
 	for warm_idx in 0 .. warmup_runs {
 		warm_name := '${warm_idx + 1}/${warmup_runs}'
-		_ = run_with_status('warm toolchain swift build ${warm_name}', toolchain_path, 'swift build')
-		_ = run_with_status('warm toolchain in build ${warm_name}', root, '"${in_bin}" build --verbose --path "${toolchain_path}" --module-id "SwiftCompilerSources"')
+		_ = run_with_status('warm toolchain swift build ${warm_name}', toolchain_pkg, 'swift build')
+		_ = run_with_status('warm toolchain in build ${warm_name}', root, '"${in_bin}" build --verbose --path "${toolchain_swift_file}" --module-id "${toolchain_module}"')
 	}
 	for run_idx in 0 .. bench_runs {
 		run_name := '${run_idx + 1}/${bench_runs}'
-		toolchain_swift_last = run_with_status('toolchain swift build ${run_name}', toolchain_path, 'swift build')
+		toolchain_swift_last = run_with_status('toolchain swift build ${run_name}', toolchain_pkg, 'swift build')
 		toolchain_swift_samples << toolchain_swift_last.ms
 		if !toolchain_swift_last.ok {
 			toolchain_swift_all_ok = false
 		}
-		toolchain_in_last = run_with_status('toolchain in build ${run_name}', root, '"${in_bin}" build --verbose --path "${toolchain_path}" --module-id "SwiftCompilerSources"')
+		toolchain_in_last = run_with_status('toolchain in build ${run_name}', root, '"${in_bin}" build --verbose --path "${toolchain_swift_file}" --module-id "${toolchain_module}"')
 		toolchain_in_samples << toolchain_in_last.ms
 		if !toolchain_in_last.ok {
 			toolchain_in_all_ok = false
@@ -493,7 +495,7 @@ fn main() {
 	t_swift_lo, t_swift_hi := min_max_ms(toolchain_swift_samples)
 	t_in_lo, t_in_hi := min_max_ms(toolchain_in_samples)
 	toolchain_row := ToolchainRow{
-		example: 'vendor/swift/SwiftCompilerSources'
+		example: 'runtime/swift-preview-host'
 		swiftpkg_ok: toolchain_swift_last.ok && toolchain_swift_all_ok
 		swiftpkg_ms: t_swift_med
 		swiftpkg_ms_min: t_swift_lo
@@ -541,7 +543,7 @@ fn main() {
 	md += '## Easy Copy/Paste\n\n'
 	md += easy_md + '\n'
 
-	md += '## Swift Toolchain (Compiler Sources) Benchmark\n\n'
+	md += '## SwiftPM Package (Preview Host) Benchmark\n\n'
 	md += toolchain_easy_md + '\n'
 
 	md += '| Example | swiftc med (min–max) | SwiftPM med (min–max) | in native med (min–max) | hybrid-cli med (min–max) | native÷SwiftPM | in-stage-total(ms) | in-driver-overhead(ms) | in-wrapper-overhead(ms) | loss bucket | swift build ok | in ok |\n'
