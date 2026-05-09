@@ -1,34 +1,188 @@
-//! Parser selection for `in build`: CLI and env override extension-based resolution.
+//! Parser selection for `in build`: CLI, env, magic first line, and file extension.
 //!
 //! ## Precedence (narrower wins first)
 //!
-//! 1. **`--parser in`**: always selects the `.in` v0 front ([`ParserCli::In`]).
+//! 1. **`--parser in`**: always selects the `.in` v0 front ([`ParserId::In`]).
 //! 2. **`--parser auto`** and the path is an **existing regular file**: read the first line.
-//!    If it is exactly `#!in parser=in` or `#!in parser=auto` (after trimming trailing
-//!    newline / `\r`), then:
-//!    - `parser=in` → `.in` front (overrides file extension and `IN_PARSER`).
-//!    - `parser=auto` → continue with normal `auto` rules below (extension and `IN_PARSER`
-//!      apply).
+//!    If it starts with `#!in parser=` (after trimming):
+//!    - `parser=in` → `.in` front (overrides extension and `IN_PARSER`).
+//!    - `parser=auto` → continue with normal `auto` rules below.
+//!    - `parser=<slug>` for any other known slug → that front (often a **stub** until lowered to
+//!      Core IR); see [`ParserId::as_str`] and [parser-surface.md](../../docs/architecture/parser-surface.md).
 //! 3. **`IN_PARSER=in`** (case-insensitive): `.in` front.
-//! 4. **`.in` extension**: `.in` front.
-//! 5. Otherwise: Swift SIL emit path.
+//! 4. **Known extension** (`.in`, `.java`, `.cpp`, `.py`, …): [`ResolvedBuildParser::CoreIr`]
+//!    with the matching [`ParserId`] (only [`ParserId::In`] is implemented).
+//! 5. Otherwise: Swift SIL emit path (`swiftc` or subset env).
 
 use crate::core_ir::UnifiedModule;
 use crate::in_lang_parse;
 use clap::ValueEnum;
 use std::io::{BufRead, BufReader};
+use std::fmt;
 use std::path::Path;
-use thiserror::Error;
 
-/// Identifies an in-tree source front (extend for Python/Ruby, etc.).
+/// In-tree source front identifier. Most variants are **stubs** today: only [`ParserId::In`]
+/// parses to [`UnifiedModule`]; everything else returns [`ParserRegistryError::NotImplemented`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ParserId {
-    /// `.in` v0 line-oriented grammar.
+    /// `.in` v0 — implemented.
     In,
-    /// Reserved for a future Python front (not wired into resolution yet).
+    // C family
+    C,
+    Cpp,
+    ObjC,
+    ObjCpp,
+    // JVM / CLR
+    Java,
+    Kotlin,
+    Scala,
+    CSharp,
+    FSharp,
+    VbNet,
+    // Dynamic OO / scripting
     Python,
-    /// Reserved for a future Ruby front (not wired into resolution yet).
     Ruby,
+    Php,
+    Perl,
+    // Web / JS-shaped
+    JavaScript,
+    TypeScript,
+    // Systems / other curly-brace
+    Go,
+    Rust,
+    Zig,
+    Dart,
+    Lua,
+    // More OO / FP fronts (stubs)
+    Clojure,
+    Groovy,
+    Elixir,
+    Erlang,
+    Haskell,
+    Julia,
+    R,
+    Nim,
+    D,
+    Crystal,
+}
+
+impl ParserId {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            ParserId::In => "in",
+            ParserId::C => "c",
+            ParserId::Cpp => "cpp",
+            ParserId::ObjC => "objc",
+            ParserId::ObjCpp => "objc++",
+            ParserId::Java => "java",
+            ParserId::Kotlin => "kotlin",
+            ParserId::Scala => "scala",
+            ParserId::CSharp => "csharp",
+            ParserId::FSharp => "fsharp",
+            ParserId::VbNet => "vb",
+            ParserId::Python => "python",
+            ParserId::Ruby => "ruby",
+            ParserId::Php => "php",
+            ParserId::Perl => "perl",
+            ParserId::JavaScript => "javascript",
+            ParserId::TypeScript => "typescript",
+            ParserId::Go => "go",
+            ParserId::Rust => "rust",
+            ParserId::Zig => "zig",
+            ParserId::Dart => "dart",
+            ParserId::Lua => "lua",
+            ParserId::Clojure => "clojure",
+            ParserId::Groovy => "groovy",
+            ParserId::Elixir => "elixir",
+            ParserId::Erlang => "erlang",
+            ParserId::Haskell => "haskell",
+            ParserId::Julia => "julia",
+            ParserId::R => "r",
+            ParserId::Nim => "nim",
+            ParserId::D => "d",
+            ParserId::Crystal => "crystal",
+        }
+    }
+
+    #[must_use]
+    pub const fn family_label(self) -> &'static str {
+        match self {
+            ParserId::In => "inauguration .in",
+            ParserId::C | ParserId::Cpp | ParserId::ObjC | ParserId::ObjCpp => "C-like",
+            ParserId::Java | ParserId::Kotlin | ParserId::Scala => "JVM / class-based",
+            ParserId::CSharp | ParserId::FSharp | ParserId::VbNet => ".NET",
+            ParserId::Python | ParserId::Ruby | ParserId::Php | ParserId::Perl => "dynamic OO / scripting",
+            ParserId::JavaScript | ParserId::TypeScript => "ECMAScript-shaped",
+            ParserId::Go | ParserId::Rust | ParserId::Zig => "systems / curly-brace",
+            ParserId::Dart | ParserId::Lua => "OO / embeddable",
+            ParserId::Clojure | ParserId::Elixir | ParserId::Erlang | ParserId::Haskell => "functional",
+            ParserId::Groovy => "JVM scripting",
+            ParserId::Julia | ParserId::R => "numeric / scientific",
+            ParserId::Nim | ParserId::D | ParserId::Crystal => "ALGOL-descended",
+        }
+    }
+}
+
+/// Map a **lowercase** extension (no leading dot) to a tracked front. `swift` is intentionally absent
+/// so the Swift toolchain path handles `.swift`.
+#[must_use]
+pub fn parser_id_from_extension(ext: &str) -> Option<ParserId> {
+    match ext {
+        "in" => Some(ParserId::In),
+        "c" | "h" => Some(ParserId::C),
+        "cc" | "cpp" | "cxx" | "hpp" | "hxx" | "hh" | "h++" | "ipp" => Some(ParserId::Cpp),
+        "m" => Some(ParserId::ObjC),
+        "mm" => Some(ParserId::ObjCpp),
+        "java" => Some(ParserId::Java),
+        "kt" | "kts" => Some(ParserId::Kotlin),
+        "scala" | "sc" => Some(ParserId::Scala),
+        "cs" => Some(ParserId::CSharp),
+        "fs" | "fsx" | "fsi" => Some(ParserId::FSharp),
+        "vb" => Some(ParserId::VbNet),
+        "py" | "pyi" | "pyw" => Some(ParserId::Python),
+        "rb" | "rake" | "gemspec" => Some(ParserId::Ruby),
+        "php" | "phtml" => Some(ParserId::Php),
+        "pl" | "pm" => Some(ParserId::Perl),
+        "js" | "mjs" | "cjs" | "jsx" => Some(ParserId::JavaScript),
+        "ts" | "tsx" | "mts" | "cts" => Some(ParserId::TypeScript),
+        "go" => Some(ParserId::Go),
+        "rs" => Some(ParserId::Rust),
+        "zig" => Some(ParserId::Zig),
+        "dart" => Some(ParserId::Dart),
+        "lua" => Some(ParserId::Lua),
+        "clj" | "cljs" | "cljc" => Some(ParserId::Clojure),
+        "groovy" => Some(ParserId::Groovy),
+        "ex" | "exs" => Some(ParserId::Elixir),
+        "erl" | "hrl" => Some(ParserId::Erlang),
+        "hs" | "lhs" => Some(ParserId::Haskell),
+        "jl" => Some(ParserId::Julia),
+        "r" => Some(ParserId::R),
+        "nim" => Some(ParserId::Nim),
+        "d" => Some(ParserId::D),
+        "cr" => Some(ParserId::Crystal),
+        _ => None,
+    }
+}
+
+/// Map a magic-line token (already trimmed) after `parser=`. Does not handle `in` / `auto`
+/// (those are handled before this is called).
+#[must_use]
+pub fn parser_id_from_magic_token(token: &str) -> Option<ParserId> {
+    let t = token.trim();
+    parser_id_from_extension(&t.to_ascii_lowercase()).or_else(|| {
+        match t.to_ascii_lowercase().as_str() {
+            "objc" | "objective-c" => Some(ParserId::ObjC),
+            "objc++" | "objcpp" => Some(ParserId::ObjCpp),
+            "csharp" => Some(ParserId::CSharp),
+            "fsharp" => Some(ParserId::FSharp),
+            "kotlin" => Some(ParserId::Kotlin),
+            "typescript" => Some(ParserId::TypeScript),
+            "javascript" => Some(ParserId::JavaScript),
+            "cplusplus" | "c++" => Some(ParserId::Cpp),
+            _ => None,
+        }
+    })
 }
 
 /// CLI `--parser`: `auto` (default) or `in` (see `IN_PARSER=in` env override).
@@ -42,7 +196,8 @@ pub enum ParserCli {
 /// Resolved frontend for `in build`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResolvedBuildParser {
-    InLang(ParserId),
+    /// Core IR path (implemented: [`ParserId::In`]; stubs: all other [`ParserId`]).
+    CoreIr(ParserId),
     /// Swift gather + `sil_emit::emit_textual_sil` (`swiftc` or subset env).
     SwiftSilEmit,
 }
@@ -62,6 +217,7 @@ enum MagicParserDirective {
     ForceIn,
     /// Hand control back to normal `auto` resolution (extension + `IN_PARSER`).
     DeferAuto,
+    UseParser(ParserId),
 }
 
 /// Reads the first line of `path` when it is a regular file; returns `None` for
@@ -82,38 +238,68 @@ fn parse_magic_parser_first_line(line: &str) -> Option<MagicParserDirective> {
     let rest = s.strip_prefix(MAGIC_SHEBANG_PREFIX)?;
     let value = rest.strip_prefix(MAGIC_PARSER_KEY)?;
     if value == "in" {
-        Some(MagicParserDirective::ForceIn)
-    } else if value == "auto" {
-        Some(MagicParserDirective::DeferAuto)
-    } else {
-        None
+        return Some(MagicParserDirective::ForceIn);
     }
+    if value == "auto" {
+        return Some(MagicParserDirective::DeferAuto);
+    }
+    let id = parser_id_from_magic_token(value)?;
+    Some(MagicParserDirective::UseParser(id))
 }
 
 pub fn resolve_parser_id(path: &Path, cli: ParserCli) -> ResolvedBuildParser {
     match cli {
-        ParserCli::In => ResolvedBuildParser::InLang(ParserId::In),
+        ParserCli::In => ResolvedBuildParser::CoreIr(ParserId::In),
         ParserCli::Auto => {
-            if let Some(MagicParserDirective::ForceIn) = read_magic_parser_directive(path) {
-                return ResolvedBuildParser::InLang(ParserId::In);
+            if let Some(m) = read_magic_parser_directive(path) {
+                match m {
+                    MagicParserDirective::ForceIn => {
+                        return ResolvedBuildParser::CoreIr(ParserId::In);
+                    }
+                    MagicParserDirective::UseParser(ParserId::In) => {
+                        return ResolvedBuildParser::CoreIr(ParserId::In);
+                    }
+                    MagicParserDirective::UseParser(id) => {
+                        return ResolvedBuildParser::CoreIr(id);
+                    }
+                    MagicParserDirective::DeferAuto => {}
+                }
             }
             if env_forces_in_parser() {
-                return ResolvedBuildParser::InLang(ParserId::In);
+                return ResolvedBuildParser::CoreIr(ParserId::In);
             }
-            if path.extension().and_then(|s| s.to_str()) == Some("in") {
-                ResolvedBuildParser::InLang(ParserId::In)
-            } else {
-                ResolvedBuildParser::SwiftSilEmit
+            if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+                let el = ext.to_ascii_lowercase();
+                if let Some(id) = parser_id_from_extension(&el) {
+                    return ResolvedBuildParser::CoreIr(id);
+                }
             }
+            ResolvedBuildParser::SwiftSilEmit
         }
     }
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub enum ParserRegistryError {
-    #[error("{0}")]
     Msg(String),
+    NotImplemented(ParserId),
 }
+
+impl fmt::Display for ParserRegistryError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ParserRegistryError::Msg(s) => write!(f, "{s}"),
+            ParserRegistryError::NotImplemented(id) => write!(
+                f,
+                "parser front `{}` ({}) is not implemented — only `.in` lowers to Core IR today; see docs/architecture/parser-surface.md",
+                id.as_str(),
+                id.family_label()
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ParserRegistryError {}
 
 /// Maps a path to core IR via the selected front.
 pub trait SourceParser {
@@ -137,13 +323,10 @@ pub fn parse_with_resolved(
 ) -> Result<Option<UnifiedModule>, ParserRegistryError> {
     match resolved {
         ResolvedBuildParser::SwiftSilEmit => Ok(None),
-        ResolvedBuildParser::InLang(ParserId::In) => InLangParser.parse_to_core(path).map(Some),
-        ResolvedBuildParser::InLang(ParserId::Python) => Err(ParserRegistryError::Msg(
-            "parser front `python` is not implemented".to_string(),
-        )),
-        ResolvedBuildParser::InLang(ParserId::Ruby) => Err(ParserRegistryError::Msg(
-            "parser front `ruby` is not implemented".to_string(),
-        )),
+        ResolvedBuildParser::CoreIr(ParserId::In) => {
+            InLangParser.parse_to_core(path).map(Some)
+        }
+        ResolvedBuildParser::CoreIr(id) => Err(ParserRegistryError::NotImplemented(id)),
     }
 }
 
@@ -176,7 +359,11 @@ mod tests {
             parse_magic_parser_first_line("#!in parser=auto\r\n"),
             Some(MagicParserDirective::DeferAuto)
         );
-        assert_eq!(parse_magic_parser_first_line("#!in parser=swift\n"), None);
+        assert_eq!(
+            parse_magic_parser_first_line("#!in parser=java\n"),
+            Some(MagicParserDirective::UseParser(ParserId::Java))
+        );
+        assert_eq!(parse_magic_parser_first_line("#!in parser=nope\n"), None);
         assert_eq!(parse_magic_parser_first_line("#!/usr/bin/env in\n"), None);
     }
 
@@ -184,7 +371,15 @@ mod tests {
     fn auto_resolves_in_extension() {
         assert!(matches!(
             resolve_parser_id(Path::new("hello.in"), ParserCli::Auto),
-            ResolvedBuildParser::InLang(ParserId::In)
+            ResolvedBuildParser::CoreIr(ParserId::In)
+        ));
+    }
+
+    #[test]
+    fn auto_resolves_java_extension_to_stub() {
+        assert!(matches!(
+            resolve_parser_id(Path::new("Foo.java"), ParserCli::Auto),
+            ResolvedBuildParser::CoreIr(ParserId::Java)
         ));
     }
 
@@ -193,6 +388,14 @@ mod tests {
         assert!(matches!(
             resolve_parser_id(Path::new("App.swift"), ParserCli::Auto),
             ResolvedBuildParser::SwiftSilEmit
+        ));
+    }
+
+    #[test]
+    fn auto_cpp_for_cc() {
+        assert!(matches!(
+            resolve_parser_id(Path::new("lib.cc"), ParserCli::Auto),
+            ResolvedBuildParser::CoreIr(ParserId::Cpp)
         ));
     }
 
@@ -206,7 +409,7 @@ mod tests {
         .expect("write temp");
         assert!(matches!(
             resolve_parser_id(&path, ParserCli::Auto),
-            ResolvedBuildParser::InLang(ParserId::In)
+            ResolvedBuildParser::CoreIr(ParserId::In)
         ));
         let _ = std::fs::remove_file(&path);
     }
@@ -231,7 +434,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         assert!(matches!(
             resolved,
-            ResolvedBuildParser::InLang(ParserId::In)
+            ResolvedBuildParser::CoreIr(ParserId::In)
         ));
     }
 
@@ -245,13 +448,17 @@ mod tests {
         .expect("write temp");
         assert!(matches!(
             resolve_parser_id(&path, ParserCli::Auto),
-            ResolvedBuildParser::InLang(ParserId::In)
+            ResolvedBuildParser::CoreIr(ParserId::In)
         ));
         let _ = std::fs::remove_file(&path);
     }
 
     #[test]
     fn unknown_magic_parser_value_falls_through_to_extension() {
+        let _lock = ENV_LOCK.lock().expect("env lock");
+        unsafe {
+            std::env::remove_var("IN_PARSER");
+        }
         let path = temp_file_path("unknown.swift");
         std::fs::write(&path, "#!in parser=nope\n").expect("write temp");
         assert!(matches!(
@@ -262,28 +469,12 @@ mod tests {
     }
 
     #[test]
-    fn stub_python_front_errors_with_stable_message() {
-        let path = temp_file_path("stub.py");
+    fn stub_java_front_errors_with_stable_variant() {
+        let path = temp_file_path("stub.java");
         std::fs::write(&path, "").ok();
-        let err = parse_with_resolved(ResolvedBuildParser::InLang(ParserId::Python), &path)
-            .expect_err("stub python");
-        assert_eq!(
-            err.to_string(),
-            "parser front `python` is not implemented"
-        );
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn stub_ruby_front_errors_with_stable_message() {
-        let path = temp_file_path("stub.rb");
-        std::fs::write(&path, "").ok();
-        let err = parse_with_resolved(ResolvedBuildParser::InLang(ParserId::Ruby), &path)
-            .expect_err("stub ruby");
-        assert_eq!(
-            err.to_string(),
-            "parser front `ruby` is not implemented"
-        );
+        let err = parse_with_resolved(ResolvedBuildParser::CoreIr(ParserId::Java), &path)
+            .expect_err("stub java");
+        assert!(matches!(err, ParserRegistryError::NotImplemented(ParserId::Java)));
         let _ = std::fs::remove_file(&path);
     }
 
@@ -291,7 +482,7 @@ mod tests {
     fn parse_with_resolved_reads_minimal_in_file() {
         let path = temp_file_path("hello.in");
         std::fs::write(&path, "fn main() -> void\n").expect("write temp .in");
-        let m = parse_with_resolved(ResolvedBuildParser::InLang(ParserId::In), &path)
+        let m = parse_with_resolved(ResolvedBuildParser::CoreIr(ParserId::In), &path)
             .expect("parse")
             .expect("module");
         let _ = std::fs::remove_file(&path);

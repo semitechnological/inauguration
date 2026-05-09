@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use inauguration::hybrid_core::ChangeEvent;
 use inauguration::hybrid_pipeline::run_wave_with_timings;
 use inauguration::hybrid_scheduler::BuildScheduler;
-use inauguration::parser_registry::{self, ParserCli};
+use inauguration::parser_registry::{self, ParserCli, ParserRegistryError};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
@@ -274,9 +274,15 @@ fn run_pipeline_for_path(
                 ))
             })?,
             Err(e) => {
-                return Err(InError::Message(format!(
-                    "{e}. Hint: for `.in` sources use `in build --parser in` or set IN_PARSER=in, and ensure `fn main() -> void` is present."
-                )));
+                let hint = match &e {
+                    ParserRegistryError::NotImplemented(id) => format!(
+                        "This path resolved to the `{}` front ({}). Only `.in` is implemented for Core IR today — use a `.in` or `.swift` file, or see docs/architecture/parser-surface.md.",
+                        id.as_str(),
+                        id.family_label()
+                    ),
+                    _ => "Hint: for `.in` sources use `in build --parser in` or set IN_PARSER=in, and ensure `fn main() -> void` is present.".to_string(),
+                };
+                return Err(InError::Message(format!("{e}. {hint}")));
             }
         };
         let emit_us = emit_start.elapsed().as_micros() as u64;
