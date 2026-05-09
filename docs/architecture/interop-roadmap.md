@@ -6,7 +6,7 @@ This doc ties optional embedding work to concrete crates and repo paths. Nothing
 
 | Piece | Role | Today |
 |-------|------|-------|
-| Swift subset front | Parse/check minimal Swift-ish lines → JSON artifact | **`in ocaml`** → `in-cli/src/swift_subset.rs` (Rust; legacy subcommand name) |
+| Swift subset front | Parse/check minimal Swift-ish lines → JSON artifact; optional **SIL** for `in build` | **`in ocaml`** → `in-cli/src/swift_subset.rs`; **`IN_NATIVE_SWIFT_SIL`** → `in-cli/src/native_swift_sil.rs` (no `swiftc` when subset matches) |
 | Protocol enums (`PatchType`) | Rust + Swift from JSON Schema | **Rust `protocol-gen`** (`cargo run --manifest-path in-cli/Cargo.toml --bin protocol-gen`) is canonical checked-in codegen; CI uses **`scripts/check-protocol-models.sh`**. **V** **`shared/protocol/generate_models.v`** is optional minor-tool parity (same outputs as `protocol-gen` aside from header comment). |
 | Benchmark harness | Swift vs `in` timings + markdown/json reports | **`./scripts/bench-swift.sh`** runs **`v -gc none run $ROOT/scripts/bench_swift.v`** (sets **`BENCH_ROOT`**). |
 | Preview pipeline | NDJSON over Unix socket | **`in dev`** defaults to **Rust** client; **`--preview-client swift`** runs SwiftPM **`swift-preview-host-client`** |

@@ -24,11 +24,13 @@ Hotreload wire formats live under **`shared/protocol`**; regenerators and benchm
 - `scripts`: operational scripts (dev loop, compiler benchmark harness).
 - `docs/architecture`: architecture and local runbooks ([interop roadmap](docs/architecture/interop-roadmap.md)).
 - `docs/benchmarks`: benchmark reports and generated comparison artifacts.
-- `vendor/swift`: optional **gitignored** Swift compiler checkout; see [docs/vendor-swift.md](docs/vendor-swift.md) and **`patches/vendor-swift/`** for inauguration-specific frontend hooks.
+- `apps/native-subset-sample`: tiny Swift-shaped sample for the **in-tree** subset compiler (no **`swiftc`** when **`IN_NATIVE_SWIFT_SIL=only`**).
 
 ## `in build` and SwiftPM staging (macOS/Linux)
 
-Default **`in build`** runs the native hybrid pipeline: it gathers Swift sources (single file, **`Sources/`** tree when a **`Package.swift`** is present), runs **`swiftc -emit-sil`** into textual SIL, then applies inauguration SIL passes on that IR (**`swiftc`** is only the SIL producer until a richer embedding lands). Set **`IN_SWIFTC`** to the **`swiftc`** you built from **`vendor/swift`** (or any fork) so the hybrid path tracks your compiler instead of whatever is on **`PATH`**. With a patched checkout (see **`docs/vendor-swift.md`**), **`IN_SWIFT_EMIT_SIL_STDOUT=1`** asks the frontend to emit canonical SIL on stdout (do not set this against stock **`swiftc`** — it errors on the unknown **`-Xfrontend`** flag). With **`--swiftpm`**, **`in`** additionally runs **`swift build`** and stages outputs for runnable artifacts.
+Default **`in build`** runs the native hybrid pipeline: it gathers Swift sources (single file, **`Sources/`** tree when a **`Package.swift`** is present), emits **textual SIL**, then applies inauguration SIL passes. By default SIL comes from **`swiftc -emit-sil`** (toolchain on **`PATH`**, or override with **`IN_SWIFTC`**).
+
+**In-tree subset (Rust, no `swiftc`):** set **`IN_NATIVE_SWIFT_SIL=try`** to try the line-oriented **`swift_subset`** front first and fall back to **`swiftc`** when the source is not a valid subset. Use **`IN_NATIVE_SWIFT_SIL=only`** to require the in-tree path (CI or hermetic checks). See **`apps/native-subset-sample/App.swift`**. With **`--swiftpm`**, **`in`** additionally runs **`swift build`** and stages outputs for runnable artifacts.
 
 After a successful **`swift build`** inside that optional step (when the target path resolves under a directory that contains `Package.swift`), **`in`** creates predictable links under the package root:
 

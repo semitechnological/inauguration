@@ -296,7 +296,7 @@ fn run_pipeline_for_path(path: &Path, module_id: &str, verbose: bool) -> Result<
             (timings.ast_refresh_us as f64) / 1000.0
         );
         println!(
-            "      - swift frontend (swiftc -emit-sil): {:.3}ms",
+            "      - SIL emit (subset or swiftc): {:.3}ms",
             (timings.swift_frontend_us as f64) / 1000.0
         );
         println!(

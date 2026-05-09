@@ -8,5 +8,6 @@ pub mod hybrid_core;
 pub mod hybrid_pipeline;
 pub mod hybrid_scheduler;
 pub mod hybrid_sil;
+pub mod native_swift_sil;
 pub mod sil_emit;
 pub mod swift_subset;

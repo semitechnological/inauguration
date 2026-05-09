@@ -1,11 +1,11 @@
-//! Extract textual SIL from Swift sources via `swiftc` for native `in build`.
+//! Extract textual SIL for native **`in build`**: optional **in-tree** subset compiler, else **`swiftc`**.
 //!
-//! This shells out to **`swiftc`** (Apple toolchain by default, or **`IN_SWIFTC`**) **only** as a SIL
-//! producer; orchestration, SIL passes, and staging policy stay in `in`.
+//! - **`IN_NATIVE_SWIFT_SIL=try`** (or **`1`**): run the Rust subset front (`native_swift_sil` +
+//!   `swift_subset`) first; on success emit SIL without **`swiftc`**, otherwise fall back to **`swiftc`**.
+//! - **`IN_NATIVE_SWIFT_SIL=only`**: require the in-tree path (no **`swiftc`**).
+//! - **`IN_SWIFTC`**: override the **`swiftc`** binary when falling back.
 //!
-//! Optional **`vendor/swift`** fork (see `docs/vendor-swift.md`): **`IN_SWIFT_EMIT_SIL_STDOUT=1`** adds
-//! **`-Xfrontend -inauguration-emit-sil-to-stdout`** so SIL prints to stdout after Swift’s SIL pipeline.
-//! Stock **`swiftc`** rejects that frontend flag — use only with **`patches/vendor-swift/inauguration-emit-sil-stdout.patch`** applied.
+//! Orchestration and SIL passes stay in `in`; full Swift remains out of tree for non-subset sources.
 
 use std::ffi::OsString;
 use std::fs;
@@ -187,12 +187,6 @@ fn swiftc_executable() -> OsString {
     std::env::var_os("IN_SWIFTC").unwrap_or_else(|| OsString::from("swiftc"))
 }
 
-fn inauguration_emit_sil_via_stdout() -> bool {
-    std::env::var("IN_SWIFT_EMIT_SIL_STDOUT")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
-}
-
 fn append_extra_swiftc_args(cmd: &mut Command) {
     let Ok(flags) = std::env::var("IN_SWIFTC_FLAGS") else {
         return;
@@ -318,6 +312,31 @@ fn module_import_paths_after_build(pkg: &Path) -> Vec<PathBuf> {
     out
 }
 
+fn load_combined_sources(inputs: &[PathBuf]) -> Result<String, SilEmitError> {
+    let mut parts = Vec::with_capacity(inputs.len());
+    for p in inputs {
+        parts.push(fs::read_to_string(p)?);
+    }
+    Ok(parts.join("\n\n"))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NativeSwiftSilMode {
+    Off,
+    Try,
+    Only,
+}
+
+fn native_swift_sil_mode_from_env() -> NativeSwiftSilMode {
+    match std::env::var("IN_NATIVE_SWIFT_SIL") {
+        Ok(v) if v == "try" || v == "1" || v.eq_ignore_ascii_case("true") => NativeSwiftSilMode::Try,
+        Ok(v) if v == "only" || v == "2" || v.eq_ignore_ascii_case("strict") => {
+            NativeSwiftSilMode::Only
+        }
+        _ => NativeSwiftSilMode::Off,
+    }
+}
+
 fn run_swiftc_emit_sil(
     inputs: &[PathBuf],
     module_id: &str,
@@ -328,7 +347,6 @@ fn run_swiftc_emit_sil(
         std::env::temp_dir().join(format!("inauguration-sil-{}.sil", std::process::id()));
 
     let swiftc_bin = swiftc_executable();
-    let stdout_mode = inauguration_emit_sil_via_stdout();
 
     let mut cmd = Command::new(&swiftc_bin);
     cmd.arg("-emit-sil");
@@ -340,10 +358,6 @@ fn run_swiftc_emit_sil(
         cmd.arg("-whole-module-optimization");
     }
     cmd.arg("-o").arg(&out_file);
-
-    if stdout_mode {
-        cmd.arg("-Xfrontend").arg("-inauguration-emit-sil-to-stdout");
-    }
 
     #[cfg(target_os = "macos")]
     if let Some(sdk) = macos_sdk_path() {
@@ -387,26 +401,12 @@ fn run_swiftc_emit_sil(
         )));
     }
 
-    let sil = if stdout_mode {
-        let from_stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-        if !from_stdout.trim().is_empty() {
-            from_stdout
-        } else {
-            fs::read_to_string(&out_file).map_err(|e| {
-                SilEmitError::Msg(format!(
-                    "read emitted SIL: patched swiftc printed empty stdout and temp file unreadable ({e}); stderr:\n{}",
-                    String::from_utf8_lossy(&output.stderr)
-                ))
-            })?
-        }
-    } else {
-        fs::read_to_string(&out_file).map_err(|e| {
-            SilEmitError::Msg(format!(
-                "read emitted SIL: {e}; stderr:\n{}",
-                String::from_utf8_lossy(&output.stderr)
-            ))
-        })?
-    };
+    let sil = fs::read_to_string(&out_file).map_err(|e| {
+        SilEmitError::Msg(format!(
+            "read emitted SIL: {e}; stderr:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        ))
+    })?;
     let _ = fs::remove_file(&out_file);
 
     if sil.trim().is_empty() {
@@ -425,11 +425,28 @@ fn run_swiftc_emit_sil(
 /// nearest `Package.swift` root. Clang `systemLibrary` deps get `-Xcc -fmodule-map-file` / `-Xcc -I`
 /// from `<pkg>/generated` when present (skips duplicate `module.modulemap`).
 ///
+/// When **`IN_NATIVE_SWIFT_SIL`** is **`try`** or **`only`**, attempts in-tree subset SIL first.
+///
 /// Tries `swiftc -emit-sil` directly; if that fails for package dependency reasons and we know a
 /// `Package.swift` root, runs one **`swift build`** to populate `.build/**/Modules`, then retries
 /// with `-I` for those directories (SwiftPM is dependency prep only, not the SIL producer path).
 pub fn emit_textual_sil(path: &Path, module_id: &str) -> Result<String, SilEmitError> {
     let inputs = resolve_swift_inputs(path)?;
+    let combined = load_combined_sources(&inputs)?;
+
+    match native_swift_sil_mode_from_env() {
+        NativeSwiftSilMode::Only => {
+            return crate::native_swift_sil::emit_in_tree_sil_or_diagnose(&combined, module_id)
+                .map_err(SilEmitError::Msg);
+        }
+        NativeSwiftSilMode::Try => {
+            if let Some(sil) = crate::native_swift_sil::try_emit_in_tree_sil(&combined, module_id) {
+                return Ok(sil);
+            }
+        }
+        NativeSwiftSilMode::Off => {}
+    }
+
     let pkg_hint = nearest_package_root(path);
     let pkg_clang = pkg_hint.as_deref();
     match run_swiftc_emit_sil(&inputs, module_id, &[], pkg_clang) {
@@ -481,5 +498,18 @@ mod tests {
         assert!(v.contains(&a));
         assert!(v.contains(&b));
         let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn native_subset_sample_emits_sil_without_swiftc() {
+        let sample = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../apps/native-subset-sample/App.swift");
+        if !sample.exists() {
+            return;
+        }
+        let src = fs::read_to_string(&sample).unwrap();
+        let sil = crate::native_swift_sil::emit_in_tree_sil_or_diagnose(&src, "App").unwrap();
+        assert!(sil.contains("sil @main"));
+        assert!(sil.contains("function_ref @helper"));
     }
 }
