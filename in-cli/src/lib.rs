@@ -3,6 +3,7 @@
 #[cfg(unix)]
 pub mod preview_client;
 
+pub mod compiler;
 pub mod core_ir;
 pub mod hotreload;
 pub mod hybrid_core;
@@ -18,6 +19,7 @@ pub mod swift_subset;
 
 #[cfg(test)]
 mod in_pipeline_tests {
+    use crate::compiler::{driver, icore};
     use crate::in_lang_parse;
     use crate::lower_core;
 
@@ -47,5 +49,19 @@ fn main() -> void { let seed: Int = 0; return; }
         assert!(sil.contains("integer_literal $Builtin.Int64, 0"));
         assert!(sil.contains("function_ref @note"));
         assert!(sil.contains("return %"));
+    }
+
+    #[test]
+    fn minimal_icore_json_to_sil_contains_main() {
+        let j = r#"{
+            "icoreVersion": 1,
+            "decls": [
+                { "kind": "struct", "name": "S", "fields": [{ "name": "x", "type": "Int" }] },
+                { "kind": "function", "name": "main", "params": [], "return": "Void", "body": [] }
+            ]
+        }"#;
+        let module = icore::parse_icore_source(j).expect("icore");
+        let sil = driver::lower_unified_module(&module, "App");
+        assert!(sil.contains("sil @main"), "sil:\n{sil}");
     }
 }

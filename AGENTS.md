@@ -41,6 +41,7 @@ in bench
 ## Code ownership map
 
 - `in-cli/src/swift_subset.rs`: Swift subset parser/checker/artifact JSON
+- `in-cli/src/compiler/*`: multi-front driver, **icore** JSON → Core IR
 - `compiler/rust-driver/crates/pipeline`: stage model + artifact ingestion
 - `compiler/rust-driver/crates/sil`: SIL analysis/transforms
 - `runtime/hotreload-daemon`: watch/decision/metrics loop

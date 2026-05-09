@@ -46,7 +46,7 @@ enum Commands {
         #[arg(
             long,
             default_value = ".",
-            help = "Source path: .in file, .swift file, or package directory"
+            help = "Source path: .in, .icore, .swift file, or package directory"
         )]
         path: String,
         #[arg(long, default_value = "App")]
@@ -67,7 +67,7 @@ enum Commands {
             long,
             value_enum,
             default_value_t = ParserCli::Auto,
-            help = "`auto`: `.in` extension or IN_PARSER=in uses the .in front; `in` forces it"
+            help = "`auto`: extension + `IN_PARSER` pick Core IR vs Swift; `in` / `icore` force `.in` or JSON icore"
         )]
         parser: ParserCli,
     },
@@ -267,20 +267,22 @@ fn run_pipeline_for_path(
     let (sil_source, swift_frontend_emit_us) = {
         let emit_start = std::time::Instant::now();
         let sil_source = match parser_registry::parse_with_resolved(resolved, path) {
-            Ok(Some(module)) => inauguration::lower_core::lower_to_textual_sil(&module, module_id),
+            Ok(Some(module)) => {
+                inauguration::compiler::driver::lower_unified_module(&module, module_id)
+            }
             Ok(None) => inauguration::sil_emit::emit_textual_sil(path, module_id).map_err(|e| {
                 InError::Message(format!(
-                    "{e}. Hint: use `in build --swiftpm` for SwiftPM emit, pass extra `swiftc` flags via IN_SWIFTC_FLAGS, or for `.in` sources use `in build --parser in` or set IN_PARSER=in."
+                    "{e}. Hint: use `in build --swiftpm` for SwiftPM emit, pass extra `swiftc` flags via IN_SWIFTC_FLAGS, or for Core IR use `.in` / `.icore` (`--parser in|icore` or `IN_PARSER=in|icore`)."
                 ))
             })?,
             Err(e) => {
                 let hint = match &e {
                     ParserRegistryError::NotImplemented(id) => format!(
-                        "This path resolved to the `{}` front ({}). Only `.in` is implemented for Core IR today — use a `.in` or `.swift` file, or see docs/architecture/parser-surface.md.",
+                        "This path resolved to the `{}` front ({}). Use `.in`, `.icore`, or `.swift`, or see docs/architecture/parser-surface.md.",
                         id.as_str(),
                         id.family_label()
                     ),
-                    _ => "Hint: for `.in` sources use `in build --parser in` or set IN_PARSER=in, and ensure `fn main() -> void` is present.".to_string(),
+                    _ => "Hint: for `.in` use `fn main() -> void`; for `.icore` see docs/architecture/general-compiler.md.".to_string(),
                 };
                 return Err(InError::Message(format!("{e}. {hint}")));
             }
@@ -991,6 +993,16 @@ mod tests {
             .expect("cli parse");
         match cli.command {
             Commands::Build { parser, .. } => assert!(matches!(parser, ParserCli::In)),
+            _ => panic!("expected build command"),
+        }
+    }
+
+    #[test]
+    fn parse_build_parser_icore_flag() {
+        let cli = Cli::try_parse_from(["in", "build", "--path", "m.icore", "--parser", "icore"])
+            .expect("cli parse");
+        match cli.command {
+            Commands::Build { parser, .. } => assert!(matches!(parser, ParserCli::Icore)),
             _ => panic!("expected build command"),
         }
     }

@@ -49,3 +49,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: in build (.in v0 sample)
         run: ./scripts/check-in-lang-sample.sh
+
+  icore-sample:
+    name: icore JSON sample (no swiftc)
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: in build (.icore sample)
+        run: ./scripts/check-icore-sample.sh

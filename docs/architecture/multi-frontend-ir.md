@@ -27,7 +27,8 @@ Rust type: `in_cli::core_ir::UnifiedModule`.
 
 | Id | Source | Entry |
 |----|--------|--------|
-| `In` | `.in` files (and `#!in parser=in`) | `in_lang_parse` → `UnifiedModule` → `lower_core::lower_to_textual_sil` |
+| `In` | `.in` files (and `#!in parser=in`) | `in_lang_parse` → `UnifiedModule` → `compiler::driver` / `lower_core` |
+| `Icore` | `.icore` files (and `#!in parser=icore`) | `compiler::icore` → `UnifiedModule` → same lowering |
 | `c`, `cpp`, `java`, `python`, … | Known extensions or `#!in parser=<slug>` | **Stub** — [`ParserRegistryError::NotImplemented`](../../in-cli/src/parser_registry.rs); see [parser-surface.md](parser-surface.md). |
 
 ## Resolution order for `in build`
@@ -42,6 +43,7 @@ See **`in-cli/src/parser_registry.rs`** (`resolve_parser_id`) and [parser-surfac
 
 ## Related
 
+- [general-compiler.md](general-compiler.md) — multi-language driver, **icore**, roadmap.  
 - [parser-surface.md](parser-surface.md) — extension + magic-line routing, stub fronts.  
 - [in-language.md](in-language.md) — `.in` v0 vs v0.2 targets, grammar, `hybrid_sil` note.
 - [native-swift-master-plan.md](native-swift-master-plan.md) — Rust-first Swift / subset roadmap.

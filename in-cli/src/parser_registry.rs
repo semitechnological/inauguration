@@ -2,31 +2,33 @@
 //!
 //! ## Precedence (narrower wins first)
 //!
-//! 1. **`--parser in`**: always selects the `.in` v0 front ([`ParserId::In`]).
+//! 1. **`--parser in`** / **`--parser icore`**: force the `.in` or JSON **icore** front.
 //! 2. **`--parser auto`** and the path is an **existing regular file**: read the first line.
 //!    If it starts with `#!in parser=` (after trimming):
 //!    - `parser=in` → `.in` front (overrides extension and `IN_PARSER`).
 //!    - `parser=auto` → continue with normal `auto` rules below.
 //!    - `parser=<slug>` for any other known slug → that front (often a **stub** until lowered to
 //!      Core IR); see [`ParserId::as_str`] and [parser-surface.md](../../docs/architecture/parser-surface.md).
-//! 3. **`IN_PARSER=in`** (case-insensitive): `.in` front.
-//! 4. **Known extension** (`.in`, `.java`, `.cpp`, `.py`, …): [`ResolvedBuildParser::CoreIr`]
-//!    with the matching [`ParserId`] (only [`ParserId::In`] is implemented).
+//! 3. **`IN_PARSER=in`** or **`IN_PARSER=icore`** (case-insensitive): force that Core IR front.
+//! 4. **Known extension** (`.in`, `.icore`, `.java`, …): [`ResolvedBuildParser::CoreIr`]
+//!    with the matching [`ParserId`] (implemented: [`ParserId::In`], [`ParserId::Icore`]; others stub).
 //! 5. Otherwise: Swift SIL emit path (`swiftc` or subset env).
 
 use crate::core_ir::UnifiedModule;
 use crate::in_lang_parse;
 use clap::ValueEnum;
-use std::io::{BufRead, BufReader};
 use std::fmt;
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 
-/// In-tree source front identifier. Most variants are **stubs** today: only [`ParserId::In`]
-/// parses to [`UnifiedModule`]; everything else returns [`ParserRegistryError::NotImplemented`].
+/// In-tree source front identifier. Implemented fronts: [`ParserId::In`], [`ParserId::Icore`].
+/// Other variants return [`ParserRegistryError::NotImplemented`] until a parser lands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ParserId {
     /// `.in` v0 — implemented.
     In,
+    /// JSON **icore** interchange — implemented ([`crate::compiler::icore`]).
+    Icore,
     // C family
     C,
     Cpp,
@@ -71,6 +73,7 @@ impl ParserId {
     pub const fn as_str(self) -> &'static str {
         match self {
             ParserId::In => "in",
+            ParserId::Icore => "icore",
             ParserId::C => "c",
             ParserId::Cpp => "cpp",
             ParserId::ObjC => "objc",
@@ -109,14 +112,19 @@ impl ParserId {
     pub const fn family_label(self) -> &'static str {
         match self {
             ParserId::In => "inauguration .in",
+            ParserId::Icore => "JSON Core IR (icore)",
             ParserId::C | ParserId::Cpp | ParserId::ObjC | ParserId::ObjCpp => "C-like",
             ParserId::Java | ParserId::Kotlin | ParserId::Scala => "JVM / class-based",
             ParserId::CSharp | ParserId::FSharp | ParserId::VbNet => ".NET",
-            ParserId::Python | ParserId::Ruby | ParserId::Php | ParserId::Perl => "dynamic OO / scripting",
+            ParserId::Python | ParserId::Ruby | ParserId::Php | ParserId::Perl => {
+                "dynamic OO / scripting"
+            }
             ParserId::JavaScript | ParserId::TypeScript => "ECMAScript-shaped",
             ParserId::Go | ParserId::Rust | ParserId::Zig => "systems / curly-brace",
             ParserId::Dart | ParserId::Lua => "OO / embeddable",
-            ParserId::Clojure | ParserId::Elixir | ParserId::Erlang | ParserId::Haskell => "functional",
+            ParserId::Clojure | ParserId::Elixir | ParserId::Erlang | ParserId::Haskell => {
+                "functional"
+            }
             ParserId::Groovy => "JVM scripting",
             ParserId::Julia | ParserId::R => "numeric / scientific",
             ParserId::Nim | ParserId::D | ParserId::Crystal => "ALGOL-descended",
@@ -130,6 +138,7 @@ impl ParserId {
 pub fn parser_id_from_extension(ext: &str) -> Option<ParserId> {
     match ext {
         "in" => Some(ParserId::In),
+        "icore" => Some(ParserId::Icore),
         "c" | "h" => Some(ParserId::C),
         "cc" | "cpp" | "cxx" | "hpp" | "hxx" | "hh" | "h++" | "ipp" => Some(ParserId::Cpp),
         "m" => Some(ParserId::ObjC),
@@ -180,6 +189,7 @@ pub fn parser_id_from_magic_token(token: &str) -> Option<ParserId> {
             "typescript" => Some(ParserId::TypeScript),
             "javascript" => Some(ParserId::JavaScript),
             "cplusplus" | "c++" => Some(ParserId::Cpp),
+            "icore" => Some(ParserId::Icore),
             _ => None,
         }
     })
@@ -191,22 +201,29 @@ pub enum ParserCli {
     #[default]
     Auto,
     In,
+    /// JSON [`ParserId::Icore`] interchange (`.icore` files).
+    Icore,
 }
 
 /// Resolved frontend for `in build`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResolvedBuildParser {
-    /// Core IR path (implemented: [`ParserId::In`]; stubs: all other [`ParserId`]).
+    /// Core IR path (implemented: [`ParserId::In`], [`ParserId::Icore`]; stubs: other [`ParserId`]).
     CoreIr(ParserId),
     /// Swift gather + `sil_emit::emit_textual_sil` (`swiftc` or subset env).
     SwiftSilEmit,
 }
 
-fn env_forces_in_parser() -> bool {
-    matches!(
-        std::env::var("IN_PARSER").ok().as_deref(),
-        Some(s) if s.eq_ignore_ascii_case("in")
-    )
+/// `IN_PARSER=in` or `IN_PARSER=icore` forces the matching Core IR front (any file path).
+fn env_core_ir_parser_override() -> Option<ParserId> {
+    let s = std::env::var("IN_PARSER").ok()?;
+    if s.eq_ignore_ascii_case("in") {
+        Some(ParserId::In)
+    } else if s.eq_ignore_ascii_case("icore") {
+        Some(ParserId::Icore)
+    } else {
+        None
+    }
 }
 
 const MAGIC_SHEBANG_PREFIX: &str = "#!in ";
@@ -250,6 +267,7 @@ fn parse_magic_parser_first_line(line: &str) -> Option<MagicParserDirective> {
 pub fn resolve_parser_id(path: &Path, cli: ParserCli) -> ResolvedBuildParser {
     match cli {
         ParserCli::In => ResolvedBuildParser::CoreIr(ParserId::In),
+        ParserCli::Icore => ResolvedBuildParser::CoreIr(ParserId::Icore),
         ParserCli::Auto => {
             if let Some(m) = read_magic_parser_directive(path) {
                 match m {
@@ -265,8 +283,8 @@ pub fn resolve_parser_id(path: &Path, cli: ParserCli) -> ResolvedBuildParser {
                     MagicParserDirective::DeferAuto => {}
                 }
             }
-            if env_forces_in_parser() {
-                return ResolvedBuildParser::CoreIr(ParserId::In);
+            if let Some(id) = env_core_ir_parser_override() {
+                return ResolvedBuildParser::CoreIr(id);
             }
             if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
                 let el = ext.to_ascii_lowercase();
@@ -291,7 +309,7 @@ impl fmt::Display for ParserRegistryError {
             ParserRegistryError::Msg(s) => write!(f, "{s}"),
             ParserRegistryError::NotImplemented(id) => write!(
                 f,
-                "parser front `{}` ({}) is not implemented — only `.in` lowers to Core IR today; see docs/architecture/parser-surface.md",
+                "parser front `{}` ({}) is not implemented — use `.in`, `.icore`, or `.swift`; see docs/architecture/parser-surface.md",
                 id.as_str(),
                 id.family_label()
             ),
@@ -323,8 +341,11 @@ pub fn parse_with_resolved(
 ) -> Result<Option<UnifiedModule>, ParserRegistryError> {
     match resolved {
         ResolvedBuildParser::SwiftSilEmit => Ok(None),
-        ResolvedBuildParser::CoreIr(ParserId::In) => {
-            InLangParser.parse_to_core(path).map(Some)
+        ResolvedBuildParser::CoreIr(ParserId::In) => InLangParser.parse_to_core(path).map(Some),
+        ResolvedBuildParser::CoreIr(ParserId::Icore) => {
+            crate::compiler::icore::parse_icore_file(path)
+                .map_err(ParserRegistryError::Msg)
+                .map(Some)
         }
         ResolvedBuildParser::CoreIr(id) => Err(ParserRegistryError::NotImplemented(id)),
     }
@@ -363,6 +384,10 @@ mod tests {
             parse_magic_parser_first_line("#!in parser=java\n"),
             Some(MagicParserDirective::UseParser(ParserId::Java))
         );
+        assert_eq!(
+            parse_magic_parser_first_line("#!in parser=icore\n"),
+            Some(MagicParserDirective::UseParser(ParserId::Icore))
+        );
         assert_eq!(parse_magic_parser_first_line("#!in parser=nope\n"), None);
         assert_eq!(parse_magic_parser_first_line("#!/usr/bin/env in\n"), None);
     }
@@ -380,6 +405,22 @@ mod tests {
         assert!(matches!(
             resolve_parser_id(Path::new("Foo.java"), ParserCli::Auto),
             ResolvedBuildParser::CoreIr(ParserId::Java)
+        ));
+    }
+
+    #[test]
+    fn auto_resolves_icore_extension() {
+        assert!(matches!(
+            resolve_parser_id(Path::new("module.icore"), ParserCli::Auto),
+            ResolvedBuildParser::CoreIr(ParserId::Icore)
+        ));
+    }
+
+    #[test]
+    fn parser_cli_icore_forces_icore() {
+        assert!(matches!(
+            resolve_parser_id(Path::new("anything.swift"), ParserCli::Icore),
+            ResolvedBuildParser::CoreIr(ParserId::Icore)
         ));
     }
 
@@ -402,11 +443,7 @@ mod tests {
     #[test]
     fn magic_parser_in_overrides_non_in_extension() {
         let path = temp_file_path("magic.swift");
-        std::fs::write(
-            &path,
-            "#!in parser=in\nfn main() -> void\n",
-        )
-        .expect("write temp");
+        std::fs::write(&path, "#!in parser=in\nfn main() -> void\n").expect("write temp");
         assert!(matches!(
             resolve_parser_id(&path, ParserCli::Auto),
             ResolvedBuildParser::CoreIr(ParserId::In)
@@ -418,11 +455,7 @@ mod tests {
     fn magic_parser_auto_defers_to_in_parser_env() {
         let _lock = ENV_LOCK.lock().expect("env lock");
         let path = temp_file_path("defer.swift");
-        std::fs::write(
-            &path,
-            "#!in parser=auto\nfn main() -> void\n",
-        )
-        .expect("write temp");
+        std::fs::write(&path, "#!in parser=auto\nfn main() -> void\n").expect("write temp");
         // Rust 2024: mutating process environment is `unsafe` (see `set_var` docs).
         unsafe {
             std::env::set_var("IN_PARSER", "in");
@@ -441,11 +474,7 @@ mod tests {
     #[test]
     fn magic_parser_auto_defers_to_dot_in_extension() {
         let path = temp_file_path("defer.in");
-        std::fs::write(
-            &path,
-            "#!in parser=auto\nfn main() -> void\n",
-        )
-        .expect("write temp");
+        std::fs::write(&path, "#!in parser=auto\nfn main() -> void\n").expect("write temp");
         assert!(matches!(
             resolve_parser_id(&path, ParserCli::Auto),
             ResolvedBuildParser::CoreIr(ParserId::In)
@@ -474,7 +503,10 @@ mod tests {
         std::fs::write(&path, "").ok();
         let err = parse_with_resolved(ResolvedBuildParser::CoreIr(ParserId::Java), &path)
             .expect_err("stub java");
-        assert!(matches!(err, ParserRegistryError::NotImplemented(ParserId::Java)));
+        assert!(matches!(
+            err,
+            ParserRegistryError::NotImplemented(ParserId::Java)
+        ));
         let _ = std::fs::remove_file(&path);
     }
 

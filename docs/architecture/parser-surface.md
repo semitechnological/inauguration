@@ -1,12 +1,12 @@
 # Parser surface (`in build`)
 
-`in-cli/src/parser_registry.rs` resolves which **front** runs before the hybrid SIL pipeline. Only **`.in`** parses into [`UnifiedModule`](multi-frontend-ir.md) today; every other tracked language is a **stub** (clear error, no `swiftc`).
+`in-cli/src/parser_registry.rs` resolves which **front** runs before the hybrid SIL pipeline. **Implemented** Core IR fronts: **`.in`**, **`.icore` (JSON)**. Every other tracked extension is a **stub** (clear error, no `swiftc`) until a parser lands — see [general-compiler.md](general-compiler.md).
 
 Resolution order is documented in the `parser_registry` module rustdoc. Summary:
 
-1. `--parser in` → `.in` front  
+1. `--parser in` / `--parser icore` → force that Core IR front  
 2. Magic first line `#!in parser=…` on a regular file  
-3. `IN_PARSER=in`  
+3. `IN_PARSER=in` or `IN_PARSER=icore`  
 4. Extension map below (case-insensitive)  
 5. Otherwise → Swift SIL emit (`.swift`, packages, `swiftc` / subset env)
 
@@ -21,6 +21,7 @@ Resolution order is documented in the `parser_registry` module rustdoc. Summary:
 | Family | Extensions | `ParserId` |
 |--------|------------|------------|
 | inauguration | `in` | `in` (**implemented**) |
+| Core IR JSON | `icore` | `icore` (**implemented** — [general-compiler.md](general-compiler.md)) |
 | C / headers | `c`, `h` | `c` |
 | C++ | `cc`, `cpp`, `cxx`, `hpp`, `hxx`, `hh`, `h++`, `ipp` | `cpp` |
 | Objective-C | `m` | `objc` |
@@ -59,4 +60,4 @@ Resolution order is documented in the `parser_registry` module rustdoc. Summary:
 
 ## Compiler roadmap (honest scope)
 
-Implementing “all” OO and C-like languages means, per language: lexer/grammar → AST → [`UnifiedModule`](multi-frontend-ir.md) or an extended IR → [`lower_core`](../in-cli/src/lower_core.rs) → textual SIL `hybrid_sil` accepts. That is **large, parallel work** (see [native-swift-master-plan.md](native-swift-master-plan.md) for the Swift-shaped slice). This document tracks **routing and names** so CI, agents, and contributors share one enum and extension table as fronts land.
+Implementing every OO / C-like language means, per language: lexer/grammar → AST → [`UnifiedModule`](multi-frontend-ir.md) (or **icore** JSON) → [`compiler::driver` / `lower_core`](../in-cli/src/compiler/driver.rs) → textual SIL. That is **large, parallel work**; [general-compiler.md](general-compiler.md) is the umbrella roadmap. This document tracks **routing and names** so CI, agents, and contributors share one enum and extension table as fronts land.
