@@ -26,7 +26,9 @@ Run all:
 in test
 ```
 
-Use an `in` binary built from this repo. From a checkout, run **`in update`** (alias **`in self-update`**) to reinstall via `cargo install --path in-cli --locked` (honours **`IN_INSTALL_DIR`** like `./install.sh`). You can still use `./install.sh` or `cargo install --path in-cli --force` manually. A stale globally installed `in` (older than `in-cli` in your tree) can fail mid-suite with `No such file or directory` because `in test` must match the workspace layout.
+Use an `in` binary built from this repo. From a checkout, run **`in update`** (alias **`in self-update`**) to reinstall via `cargo install --path in-cli --locked` (honours **`IN_INSTALL_DIR`** like `./install.sh`). Outside a checkout, `in update` falls back to remote `install.sh` from `https://raw.githubusercontent.com/${IN_REPO:-semitechnological/inauguration}/master/install.sh` on Unix hosts. You can still use `./install.sh` or `cargo install --path in-cli --force` manually. A stale globally installed `in` (older than `in-cli` in your tree) can fail mid-suite with `No such file or directory` because `in test` must match the workspace layout.
+
+Set **`IN_TEST_SKIP_SWIFT=1`** (or **`true`**, case-insensitive) to skip the `runtime/swift-preview-host` `swift package clean` and `swift test` steps during `in test` when Swift is unavailable; all other test steps still run.
 
 If touching benchmarks or runtime timing, also run:
 

@@ -114,7 +114,16 @@ pub fn plan_patch(path: &str, changed_symbols: &[String]) -> ReloadPatch {
     plan_patch_with_sil_graph(path, changed_symbols, None)
 }
 
-/// Plan reload patch shape. When **`sil_call_edges`** is **`Some(n)`** with **`n > 0`** (subset SIL had `function_ref` edges) and the path is not **`App.swift`**, **`FullModule`** downgrades to **`ViewBody`** so preview can try hot patch instead of forced restart.
+fn is_app_entry_path(path: &str) -> bool {
+    // Only treat the canonical entrypoint basename as the app root;
+    // names like SampleApp.swift should still be eligible for hot patching.
+    Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name == "App.swift")
+}
+
+/// Plan reload patch shape. When **`sil_call_edges`** is **`Some(n)`** with **`n > 0`** (subset SIL had `function_ref` edges) and the path is not the canonical **`App.swift`** entrypoint (basename only, not `*App.swift`), **`FullModule`** downgrades to **`ViewBody`** so preview can try hot patch instead of forced restart.
 pub fn plan_patch_with_sil_graph(
     path: &str,
     changed_symbols: &[String],
@@ -129,11 +138,11 @@ pub fn plan_patch_with_sil_graph(
     };
     if matches!(patch_type, PatchType::FullModule)
         && sil_call_edges.is_some_and(|n| n > 0)
-        && !path.ends_with("App.swift")
+        && !is_app_entry_path(path)
     {
         patch_type = PatchType::ViewBody;
     }
-    let compatible = !path.ends_with("App.swift") && !matches!(patch_type, PatchType::FullModule);
+    let compatible = !is_app_entry_path(path) && !matches!(patch_type, PatchType::FullModule);
     ReloadPatch {
         target: path.to_string(),
         patch_type,
@@ -213,7 +222,7 @@ impl QueryGraph {
 
 fn infer_deps_for_path(path: &str) -> HashSet<String> {
     let mut deps = HashSet::new();
-    if path.ends_with("App.swift") {
+    if is_app_entry_path(path) {
         return deps;
     }
     if let Some((prefix, _)) = path.rsplit_once('/') {
@@ -482,7 +491,7 @@ mod tests {
 
     #[test]
     fn app_file_forces_restart_path() {
-        let patch = plan_patch("SampleApp.swift", &[]);
+        let patch = plan_patch("App.swift", &[]);
         assert!(!patch.compatible);
     }
 
@@ -501,6 +510,13 @@ mod tests {
         let p = plan_patch_with_sil_graph("Sources/App.swift", &[], Some(5));
         assert_eq!(p.patch_type, PatchType::FullModule);
         assert!(!p.compatible);
+    }
+
+    #[test]
+    fn sil_graph_allows_non_entrypoint_names_ending_with_app_swift() {
+        let p = plan_patch_with_sil_graph("Sources/SampleApp.swift", &[], Some(1));
+        assert_eq!(p.patch_type, PatchType::ViewBody);
+        assert!(p.compatible);
     }
 
     #[test]

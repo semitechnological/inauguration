@@ -165,7 +165,10 @@ fn run() -> Result<()> {
             debounce_ms,
         ),
         Commands::Test => cmd_test(&workspace_root(invocation_cwd.clone())?),
-        Commands::Update => cmd_update(&workspace_root(invocation_cwd.clone())?),
+        Commands::Update => match workspace_root(invocation_cwd.clone()) {
+            Ok(root) => cmd_update(&root),
+            Err(_) => cmd_update_remote(),
+        },
         Commands::Doctor => cmd_doctor(),
         Commands::Bench { metrics } => {
             cmd_bench(&workspace_root(invocation_cwd.clone())?, &metrics)
@@ -709,19 +712,23 @@ fn cmd_test(root: &Path) -> Result<()> {
             .arg("test")
             .current_dir(root.join("in-cli")),
     )?;
-    run_test_step(
-        "runtime/swift-preview-host (swift package clean)",
-        Command::new("swift")
-            .arg("package")
-            .arg("clean")
-            .current_dir(root.join("runtime").join("swift-preview-host")),
-    )?;
-    run_test_step(
-        "runtime/swift-preview-host (swift test)",
-        Command::new("swift")
-            .arg("test")
-            .current_dir(root.join("runtime").join("swift-preview-host")),
-    )?;
+    if skip_swift_tests() {
+        eprintln!("Skipping runtime/swift-preview-host steps (IN_TEST_SKIP_SWIFT set).");
+    } else {
+        run_test_step(
+            "runtime/swift-preview-host (swift package clean)",
+            Command::new("swift")
+                .arg("package")
+                .arg("clean")
+                .current_dir(root.join("runtime").join("swift-preview-host")),
+        )?;
+        run_test_step(
+            "runtime/swift-preview-host (swift test)",
+            Command::new("swift")
+                .arg("test")
+                .current_dir(root.join("runtime").join("swift-preview-host")),
+        )?;
+    }
     run_test_step(
         "runtime/hotreload-daemon (cargo test)",
         Command::new("cargo")
@@ -766,6 +773,55 @@ fn cmd_update(root: &Path) -> Result<()> {
         start.elapsed().as_secs_f64()
     );
     Ok(())
+}
+
+fn github_repo_slug_for_remote_install() -> String {
+    const DEFAULT: &str = "semitechnological/inauguration";
+    let raw = std::env::var("IN_REPO").unwrap_or_default();
+    let s = raw.trim();
+    if s.is_empty() {
+        return DEFAULT.to_string();
+    }
+    let ok = s.contains('/')
+        && s.matches('/').count() == 1
+        && !s.starts_with('/')
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '/');
+    if ok {
+        s.to_string()
+    } else {
+        eprintln!("warning: IN_REPO is not a valid owner/repo slug; using {DEFAULT}");
+        DEFAULT.to_string()
+    }
+}
+
+fn cmd_update_remote() -> Result<()> {
+    #[cfg(unix)]
+    {
+        let repo = github_repo_slug_for_remote_install();
+        let url = format!("https://raw.githubusercontent.com/{repo}/master/install.sh");
+        println!("No local inauguration checkout found; running remote install.sh ...");
+        println!("Fetching: {url}");
+        let snippet = format!("set -euo pipefail; curl -fsSL \"{url}\" | bash");
+        run_cmd(Command::new("bash").arg("-c").arg(snippet))
+    }
+    #[cfg(not(unix))]
+    {
+        Err(InError::Message(
+            "`in update` requires Unix for remote install.sh fallback; run from an inauguration checkout on this platform.".to_string(),
+        ))
+    }
+}
+
+fn parse_env_bool(value: &str) -> bool {
+    let trimmed = value.trim();
+    trimmed == "1" || trimmed.eq_ignore_ascii_case("true")
+}
+
+fn skip_swift_tests() -> bool {
+    std::env::var("IN_TEST_SKIP_SWIFT")
+        .ok()
+        .is_some_and(|value| parse_env_bool(&value))
 }
 
 fn run_test_step(step: &'static str, cmd: &mut Command) -> Result<()> {
@@ -1113,6 +1169,18 @@ mod tests {
             let cli = Cli::try_parse_from(argv).expect("cli parse");
             assert!(matches!(cli.command, Commands::Update));
         }
+    }
+
+    #[test]
+    fn parse_env_bool_truthy_and_falsey_values() {
+        assert!(super::parse_env_bool("1"));
+        assert!(super::parse_env_bool("true"));
+        assert!(super::parse_env_bool("TRUE"));
+        assert!(super::parse_env_bool(" True "));
+        assert!(!super::parse_env_bool("0"));
+        assert!(!super::parse_env_bool("false"));
+        assert!(!super::parse_env_bool("yes"));
+        assert!(!super::parse_env_bool(""));
     }
 
     #[cfg(unix)]
