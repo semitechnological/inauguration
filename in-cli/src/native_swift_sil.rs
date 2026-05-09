@@ -86,9 +86,7 @@ fn program_to_textual_sil(program: &[Decl], _module_id: &str) -> String {
         ));
     }
     let ret = ssa;
-    sil.push_str(&format!(
-        "%{ret} = integer_literal $Builtin.Int64, 0\n"
-    ));
+    sil.push_str(&format!("%{ret} = integer_literal $Builtin.Int64, 0\n"));
     sil
 }
 
@@ -113,7 +111,10 @@ pub fn try_emit_in_tree_sil(combined_sources: &str, module_id: &str) -> Option<S
     Some(program_to_textual_sil(&program, module_id))
 }
 
-pub fn emit_in_tree_sil_or_diagnose(combined_sources: &str, module_id: &str) -> Result<String, String> {
+pub fn emit_in_tree_sil_or_diagnose(
+    combined_sources: &str,
+    module_id: &str,
+) -> Result<String, String> {
     let filtered = filter_top_level_decl_lines(combined_sources);
     let program = swift_subset::parse(&filtered);
     let diags: Vec<Diagnostic> = swift_subset::check(&program);
@@ -132,9 +133,7 @@ Subset expects top-level `struct`/`func` lines only (see `swift_subset` + `nativ
         .iter()
         .any(|d| matches!(d, Decl::Function(f) if f.name == "main"));
     if !has_main {
-        return Err(
-            "IN_NATIVE_SWIFT_SIL=only: missing `func main` at top level (subset)".into(),
-        );
+        return Err("IN_NATIVE_SWIFT_SIL=only: missing `func main` at top level (subset)".into());
     }
     if program.is_empty() {
         return Err("IN_NATIVE_SWIFT_SIL=only: no top-level decls after filtering".into());

@@ -493,9 +493,7 @@ mod tests {
 
     #[test]
     fn parse_access_modifier_strip_bounded_at_four_iterations() {
-        let program = parse(
-            "public private public private public func surplus() -> Void",
-        );
+        let program = parse("public private public private public func surplus() -> Void");
         assert!(
             program.is_empty(),
             "fifth modifier should remain and prevent func recognition",
