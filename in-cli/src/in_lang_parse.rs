@@ -33,9 +33,6 @@ pub fn filter_top_level_in_decl_lines(source: &str) -> String {
         if t.starts_with("//") {
             continue;
         }
-        if t.starts_with("//") {
-            continue;
-        }
         let at_zero = depth == 0;
         let delta = brace_delta(raw_line);
         if at_zero && (t.starts_with("fn ") || t.starts_with("struct ")) {
@@ -107,13 +104,44 @@ fn parse_fn_header(after_fn_keyword: &str) -> (String, Vec<(String, Typ)>, Typ) 
     }
 }
 
+/// `struct Name { }` or `struct Name { Int id; String label }` — fields only on same line as `{`/`}`.
 fn parse_struct_line(line: &str) -> (String, Vec<(String, Typ)>) {
     let rest = line.strip_prefix("struct ").map(trim).unwrap_or("");
-    let name = rest
-        .find('{')
-        .map(|i| trim(&rest[..i]).to_string())
-        .unwrap_or_else(|| rest.to_string());
-    (name, Vec::new())
+    let (name, body_opt) = match (rest.find('{'), rest.rfind('}')) {
+        (Some(i), Some(j)) if j > i => {
+            let n = trim(&rest[..i]).to_string();
+            let inner = trim(&rest[i + 1..j]);
+            (n, Some(inner.to_string()))
+        }
+        _ => {
+            let n = rest
+                .find('{')
+                .map(|i| trim(&rest[..i]).to_string())
+                .unwrap_or_else(|| rest.to_string());
+            (n, None)
+        }
+    };
+
+    let mut fields = Vec::new();
+    if let Some(inner) = body_opt {
+        if !inner.is_empty() {
+            for part in inner.split(';') {
+                let seg = trim(part);
+                if seg.is_empty() {
+                    continue;
+                }
+                // `Type fieldName` — type is all but last token (supports `String long_name`).
+                let tokens: Vec<&str> = seg.split_whitespace().collect();
+                if tokens.len() < 2 {
+                    continue;
+                }
+                let field_name = tokens[tokens.len() - 1].to_string();
+                let ty_str = tokens[..tokens.len() - 1].join(" ");
+                fields.push((field_name, parse_in_type(&ty_str)));
+            }
+        }
+    }
+    (name, fields)
 }
 
 fn parse_filtered(source: &str) -> UnifiedModule {
@@ -261,5 +289,27 @@ fn main() -> void
     fn rejects_duplicate() {
         let err = parse_in_source("fn main() -> void\nfn main() -> void\n").expect_err("dup");
         assert!(err.contains("duplicate"));
+    }
+
+    #[test]
+    fn struct_parses_inline_fields() {
+        let m = parse_in_source(
+            "struct Box { Int x; String label }\nfn main() -> void\n",
+        )
+        .expect("ok");
+        let st = m.decls.iter().find_map(|d| match d {
+            Decl::Struct { name, fields } if name == "Box" => Some(fields.clone()),
+            _ => None,
+        });
+        let fields = st.expect("struct Box");
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0], ("x".into(), Typ::Int));
+        assert_eq!(fields[1], ("label".into(), Typ::String));
+    }
+
+    #[test]
+    fn struct_field_type_must_be_known() {
+        let err = parse_in_source("struct Bad { Unknown z }\nfn main() -> void\n").expect_err("ty");
+        assert!(err.contains("unknown type") || err.contains("Bad"));
     }
 }

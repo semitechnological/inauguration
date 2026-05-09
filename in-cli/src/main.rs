@@ -43,7 +43,11 @@ enum PreviewClientKind {
 enum Commands {
     #[command(about = "Run hybrid compiler pipeline")]
     Build {
-        #[arg(long, default_value = ".", help = "Swift file or package directory")]
+        #[arg(
+            long,
+            default_value = ".",
+            help = "Source path: .in file, .swift file, or package directory"
+        )]
         path: String,
         #[arg(long, default_value = "App")]
         module_id: String,

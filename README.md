@@ -4,7 +4,7 @@
 
 ## What it is
 
-- **Compiler workspace** for experimenting with Swift tooling (pipeline, SIL passes, small frontend checks).
+- **Compiler workspace** for experimenting with Swift tooling (pipeline, SIL passes, small frontend checks) and **multi-front experimentation** (Swift, line-oriented **`.in`**, Core IR → stub SIL — see [`.in` language](docs/architecture/in-language.md) and [multi-frontend IR](docs/architecture/multi-frontend-ir.md)).
 - **Hot reload** path for SwiftUI: daemon plus preview host bridge.
 - **`in` CLI** for daily workflows: build, dev loop, tests, benchmarks, plugins.
 
@@ -31,7 +31,7 @@ Hotreload wire formats live under **`shared/protocol`**; regenerators and benchm
 
 Default **`in build`** runs the native hybrid pipeline: it gathers Swift sources (single file, **`Sources/`** tree when a **`Package.swift`** is present), emits **textual SIL**, then applies inauguration SIL passes. By default SIL comes from **`swiftc -emit-sil`** (toolchain on **`PATH`**, or override with **`IN_SWIFTC`**).
 
-**`.in` v0 (no `swiftc`):** **`in build --path apps/in-sample/hello.in --module-id App`** — default **`--parser auto`** selects the `.in` front from the file extension; use **`--parser in`** or **`IN_PARSER=in`** to force. Sample + script: **`apps/in-sample/hello.in`**, **`./scripts/check-in-lang-sample.sh`** (CI job **`in-lang-sample`**). Core IR → same stub SIL path as the Swift subset ([`docs/architecture/in-language.md`](docs/architecture/in-language.md)).
+**`.in` v0 (no `swiftc`):** **`in build --path apps/in-sample/hello.in --module-id App`** — default **`--parser auto`** selects the `.in` front from the file extension; use **`--parser in`** or **`IN_PARSER=in`** to force. Sample + script: **`apps/in-sample/hello.in`**, **`./scripts/check-in-lang-sample.sh`** (CI job **`in-lang-sample`**). Core IR → same stub SIL path as the Swift subset ([`docs/architecture/in-language.md`](docs/architecture/in-language.md)). Structs may declare **inline fields** on the `struct` line, e.g. **`struct Session { Int id; String label }`** (semicolon-separated **`Type name`** segments inside `{` … `}`).
 
 **In-tree subset (Rust, no `swiftc`):** set **`IN_NATIVE_SWIFT_SIL=try`** to try the line-oriented **`swift_subset`** front first and fall back to **`swiftc`** when the source is not a valid subset. Use **`IN_NATIVE_SWIFT_SIL=only`** to require the in-tree path (CI or hermetic checks). Contracted syntax: **[docs/architecture/subset-grammar.md](docs/architecture/subset-grammar.md)**; sample **`apps/native-subset-sample/App.swift`**; local check **`./scripts/check-native-subset-sample.sh`**. With **`--swiftpm`**, **`in`** additionally runs **`swift build`** and stages outputs for runnable artifacts.
 
