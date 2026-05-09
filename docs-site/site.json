@@ -7,12 +7,12 @@
     "ogImage": null
   },
   "theme": {
-    "accent": "#ffb070",
-    "accentSoft": "#e8c4ff",
-    "surface": "#0c0612",
-    "text": "#f4ebff",
-    "muted": "#9a8ab8",
-    "border": "#4c4168"
+    "accent": "#0070f3",
+    "accentSoft": "#3291ff",
+    "surface": "#ffffff",
+    "text": "#171717",
+    "muted": "#666666",
+    "border": "#eaeaea"
   },
   "elements": [],
   "analytics": null,

@@ -1,6 +1,6 @@
 # inauguration docs site (crepuscularity-web)
 
-Twilight-styled static site matching [crepuscularity `docs-site`](https://github.com/semitechnological/crepuscularity/tree/main/docs-site): `.crepus` landing page, wasm32 runtime, and HTML emitted from repository `docs/*.md`.
+Light, Vercel-adjacent static site: white surface, crisp borders, black primary actions, blue accents — informed by [Vercel Web Interface Guidelines](https://vercel.com/design/guidelines) (layout, focus rings, motion reduction). **Instrument Sans** loads from Google Fonts for all UI copy; **JetBrains Mono** for code. The `.crepus` landing uses `web.toml` + Uno-style classes; markdown pages are emitted by `crepus` and post-processed with **`scripts/patch-docs-site-instrument-sans.sh`** so body text matches (the generator still embeds an Inter URL by default).
 
 ## Prerequisites
 

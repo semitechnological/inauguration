@@ -23,7 +23,7 @@ Hotreload wire formats live under **`shared/protocol`**; regenerators and benchm
 - `plugins/registry`: installable project accelerators (aurorality, crepuscularity).
 - `scripts`: operational scripts (dev loop, compiler benchmark harness).
 - `docs/architecture`: architecture and local runbooks ([interop roadmap](docs/architecture/interop-roadmap.md), [native Swift master plan](docs/architecture/native-swift-master-plan.md), [`.in` language](docs/architecture/in-language.md), [multi-frontend IR](docs/architecture/multi-frontend-ir.md)). Hybrid `in-cli` ↔ `rust-driver` mirror: [docs/contributing-hybrid-mirror.md](docs/contributing-hybrid-mirror.md).
-- `docs-site`: static **crepuscularity-web** site (twilight shell like [crepuscularity docs-site](https://github.com/semitechnological/crepuscularity/tree/main/docs-site)); build with **`./scripts/build-docs-site.sh`** (needs sibling **`../crepuscularity`** or **`crepus`** on `PATH`). Top-level **`docs/*.md` symlinks** expose nested guides to `crepus web build`.
+- `docs-site`: static **crepuscularity-web** site (Vercel-inspired light UI, **Instrument Sans**); build with **`./scripts/build-docs-site.sh`** (needs sibling **`../crepuscularity`** or **`crepus`** on `PATH`). Top-level **`docs/*.md` symlinks** expose nested guides to `crepus web build`.
 - `docs/benchmarks`: benchmark reports and generated comparison artifacts.
 - `apps/native-subset-sample`: tiny Swift-shaped sample for the **in-tree** subset compiler (no **`swiftc`** when **`IN_NATIVE_SWIFT_SIL=only`**).
 - `apps/in-sample`: minimal **`.in` v0** module (struct + helper **`fn`** + **`fn main`**); run **`./scripts/check-in-lang-sample.sh`** (**`in build --parser in --path …`**) — no **`swiftc`**.
