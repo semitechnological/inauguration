@@ -1,8 +1,10 @@
-//! Tree-sitter grammars → [`UnifiedModule`] (`Decl::Function` signatures; bodies empty).
+//! Tree-sitter grammars → [`UnifiedModule`]. **C / C++ / ObjC++** `function_definition` fills coarse
+//! types, parameters, and trivial `return <integer>;` / `return <param>;` / `return;` bodies (single
+//! statement, no locals); other languages remain mostly signature-only until their extractors grow.
 
 use crate::core_ir::{Decl, UnifiedModule};
 use crate::parser_registry::ParserId;
-use crate::swift_subset::Typ;
+use crate::swift_subset::{Expr, Stmt, Typ};
 use std::collections::HashSet;
 use std::path::Path;
 use tree_sitter::{Language, Node, Parser};
@@ -38,15 +40,11 @@ pub fn parse_polyglot_file(id: ParserId, path: &Path) -> Result<UnifiedModule, S
 fn dispatch(id: ParserId, path: &Path, src: &str) -> Result<UnifiedModule, String> {
     match id {
         ParserId::C => parse_lang(tree_sitter_c::LANGUAGE.into(), src, |b, r| {
-            extract_fn_nodes(b, r, &["function_definition"], |src, n| {
-                c_like_fn_name(src, n).map(|name| decl_fn(name, vec![], Typ::Void))
-            })
+            extract_fn_nodes(b, r, &["function_definition"], c_like_function_decl)
         }),
         ParserId::Cpp | ParserId::ObjCpp => {
             parse_lang(tree_sitter_cpp::LANGUAGE.into(), src, |b, r| {
-                extract_fn_nodes(b, r, &["function_definition"], |src, n| {
-                    c_like_fn_name(src, n).map(|name| decl_fn(name, vec![], Typ::Void))
-                })
+                extract_fn_nodes(b, r, &["function_definition"], c_like_function_decl)
             })
         }
         ParserId::ObjC => parse_lang(tree_sitter_objc::LANGUAGE.into(), src, |b, r| {
@@ -168,7 +166,9 @@ fn dedup_fns(decls: Vec<Decl>) -> Vec<Decl> {
     let mut seen = HashSet::new();
     let mut out = Vec::new();
     for d in decls {
-        if let Decl::Function { name, .. } = &d && seen.insert(name.clone()) {
+        if let Decl::Function { name, .. } = &d
+            && seen.insert(name.clone())
+        {
             out.push(d);
         }
     }
@@ -225,9 +225,246 @@ fn c_like_fn_name<'a>(src: &[u8], func_def: Node<'a>) -> Option<String> {
     Some(normalize_entry(node_txt(src, id).trim()))
 }
 
+/// C / C++ / ObjC++ `function_definition`: name, coarse types, parameters, optional trivial
+/// `return <integer>;`, `return <param>;`, or `return;` body (single statement, no locals).
+fn c_like_function_decl<'a>(src: &[u8], func_def: Node<'a>) -> Option<Decl> {
+    let name = c_like_fn_name(src, func_def)?;
+    let ret = c_coarse_return_typ(src, func_def);
+    let params = c_parameter_list(src, func_def);
+    let body = func_def
+        .child_by_field_name("body")
+        .and_then(|b| c_trivial_return_body(src, b, &params))
+        .unwrap_or_default();
+    Some(Decl::Function {
+        name,
+        params,
+        ret,
+        body,
+    })
+}
+
+fn c_strip_decl_storage(s: &str) -> String {
+    s.split_whitespace()
+        .filter(|w| {
+            !matches!(
+                *w,
+                "static"
+                    | "extern"
+                    | "inline"
+                    | "__inline"
+                    | "__inline__"
+                    | "const"
+                    | "volatile"
+                    | "auto"
+                    | "register"
+                    | "_Noreturn"
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn c_typ_from_decl_specifier_text(raw: &str) -> Typ {
+    let s = c_strip_decl_storage(raw.trim());
+    if s.is_empty() {
+        return Typ::Void;
+    }
+    let lower = s.to_ascii_lowercase();
+    if lower
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .any(|w| w == "void")
+    {
+        return Typ::Void;
+    }
+    if c_decl_specs_look_integral(&lower) {
+        return Typ::Int;
+    }
+    Typ::Named(
+        s.split_whitespace()
+            .last()
+            .unwrap_or(s.as_str())
+            .to_string(),
+    )
+}
+
+fn c_decl_specs_look_integral(lower: &str) -> bool {
+    const KW: &[&str] = &[
+        "int", "char", "short", "long", "signed", "unsigned", "uint8_t", "uint16_t", "uint32_t",
+        "uint64_t", "int8_t", "int16_t", "int32_t", "int64_t", "size_t", "ssize_t", "bool",
+        "_bool",
+    ];
+    KW.iter().any(|k| lower.contains(k))
+}
+
+fn c_coarse_return_typ(src: &[u8], func_def: Node<'_>) -> Typ {
+    let Some(decl) = func_def.child_by_field_name("declarator") else {
+        return Typ::Void;
+    };
+    let head = src
+        .get(func_def.start_byte()..decl.start_byte())
+        .and_then(|b| std::str::from_utf8(b).ok())
+        .unwrap_or("")
+        .trim();
+    c_typ_from_decl_specifier_text(head)
+}
+
+fn c_parameter_list<'a>(src: &[u8], func_def: Node<'a>) -> Vec<(String, Typ)> {
+    let Some(decl) = func_def.child_by_field_name("declarator") else {
+        return vec![];
+    };
+    let Some(plist) = named_descendant(decl, "parameter_list") else {
+        return vec![];
+    };
+    let mut out = Vec::new();
+    let mut w = plist.walk();
+    for ch in plist.named_children(&mut w) {
+        if ch.kind() != "parameter_declaration" {
+            continue;
+        }
+        if let Some(pair) = c_one_parameter(src, ch, out.len()) {
+            out.push(pair);
+        }
+    }
+    out
+}
+
+fn c_one_parameter(src: &[u8], pd: Node<'_>, idx: usize) -> Option<(String, Typ)> {
+    let decl = pd.child_by_field_name("declarator");
+    let ty_end = decl.map(|d| d.start_byte()).unwrap_or(pd.end_byte());
+    let ty_src = src.get(pd.start_byte()..ty_end)?;
+    let ty_text = std::str::from_utf8(ty_src).ok()?.trim();
+    if ty_text.is_empty() {
+        return None;
+    }
+    if ty_text == "void" && decl.is_none() {
+        return None;
+    }
+    let ty = c_typ_from_decl_specifier_text(ty_text);
+    let name = decl
+        .and_then(|d| named_descendant(d, "identifier"))
+        .map(|id| node_txt(src, id).trim().to_string())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| format!("arg{idx}"));
+    Some((name, ty))
+}
+
+fn c_trivial_return_body(
+    src: &[u8],
+    body: Node<'_>,
+    params: &[(String, Typ)],
+) -> Option<Vec<Stmt>> {
+    if body.kind() != "compound_statement" {
+        return None;
+    }
+    let mut w = body.walk();
+    let items: Vec<Node<'_>> = body.named_children(&mut w).collect();
+    if items.is_empty() {
+        return Some(vec![]);
+    }
+    if items.len() != 1 {
+        return None;
+    }
+    let inner = c_peel_statement_shell(items[0])?;
+    if inner.kind() != "return_statement" {
+        return None;
+    }
+    let ret_expr = match c_try_return_expr(src, inner, params) {
+        Ok(v) => v,
+        Err(()) => return None,
+    };
+    Some(vec![Stmt::Return(ret_expr)])
+}
+
+fn c_peel_statement_shell<'a>(n: Node<'a>) -> Option<Node<'a>> {
+    match n.kind() {
+        "statement" => {
+            let inner = n.named_child(0)?;
+            c_peel_statement_shell(inner)
+        }
+        "attributed_statement" => {
+            let idx = n.named_child_count().saturating_sub(1) as u32;
+            let inner = n.named_child(idx)?;
+            c_peel_statement_shell(inner)
+        }
+        _ => Some(n),
+    }
+}
+
+/// `Ok(Some(expr))` = `return <expr>;`, `Ok(None)` = `return;`, `Err` = non-trivial return.
+fn c_try_return_expr(
+    src: &[u8],
+    ret: Node<'_>,
+    params: &[(String, Typ)],
+) -> Result<Option<Expr>, ()> {
+    if named_descendant(ret, "binary_expression").is_some()
+        || named_descendant(ret, "call_expression").is_some()
+    {
+        return Err(());
+    }
+    let mut w = ret.walk();
+    for ch in ret.named_children(&mut w) {
+        match ch.kind() {
+            "number_literal" => {
+                let t = node_txt(src, ch).trim();
+                let v = parse_c_integer_literal(t).ok_or(())?;
+                return Ok(Some(Expr::IntLit(v)));
+            }
+            "identifier" => {
+                let name = node_txt(src, ch).trim().to_string();
+                if params.iter().any(|(p, _)| p == &name) {
+                    return Ok(Some(Expr::Ident(name)));
+                }
+                return Err(());
+            }
+            "expression" | "comma_expression" => {
+                if let Some(num) = named_descendant(ch, "number_literal") {
+                    let t = node_txt(src, num).trim();
+                    let v = parse_c_integer_literal(t).ok_or(())?;
+                    return Ok(Some(Expr::IntLit(v)));
+                }
+                if let Some(e) = c_try_param_ident_expr(src, ch, params) {
+                    return Ok(Some(e));
+                }
+                return Err(());
+            }
+            _ => {}
+        }
+    }
+    Ok(None)
+}
+
+/// `return x` / `return (x)` where the value is a lone parameter name (no calls, subscripts, or
+/// binary operators in the return expression).
+fn c_try_param_ident_expr(src: &[u8], expr: Node<'_>, params: &[(String, Typ)]) -> Option<Expr> {
+    if named_descendant(expr, "binary_expression").is_some()
+        || named_descendant(expr, "call_expression").is_some()
+        || named_descendant(expr, "subscript_expression").is_some()
+    {
+        return None;
+    }
+    let id = named_descendant(expr, "identifier")?;
+    let name = node_txt(src, id).trim().to_string();
+    if params.iter().any(|(p, _)| p == &name) {
+        return Some(Expr::Ident(name));
+    }
+    None
+}
+
+fn parse_c_integer_literal(t: &str) -> Option<i64> {
+    let t = t.trim();
+    let t = t.trim_end_matches(|c: char| c.is_ascii_alphabetic());
+    if t.is_empty() {
+        return None;
+    }
+    if let Some(rest) = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
+        return i64::from_str_radix(rest, 16).ok();
+    }
+    t.parse::<i64>().ok()
+}
+
 fn objc_like<'a>(src: &[u8], n: Node<'a>) -> Option<Decl> {
     if n.kind() == "function_definition" {
-        return c_like_fn_name(src, n).map(|name| decl_fn(name, vec![], Typ::Void));
+        return c_like_function_decl(src, n);
     }
     if n.kind() == "method_definition" {
         let sel = named_descendant(n, "selector")?;
@@ -766,5 +1003,58 @@ mod tests {
         let src = "fn main() {}\n";
         let m = parse_lang(tree_sitter_rust::LANGUAGE.into(), src, extract_rust).expect("ok");
         assert!(matches!(m.decls.as_slice(), [Decl::Function { name, .. }] if name == "main"));
+    }
+
+    #[test]
+    fn c_non_trivial_return_drops_function_body() {
+        let src = "int f(void) { return 1 + 2; }\nint main(void) { return 0; }\n";
+        let m = parse_lang(tree_sitter_c::LANGUAGE.into(), src, |b, r| {
+            extract_fn_nodes(b, r, &["function_definition"], c_like_function_decl)
+        })
+        .expect("parse");
+        let f = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "f"))
+            .expect("f");
+        match f {
+            Decl::Function { body, .. } => assert!(
+                body.is_empty(),
+                "binary return should not become a trivial body; got {body:?}"
+            ),
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn c_return_statement_child_kinds_for_param_return() {
+        let src = "int echo(int x) { return x; }\n";
+        let mut p = Parser::new();
+        p.set_language(&tree_sitter_c::LANGUAGE.into()).unwrap();
+        let tree = p.parse(src, None).unwrap();
+        let mut found = false;
+        fn visit(n: Node<'_>, src: &str, found: &mut bool) {
+            if n.kind() == "return_statement" {
+                *found = true;
+                let mut w = n.walk();
+                let kinds: Vec<_> = n
+                    .named_children(&mut w)
+                    .map(|c| c.kind().to_string())
+                    .collect();
+                assert!(
+                    kinds.iter().any(|k| {
+                        matches!(k.as_str(), "expression" | "comma_expression" | "identifier")
+                    }),
+                    "unexpected return_statement named children: {kinds:?} text={:?}",
+                    &src[n.start_byte()..n.end_byte()]
+                );
+            }
+            let mut w = n.walk();
+            for ch in n.named_children(&mut w) {
+                visit(ch, src, found);
+            }
+        }
+        visit(tree.root_node(), src, &mut found);
+        assert!(found, "expected a return_statement in parse tree");
     }
 }
