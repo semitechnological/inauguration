@@ -1,10 +1,31 @@
 //! In-tree Swift **subset** → textual SIL (no `swiftc`). Uses `swift_subset` parse/check at file scope
-//! only so nested `func` bodies are not mistaken for top-level declarations.
+//! only so nested `func` bodies are not mistaken for top-level declarations. SIL emission delegates to
+//! [`crate::lower_core::lower_to_textual_sil`] so subset bodies share the same lowering as Core IR fronts.
 //!
 //! **`IN_NATIVE_SWIFT_SIL`** mode (shared with [`crate::sil_emit`] and hot reload compile gate):
 //! **`try`** / **`1`** / **`true`**, **`only`** / **`2`** / **`strict`**, else **off**.
 
+use crate::core_ir::{Decl as IrDecl, UnifiedModule};
 use crate::swift_subset::{self, Decl, Diagnostic};
+
+fn subset_program_to_unified(program: &[Decl]) -> UnifiedModule {
+    let decls: Vec<IrDecl> = program
+        .iter()
+        .map(|d| match d {
+            Decl::Struct(s) => IrDecl::Struct {
+                name: s.name.clone(),
+                fields: s.fields.clone(),
+            },
+            Decl::Function(f) => IrDecl::Function {
+                name: f.name.clone(),
+                params: f.params.clone(),
+                ret: f.ret.clone(),
+                body: f.body.clone(),
+            },
+        })
+        .collect();
+    UnifiedModule { decls }
+}
 
 /// Same semantics as [`crate::sil_emit`] for **`IN_NATIVE_SWIFT_SIL`**.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -95,45 +116,10 @@ pub fn filter_top_level_decl_lines(source: &str) -> String {
 /// `"main"` (last `sil @…` wins). [`crate::hybrid_sil::extract_call_graph`] attributes each `function_ref` to the
 /// function body that contained that instruction. SSA ids are unique across the whole string because that parser
 /// concatenates instructions from every function into one list.
-fn program_to_textual_sil(program: &[Decl], _module_id: &str) -> String {
-    let mut fn_names: Vec<String> = program
-        .iter()
-        .filter_map(|d| match d {
-            Decl::Function(f) => Some(f.name.clone()),
-            _ => None,
-        })
-        .collect();
-    fn_names.sort();
-    let mut sil = String::from("// inauguration in-tree subset SIL (no swiftc)\n");
-    let helpers: Vec<&str> = fn_names
-        .iter()
-        .map(String::as_str)
-        .filter(|n| *n != "main")
-        .collect();
-
-    let mut ssa = 0usize;
-    for name in &fn_names {
-        if *name == "main" {
-            continue;
-        }
-        let v = ssa;
-        ssa += 1;
-        sil.push_str(&format!(
-            "sil @{name}\nbb0:\n%{v} = integer_literal $Builtin.Int64, 0\nbb1:\nreturn %{v} : $Builtin.Int64\n"
-        ));
-    }
-
-    sil.push_str("sil @main\nbb0:\n");
-    for callee in &helpers {
-        let r = ssa;
-        ssa += 1;
-        sil.push_str(&format!(
-            "%{r} = function_ref @{callee} : $@convention(thin)\n"
-        ));
-    }
-    let ret = ssa;
-    sil.push_str(&format!("%{ret} = integer_literal $Builtin.Int64, 0\n"));
-    sil
+fn program_to_textual_sil(program: &[Decl], module_id: &str) -> String {
+    let um = subset_program_to_unified(program);
+    let body = crate::lower_core::lower_to_textual_sil(&um, module_id);
+    format!("// inauguration in-tree subset SIL (no swiftc)\n{body}")
 }
 
 /// If the combined sources are a valid **subset** program (checker clean, includes `main`), emit SIL.
