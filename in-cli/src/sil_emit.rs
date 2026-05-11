@@ -4,6 +4,10 @@
 //!   `swift_subset`) first; on success emit SIL without **`swiftc`**, otherwise fall back to **`swiftc`**.
 //! - **`IN_NATIVE_SWIFT_SIL=only`**: require the in-tree path (no **`swiftc`**).
 //! - **`IN_SWIFTC`**: override the **`swiftc`** binary when falling back.
+//! - **`IN_SWIFT_COMPILER_PROJECT_ROOT`**: optional upstream Swift “project root” (sibling layout:
+//!   **`llvm-project/`**, **`build/Default/{swift,llvm}/include`**, **`swift/include`**) so
+//!   **`swiftc -emit-sil`** / **`-typecheck`** on **`SwiftCompilerSources`** get the same **`-Xcc`**
+//!   include paths and C++ interop mode as **`swift build`** (see that package’s **`Package.swift`**).
 //!
 //! Hot reload compile gate uses the same policy via [`compile_check_swift_path`] (including **`swift build`** + **`-I`** retry when **`swiftc -typecheck`** fails inside a package, same as emit).
 //!
@@ -106,10 +110,12 @@ fn collect_sources_dir(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), SilEmit
 /// path segment under `Sources/` is a directory (e.g. `Sources/Foo/Bar.swift`), collect only that
 /// subtree so we do not merge unrelated targets (e.g. `SwiftPreviewHost` vs `SwiftPreviewHostClient`
 /// both exporting `@main`). If the first segment is a file in `Sources/`, collect all of `Sources/`.
-fn collect_package_sources_for_input_file(pkg: &Path, path: &Path) -> Result<Vec<PathBuf>, SilEmitError> {
-    let sources = fs::canonicalize(pkg.join("Sources")).map_err(|_| {
-        SilEmitError::Msg(format!("no Sources/ under {}", pkg.display()))
-    })?;
+fn collect_package_sources_for_input_file(
+    pkg: &Path,
+    path: &Path,
+) -> Result<Vec<PathBuf>, SilEmitError> {
+    let sources = fs::canonicalize(pkg.join("Sources"))
+        .map_err(|_| SilEmitError::Msg(format!("no Sources/ under {}", pkg.display())))?;
     let rel = path.strip_prefix(&sources).map_err(|_| {
         SilEmitError::Msg(format!(
             "path {} is not under {}",
@@ -255,7 +261,8 @@ fn resolve_swift_inputs(path: &Path) -> Result<Vec<PathBuf>, SilEmitError> {
         // Prefer full package source roots (Sources/, Generated/, swift/Sources/) when a
         // Package.swift exists; sibling-only sets miss SPM-listed paths outside `Sources/`.
         if let Some(pkg) = package_root_containing_swift_file(&path) {
-            let pkg_sources = fs::canonicalize(pkg.join("Sources")).unwrap_or_else(|_| pkg.join("Sources"));
+            let pkg_sources =
+                fs::canonicalize(pkg.join("Sources")).unwrap_or_else(|_| pkg.join("Sources"));
             if path.starts_with(&pkg_sources) {
                 return collect_package_sources_for_input_file(&pkg, &path);
             }
@@ -297,6 +304,100 @@ fn macos_sdk_path() -> Option<String> {
 
 fn swiftc_executable() -> OsString {
     std::env::var_os("IN_SWIFTC").unwrap_or_else(|| OsString::from("swiftc"))
+}
+
+/// True when `pkg/Package.swift` is Apple’s **`SwiftCompilerSources`** SwiftPM package (C++ interop
+/// + Ninja include layout documented in that manifest).
+fn package_is_swift_compiler_sources(pkg: &Path) -> bool {
+    let manifest = pkg.join("Package.swift");
+    let Ok(txt) = fs::read_to_string(&manifest) else {
+        return false;
+    };
+    txt.contains("name: \"SwiftCompilerSources\"")
+}
+
+/// Upstream “project root”: parent of the **`swift/`** repo directory (holds **`llvm-project/`**,
+/// **`build/Default/...`**). Resolves **`IN_SWIFT_COMPILER_PROJECT_ROOT`** when set, else if `pkg` is
+/// **`…/swift/SwiftCompilerSources`** uses **`pkg.parent()?.parent()`** when key include dirs exist.
+fn resolved_swift_compiler_project_root(pkg: &Path) -> Option<PathBuf> {
+    if let Ok(s) = std::env::var("IN_SWIFT_COMPILER_PROJECT_ROOT")
+        && !s.is_empty()
+    {
+        let p = PathBuf::from(s);
+        if swift_compiler_project_root_looks_valid(&p) {
+            return fs::canonicalize(&p).ok().or(Some(p));
+        }
+        return None;
+    }
+    if pkg.file_name().and_then(|n| n.to_str()) != Some("SwiftCompilerSources") {
+        return None;
+    }
+    let project = pkg.parent()?.parent()?;
+    if swift_compiler_project_root_looks_valid(project) {
+        return fs::canonicalize(project)
+            .ok()
+            .or(Some(project.to_path_buf()));
+    }
+    None
+}
+
+fn swift_compiler_project_root_looks_valid(root: &Path) -> bool {
+    root.join("build/Default/swift/include").is_dir()
+        || root.join("llvm-project/llvm/include").is_dir()
+}
+
+/// Mirrors **`SwiftCompilerSources/Package.swift`** `compilerModuleTarget` **`unsafeFlags`** plus
+/// C++ interop so standalone **`swiftc`** matches what **`swift build`** passes to the compiler.
+fn append_swift_compiler_sources_swiftc_flags(
+    cmd: &mut Command,
+    package_root_for_clang: Option<&Path>,
+) {
+    let Some(pkg) = package_root_for_clang else {
+        return;
+    };
+    if !package_is_swift_compiler_sources(pkg) {
+        return;
+    }
+    let Some(project_root) = resolved_swift_compiler_project_root(pkg) else {
+        return;
+    };
+    let swift_repo = pkg.parent();
+
+    cmd.arg("-cxx-interoperability-mode=default");
+    cmd.arg("-Xcc").arg("-std=c++17");
+    for (a, b) in [
+        ("-Xcc", "-DCOMPILED_WITH_SWIFT"),
+        ("-Xcc", "-DPURE_BRIDGING_MODE"),
+        ("-Xcc", "-UIBOutlet"),
+        ("-Xcc", "-UIBAction"),
+        ("-Xcc", "-UIBInspectable"),
+    ] {
+        cmd.arg(a).arg(b);
+    }
+
+    let mut seen: HashSet<PathBuf> = HashSet::new();
+    let mut push_inc = |p: PathBuf| {
+        if p.is_dir() {
+            let key = fs::canonicalize(&p).unwrap_or_else(|_| p.clone());
+            if seen.insert(key) {
+                cmd.arg("-Xcc").arg(format!("-I{}", p.display()));
+            }
+        }
+    };
+
+    let rel_includes = [
+        "llvm-project/llvm/include",
+        "llvm-project/clang/include",
+        "build/Default/swift/include",
+        "build/Default/llvm/include",
+        "build/Default/llvm/tools/clang/include",
+    ];
+    for rel in rel_includes {
+        push_inc(project_root.join(rel));
+    }
+    if let Some(sr) = swift_repo {
+        push_inc(sr.join("include"));
+    }
 }
 
 fn append_extra_swiftc_args(cmd: &mut Command) {
@@ -516,6 +617,7 @@ fn run_swiftc_typecheck(
     {
         cmd.arg("-target").arg(triple);
     }
+    append_swift_compiler_sources_swiftc_flags(&mut cmd, package_root_for_clang);
     if let Some(pkg) = package_root_for_clang {
         append_package_clang_module_flags(&mut cmd, pkg);
     }
@@ -549,7 +651,11 @@ fn run_swiftc_typecheck_partitioned(
         || run_swiftc_typecheck(&singles, module_includes, package_root_for_clang);
     let ok_multis = multis.iter().all(|group| {
         group.iter().all(|p| {
-            run_swiftc_typecheck(std::slice::from_ref(p), module_includes, package_root_for_clang)
+            run_swiftc_typecheck(
+                std::slice::from_ref(p),
+                module_includes,
+                package_root_for_clang,
+            )
         })
     });
     ok_singles && ok_multis
@@ -644,6 +750,7 @@ fn run_swiftc_emit_sil_batch(
         cmd.arg("-target").arg(triple);
     }
 
+    append_swift_compiler_sources_swiftc_flags(&mut cmd, package_root_for_clang);
     if let Some(pkg) = package_root_for_clang {
         append_package_clang_module_flags(&mut cmd, pkg);
     }
@@ -666,13 +773,20 @@ fn run_swiftc_emit_sil_batch(
 
     if !output.status.success() {
         let _ = fs::remove_file(&out_file);
-        return Err(SilEmitError::Msg(format!(
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let mut msg = format!(
             "{} -emit-sil failed ({}) for {} inputs\nstderr:\n{}",
             swiftc_bin.to_string_lossy(),
             output.status,
             inputs.len(),
-            String::from_utf8_lossy(&output.stderr)
-        )));
+            stderr
+        );
+        if stderr.contains("BasicBridging") {
+            msg.push_str(
+                "\n(SwiftCompilerSources) Point IN_SWIFT_COMPILER_PROJECT_ROOT at the directory that contains llvm-project/ and build/Default/ (see SwiftCompilerSources/Package.swift symlink instructions.)\n",
+            );
+        }
+        return Err(SilEmitError::Msg(msg));
     }
 
     let sil = fs::read_to_string(&out_file).map_err(|e| {
@@ -857,6 +971,35 @@ mod tests {
         let sil = crate::native_swift_sil::emit_in_tree_sil_or_diagnose(&src, "App").unwrap();
         assert!(sil.contains("sil @main"));
         assert!(sil.contains("function_ref @helper"));
+    }
+
+    #[test]
+    fn package_is_swift_compiler_sources_detects_manifest_name() {
+        let dir = std::env::temp_dir().join(format!("in-scs-pkg-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        fs::write(
+            dir.join("Package.swift"),
+            r#"import PackageDescription
+let package = Package(
+  name: "SwiftCompilerSources",
+  targets: []
+)
+"#,
+        )
+        .unwrap();
+        assert!(package_is_swift_compiler_sources(&dir));
+        fs::write(
+            dir.join("Package.swift"),
+            r#"import PackageDescription
+let package = Package(
+  name: "OtherPkg",
+  targets: []
+)
+"#,
+        )
+        .unwrap();
+        assert!(!package_is_swift_compiler_sources(&dir));
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
