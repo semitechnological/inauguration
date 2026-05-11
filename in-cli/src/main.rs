@@ -856,7 +856,9 @@ fn run_test_step(step: &'static str, cmd: &mut Command) -> Result<()> {
 
 fn cmd_doctor() -> Result<()> {
     println!("in {}", env!("CARGO_PKG_VERSION"));
-    println!("PATH tools (need cargo, bash for in test; curl for in update remote fallback; swift unless IN_TEST_SKIP_SWIFT):");
+    println!(
+        "PATH tools (need cargo, bash for in test; curl for in update remote fallback; swift unless IN_TEST_SKIP_SWIFT):"
+    );
     for tool in ["cargo", "rustc", "bash", "curl", "swift", "rg"] {
         let status = Command::new("which")
             .arg(tool)
