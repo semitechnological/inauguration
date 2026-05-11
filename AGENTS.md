@@ -4,11 +4,11 @@ Contributor guide for humans and coding agents working in `inauguration`.
 
 ## Mission
 
-Ship faster Swift developer workflows by improving three core layers together:
+Ship an **ultrafast** compiler for **general object-oriented and C-type** languages: one **Core IR** and SIL pipeline, many fronts (C family via Tree-sitter, **`.in` / `.icore`**, Rust/Go/V lowers, Swift via **`swiftc`** and the in-tree **subset**). Improve these layers together:
 
-1. `in-cli` Swift subset front (`swift_subset`) + CLI workflows
-2. `compiler/rust-driver` (pipeline/orchestration/perf)
-3. `runtime/*` (reload latency and reliability)
+1. **`in-cli`**: **`lower_core`**, **`core_ir`**, **`compiler::tree_front`** (Tree-sitter + trivial C/C++/ObjC++ bodies where wired), **`parser_registry`**, **`swift_subset`** + **`native_swift_sil`**, **`sil_emit`**, embedded **`hybrid_*`** crates, **`in`** CLI, hotreload daemon, **`protocol-gen`**
+2. **`compiler/rust-driver`**: pipeline, orchestration, **`hybrid-sil`** and related crates, batch path performance
+3. **`runtime/*`**: SwiftUI reload latency, preview host apply semantics, thin daemon wrappers and tests
 
 ## Working rules
 
@@ -44,13 +44,17 @@ in bench
 
 ## Code ownership map
 
-- `in-cli/src/swift_subset.rs`: Swift subset parser/checker/artifact JSON
-- `in-cli/src/compiler/*`: multi-front driver, **icore** JSON → Core IR, **tree_front** (Tree-sitter polyglot)
+- `in-cli/src/swift_subset.rs`: subset parse + check + artifact JSON (contract: [docs/architecture/subset-grammar.md](docs/architecture/subset-grammar.md))
+- `in-cli/src/native_swift_sil.rs`: line filter + bridge into subset emit when **`IN_NATIVE_SWIFT_SIL`** is set
+- `in-cli/src/sil_emit.rs`: Swift source discovery, **`swiftc`** invocation, merge of textual SIL primaries
+- `in-cli/src/in_lang_parse.rs`, `lower_core.rs`, `core_ir.rs`: **`.in`** and unified Core IR module
+- `in-cli/src/parser_registry.rs`: extension and shebang resolution to parser ids
+- `in-cli/src/compiler/*`: multi-front driver, **icore** JSON → Core IR, **tree_front** (Tree-sitter polyglot + dedicated fronts)
 - `compiler/rust-driver/crates/pipeline`: stage model + artifact ingestion
 - `compiler/rust-driver/crates/sil`: SIL analysis/transforms
-- `runtime/hotreload-daemon`: watch/decision/metrics loop
-- `runtime/swift-preview-host`: patch apply semantics
-- `in-cli`: user workflow and plugin surface
+- `runtime/hotreload-daemon`: watch/decision/metrics loop (implementation lives in `in-cli`; crate is wrapper + tests)
+- `runtime/swift-preview-host`: Swift package; patch apply semantics against generated protocol models
+- `in-cli` (remainder): **`main`**, plugins, **`in test`**, preview clients, hybrid embedding
 
 ## Plugin policy
 

@@ -1,12 +1,13 @@
 # inauguration
 
-`inauguration` is fast developer toolchain for Swift projects: incremental compiler experimentation, SIL analysis, and low-latency SwiftUI hot reload.
+`inauguration` targets an **ultrafast** compiler for **general object-oriented and C-family** languages: multiple parsers lower into one **Core IR**, then into **textual SIL** that **`hybrid_sil`** analyzes in Rust. **Swift** is a first shipping surface (**`swiftc`** emit, in-tree **Swift-shaped subset**, SwiftPM staging) alongside **`.in`**, **`.icore`**, **Tree-sitter** polyglot fronts, and bounded **Rust / Go / V** lowers. A **SwiftUI hot reload** daemon and **`in`** CLI wrap the same pipeline for day-to-day workflows.
 
 ## What it is
 
-- **Compiler workspace** for experimenting with Swift tooling (pipeline, SIL passes, small frontend checks) and **multi-front experimentation** (Swift, line-oriented **`.in`**, Core IR → shared SIL lowering path — see [`.in` language](docs/architecture/in-language.md) and [multi-frontend IR](docs/architecture/multi-frontend-ir.md)).
-- **Hot reload** path for SwiftUI: daemon plus preview host bridge.
-- **`in` CLI** for daily workflows: build, dev loop, tests, benchmarks, plugins.
+- **Compiler core** (`in-cli` + `compiler/rust-driver`): shared **Core IR** → **`lower_core`** → textual SIL → **`hybrid_sil`** passes; fronts include **C / C++ / ObjC++** and other Tree-sitter grammars (see [parser surface](docs/architecture/parser-surface.md)), **`.in`** / **`.icore`**, dedicated **Rust / Go / V** parsers, and Swift via **`swiftc`** or the **hermetic** **`IN_NATIVE_SWIFT_SIL`** path ([subset grammar](docs/architecture/subset-grammar.md)); see [multi-frontend IR](docs/architecture/multi-frontend-ir.md) and [`.in` language](docs/architecture/in-language.md).
+- **`in` CLI** (crate **`inauguration`**, binary **`in`**): **`in build`**, **`in dev`**, **`in test`**, **`in bench`**, plugins, optional SwiftPM staging — [Core commands](#core-commands).
+- **Hot reload** for SwiftUI: Unix-socket daemon in **`in`**, metrics, **`runtime/swift-preview-host`**, wire format under **`shared/protocol`**.
+- **Ecosystem glue**: **`plugins/registry`**, **`docs-site`**, **`scripts`** and **`docs/benchmarks`** harnesses.
 
 The published **`in`** binary bundles the hybrid compile wave (native default for **`in build`**), hotreload daemon, and socket-based dev preview. **`in dev`** uses a lightweight client by default; pass **`--preview-client swift`** when you want the SwiftPM preview host. Use **`in build --swiftpm`** only when you need SwiftPM **`swift build`** plus staging as a fallback alongside the native pipeline.
 
