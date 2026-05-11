@@ -23,11 +23,12 @@ Implementation today: `in-cli` modules **`native_swift_sil`** (filter + emit) an
 **`struct`**
 
 - A single line: trimmed text starts with `struct `.
-- The struct **name** is the token after `struct `, optionally truncated at the first `{` if present. **Fields are not parsed** from the line (field list is empty in the AST today).
+- The struct **name** is the token between `struct ` and `{` when `{ … }` appears on the **same line**; inner text is comma-separated **`name: Type`** fields (same tokens as `func` parameters). If there is no `{` / `}` pair on the line, the name is the rest of the line after `struct ` and **fields stay empty** (legacy one-token form).
+- **Multi-line** `struct { … }` is still **out of contract** for field capture: only brace-balanced **single-line** struct headers populate `fields`.
 
 **`func`**
 
-- A single line: trimmed text starts with `func `.
+- A single line: trimmed text starts with `func ` (after optional leading **`public` / `private` / …** access keywords and optional **`async`**, **`throws`**, **`reasync`**, **`nonisolated`** tokens with spaces, each stripped in a bounded loop so `async throws func main() -> Void` is accepted).
 - **Name** and **parameters**: `func name(_ p1: T1, p2: T2) -> Ret` — parameter list between `(` and `)`; each parameter is `label: Type` split on the first `:` (see implementation). Empty `()` allowed.
 - **Return type**: if the substring after `)` contains `-> Type`, that `Type` is used; otherwise return type is **`Void`**.
 - **Body** is not parsed from source; the checker uses a **placeholder** body internally.
@@ -41,7 +42,8 @@ Implementation today: `in-cli` modules **`native_swift_sil`** (filter + emit) an
 
 - There must be exactly one top-level function named **`main`** (after filtering).
 - No duplicate top-level names: struct names and function names share one namespace; duplicates are errors.
-- Parameter and return types must be “known” (built-in or declared struct).
+- No duplicate **field** names within one struct (`E_DUP_FIELD`).
+- Parameter, return, and **struct field** types must be “known” (built-in or declared struct).
 
 ## Explicit non-support (do not rely on these)
 

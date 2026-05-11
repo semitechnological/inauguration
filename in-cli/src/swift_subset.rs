@@ -220,16 +220,72 @@ fn strip_leading_access_modifiers(mut line: &str) -> &str {
     trim(line)
 }
 
+/// Strip common Swift effect / concurrency keywords before `func` (bounded repeats).
+fn strip_leading_func_effect_keywords(mut line: &str) -> &str {
+    const EFFECT: &[&str] = &["async", "throws", "reasync", "nonisolated"];
+
+    fn strip_one_keyword_space<'a>(s: &'a str, kw: &str) -> Option<&'a str> {
+        let s = trim(s);
+        if !s.starts_with(kw) {
+            return None;
+        }
+        let tail = &s[kw.len()..];
+        if tail.is_empty() {
+            return Some("");
+        }
+        if tail.starts_with(' ') {
+            Some(trim(tail.trim_start_matches(' ')))
+        } else {
+            None
+        }
+    }
+
+    for _ in 0..4 {
+        let mut peeled = false;
+        for kw in EFFECT {
+            if let Some(rest) = strip_one_keyword_space(line, kw) {
+                line = rest;
+                peeled = true;
+                break;
+            }
+        }
+        if !peeled {
+            break;
+        }
+    }
+    trim(line)
+}
+
+/// One-line `struct Name { a: T, b: U }` (same `name: Type` tokens as `func` parameters).
 fn parse_struct_line(line: &str) -> StructDecl {
     let raw = trim(&line[7.min(line.len())..]);
-    let name = raw
-        .find('{')
-        .map(|i| trim(&raw[..i]).to_string())
-        .unwrap_or_else(|| raw.to_string());
-    StructDecl {
-        name,
-        fields: Vec::new(),
+    let Some(open) = raw.find('{') else {
+        return StructDecl {
+            name: raw.to_string(),
+            fields: Vec::new(),
+        };
+    };
+    let name = trim(&raw[..open]).to_string();
+    let after = trim(raw.get(open + 1..).unwrap_or(""));
+    let Some(close) = after.rfind('}') else {
+        return StructDecl {
+            name,
+            fields: Vec::new(),
+        };
+    };
+    let inner = trim(&after[..close]);
+    let fields = parse_struct_field_list(inner);
+    StructDecl { name, fields }
+}
+
+fn parse_struct_field_list(inner: &str) -> Vec<(String, Typ)> {
+    if inner.is_empty() {
+        return Vec::new();
     }
+    split_and_trim(',', inner)
+        .into_iter()
+        .map(|t| parse_param(&t))
+        .collect()
 }
 
 /// Parse minimal Swift-ish subset (line-oriented; matches OCaml `parser.ml`).
@@ -241,6 +297,10 @@ pub fn parse(source: &str) -> Program {
             continue;
         }
         let line = strip_leading_access_modifiers(line);
+        if line.is_empty() {
+            continue;
+        }
+        let line = strip_leading_func_effect_keywords(line);
         if line.is_empty() {
             continue;
         }
@@ -325,7 +385,14 @@ pub fn check(program: &[Decl]) -> Vec<Diagnostic> {
     for decl in program {
         match decl {
             Decl::Struct(s) => {
+                let mut seen_field: HashSet<&str> = HashSet::new();
                 for (field, ty) in &s.fields {
+                    if !seen_field.insert(field.as_str()) {
+                        type_diags.push(Diagnostic {
+                            code: "E_DUP_FIELD".into(),
+                            message: format!("duplicate struct field `{field}` in {}", s.name),
+                        });
+                    }
                     if !type_known(&struct_set, ty) {
                         type_diags.push(Diagnostic {
                             code: "E_UNKNOWN_TYPE".into(),
@@ -540,6 +607,65 @@ mod tests {
         assert!(
             program.is_empty(),
             "fifth modifier should remain and prevent func recognition",
+        );
+    }
+
+    #[test]
+    fn parse_accepts_async_throws_before_func() {
+        let program = parse("async throws func main() -> Void");
+        assert!(
+            matches!(&program[0], Decl::Function(f) if f.name == "main" && f.ret == Typ::Void),
+            "{program:?}"
+        );
+        assert!(check(&program).is_empty(), "{:?}", check(&program));
+    }
+
+    #[test]
+    fn parse_accepts_throws_only_before_func() {
+        let program = parse("throws func main() -> Int");
+        assert!(
+            matches!(&program[0], Decl::Function(f) if f.name == "main" && f.ret == Typ::Int),
+            "{program:?}"
+        );
+        assert!(check(&program).is_empty());
+    }
+
+    #[test]
+    fn parse_struct_one_line_fields() {
+        let src = "struct User { id: Int, name: String }\nfunc main(u: User) -> Void";
+        let program = parse(src);
+        assert_eq!(program.len(), 2);
+        match &program[0] {
+            Decl::Struct(s) => {
+                assert_eq!(s.name, "User");
+                assert_eq!(
+                    s.fields,
+                    vec![("id".into(), Typ::Int), ("name".into(), Typ::String),]
+                );
+            }
+            _ => panic!("expected struct"),
+        }
+        let diagnostics = check(&program);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn check_rejects_unknown_struct_field_type() {
+        let program = parse("struct User { id: Unknown }\nfunc main() -> Void");
+        let diagnostics = check(&program);
+        assert!(
+            diagnostics.iter().any(|d| d.code == "E_UNKNOWN_TYPE"),
+            "{diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn check_rejects_duplicate_struct_field() {
+        let program = parse("struct User { id: Int, id: String }\nfunc main() -> Void");
+        let diagnostics = check(&program);
+        assert!(
+            diagnostics.iter().any(|d| d.code == "E_DUP_FIELD"),
+            "{diagnostics:?}"
         );
     }
 }
