@@ -20,10 +20,12 @@ pub mod swift_subset;
 #[cfg(test)]
 mod in_pipeline_tests {
     use crate::compiler::{driver, icore, tree_front};
+    use crate::core_ir::Decl;
     use crate::hybrid_sil;
     use crate::in_lang_parse;
     use crate::lower_core;
     use crate::parser_registry::ParserId;
+    use crate::swift_subset::{Expr, Stmt};
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -117,5 +119,93 @@ fn main() -> void { let seed: Int = 0; return; }
             !artifact.instructions.is_empty() || !report.call_edges.is_empty(),
             "hybrid_sil should see instructions or call edges from lowered Java SIL; sil:\n{sil}"
         );
+    }
+
+    #[test]
+    fn c_tree_front_lowers_trivial_return_and_helpers() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock before UNIX_EPOCH")
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!(
+            "inauguration-c-tree-front-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let _guard = TempDirGuard::new(temp_dir.clone());
+
+        let path = temp_dir.join("sample.c");
+        fs::write(
+            &path,
+            r#"int helper(void) { return 42; }
+int main(void) { return 0; }
+"#,
+        )
+        .expect("write C source");
+
+        let module = tree_front::parse_polyglot_file(ParserId::C, &path).expect("parse C");
+        let sil = driver::lower_unified_module(&module, "App");
+        assert!(sil.contains("sil @helper"), "sil:\n{sil}");
+        assert!(sil.contains("sil @main"), "sil:\n{sil}");
+        assert!(
+            sil.contains("integer_literal $Builtin.Int64, 42"),
+            "helper return literal; sil:\n{sil}"
+        );
+        assert!(
+            sil.contains("integer_literal $Builtin.Int64, 0"),
+            "main return literal; sil:\n{sil}"
+        );
+        assert!(
+            sil.contains("function_ref @helper"),
+            "main should reference helper; sil:\n{sil}"
+        );
+        let artifact = hybrid_sil::parse_textual_sil(&sil);
+        let cleaned = hybrid_sil::remove_debug_insts(&artifact);
+        let report = hybrid_sil::extract_call_graph(&cleaned);
+        assert!(
+            !artifact.instructions.is_empty() || !report.call_edges.is_empty(),
+            "hybrid_sil should see instructions or call edges from lowered C SIL; sil:\n{sil}"
+        );
+    }
+
+    #[test]
+    fn c_tree_front_return_statement_uses_parameter_ident() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock before UNIX_EPOCH")
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!(
+            "inauguration-c-tree-front-ident-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let _guard = TempDirGuard::new(temp_dir.clone());
+
+        let path = temp_dir.join("echo.c");
+        fs::write(
+            &path,
+            "int echo(int x) { return x; }\nint main(void) { return 0; }\n",
+        )
+        .expect("write C source");
+
+        let module = tree_front::parse_polyglot_file(ParserId::C, &path).expect("parse C");
+        let echo = module
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "echo"))
+            .expect("echo fn");
+        match echo {
+            Decl::Function { body, .. } => {
+                assert_eq!(
+                    body.as_slice(),
+                    &[Stmt::Return(Some(Expr::Ident("x".into())))]
+                );
+            }
+            _ => panic!("expected function"),
+        }
+        let sil = driver::lower_unified_module(&module, "App");
+        assert!(sil.contains("sil @echo"), "sil:\n{sil}");
     }
 }
