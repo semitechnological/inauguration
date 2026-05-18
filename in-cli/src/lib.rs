@@ -3,6 +3,7 @@
 #[cfg(unix)]
 pub mod preview_client;
 
+pub mod bytecode;
 pub mod compiler;
 pub mod core_ir;
 pub mod hotreload;
@@ -15,7 +16,9 @@ pub mod lower_core;
 pub mod native_swift_sil;
 pub mod parser_registry;
 pub mod sil_emit;
+pub mod sil_to_bytecode;
 pub mod swift_subset;
+pub mod vm;
 
 #[cfg(test)]
 mod in_pipeline_tests {
@@ -207,5 +210,28 @@ int main(void) { return 0; }
         }
         let sil = driver::lower_unified_module(&module, "App");
         assert!(sil.contains("sil @echo"), "sil:\n{sil}");
+    }
+
+    #[test]
+    fn bytecode_backend_from_sil() {
+        // Test the full pipeline: .in → Core IR → SIL → Bytecode → VM
+        let src = "fn main() -> void { return; }";
+        let module = in_lang_parse::parse_in_source(src).expect("parse .in");
+        let sil = lower_core::lower_to_textual_sil(&module, "App");
+        
+        // Parse SIL into artifact
+        let artifact = hybrid_sil::parse_textual_sil(&sil);
+        assert!(artifact.function_id.contains("main"), "should identify main function");
+        
+        // Lower to bytecode
+        let bytecode_module = crate::sil_to_bytecode::lower_sil_to_bytecode(&artifact)
+            .expect("lower SIL to bytecode");
+        assert_eq!(bytecode_module.functions.len(), 1);
+        assert_eq!(bytecode_module.functions[0].name, "main");
+        
+        // Execute bytecode
+        let mut vm = crate::vm::BytecodeVM::new(bytecode_module);
+        let result = vm.run().expect("bytecode execution");
+        assert!(matches!(result, crate::bytecode::Value::Nil));
     }
 }
