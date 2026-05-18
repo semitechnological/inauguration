@@ -12,7 +12,7 @@
 //! 3. **`IN_PARSER=in`** or **`IN_PARSER=icore`** (case-insensitive): force that Core IR front.
 //! 4. **Known extension** (`.in`, `.icore`, `.java`, …): [`ResolvedBuildParser::CoreIr`]
 //!    with the matching [`ParserId`] (full: [`ParserId::In`], [`ParserId::Icore`]; others: Tree-sitter).
-//! 5. Otherwise: Swift SIL emit path (`swiftc` or subset env).
+//! 5. Otherwise: Swift SIL emit path (in-tree subset by default; optional toolchain fallback via env).
 
 use crate::core_ir::UnifiedModule;
 use crate::in_lang_parse;
@@ -215,7 +215,7 @@ pub enum ParserCli {
 pub enum ResolvedBuildParser {
     /// Core IR path (implemented: [`ParserId::In`], [`ParserId::Icore`]; stubs: other [`ParserId`]).
     CoreIr(ParserId),
-    /// Swift gather + `sil_emit::emit_textual_sil` (`swiftc` or subset env).
+    /// Swift gather + `sil_emit::emit_textual_sil` (subset-default, optional toolchain fallback).
     SwiftSilEmit,
 }
 

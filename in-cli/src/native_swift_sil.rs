@@ -3,7 +3,8 @@
 //! [`crate::lower_core::lower_to_textual_sil`] so subset bodies share the same lowering as Core IR fronts.
 //!
 //! **`IN_NATIVE_SWIFT_SIL`** mode (shared with [`crate::sil_emit`] and hot reload compile gate):
-//! **`try`** / **`1`** / **`true`**, **`only`** / **`2`** / **`strict`**, else **off**.
+//! **`try`** / **`1`** / **`true`**, **`only`** / **`2`** / **`strict`**, **`off`** / **`0`** / **`false`**.
+//! Default is **`only`** so `in build` stays self-hosted unless explicitly opted into toolchain fallback.
 
 use crate::core_ir::{Decl as IrDecl, UnifiedModule};
 use crate::swift_subset::{self, Decl, Diagnostic};
@@ -43,7 +44,10 @@ pub fn native_swift_sil_mode_from_env() -> NativeSwiftSilMode {
         Ok(v) if v == "only" || v == "2" || v.eq_ignore_ascii_case("strict") => {
             NativeSwiftSilMode::Only
         }
-        _ => NativeSwiftSilMode::Off,
+        Ok(v) if v == "off" || v == "0" || v.eq_ignore_ascii_case("false") => {
+            NativeSwiftSilMode::Off
+        }
+        _ => NativeSwiftSilMode::Only,
     }
 }
 

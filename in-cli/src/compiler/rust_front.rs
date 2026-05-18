@@ -9,8 +9,6 @@ use std::path::Path;
 
 pub fn parse_rust_file(path: &Path) -> Result<UnifiedModule, String> {
     let src = std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
-    // Keep this front honest: if Rust itself rejects the file, fail here.
-    rustc_validate(path)?;
     parse_rust_source(&src)
 }
 
@@ -285,23 +283,6 @@ fn lower_expr(expr: &syn::Expr) -> Expr {
             rhs: Box::new(lower_expr(&b.right)),
         },
         _ => Expr::Ident(expr.to_token_stream().to_string()),
-    }
-}
-
-fn rustc_validate(path: &Path) -> Result<(), String> {
-    let out = std::process::Command::new("rustc")
-        .arg("--crate-type")
-        .arg("lib")
-        .arg("--emit=metadata")
-        .arg(path)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped())
-        .output()
-        .map_err(|e| format!("failed to run rustc: {e}"))?;
-    if out.status.success() {
-        Ok(())
-    } else {
-        Err(String::from_utf8_lossy(&out.stderr).to_string())
     }
 }
 

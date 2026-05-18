@@ -279,7 +279,7 @@ fn run_pipeline_for_path(
             }
             Ok(None) => inauguration::sil_emit::emit_textual_sil(path, module_id).map_err(|e| {
                 InError::Message(format!(
-                    "{e}. Hint: use `in build --swiftpm` for SwiftPM emit, pass extra `swiftc` flags via IN_SWIFTC_FLAGS, or for Core IR use `.in` / `.icore` (`--parser in|icore` or `IN_PARSER=in|icore`)."
+                    "{e}. Hint: default Swift mode is self-hosted (`IN_NATIVE_SWIFT_SIL=only`). For toolchain fallback set `IN_NATIVE_SWIFT_SIL=try` (or `off`) and optionally use `in build --swiftpm`; for Core IR use `.in` / `.icore` (`--parser in|icore` or `IN_PARSER=in|icore`)."
                 ))
             })?,
             Err(e) => {
