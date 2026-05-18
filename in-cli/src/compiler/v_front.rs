@@ -240,10 +240,19 @@ fn brace_depth_scan(s: &str) -> usize {
 /// From `lines[start]` containing `{`, return inner lines, last physical line index consumed, and
 /// text after the matching `}` on the closing fragment (e.g. ` else if … {`).
 fn gather_braced_region(lines: &[String], start: usize) -> Option<(Vec<String>, usize, String)> {
-    let first = lines.get(start)?.trim();
-    let open = first.find('{')?;
-    let mut blob = first[open + 1..].to_string();
-    let mut end_line = start;
+    let mut open_line = start;
+    let mut open_col = None;
+    while open_line < lines.len() {
+        let line = lines.get(open_line)?.trim();
+        if let Some(pos) = line.find('{') {
+            open_col = Some(pos);
+            break;
+        }
+        open_line += 1;
+    }
+    let open = open_col?;
+    let mut blob = lines.get(open_line)?.trim()[open + 1..].to_string();
+    let mut end_line = open_line;
     loop {
         if let Some(ci) = matching_brace_index(&blob, 1) {
             let inner_raw = &blob[..ci];
@@ -742,6 +751,29 @@ fn main() {
                 } if c == "i < 3"
             )
         }));
+    }
+
+    #[test]
+    fn parses_multiline_if_condition_block() {
+        let src = r#"
+module main
+fn main() {
+    if left > 0
+        || right > 0 {
+        return
+    }
+}
+"#;
+        let m = parse_v_source(src).expect("v parse");
+        let body = m
+            .decls
+            .iter()
+            .find_map(|d| match d {
+                Decl::Function { name, body, .. } if name == "main" => Some(body),
+                _ => None,
+            })
+            .expect("main body");
+        assert!(body.iter().any(|s| matches!(s, Stmt::If { .. })));
     }
 
     #[test]
