@@ -60,12 +60,6 @@ fn subset_program_if_valid(combined_sources: &str) -> Option<Vec<Decl>> {
     if program.is_empty() {
         return None;
     }
-    let has_main = program
-        .iter()
-        .any(|d| matches!(d, Decl::Function(f) if f.name == "main"));
-    if !has_main {
-        return None;
-    }
     Some(program)
 }
 
@@ -126,7 +120,7 @@ fn program_to_textual_sil(program: &[Decl], module_id: &str) -> String {
     format!("// inauguration in-tree subset SIL (no swiftc)\n{body}")
 }
 
-/// If the combined sources are a valid **subset** program (checker clean, includes `main`), emit SIL.
+/// If the combined sources are a valid **subset** program (checker clean), emit SIL.
 /// Otherwise returns `Ok(None)` so `sil_emit` can fall back to `swiftc` when mode is `try`.
 pub fn try_emit_in_tree_sil(combined_sources: &str, module_id: &str) -> Option<String> {
     let program = subset_program_if_valid(combined_sources)?;
@@ -150,12 +144,6 @@ pub fn emit_in_tree_sil_or_diagnose(
             "IN_NATIVE_SWIFT_SIL=only: in-tree subset rejected this source ({msg}). \
 Subset expects top-level `struct`/`func` lines only (see `swift_subset` + `native_swift_sil`)."
         ));
-    }
-    let has_main = program
-        .iter()
-        .any(|d| matches!(d, Decl::Function(f) if f.name == "main"));
-    if !has_main {
-        return Err("IN_NATIVE_SWIFT_SIL=only: missing `func main` at top level (subset)".into());
     }
     if program.is_empty() {
         return Err("IN_NATIVE_SWIFT_SIL=only: no top-level decls after filtering".into());
@@ -220,7 +208,7 @@ func main() -> Void
         assert!(try_emit_in_tree_sil(ok, "App").is_some());
 
         let no_main = "struct X\n";
-        assert!(!swift_subset_typecheck_ok(no_main));
-        assert!(try_emit_in_tree_sil(no_main, "App").is_none());
+        assert!(swift_subset_typecheck_ok(no_main));
+        assert!(try_emit_in_tree_sil(no_main, "App").is_some());
     }
 }

@@ -1003,7 +1003,7 @@ let package = Package(
     }
 
     #[test]
-    fn compile_check_only_accepts_subset_with_main() {
+    fn compile_check_only_accepts_subset_without_main() {
         let dir = std::env::temp_dir().join(format!("in-compile-only-{}", std::process::id()));
         let _ = fs::create_dir_all(&dir);
         let ok_path = dir.join("ok.swift");
@@ -1018,7 +1018,7 @@ let package = Package(
         let bad = dir.join("bad.swift");
         let mut f2 = fs::File::create(&bad).unwrap();
         writeln!(f2, "struct X {{}}").unwrap();
-        assert!(!compile_check_swift_path_with_mode(
+        assert!(compile_check_swift_path_with_mode(
             &bad,
             NativeSwiftSilMode::Only
         ));

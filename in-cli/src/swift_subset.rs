@@ -364,15 +364,6 @@ pub fn check(program: &[Decl]) -> Vec<Diagnostic> {
     all_top.extend(fn_names.iter().cloned());
     let dupes = duplicate_names(&all_top);
 
-    let missing_main = if fn_names.iter().any(|n| n == "main") {
-        vec![]
-    } else {
-        vec![Diagnostic {
-            code: "E_MAIN".into(),
-            message: "missing required function: main".into(),
-        }]
-    };
-
     let duplicate_diags: Vec<Diagnostic> = dupes
         .into_iter()
         .map(|name| Diagnostic {
@@ -423,11 +414,7 @@ pub fn check(program: &[Decl]) -> Vec<Diagnostic> {
         }
     }
 
-    missing_main
-        .into_iter()
-        .chain(duplicate_diags)
-        .chain(type_diags)
-        .collect()
+    duplicate_diags.into_iter().chain(type_diags).collect()
 }
 
 #[derive(Serialize)]
