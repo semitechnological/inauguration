@@ -5,44 +5,71 @@ use crate::hybrid_sil::SilArtifact;
 use std::collections::HashMap;
 
 /// Lower a SIL artifact to bytecode.
+/// Handles multiple functions by grouping instructions under sil @ headers.
 pub fn lower_sil_to_bytecode(artifact: &SilArtifact) -> Result<BytecodeModule, String> {
     let mut module = BytecodeModule::new(artifact.function_id.clone());
 
-    // For now, emit a single-function module with simple lowering.
-    // In a full compiler, we'd parse each `sil @name` block as a separate function.
+    // Group instructions by function
+    let mut functions_map: HashMap<String, Vec<String>> = HashMap::new();
+    let mut current_func = artifact.function_id.clone();
 
-    let mut instructions = Vec::new();
-    let mut local_counter = 0;
-    let mut value_map: HashMap<String, usize> = HashMap::new();
-    let mut label_counter = 0;
-
-    for line in &artifact.instructions {
+    for (idx, line) in artifact.instructions.iter().enumerate() {
         let line = line.trim();
 
+        // Check if instruction_callers indicates a function boundary
+        if idx < artifact.instruction_callers.len() && artifact.instruction_callers[idx] != current_func {
+            current_func = artifact.instruction_callers[idx].clone();
+        }
+
+        functions_map
+            .entry(current_func.clone())
+            .or_insert_with(Vec::new)
+            .push(line.to_string());
+    }
+
+    // Lower each function
+    for (func_name, instructions) in functions_map {
+        let bytecode_func = lower_function(&func_name, &instructions)?;
+        module.add_function(bytecode_func);
+    }
+
+    Ok(module)
+}
+
+/// Lower a single function to bytecode.
+fn lower_function(name: &str, instructions: &[String]) -> Result<BytecodeFunction, String> {
+    let mut bytecode = Vec::new();
+    let mut local_counter = 0;
+    let mut value_map: HashMap<String, usize> = HashMap::new();
+    let mut _label_counter = 0;
+
+    for line in instructions {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with("//") {
+            continue;
+        }
+
         // Parse SIL instructions and convert to bytecode
-        if let Ok(inst) = parse_sil_instruction_to_bytecode(
+        if let Ok(insts) = parse_sil_instruction_to_bytecode(
             line,
             &mut local_counter,
             &mut value_map,
-            &mut label_counter,
+            &mut _label_counter,
         ) {
-            instructions.extend(inst);
+            bytecode.extend(insts);
         }
     }
 
     // Always end with return
-    if !matches!(instructions.last(), Some(Instruction::Return)) {
-        instructions.push(Instruction::Return);
+    if !matches!(bytecode.last(), Some(Instruction::Return)) {
+        bytecode.push(Instruction::Return);
     }
 
-    let func = BytecodeFunction {
-        name: artifact.function_id.clone(),
-        instructions,
+    Ok(BytecodeFunction {
+        name: name.to_string(),
+        instructions: bytecode,
         local_count: local_counter,
-    };
-
-    module.add_function(func);
-    Ok(module)
+    })
 }
 
 /// Parse a single SIL instruction and emit bytecode equivalent(s).
@@ -55,7 +82,35 @@ fn parse_sil_instruction_to_bytecode(
     let mut out = Vec::new();
     let line = line.trim();
 
-    // integer_literal $Builtin.Int64, 42 → LoadInt(42)
+    // Skip empty and comment lines
+    if line.is_empty() || line.starts_with("//") {
+        return Ok(out);
+    }
+
+    // %0 = integer_literal $Builtin.Int64, 42
+    if line.contains("=") && line.contains("integer_literal") {
+        if let Some(before_eq) = line.split('=').next() {
+            let reg = before_eq.trim();
+            if reg.starts_with('%') {
+                if let Some(rest) = line.split('=').nth(1) {
+                    let rest = rest.trim();
+                    if let Some(n_str) = rest.strip_prefix("integer_literal $Builtin.Int64,") {
+                        if let Ok(n) = n_str.trim().parse::<i64>() {
+                            out.push(Instruction::LoadInt(n));
+                            // Store in "register" (local)
+                            let slot = *local_counter;
+                            *local_counter += 1;
+                            value_map.insert(reg.to_string(), slot);
+                            out.push(Instruction::Store(slot));
+                            return Ok(out);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // integer_literal $Builtin.Int64, 42 (standalone)
     if let Some(rest) = line.strip_prefix("integer_literal $Builtin.Int64,") {
         if let Ok(n) = rest.trim().parse::<i64>() {
             out.push(Instruction::LoadInt(n));
@@ -63,37 +118,105 @@ fn parse_sil_instruction_to_bytecode(
         }
     }
 
-    // %0 = integer_literal $Builtin.Int64, 42
-    if let Some(before_eq) = line.split('=').next() {
-        let reg = before_eq.trim();
-        if reg.starts_with('%') {
-            if let Some(rest) = line.split('=').nth(1) {
-                let rest = rest.trim();
-                if let Some(n_str) = rest.strip_prefix("integer_literal $Builtin.Int64,") {
-                    if let Ok(n) = n_str.trim().parse::<i64>() {
-                        out.push(Instruction::LoadInt(n));
-                        // Store in "register" (local)
-                        let slot = *local_counter;
-                        *local_counter += 1;
-                        value_map.insert(reg.to_string(), slot);
-                        out.push(Instruction::Store(slot));
-                        return Ok(out);
+    // %0 = apply %1(%2, %3) : $... (function call)
+    if line.contains("= apply") {
+        if let Some(eq_split) = line.split('=').nth(1) {
+            if let Some(apply_rest) = eq_split.strip_prefix("apply").map(str::trim) {
+                // Extract function ref
+                if let Some(paren_idx) = apply_rest.find('(') {
+                    let func_ref = &apply_rest[..paren_idx].trim();
+                    // Try to look up in value_map or treat as literal
+                    if value_map.contains_key(&func_ref.to_string()) {
+                        let slot = value_map[&func_ref.to_string()];
+                        out.push(Instruction::Load(slot));
                     }
+
+                    // Extract arguments between parens
+                    if let Some(close_paren) = apply_rest.find(')') {
+                        let args_str = &apply_rest[paren_idx + 1..close_paren];
+                        for arg in args_str.split(',') {
+                            let arg = arg.trim();
+                            if arg.starts_with('%') {
+                                if let Some(slot) = value_map.get(arg) {
+                                    out.push(Instruction::Load(*slot));
+                                }
+                            }
+                        }
+                        // Emit the call (arg count)
+                        let argc = args_str.split(',').count();
+                        out.push(Instruction::CallFunction("user_func".to_string(), argc));
+
+                        // Store result
+                        if let Some(before_eq) = line.split('=').next() {
+                            let res_reg = before_eq.trim();
+                            if res_reg.starts_with('%') {
+                                let slot = *local_counter;
+                                *local_counter += 1;
+                                value_map.insert(res_reg.to_string(), slot);
+                                out.push(Instruction::Store(slot));
+                            }
+                        }
+                    }
+                    return Ok(out);
                 }
             }
         }
     }
 
-    // function_ref @helper → emit a reference (stub for now)
-    if let Some(rest) = line.strip_prefix("function_ref @") {
-        let func_name = rest.split_whitespace().next().unwrap_or("?");
-        out.push(Instruction::LoadString(func_name.to_string()));
+    // function_ref @helper : $...
+    if line.contains("function_ref @") {
+        if let Some(rest) = line.split("function_ref @").nth(1) {
+            let func_name = rest
+                .split(|c: char| c.is_whitespace() || c == ':' || c == '(')
+                .next()
+                .unwrap_or("?");
+            out.push(Instruction::LoadString(func_name.to_string()));
+        }
         return Ok(out);
     }
 
-    // return → Return
+    // return %0 or return
     if line.starts_with("return") {
+        if let Some(rest) = line.strip_prefix("return").map(str::trim) {
+            if !rest.is_empty() && rest.starts_with('%') {
+                // Load the return value
+                if let Some(slot) = value_map.get(rest) {
+                    out.push(Instruction::Load(*slot));
+                }
+            }
+        }
         out.push(Instruction::Return);
+        return Ok(out);
+    }
+
+    // cond_br %0, bb1, bb2 (conditional branch)
+    if line.starts_with("cond_br") {
+        if let Some(rest) = line.strip_prefix("cond_br").map(str::trim) {
+            let parts: Vec<&str> = rest.split(',').collect();
+            if parts.len() >= 3 {
+                let cond_reg = parts[0].trim();
+                let true_label = parts[1].trim();
+                let false_label = parts[2].trim();
+
+                // Load condition
+                if let Some(slot) = value_map.get(cond_reg) {
+                    out.push(Instruction::Load(*slot));
+                }
+
+                // Jump if true
+                out.push(Instruction::JumpIfTrue(true_label.to_string()));
+                // Jump to false label unconditionally
+                out.push(Instruction::Jump(false_label.to_string()));
+            }
+        }
+        return Ok(out);
+    }
+
+    // br bb1 (unconditional branch)
+    if line.starts_with("br ") {
+        if let Some(label) = line.strip_prefix("br ").map(str::trim) {
+            out.push(Instruction::Jump(label.to_string()));
+        }
         return Ok(out);
     }
 
@@ -104,12 +227,12 @@ fn parse_sil_instruction_to_bytecode(
         return Ok(out);
     }
 
-    // debug_value instructions → skip
+    // Skip debug_value
     if line.starts_with("debug_value") {
         return Ok(out);
     }
 
-    // For unrecognized SIL, emit a load of 0 as a safe default
+    // For other register assignments, emit a safe default (load 0)
     if line.starts_with("%") || line.contains("=") {
         out.push(Instruction::LoadInt(0));
         // Try to capture result register

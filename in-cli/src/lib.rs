@@ -234,4 +234,69 @@ int main(void) { return 0; }
         let result = vm.run().expect("bytecode execution");
         assert!(matches!(result, crate::bytecode::Value::Nil));
     }
+
+    #[test]
+    fn bytecode_with_helper_function() {
+        // Test multi-function compilation
+        let src = r#"
+fn helper(x: Int) -> Int {
+  return x
+}
+fn main() -> void {
+  return
+}
+"#;
+        let module = in_lang_parse::parse_in_source(src).expect("parse .in");
+        let sil = lower_core::lower_to_textual_sil(&module, "App");
+        
+        // Parse SIL into artifact
+        let artifact = hybrid_sil::parse_textual_sil(&sil);
+        
+        // Lower to bytecode
+        let bytecode_module = crate::sil_to_bytecode::lower_sil_to_bytecode(&artifact)
+            .expect("lower SIL to bytecode");
+        
+        // Should have at least 1 function (main)
+        assert!(
+            bytecode_module.functions.len() >= 1,
+            "expected at least main function, got {} functions",
+            bytecode_module.functions.len()
+        );
+        
+        // Find main function
+        let main_func = bytecode_module
+            .functions
+            .iter()
+            .find(|f| f.name == "main")
+            .expect("main function");
+        assert!(!main_func.instructions.is_empty(), "main should have instructions");
+        
+        // Execute
+        let mut vm = crate::vm::BytecodeVM::new(bytecode_module);
+        let result = vm.run().expect("bytecode execution");
+        // Just verify it executes without error
+        let _ = result;
+    }
+
+    #[test]
+    fn bytecode_arithmetic_expression() {
+        // Test that arithmetic SIL lowers to bytecode operations
+        let src = "fn main() -> Int { let x: Int = 2 + 3; return x; }";
+        let module = in_lang_parse::parse_in_source(src).expect("parse .in");
+        let sil = lower_core::lower_to_textual_sil(&module, "App");
+        assert!(
+            sil.contains("integer_literal $Builtin.Int64"),
+            "SIL should contain integer literals"
+        );
+        
+        let artifact = hybrid_sil::parse_textual_sil(&sil);
+        let bytecode_module = crate::sil_to_bytecode::lower_sil_to_bytecode(&artifact)
+            .expect("lower SIL to bytecode");
+        
+        let mut vm = crate::vm::BytecodeVM::new(bytecode_module);
+        let result = vm.run().expect("bytecode execution");
+        // Should execute successfully
+        let _ = result;
+    }
+
 }
