@@ -98,15 +98,13 @@ impl BytecodeVM {
                     let result = self.call_builtin(&builtin_name, args)?;
                     self.stack.push(result);
                 }
-                Instruction::CallFunction(fn_name, _argc) => {
-                    // For now, handle recursive calls simply
-                    let callee_func = self
-                        .module
-                        .find_function(&fn_name)
-                        .ok_or(format!("function not found: {}", fn_name))?
-                        .clone();
-                    self.execute_function(&callee_func)?;
-                    // Result is on stack if function returned a value
+                Instruction::CallFunction(fn_name, argc) => {
+                    // Pop arguments from stack
+                    let args = self.pop_n(argc)?;
+                    // Call the function properly (manages frame stack)
+                    let result = self.call_function(&fn_name, args)?;
+                    // Push result back on stack
+                    self.stack.push(result);
                 }
                 Instruction::Return => {
                     break;
