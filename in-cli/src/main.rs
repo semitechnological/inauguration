@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use inauguration::hybrid_core::ChangeEvent;
-use inauguration::hybrid_pipeline::run_wave_with_timings;
+use inauguration::hybrid_pipeline::{StageTimings, run_wave_with_timings};
 use inauguration::hybrid_scheduler::BuildScheduler;
 use inauguration::parser_registry::{self, ParserCli};
 use serde::Deserialize;
@@ -328,43 +328,49 @@ fn run_pipeline_for_path(
     timings.swift_frontend_us = timings
         .swift_frontend_us
         .saturating_add(swift_frontend_emit_us);
-    timings.total_us = pipeline_start.elapsed().as_micros() as u64;
+    timings.pipeline_us = pipeline_start.elapsed().as_micros() as u64;
 
     if verbose {
-        println!(
-            "    Finished `in` compiler pipeline (tasks: {count}) in {:.3}ms",
-            (timings.total_us as f64) / 1000.0
-        );
-        println!("      Stage timings:");
-        println!(
-            "      - ast refresh: {:.3}ms",
-            (timings.ast_refresh_us as f64) / 1000.0
-        );
-        println!(
-            "      - SIL emit (subset or swiftc): {:.3}ms",
-            (timings.swift_frontend_us as f64) / 1000.0
-        );
-        println!(
-            "      - sil analysis: {:.3}ms",
-            (timings.sil_analysis_us as f64) / 1000.0
-        );
-        println!("      - total: {:.3}ms", (timings.total_us as f64) / 1000.0);
-        println!("processed tasks: {count}");
-        println!(
-            "stage.ast_refresh_ms={:.3}",
-            (timings.ast_refresh_us as f64) / 1000.0
-        );
-        println!(
-            "stage.swift_frontend_ms={:.3}",
-            (timings.swift_frontend_us as f64) / 1000.0
-        );
-        println!(
-            "stage.sil_analysis_ms={:.3}",
-            (timings.sil_analysis_us as f64) / 1000.0
-        );
-        println!("stage.total_ms={:.3}", (timings.total_us as f64) / 1000.0);
+        for line in pipeline_timing_lines(count, &timings, "SIL emit (subset or swiftc)") {
+            println!("{line}");
+        }
     }
     Ok(())
+}
+
+fn ms(us: u64) -> f64 {
+    (us as f64) / 1000.0
+}
+
+fn pipeline_timing_lines(
+    count: usize,
+    timings: &StageTimings,
+    frontend_label: &str,
+) -> Vec<String> {
+    vec![
+        format!(
+            "    Finished `in` compiler pipeline (tasks: {count}) in {:.3}ms",
+            ms(timings.pipeline_us)
+        ),
+        "      Stage timings:".to_string(),
+        format!("      - ast refresh: {:.3}ms", ms(timings.ast_refresh_us)),
+        format!(
+            "      - {frontend_label}: {:.3}ms",
+            ms(timings.swift_frontend_us)
+        ),
+        format!("      - sil analysis: {:.3}ms", ms(timings.sil_analysis_us)),
+        format!("      - wave: {:.3}ms", ms(timings.wave_us)),
+        format!("      - pipeline: {:.3}ms", ms(timings.pipeline_us)),
+        format!("processed tasks: {count}"),
+        format!("stage.ast_refresh_ms={:.3}", ms(timings.ast_refresh_us)),
+        format!(
+            "stage.swift_frontend_ms={:.3}",
+            ms(timings.swift_frontend_us)
+        ),
+        format!("stage.sil_analysis_ms={:.3}", ms(timings.sil_analysis_us)),
+        format!("timing.wave_ms={:.3}", ms(timings.wave_us)),
+        format!("timing.pipeline_ms={:.3}", ms(timings.pipeline_us)),
+    ]
 }
 
 fn find_package_root(path: &Path) -> Option<PathBuf> {
@@ -713,7 +719,10 @@ fn cmd_execute_bytecode(cwd: &Path, path: &str, module_id: &str, verbose: bool) 
     let source_path = cwd.join(path);
 
     if !source_path.exists() {
-        return Err(InError::Message(format!("file not found: {}", source_path.display())));
+        return Err(InError::Message(format!(
+            "file not found: {}",
+            source_path.display()
+        )));
     }
 
     // Read source file
@@ -739,8 +748,11 @@ fn cmd_execute_bytecode(cwd: &Path, path: &str, module_id: &str, verbose: bool) 
                 .map_err(|e| InError::Message(format!("v frontend error: {e}")))?,
             "java" => {
                 use inauguration::parser_registry::ParserId;
-                inauguration::compiler::tree_front::parse_polyglot_file(ParserId::Java, &source_path)
-                    .map_err(|e| InError::Message(format!("java frontend error: {e}")))?
+                inauguration::compiler::tree_front::parse_polyglot_file(
+                    ParserId::Java,
+                    &source_path,
+                )
+                .map_err(|e| InError::Message(format!("java frontend error: {e}")))?
             }
             "c" => {
                 use inauguration::parser_registry::ParserId;
@@ -756,7 +768,7 @@ fn cmd_execute_bytecode(cwd: &Path, path: &str, module_id: &str, verbose: bool) 
                 return Err(InError::Message(format!(
                     "unsupported file extension: {}",
                     ext
-                )))
+                )));
             }
         }
     } else {
@@ -788,25 +800,34 @@ fn cmd_execute_bytecode(cwd: &Path, path: &str, module_id: &str, verbose: bool) 
         .map_err(|e| InError::Message(format!("bytecode lowering: {e}")))?;
 
     if verbose {
-        eprintln!("[bytecode] Generated {} functions", bytecode_module.functions.len());
+        eprintln!(
+            "[bytecode] Generated {} functions",
+            bytecode_module.functions.len()
+        );
         for func in &bytecode_module.functions {
-            eprintln!("  - @{} ({} instructions)", func.name, func.instructions.len());
+            eprintln!(
+                "  - @{} ({} instructions)",
+                func.name,
+                func.instructions.len()
+            );
         }
     }
 
     // Execute bytecode
     if verbose {
-        eprintln!("[bytecode] Executing entry point: @{}", bytecode_module.entry_point);
+        eprintln!(
+            "[bytecode] Executing entry point: @{}",
+            bytecode_module.entry_point
+        );
     }
 
     let mut vm = inauguration::vm::BytecodeVM::new(bytecode_module);
-    let result = vm.run().map_err(|e| InError::Message(format!("bytecode execution: {e}")))?;
+    let result = vm
+        .run()
+        .map_err(|e| InError::Message(format!("bytecode execution: {e}")))?;
 
     if verbose {
-        eprintln!(
-            "[bytecode] Execution completed with result: {:?}",
-            result
-        );
+        eprintln!("[bytecode] Execution completed with result: {:?}", result);
     }
 
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
@@ -1318,6 +1339,26 @@ mod tests {
         assert!(!super::parse_env_bool("false"));
         assert!(!super::parse_env_bool("yes"));
         assert!(!super::parse_env_bool(""));
+    }
+
+    #[test]
+    fn pipeline_timing_lines_separate_wave_and_pipeline_time() {
+        let lines = super::pipeline_timing_lines(
+            3,
+            &StageTimings {
+                ast_refresh_us: 1000,
+                swift_frontend_us: 2000,
+                sil_analysis_us: 3000,
+                wave_us: 4000,
+                pipeline_us: 9000,
+            },
+            "SIL emit (subset or swiftc)",
+        );
+        assert!(lines.contains(&"      - wave: 4.000ms".to_string()));
+        assert!(lines.contains(&"      - pipeline: 9.000ms".to_string()));
+        assert!(lines.contains(&"timing.wave_ms=4.000".to_string()));
+        assert!(lines.contains(&"timing.pipeline_ms=9.000".to_string()));
+        assert!(!lines.iter().any(|line| line.contains("stage.total_ms")));
     }
 
     #[cfg(unix)]

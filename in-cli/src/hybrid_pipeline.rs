@@ -146,7 +146,8 @@ pub struct StageTimings {
     pub ast_refresh_us: u64,
     pub swift_frontend_us: u64,
     pub sil_analysis_us: u64,
-    pub total_us: u64,
+    pub wave_us: u64,
+    pub pipeline_us: u64,
 }
 
 #[allow(dead_code)]
@@ -184,7 +185,7 @@ pub async fn run_wave_with_timings(
     event: &ChangeEvent,
     sil_source: &str,
 ) -> Result<(usize, StageTimings), PipelineError> {
-    let start_total = Instant::now();
+    let wave_start = Instant::now();
     scheduler.enqueue_wave(event).await;
     let mut processed = 0usize;
     let mut timings = StageTimings::default();
@@ -212,7 +213,8 @@ pub async fn run_wave_with_timings(
             }
         }
     }
-    timings.total_us = start_total.elapsed().as_micros() as u64;
+    timings.wave_us = wave_start.elapsed().as_micros() as u64;
+    timings.pipeline_us = timings.wave_us;
     Ok((processed, timings))
 }
 
@@ -237,7 +239,8 @@ mod tests {
         .await
         .expect("pipeline runs");
         assert_eq!(count, 3);
-        assert!(timings.total_us <= 50_000_000);
+        assert!(timings.wave_us <= 50_000_000);
+        assert_eq!(timings.pipeline_us, timings.wave_us);
     }
 
     #[test]
@@ -336,6 +339,7 @@ mod tests {
         .await
         .expect("wave");
         assert_eq!(count, 3);
-        assert!(timings.total_us <= 50_000_000);
+        assert!(timings.wave_us <= 50_000_000);
+        assert_eq!(timings.pipeline_us, timings.wave_us);
     }
 }

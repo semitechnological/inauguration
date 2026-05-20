@@ -1,6 +1,6 @@
 use clap::Parser;
 use hybrid_core::ChangeEvent;
-use hybrid_pipeline::run_wave_with_timings;
+use hybrid_pipeline::{run_wave_with_timings, StageTimings};
 use hybrid_scheduler::BuildScheduler;
 use rayon::prelude::*;
 use std::path::{Path, PathBuf};
@@ -41,41 +41,47 @@ fn main() {
         "sil @main\nentry:\ndebug_value %0\n%1 = integer_literal $Builtin.Int64, 1\n%2 = function_ref @helper",
     )) {
         Ok((count, timings)) => {
-            println!(
-                "    Finished `in` compiler pipeline (tasks: {count}) in {:.3}ms",
-                (timings.total_us as f64) / 1000.0
-            );
-            println!("      Stage timings:");
-            println!(
-                "      - ast refresh: {:.3}ms",
-                (timings.ast_refresh_us as f64) / 1000.0
-            );
-            println!(
-                "      - swift frontend: {:.3}ms",
-                (timings.swift_frontend_us as f64) / 1000.0
-            );
-            println!(
-                "      - sil analysis: {:.3}ms",
-                (timings.sil_analysis_us as f64) / 1000.0
-            );
-            println!("      - total: {:.3}ms", (timings.total_us as f64) / 1000.0);
-            println!("processed tasks: {count}");
-            println!(
-                "stage.ast_refresh_ms={:.3}",
-                (timings.ast_refresh_us as f64) / 1000.0
-            );
-            println!(
-                "stage.swift_frontend_ms={:.3}",
-                (timings.swift_frontend_us as f64) / 1000.0
-            );
-            println!(
-                "stage.sil_analysis_ms={:.3}",
-                (timings.sil_analysis_us as f64) / 1000.0
-            );
-            println!("stage.total_ms={:.3}", (timings.total_us as f64) / 1000.0);
+            for line in pipeline_timing_lines(count, &timings, "swift frontend") {
+                println!("{line}");
+            }
         }
         Err(err) => eprintln!("pipeline failed: {err}"),
     }
+}
+
+fn ms(us: u64) -> f64 {
+    (us as f64) / 1000.0
+}
+
+fn pipeline_timing_lines(
+    count: usize,
+    timings: &StageTimings,
+    frontend_label: &str,
+) -> Vec<String> {
+    vec![
+        format!(
+            "    Finished `in` compiler pipeline (tasks: {count}) in {:.3}ms",
+            ms(timings.pipeline_us)
+        ),
+        "      Stage timings:".to_string(),
+        format!("      - ast refresh: {:.3}ms", ms(timings.ast_refresh_us)),
+        format!(
+            "      - {frontend_label}: {:.3}ms",
+            ms(timings.swift_frontend_us)
+        ),
+        format!("      - sil analysis: {:.3}ms", ms(timings.sil_analysis_us)),
+        format!("      - wave: {:.3}ms", ms(timings.wave_us)),
+        format!("      - pipeline: {:.3}ms", ms(timings.pipeline_us)),
+        format!("processed tasks: {count}"),
+        format!("stage.ast_refresh_ms={:.3}", ms(timings.ast_refresh_us)),
+        format!(
+            "stage.swift_frontend_ms={:.3}",
+            ms(timings.swift_frontend_us)
+        ),
+        format!("stage.sil_analysis_ms={:.3}", ms(timings.sil_analysis_us)),
+        format!("timing.wave_ms={:.3}", ms(timings.wave_us)),
+        format!("timing.pipeline_ms={:.3}", ms(timings.pipeline_us)),
+    ]
 }
 
 fn run_batch(root: &str) -> Result<(), String> {
@@ -99,7 +105,14 @@ fn run_batch(root: &str) -> Result<(), String> {
     if files.is_empty() {
         return Err("no swift files found".to_string());
     }
-    let (processed, ast_us, swift_us, sil_us, total_us): (usize, u64, u64, u64, u64) = files
+    let (processed, ast_us, swift_us, sil_us, wave_us, pipeline_us): (
+        usize,
+        u64,
+        u64,
+        u64,
+        u64,
+        u64,
+    ) = files
         .par_iter()
         .map(|file| {
             let runtime = match tokio::runtime::Builder::new_current_thread()
@@ -107,7 +120,7 @@ fn run_batch(root: &str) -> Result<(), String> {
                 .build()
             {
                 Ok(rt) => rt,
-                Err(_) => return (0usize, 0u64, 0u64, 0u64, 0u64),
+                Err(_) => return (0usize, 0u64, 0u64, 0u64, 0u64, 0u64),
             };
             let module = Path::new(file)
                 .file_stem()
@@ -133,27 +146,60 @@ fn run_batch(root: &str) -> Result<(), String> {
                 timings.ast_refresh_us,
                 timings.swift_frontend_us,
                 timings.sil_analysis_us,
-                timings.total_us,
+                timings.wave_us,
+                timings.pipeline_us,
             )
         })
         .reduce(
-            || (0usize, 0u64, 0u64, 0u64, 0u64),
-            |a, b| (a.0 + b.0, a.1 + b.1, a.2 + b.2, a.3 + b.3, a.4 + b.4),
+            || (0usize, 0u64, 0u64, 0u64, 0u64, 0u64),
+            |a, b| {
+                (
+                    a.0 + b.0,
+                    a.1 + b.1,
+                    a.2 + b.2,
+                    a.3 + b.3,
+                    a.4 + b.4,
+                    a.5 + b.5,
+                )
+            },
         );
     println!("batch files: {}", files.len());
     println!(
         "    Finished batch `in` compiler pipeline (files: {}, tasks: {}) in {:.3}ms",
         files.len(),
         processed,
-        (total_us as f64) / 1000.0
+        ms(pipeline_us)
     );
     println!("batch processed tasks: {processed}");
-    println!("batch stage.ast_refresh_ms={:.3}", (ast_us as f64) / 1000.0);
-    println!(
-        "batch stage.swift_frontend_ms={:.3}",
-        (swift_us as f64) / 1000.0
-    );
-    println!("batch stage.sil_analysis_ms={:.3}", (sil_us as f64) / 1000.0);
-    println!("batch stage.total_ms={:.3}", (total_us as f64) / 1000.0);
+    println!("batch stage.ast_refresh_ms={:.3}", ms(ast_us));
+    println!("batch stage.swift_frontend_ms={:.3}", ms(swift_us));
+    println!("batch stage.sil_analysis_ms={:.3}", ms(sil_us));
+    println!("batch timing.wave_ms={:.3}", ms(wave_us));
+    println!("batch timing.pipeline_ms={:.3}", ms(pipeline_us));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pipeline_timing_lines_separate_wave_and_pipeline_time() {
+        let lines = pipeline_timing_lines(
+            3,
+            &StageTimings {
+                ast_refresh_us: 1000,
+                swift_frontend_us: 2000,
+                sil_analysis_us: 3000,
+                wave_us: 4000,
+                pipeline_us: 9000,
+            },
+            "swift frontend",
+        );
+        assert!(lines.contains(&"      - wave: 4.000ms".to_string()));
+        assert!(lines.contains(&"      - pipeline: 9.000ms".to_string()));
+        assert!(lines.contains(&"timing.wave_ms=4.000".to_string()));
+        assert!(lines.contains(&"timing.pipeline_ms=9.000".to_string()));
+        assert!(!lines.iter().any(|line| line.contains("stage.total_ms")));
+    }
 }

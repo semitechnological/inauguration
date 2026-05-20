@@ -144,7 +144,8 @@ pub struct StageTimings {
     pub ast_refresh_us: u64,
     pub swift_frontend_us: u64,
     pub sil_analysis_us: u64,
-    pub total_us: u64,
+    pub wave_us: u64,
+    pub pipeline_us: u64,
 }
 
 pub fn summarize_frontend_artifact(json: &str) -> Result<FrontendArtifactSummary, PipelineError> {
@@ -180,7 +181,7 @@ pub async fn run_wave_with_timings(
     event: &ChangeEvent,
     sil_source: &str,
 ) -> Result<(usize, StageTimings), PipelineError> {
-    let start_total = Instant::now();
+    let wave_start = Instant::now();
     scheduler.enqueue_wave(event).await;
     let mut processed = 0usize;
     let mut timings = StageTimings::default();
@@ -208,7 +209,8 @@ pub async fn run_wave_with_timings(
             }
         }
     }
-    timings.total_us = start_total.elapsed().as_micros() as u64;
+    timings.wave_us = wave_start.elapsed().as_micros() as u64;
+    timings.pipeline_us = timings.wave_us;
     Ok((processed, timings))
 }
 
@@ -233,7 +235,8 @@ mod tests {
         .await
         .expect("pipeline runs");
         assert_eq!(count, 3);
-        assert!(timings.total_us <= 50_000_000);
+        assert!(timings.wave_us <= 50_000_000);
+        assert_eq!(timings.pipeline_us, timings.wave_us);
     }
 
     #[test]
@@ -306,19 +309,16 @@ mod tests {
             .textual_sil
             .expect("sil");
         let report = extract_call_graph(&parse_textual_sil(&sil));
-        assert!(
-            report
-                .call_edges
-                .iter()
-                .any(|(_, callee)| callee == "from_artifact")
-        );
+        assert!(report
+            .call_edges
+            .iter()
+            .any(|(_, callee)| callee == "from_artifact"));
     }
 
     #[tokio::test]
     async fn wave_from_frontend_runs_three_tasks() {
         let scheduler = BuildScheduler::default();
-        let artifact =
-            r#"{"success":true,"textual_sil":"sil @main\nbb0:\n%0 = integer_literal $Builtin.Int64, 1\n"}"#;
+        let artifact = r#"{"success":true,"textual_sil":"sil @main\nbb0:\n%0 = integer_literal $Builtin.Int64, 1\n"}"#;
         let (count, timings) = run_wave_with_timings_from_frontend(
             &scheduler,
             &ChangeEvent {
@@ -333,6 +333,7 @@ mod tests {
         .await
         .expect("wave");
         assert_eq!(count, 3);
-        assert!(timings.total_us <= 50_000_000);
+        assert!(timings.wave_us <= 50_000_000);
+        assert_eq!(timings.pipeline_us, timings.wave_us);
     }
 }

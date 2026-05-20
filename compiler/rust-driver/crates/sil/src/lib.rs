@@ -146,7 +146,10 @@ mod tests {
         let artifact =
             parse_textual_sil("sil @main\nentry:\n%0 = function_ref @helper : $@convention(thin)");
         let report = extract_call_graph(&artifact);
-        assert_eq!(report.call_edges, vec![("main".to_string(), "helper".to_string())]);
+        assert_eq!(
+            report.call_edges,
+            vec![("main".to_string(), "helper".to_string())]
+        );
     }
 
     #[test]
