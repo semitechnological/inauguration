@@ -108,16 +108,36 @@ fn main() -> void { let seed: Int = 0; return; }
         let path = temp_dir.join("Hello.java");
         fs::write(
             &path,
-            "public class Hello { public static void main(String[] args) { } }",
+            r#"
+public class Hello {
+  private static int helper(int value) { return value; }
+  private static int twice(int value) { return helper(value); }
+  public static void main(String[] args) { twice(args.length); }
+}
+"#,
         )
         .expect("write Java source");
 
         let module = tree_front::parse_polyglot_file(ParserId::Java, &path).expect("parse Java");
         let sil = driver::lower_unified_module(&module, "App");
+        assert!(sil.contains("sil @helper"), "sil:\n{sil}");
+        assert!(sil.contains("sil @twice"), "sil:\n{sil}");
         assert!(sil.contains("sil @main"), "sil:\n{sil}");
+        assert!(sil.contains("function_ref @helper"), "sil:\n{sil}");
+        assert!(sil.contains("function_ref @twice"), "sil:\n{sil}");
         let artifact = hybrid_sil::parse_textual_sil(&sil);
         let cleaned = hybrid_sil::remove_debug_insts(&artifact);
         let report = hybrid_sil::extract_call_graph(&cleaned);
+        assert!(
+            report
+                .call_edges
+                .contains(&("twice".into(), "helper".into())),
+            "sil:\n{sil}"
+        );
+        assert!(
+            report.call_edges.contains(&("main".into(), "twice".into())),
+            "sil:\n{sil}"
+        );
         assert!(
             !artifact.instructions.is_empty() || !report.call_edges.is_empty(),
             "hybrid_sil should see instructions or call edges from lowered Java SIL; sil:\n{sil}"

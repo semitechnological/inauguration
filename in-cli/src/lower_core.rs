@@ -44,7 +44,15 @@ fn lower_expr(e: &Expr, env: &HashMap<String, usize>, ssa: &mut usize, out: &mut
             id
         }
         Expr::Call { callee, args } => {
-            let _ = lower_expr(callee, env, ssa, out);
+            if let Expr::Ident(name) = callee.as_ref() {
+                let r = *ssa;
+                *ssa += 1;
+                out.push_str(&format!(
+                    "%{r} = function_ref @{name} : $@convention(thin)\n"
+                ));
+            } else {
+                let _ = lower_expr(callee, env, ssa, out);
+            }
             for arg in args {
                 let _ = lower_expr(arg, env, ssa, out);
             }

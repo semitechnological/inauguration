@@ -24,9 +24,10 @@
   - Cover small subset SIL, multi-function SIL, and representative `swiftc -emit-sil` blobs.
   - Keep outputs useful for `docs/benchmarks` when they affect project direction.
 
-- [ ] Deepen one Tree-sitter front end-to-end.
-  - Extend the existing Java path from source to `UnifiedModule` to textual SIL and through `hybrid_sil` graph extraction.
-  - Promote another high-value front only after Java has fixture coverage for declarations, bounded bodies, lowering, and diagnostics.
+- [x] Deepen one Tree-sitter front end-to-end.
+  - Java now has source to `UnifiedModule` to textual SIL to `hybrid_sil` graph coverage.
+  - Java method extraction now lowers bounded returns, assignments, and call expressions into Core IR bodies.
+  - Promote another high-value front only after Java-style fixture coverage exists for declarations, bounded bodies, lowering, and diagnostics.
   - Keep parser maturity labels current in `docs/architecture/parser-surface.md`.
 
 - [ ] Add an agent-first compiler mode.
