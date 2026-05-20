@@ -64,10 +64,10 @@
   - Lower non-empty Core IR bodies in `in-cli/src/lower_core.rs` instead of emitting only stub SIL.
   - Add fixture tests and update `docs/architecture/in-language.md` as each syntax shape lands.
 
-- [ ] Evolve `.icore` conservatively.
+- [x] Evolve `.icore` conservatively.
   - Keep `icoreVersion: 1` stable for the current declaration and empty-body shape.
   - Add fixture-driven diagnostics for rejected JSON shapes.
-  - Plan the next version only when statement and expression JSON is ready across parser, lowering, docs, and tests.
+  - Add `icoreVersion: 2` statement and expression JSON across parser, lowering, docs, and tests.
 
 - [ ] Expand the native Swift subset.
   - Replace header-only parsing with a real subset AST for top-level declarations, struct fields, function signatures, and bounded bodies.

@@ -1,0 +1,17 @@
+{
+  "icoreVersion": 1,
+  "decls": [
+    {
+      "kind": "struct",
+      "name": "Unit",
+      "fields": []
+    },
+    {
+      "kind": "function",
+      "name": "main",
+      "params": [],
+      "return": "Void",
+      "body": []
+    }
+  ]
+}

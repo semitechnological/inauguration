@@ -1,5 +1,5 @@
 {
-  "icoreVersion": 1,
+  "icoreVersion": 2,
   "decls": [
     {
       "kind": "struct",
@@ -8,10 +8,26 @@
     },
     {
       "kind": "function",
+      "name": "helper",
+      "params": [],
+      "return": "Int",
+      "body": [
+        { "kind": "return", "value": 7 }
+      ]
+    },
+    {
+      "kind": "function",
       "name": "main",
       "params": [],
       "return": "Void",
-      "body": []
+      "body": [
+        {
+          "kind": "assign",
+          "target": "value",
+          "value": { "kind": "call", "callee": "helper" }
+        },
+        { "kind": "return" }
+      ]
     }
   ]
 }

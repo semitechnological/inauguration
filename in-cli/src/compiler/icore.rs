@@ -157,6 +157,16 @@ fn parse_v2_stmt(value: &Value, context: &str) -> Result<Stmt, String> {
                 parse_v2_expr(value, context)?,
             ))
         }
+        "let" => {
+            let name = string_field(object, "name", context)?;
+            let typ = object.get("type").and_then(Value::as_str).map(parse_typ);
+            let value = required_field(object, "value", context)?;
+            Ok(Stmt::Let(
+                name.to_string(),
+                typ,
+                parse_v2_expr(value, context)?,
+            ))
+        }
         "expr" | "expression" => {
             let value = expr_or_value_field(object, context)?;
             Ok(Stmt::Expr(parse_v2_expr(value, context)?))
@@ -397,6 +407,7 @@ mod tests {
                     "params": [],
                     "return": "Void",
                     "body": [
+                        { "kind": "let", "name": "seed", "type": "Int", "value": 0 },
                         {
                             "kind": "assign",
                             "target": "value",
@@ -442,6 +453,7 @@ mod tests {
         assert_eq!(
             main_body,
             &vec![
+                Stmt::Let("seed".into(), Some(Typ::Int), Expr::IntLit(0)),
                 Stmt::Assign(
                     "value".into(),
                     Expr::Call {

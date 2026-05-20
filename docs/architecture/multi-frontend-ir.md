@@ -6,7 +6,7 @@ Multiple source languages can feed the same hybrid pipeline by lowering to **tex
 
 `parse_textual_sil` keeps the legacy top-level **`function_id`** as whichever **`sil @name`** line appeared **last** in the input, and still exposes flattened block / instruction vectors for existing callers. It also records explicit per-function entries in **`SilArtifact::functions`**, each with its own blocks and instructions. **`extract_call_graph`** prefers those per-function records, then falls back to **`instruction_callers`**, then to the legacy **`function_id`** behavior for old artifacts. Emitters still typically place **`sil @main` last** so single-function views line up with `main`. For full detail see [in-language.md](in-language.md#hybrid_sil-and-merged-textual-sil).
 
-## `UnifiedModule` (v0 schema, v0.2 extensions TBD)
+## `UnifiedModule` (current schema)
 
 Rust type: `in_cli::core_ir::UnifiedModule`.
 
@@ -14,12 +14,12 @@ Rust type: `in_cli::core_ir::UnifiedModule`.
 |-------|--------|
 | `decls: Vec<Decl>` | Top-level declarations in source order (before lowering sorts functions for SIL). |
 
-**`Decl` variants (v0)**
+**`Decl` variants**
 
 | Variant | Fields | Notes |
 |---------|--------|-------|
-| `Struct` | `name`, `fields: Vec<(String, Typ)>` | **`.in` v0**: fields populated only from a **single-line** `struct Name { … }` body (see [in-language.md](in-language.md)). **Target v0.2**: multiline field blocks between braces. |
-| `Function` | `name`, `params`, `ret`, `body` | **`.in`**: statement list when the parser fills it; lowering follows `lower_core`. |
+| `Struct` | `name`, `fields: Vec<(String, Typ)>` | **`.in` v0.2** supports multiline field blocks; Tree-sitter and dedicated fronts fill fields where their current extractor supports them. |
+| `Function` | `name`, `params`, `ret`, `body` | **`.in`**, `icoreVersion: 2`, dedicated Rust/Go/V fronts, and selected Tree-sitter fronts fill bounded statement lists; lowering follows `lower_core`. |
 
 **`Typ`**: `Int`, `String`, `Bool`, `Void`, `Named(String)` — shared with `swift_subset` today for consistency.
 
@@ -28,16 +28,16 @@ Rust type: `in_cli::core_ir::UnifiedModule`.
 | Id | Source | Entry |
 |----|--------|--------|
 | `In` | `.in` files (and `#!in parser=in`) | `in_lang_parse` → `UnifiedModule` → `compiler::driver` / `lower_core` |
-| `Icore` | `.icore` files (and `#!in parser=icore`) | `compiler::icore` → `UnifiedModule` → same lowering |
-| `c`, `cpp`, `java`, `python`, … | Known extensions or `#!in parser=<slug>` | **Tree-sitter polyglot** — [`compiler::tree_front`](../../in-cli/src/compiler/tree_front/mod.rs) grammar-backed AST → signature `UnifiedModule` (empty bodies v0); icore-only ids documented in [parser-surface.md](parser-surface.md). |
+| `Icore` | `.icore` files (and `#!in parser=icore`) | `compiler::icore` v1 declarations or v2 bounded body JSON → `UnifiedModule` → same lowering |
+| `c`, `cpp`, `java`, `python`, … | Known extensions or `#!in parser=<slug>` | **Tree-sitter polyglot** — [`compiler::tree_front`](../../in-cli/src/compiler/tree_front/mod.rs) grammar-backed AST → `UnifiedModule`; Java/Groovy and C-family have bounded body lowering where documented, other routed fronts remain declaration-level; icore-only ids documented in [parser-surface.md](parser-surface.md). |
 
 ## Resolution order for `in build`
 
 See **`in-cli/src/parser_registry.rs`** (`resolve_parser_id`) and [parser-surface.md](parser-surface.md). In short:
 
-1. **`--parser in`** — force the `.in` front.  
+1. **`--parser in` / `--parser icore`** — force the `.in` or `.icore` front.
 2. **Magic first line** — `#!in parser=in` | `auto` | `<slug>`.  
-3. **`IN_PARSER=in`**.  
+3. **`IN_PARSER=in` / `IN_PARSER=icore`**.
 4. **Extension map** — `.in`, `.icore`, `.java`, `.cpp`, … → Core IR path (full parsers for `.in`/`.icore`; Tree-sitter for other wired extensions).  
 5. Otherwise **Swift** path: `sil_emit::emit_textual_sil` (`swiftc` and/or `IN_NATIVE_SWIFT_SIL` subset).
 
@@ -45,6 +45,6 @@ See **`in-cli/src/parser_registry.rs`** (`resolve_parser_id`) and [parser-surfac
 
 - [general-compiler.md](general-compiler.md) — multi-language driver, **icore**, roadmap.  
 - [parser-surface.md](parser-surface.md) — extension + magic-line routing, Tree-sitter vs full fronts.  
-- [in-language.md](in-language.md) — `.in` v0 vs v0.2 targets, grammar, `hybrid_sil` note.
+- [in-language.md](in-language.md) — `.in` v0.2 grammar and `hybrid_sil` note.
 - [native-swift-master-plan.md](native-swift-master-plan.md) — Rust-first Swift / subset roadmap.
 - [README · `in build` / `.in`](../../README.md#in-build-and-swiftpm-staging-macoslinux) — CLI flags and sample commands (no duplicate install steps here).

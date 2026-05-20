@@ -387,7 +387,7 @@ fn build_report(path: &Path, config: &AgentModeConfig) -> Result<AgentReport, Ag
     let source_lines = source.lines().count();
     let resolved = parser_registry::resolve_parser_id(path, parser_cli(&config.parser));
     let parser_decision = parser_decision(path, &config.parser, resolved);
-    let language_level = language_level(resolved);
+    let mut language_level = language_level(resolved);
     let parser_id = resolved_parser_id(resolved).map(|id| id.as_str().to_string());
     let mut diagnostics = Vec::new();
     let mut repair_plans = Vec::new();
@@ -404,6 +404,8 @@ fn build_report(path: &Path, config: &AgentModeConfig) -> Result<AgentReport, Ag
     match parsed {
         Ok(Some(module)) => {
             core_decl_count = module.decls.len();
+            language_level =
+                language_level_for_module(language_level, parser_id.as_deref(), &source);
             let summary = summarize_core_ir(&module);
             diagnostics.extend(core_diagnostics(&module, parser_id.as_deref(), &source));
             let lower_start = Instant::now();
@@ -542,7 +544,14 @@ fn language_level(resolved: ResolvedBuildParser) -> LanguageLevel {
             label: "icore v1 declarations".to_string(),
         },
         ResolvedBuildParser::CoreIr(
-            ParserId::Rust | ParserId::Go | ParserId::V | ParserId::Java,
+            ParserId::Rust
+            | ParserId::Go
+            | ParserId::V
+            | ParserId::Java
+            | ParserId::Groovy
+            | ParserId::C
+            | ParserId::Cpp
+            | ParserId::ObjCpp,
         ) => LanguageLevel {
             level: 2,
             label: "bounded body lowering".to_string(),
@@ -558,6 +567,28 @@ fn language_level(resolved: ResolvedBuildParser) -> LanguageLevel {
             label: "Tree-sitter declaration extraction".to_string(),
         },
     }
+}
+
+fn language_level_for_module(
+    current: LanguageLevel,
+    parser_id: Option<&str>,
+    source: &str,
+) -> LanguageLevel {
+    if parser_id == Some("icore") && icore_source_version(source) == Some(2) {
+        return LanguageLevel {
+            level: 2,
+            label: "icore v2 body subset".to_string(),
+        };
+    }
+    current
+}
+
+fn icore_source_version(source: &str) -> Option<u32> {
+    serde_json::from_str::<serde_json::Value>(source)
+        .ok()?
+        .get("icoreVersion")?
+        .as_u64()
+        .and_then(|version| u32::try_from(version).ok())
 }
 
 fn summarize_core_ir(module: &UnifiedModule) -> CoreIrSummary {
@@ -951,6 +982,82 @@ mod tests {
         assert_eq!(plan.diagnostics[0].code, "AGENT_PARSE_FAILED");
         assert_eq!(plan.repair_plans[0].id, "inspect-parser-input");
         assert_eq!(plan.repair_plans[0].actions[0].kind, "manual_review");
+    }
+
+    #[test]
+    fn icore_v2_report_uses_body_subset_level() {
+        let temp = temp_source(
+            "body",
+            "icore",
+            r#"{
+                "icoreVersion": 2,
+                "decls": [
+                    {
+                        "kind": "function",
+                        "name": "helper",
+                        "params": [],
+                        "return": "Int",
+                        "body": [{ "kind": "return", "value": 1 }]
+                    },
+                    {
+                        "kind": "function",
+                        "name": "main",
+                        "params": [],
+                        "return": "Void",
+                        "body": [{ "kind": "call", "callee": "helper" }]
+                    }
+                ]
+            }"#,
+        );
+        let report = json_report(&temp.path, &AgentModeConfig::default()).expect("report");
+        assert_eq!(report.language_level.level, 2);
+        assert_eq!(report.language_level.label, "icore v2 body subset");
+    }
+
+    #[test]
+    fn icore_v2_empty_body_report_still_uses_v2_level() {
+        let temp = temp_source(
+            "empty-body",
+            "icore",
+            r#"{
+                "icoreVersion": 2,
+                "decls": [
+                    {
+                        "kind": "function",
+                        "name": "main",
+                        "params": [],
+                        "return": "Void",
+                        "body": []
+                    }
+                ]
+            }"#,
+        );
+        let report = json_report(&temp.path, &AgentModeConfig::default()).expect("report");
+        assert_eq!(report.language_level.level, 2);
+        assert_eq!(report.language_level.label, "icore v2 body subset");
+    }
+
+    #[test]
+    fn icore_v1_report_uses_declaration_level() {
+        let temp = temp_source(
+            "v1",
+            "icore",
+            r#"{
+                "icoreVersion": 1,
+                "decls": [
+                    {
+                        "kind": "function",
+                        "name": "main",
+                        "params": [],
+                        "return": "Void",
+                        "body": []
+                    }
+                ]
+            }"#,
+        );
+        let report = json_report(&temp.path, &AgentModeConfig::default()).expect("report");
+        assert_eq!(report.language_level.level, 1);
+        assert_eq!(report.language_level.label, "icore v1 declarations");
     }
 
     #[test]

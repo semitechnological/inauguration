@@ -2,14 +2,14 @@
 
 ## Executive summary
 
-`inauguration` is becoming a **general hybrid compiler**: many source fronts can lower into shared Core IR, then reuse one SIL-oriented driver and `hybrid_sil` pipeline. The current model is layered: **full parsers** (`.in`, `.icore`) own rich grammars and semantics; dedicated **Rust/Go/V** fronts already lower real declarations plus bounded body subsets; and **Tree-sitter polyglot** (`compiler::tree_front`) still handles many other extensions at signature-level `UnifiedModule` (empty bodies until lowering grows). Parser ids without a compatible grammar still route contributors to **`.icore`**.
+`inauguration` is becoming a **general hybrid compiler**: many source fronts can lower into shared Core IR, then reuse one SIL-oriented driver and `hybrid_sil` pipeline. The current model is layered: **full parsers** (`.in`, `.icore`) own rich grammars and semantics; dedicated **Rust/Go/V** fronts already lower real declarations plus bounded body subsets; selected **Tree-sitter polyglot** fronts now lower bounded bodies (Java/Groovy and trivial C-family returns), while many other routed extensions remain declaration-level. Parser ids without a compatible grammar still route contributors to **`.icore`**.
 
 The near-term goal is not to finish every language at once. It is to keep parser routing, Core IR, SIL lowering, hot reload, and rust-driver parity moving together so each Tree-sitter front can deepen (statements, types, diagnostics) without forking the pipeline.
 
 ## Done recently
 
 - Added dedicated fronts for **Rust**, **Go**, and **V** with real top-level lowering and body subsets.
-- **`compiler::tree_front`** still covers many other `ParserId`s (signature extraction → `UnifiedModule`).
+- **`compiler::tree_front`** still covers many other `ParserId`s (bounded extraction where implemented, declaration extraction elsewhere).
 - Routed hot reload **compile_check** through parser resolution for Core IR fronts, so polyglot / `.in` / `.icore` inputs share one decision path.
 - Centralized front selection in **`parser_registry`** with concrete `ParserId` handling; tracked parser ids no longer rely on `NotImplemented`-style placeholders.
 

@@ -18,10 +18,15 @@ This is **not** “30 production compilers in one repo overnight.” It is an **
 
 ## icore (JSON Core IR)
 
-Version **1** schema (see sample under `apps/icore-sample/`):
+Versioned schemas (see samples under `apps/icore-sample/`):
 
-- Top-level `icoreVersion: 1` and `decls` array.
-- Each element is `{"kind":"struct",...}` or `{"kind":"function",...}` with `return` (string), `params`, and **`body: []`** only (non-empty bodies rejected until v2 adds `Stmt` JSON).
+- `icoreVersion: 1`: stable declaration interchange. Top-level `decls` contains `{"kind":"struct",...}` or `{"kind":"function",...}`. Function `body` must be **`[]`**; non-empty bodies are rejected with a v1-specific diagnostic.
+- `icoreVersion: 2`: bounded body interchange for tools and plugins that can emit Core IR directly. Function `body` accepts statement objects:
+  - `{ "kind": "return" }` or `{ "kind": "return", "value": <expr> }`
+  - `{ "kind": "assign", "target": "name", "value": <expr> }`
+  - `{ "kind": "let", "name": "name", "type": "Int", "value": <expr> }`
+  - `{ "kind": "expr", "expr": <expr> }` or a direct call statement
+- v2 expressions accept int/string/bool scalar literals, typed literal objects (`int`, `string`, `bool`), identifiers (`ident` / `identifier`), and calls (`{ "kind": "call", "callee": "name", "args": [...] }`). Unsupported shapes fail closed instead of inventing semantics.
 
 Any tool may emit **icore** so inauguration runs **without** a native lexer for that language yet.
 
