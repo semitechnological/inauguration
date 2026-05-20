@@ -17,7 +17,9 @@ pub fn lower_sil_to_bytecode(artifact: &SilArtifact) -> Result<BytecodeModule, S
         let line = line.trim();
 
         // Check if instruction_callers indicates a function boundary
-        if idx < artifact.instruction_callers.len() && artifact.instruction_callers[idx] != current_func {
+        if idx < artifact.instruction_callers.len()
+            && artifact.instruction_callers[idx] != current_func
+        {
             current_func = artifact.instruction_callers[idx].clone();
         }
 
@@ -300,6 +302,7 @@ mod tests {
                 "return".to_string(),
             ],
             instruction_callers: vec![],
+            functions: vec![],
         };
 
         let module = lower_sil_to_bytecode(&artifact).unwrap();

@@ -2,9 +2,9 @@
 
 Multiple source languages can feed the same hybrid pipeline by lowering to **textual SIL** that `hybrid_sil` already parses (`sil @…`, `bbN:`, `function_ref @…`, unique SSA ids across the merged module).
 
-## Textual SIL merge caveat (`hybrid_sil`)
+## Textual SIL merge behavior (`hybrid_sil`)
 
-`parse_textual_sil` is a **single-artifact** scan: the top-level **`function_id`** is still whichever **`sil @name`** line appeared **last** in the input, and basic blocks / instructions stay one flattened list. **`extract_call_graph`**, however, can attribute each instruction to the **active `sil @…` at parse time** via parallel **`instruction_callers`** (when populated by `parse_textual_sil`); legacy artifacts with empty callers keep the old behavior (**every edge uses `function_id` only**). Emitters still typically place **`sil @main` last** so single-function views line up with `main`. For full detail see [in-language.md](in-language.md#hybrid_sil-and-merged-textual-sil).
+`parse_textual_sil` keeps the legacy top-level **`function_id`** as whichever **`sil @name`** line appeared **last** in the input, and still exposes flattened block / instruction vectors for existing callers. It also records explicit per-function entries in **`SilArtifact::functions`**, each with its own blocks and instructions. **`extract_call_graph`** prefers those per-function records, then falls back to **`instruction_callers`**, then to the legacy **`function_id`** behavior for old artifacts. Emitters still typically place **`sil @main` last** so single-function views line up with `main`. For full detail see [in-language.md](in-language.md#hybrid_sil-and-merged-textual-sil).
 
 ## `UnifiedModule` (v0 schema, v0.2 extensions TBD)
 

@@ -34,7 +34,7 @@ Until a feature is implemented in `in_lang_parse.rs` / `lower_core.rs`, treat ro
 
 ## `hybrid_sil` and merged textual SIL
 
-The pipeline’s `parse_textual_sil` view of a SIL string keeps **one** “current function” name: each **`sil @…`** header **overwrites** the previous, so **the last `sil @` in the blob wins** as `SilArtifact::function_id`. **`extract_call_graph`** attributes every **`function_ref`** edge to that id. Multi-function emitters (including `lower_to_textual_sil`) order **`@main` last** so the artifact is still labeled `main` while instructions from all functions accumulate in one list. See also [multi-frontend-ir.md](multi-frontend-ir.md).
+The pipeline’s `parse_textual_sil` view keeps the legacy “last `sil @…` wins” `SilArtifact::function_id`, but merged blobs now also carry explicit per-function records in `SilArtifact::functions`. `extract_call_graph` uses those records before falling back to instruction-level callers or the legacy single-id behavior. Multi-function emitters (including `lower_to_textual_sil`) still order **`@main` last** so older single-function views stay labeled `main`. See also [multi-frontend-ir.md](multi-frontend-ir.md).
 
 ## See also
 

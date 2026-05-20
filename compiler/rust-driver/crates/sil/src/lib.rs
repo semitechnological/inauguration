@@ -1,6 +1,13 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SilFunctionRecord {
+    pub function_id: String,
+    pub cfg_blocks: Vec<String>,
+    pub instructions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SilArtifact {
     /// Last `sil @…` header in the merged blob (emitters often place `@main` last).
     pub function_id: String,
@@ -10,6 +17,8 @@ pub struct SilArtifact {
     /// Empty means unknown / legacy deserialize — [`extract_call_graph`] falls back to `function_id` for every instruction.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub instruction_callers: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub functions: Vec<SilFunctionRecord>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,24 +51,56 @@ pub fn parse_textual_sil(input: &str) -> SilArtifact {
     let mut cfg_blocks = Vec::new();
     let mut instructions = Vec::new();
     let mut instruction_callers = Vec::new();
+    let mut functions = Vec::new();
+    let mut current_function: Option<SilFunctionRecord> = None;
     for line in input.lines().map(str::trim).filter(|line| !line.is_empty()) {
         if line.starts_with("//") {
             continue;
         }
         if let Some(fid) = parse_sil_function_header(line) {
             function_id = fid;
+            if let Some(record) = current_function.take() {
+                functions.push(record);
+            }
+            current_function = Some(SilFunctionRecord {
+                function_id: function_id.clone(),
+                cfg_blocks: Vec::new(),
+                instructions: Vec::new(),
+            });
         } else if line.ends_with(':') {
-            cfg_blocks.push(line.trim_end_matches(':').to_string());
+            let block = line.trim_end_matches(':').to_string();
+            cfg_blocks.push(block.clone());
+            current_function
+                .get_or_insert_with(|| SilFunctionRecord {
+                    function_id: function_id.clone(),
+                    cfg_blocks: Vec::new(),
+                    instructions: Vec::new(),
+                })
+                .cfg_blocks
+                .push(block);
         } else {
-            instructions.push(line.to_string());
+            let instruction = line.to_string();
+            instructions.push(instruction.clone());
             instruction_callers.push(function_id.clone());
+            current_function
+                .get_or_insert_with(|| SilFunctionRecord {
+                    function_id: function_id.clone(),
+                    cfg_blocks: Vec::new(),
+                    instructions: Vec::new(),
+                })
+                .instructions
+                .push(instruction);
         }
+    }
+    if let Some(record) = current_function {
+        functions.push(record);
     }
     SilArtifact {
         function_id,
         cfg_blocks,
         instructions,
         instruction_callers,
+        functions,
     }
 }
 
@@ -81,15 +122,52 @@ pub fn remove_debug_insts(artifact: &SilArtifact) -> SilArtifact {
             .collect()
     };
     let (instructions, instruction_callers): (Vec<_>, Vec<_>) = paired.into_iter().unzip();
+    let functions = artifact
+        .functions
+        .iter()
+        .map(|function| SilFunctionRecord {
+            function_id: function.function_id.clone(),
+            cfg_blocks: function.cfg_blocks.clone(),
+            instructions: function
+                .instructions
+                .iter()
+                .filter(|inst| !inst.starts_with("debug_value"))
+                .cloned()
+                .collect(),
+        })
+        .collect();
     SilArtifact {
         function_id: artifact.function_id.clone(),
         cfg_blocks: artifact.cfg_blocks.clone(),
         instructions,
         instruction_callers,
+        functions,
     }
 }
 
 pub fn extract_call_graph(artifact: &SilArtifact) -> SilAnalysisReport {
+    if !artifact.functions.is_empty() {
+        let call_edges = artifact
+            .functions
+            .iter()
+            .flat_map(|function| {
+                function.instructions.iter().filter_map(|inst| {
+                    if let Some(rest) = inst.split("function_ref @").nth(1) {
+                        let callee = rest
+                            .split_whitespace()
+                            .next()
+                            .unwrap_or(rest)
+                            .trim()
+                            .to_string();
+                        Some((function.function_id.clone(), callee))
+                    } else {
+                        None
+                    }
+                })
+            })
+            .collect();
+        return SilAnalysisReport { call_edges };
+    }
     let fallback_caller = artifact.function_id.clone();
     let use_per_inst_callers = artifact.instruction_callers.len() == artifact.instructions.len()
         && !artifact.instruction_callers.is_empty();
@@ -186,6 +264,7 @@ mod tests {
                 "%1 = function_ref @b : $@convention(thin)".into(),
             ],
             instruction_callers: vec![],
+            functions: vec![],
         };
         let report = extract_call_graph(&artifact);
         assert_eq!(
@@ -211,6 +290,53 @@ mod tests {
         assert_eq!(
             extract_call_graph(&cleaned).call_edges,
             vec![("helper".to_string(), "x".to_string())]
+        );
+    }
+
+    #[test]
+    fn merged_multi_function_sil_records_each_function() {
+        let artifact = parse_textual_sil(concat!(
+            "sil @helper\nbb0:\n",
+            "%0 = function_ref @deep : $@convention(thin)\n",
+            "sil @main\nbb0:\n",
+            "%1 = function_ref @helper : $@convention(thin)\n",
+        ));
+        assert_eq!(artifact.function_id, "main");
+        assert_eq!(artifact.instructions.len(), 2);
+        assert_eq!(artifact.functions.len(), 2);
+        assert_eq!(artifact.functions[0].function_id, "helper");
+        assert_eq!(artifact.functions[0].cfg_blocks, vec!["bb0"]);
+        assert_eq!(
+            artifact.functions[0].instructions,
+            vec!["%0 = function_ref @deep : $@convention(thin)"]
+        );
+        assert_eq!(artifact.functions[1].function_id, "main");
+        assert_eq!(artifact.functions[1].cfg_blocks, vec!["bb0"]);
+        assert_eq!(
+            artifact.functions[1].instructions,
+            vec!["%1 = function_ref @helper : $@convention(thin)"]
+        );
+    }
+
+    #[test]
+    fn remove_debug_insts_keeps_function_records_aligned() {
+        let artifact = parse_textual_sil(concat!(
+            "sil @helper\nentry:\n",
+            "debug_value %x\n",
+            "%0 = function_ref @x : $@convention(thin)\n",
+            "sil @main\nbb0:\n",
+            "debug_value %y\n",
+            "%1 = integer_literal $Builtin.Int64, 1\n",
+        ));
+        let cleaned = remove_debug_insts(&artifact);
+        assert_eq!(cleaned.functions.len(), 2);
+        assert_eq!(
+            cleaned.functions[0].instructions,
+            vec!["%0 = function_ref @x : $@convention(thin)"]
+        );
+        assert_eq!(
+            cleaned.functions[1].instructions,
+            vec!["%1 = integer_literal $Builtin.Int64, 1"]
         );
     }
 }
