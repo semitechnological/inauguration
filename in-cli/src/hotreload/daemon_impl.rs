@@ -114,6 +114,82 @@ pub fn plan_patch(path: &str, changed_symbols: &[String]) -> ReloadPatch {
     plan_patch_with_sil_graph(path, changed_symbols, None)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SilGraphSource {
+    Subset,
+    SubsetZeroEdges,
+    SubsetUnavailable,
+    NonSwift,
+    SkippedCompileFail,
+}
+
+impl SilGraphSource {
+    fn reason_tag(&self) -> &'static str {
+        match self {
+            Self::Subset => "sil_graph=subset",
+            Self::SubsetZeroEdges => "sil_graph=subset_zero_edges",
+            Self::SubsetUnavailable => "sil_graph=subset_unavailable",
+            Self::NonSwift => "sil_graph=non_swift",
+            Self::SkippedCompileFail => "sil_graph=skipped_compile_fail",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SilGraphDetail {
+    source: SilGraphSource,
+    call_edges: Vec<(String, String)>,
+    callees: HashSet<String>,
+}
+
+impl SilGraphDetail {
+    fn unavailable(source: SilGraphSource) -> Self {
+        Self {
+            source,
+            call_edges: Vec::new(),
+            callees: HashSet::new(),
+        }
+    }
+
+    fn from_call_edges(call_edges: Vec<(String, String)>) -> Self {
+        let callees = call_edges
+            .iter()
+            .map(|(_, callee)| callee.clone())
+            .collect::<HashSet<_>>();
+        let source = if call_edges.is_empty() {
+            SilGraphSource::SubsetZeroEdges
+        } else {
+            SilGraphSource::Subset
+        };
+        Self {
+            source,
+            call_edges,
+            callees,
+        }
+    }
+
+    fn reason_tag(&self) -> &'static str {
+        self.source.reason_tag()
+    }
+
+    fn edge_count(&self) -> Option<u32> {
+        match self.source {
+            SilGraphSource::Subset | SilGraphSource::SubsetZeroEdges => {
+                Some(self.call_edges.len() as u32)
+            }
+            SilGraphSource::SubsetUnavailable
+            | SilGraphSource::NonSwift
+            | SilGraphSource::SkippedCompileFail => None,
+        }
+    }
+
+    fn has_changed_callee(&self, changed_symbols: &[String]) -> bool {
+        changed_symbols
+            .iter()
+            .any(|symbol| self.callees.contains(symbol))
+    }
+}
+
 fn is_app_entry_path(path: &str) -> bool {
     // Only treat the canonical entrypoint basename as the app root;
     // names like SampleApp.swift should still be eligible for hot patching.
@@ -127,7 +203,7 @@ fn is_app_entry_path(path: &str) -> bool {
 pub fn plan_patch_with_sil_graph(
     path: &str,
     changed_symbols: &[String],
-    sil_call_edges: Option<u32>,
+    sil_graph: Option<&SilGraphDetail>,
 ) -> ReloadPatch {
     let mut patch_type = if changed_symbols.iter().any(|s| s.contains("body")) {
         PatchType::ViewBody
@@ -137,7 +213,7 @@ pub fn plan_patch_with_sil_graph(
         PatchType::FullModule
     };
     if matches!(patch_type, PatchType::FullModule)
-        && sil_call_edges.is_some_and(|n| n > 0)
+        && sil_graph.is_some_and(|graph| graph.has_changed_callee(changed_symbols))
         && !is_app_entry_path(path)
     {
         patch_type = PatchType::ViewBody;
@@ -250,37 +326,29 @@ fn compile_check_swift(path: &Path) -> bool {
     sil_emit::compile_check_swift_path(path)
 }
 
-/// Best-effort subset SIL observability detail used by hotreload reason strings.
-/// Returns `(edges, tag)` where `edges` is present only when subset SIL extraction succeeds.
-fn sil_subset_call_edges_detail(path: &Path) -> (Option<u32>, &'static str) {
+fn sil_subset_graph_detail(path: &Path) -> SilGraphDetail {
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
     if ext != "swift" {
-        return (None, "sil_graph=non_swift");
+        return SilGraphDetail::unavailable(SilGraphSource::NonSwift);
     }
     let Ok(combined) = sil_emit::combined_swift_sources_for_path(path) else {
-        return (None, "sil_graph=no_combined_sources");
+        return SilGraphDetail::unavailable(SilGraphSource::SubsetUnavailable);
     };
     let Some(sil) = native_swift_sil::try_emit_in_tree_sil(&combined, "App") else {
-        return (None, "sil_graph=subset_unavailable");
+        return SilGraphDetail::unavailable(SilGraphSource::SubsetUnavailable);
     };
     let artifact = hybrid_sil::parse_textual_sil(&sil);
     let cleaned = hybrid_sil::remove_debug_insts(&artifact);
-    let n = hybrid_sil::extract_call_graph(&cleaned).call_edges.len();
-    let n = n as u32;
-    if n > 0 {
-        (Some(n), "sil_graph=subset")
-    } else {
-        (Some(n), "sil_graph=subset_zero_edges")
-    }
+    SilGraphDetail::from_call_edges(hybrid_sil::extract_call_graph(&cleaned).call_edges)
 }
 
 #[cfg(test)]
 fn sil_subset_call_edge_count(path: &Path) -> Option<u32> {
-    sil_subset_call_edges_detail(path).0
+    sil_subset_graph_detail(path).edge_count()
 }
 
 pub fn compile_check(path: &Path) -> bool {
@@ -410,14 +478,15 @@ async fn emit_patch(
 ) -> Result<ReloadPatch, DaemonError> {
     let (compile_ok, compile_cache_hit, compile_check_ms) =
         compile_check_cached(Path::new(target), compile_cache);
-    let (sil_call_edges, sil_graph_tag) = if compile_ok {
-        sil_subset_call_edges_detail(Path::new(target))
+    let sil_graph = if compile_ok {
+        sil_subset_graph_detail(Path::new(target))
     } else {
-        (None, "sil_graph=skipped_compile_fail")
+        SilGraphDetail::unavailable(SilGraphSource::SkippedCompileFail)
     };
-    let patch = plan_patch_with_sil_graph(target, symbols, sil_call_edges);
+    let sil_call_edges = sil_graph.edge_count();
+    let patch = plan_patch_with_sil_graph(target, symbols, Some(&sil_graph));
     let (patch, mut reason) = apply_restart_supervisor(patch, compile_ok);
-    reason = format!("{reason}|{sil_graph_tag}");
+    reason = format!("{reason}|{}", sil_graph.reason_tag());
     if let Some(n) = sil_call_edges {
         reason = format!("{reason}|sil_call_edges={n}");
     }
@@ -509,7 +578,13 @@ mod tests {
 
     #[test]
     fn sil_graph_downgrades_full_module_to_view_body_for_hot_patch() {
-        let p = plan_patch_with_sil_graph("Sources/Helper.swift", &[], Some(2));
+        let graph =
+            SilGraphDetail::from_call_edges(vec![("main".to_string(), "helper".to_string())]);
+        let p = plan_patch_with_sil_graph(
+            "Sources/Helper.swift",
+            &["helper".to_string()],
+            Some(&graph),
+        );
         assert_eq!(p.patch_type, PatchType::ViewBody);
         assert!(p.compatible);
         let (out, reason) = apply_restart_supervisor(p, true);
@@ -518,17 +593,49 @@ mod tests {
     }
 
     #[test]
+    fn sil_graph_does_not_downgrade_without_changed_callee() {
+        let graph =
+            SilGraphDetail::from_call_edges(vec![("main".to_string(), "helper".to_string())]);
+        let p =
+            plan_patch_with_sil_graph("Sources/Helper.swift", &["other".to_string()], Some(&graph));
+        assert_eq!(p.patch_type, PatchType::FullModule);
+        assert!(!p.compatible);
+    }
+
+    #[test]
     fn sil_graph_does_not_downgrade_app_swift() {
-        let p = plan_patch_with_sil_graph("Sources/App.swift", &[], Some(5));
+        let graph =
+            SilGraphDetail::from_call_edges(vec![("main".to_string(), "helper".to_string())]);
+        let p =
+            plan_patch_with_sil_graph("Sources/App.swift", &["helper".to_string()], Some(&graph));
         assert_eq!(p.patch_type, PatchType::FullModule);
         assert!(!p.compatible);
     }
 
     #[test]
     fn sil_graph_allows_non_entrypoint_names_ending_with_app_swift() {
-        let p = plan_patch_with_sil_graph("Sources/SampleApp.swift", &[], Some(1));
+        let graph =
+            SilGraphDetail::from_call_edges(vec![("main".to_string(), "helper".to_string())]);
+        let p = plan_patch_with_sil_graph(
+            "Sources/SampleApp.swift",
+            &["helper".to_string()],
+            Some(&graph),
+        );
         assert_eq!(p.patch_type, PatchType::ViewBody);
         assert!(p.compatible);
+    }
+
+    #[test]
+    fn unavailable_sil_graph_does_not_downgrade() {
+        let graph = SilGraphDetail::unavailable(SilGraphSource::SubsetUnavailable);
+        let p = plan_patch_with_sil_graph(
+            "Sources/Helper.swift",
+            &["helper".to_string()],
+            Some(&graph),
+        );
+        assert_eq!(p.patch_type, PatchType::FullModule);
+        assert!(!p.compatible);
+        assert_eq!(graph.reason_tag(), "sil_graph=subset_unavailable");
     }
 
     #[test]
@@ -663,6 +770,44 @@ mod tests {
         assert!(n >= 1, "expected main→helper edge, got {n}");
         let _ = std::fs::remove_file(&f);
         let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn sil_subset_graph_detail_reports_non_swift() {
+        let path = Path::new("Sources/Main.rs");
+        let graph = sil_subset_graph_detail(path);
+        assert_eq!(graph.reason_tag(), "sil_graph=non_swift");
+        assert_eq!(graph.edge_count(), None);
+    }
+
+    #[test]
+    fn sil_subset_graph_detail_reports_unavailable() {
+        let path = Path::new("Missing.swift");
+        let graph = sil_subset_graph_detail(path);
+        assert_eq!(graph.reason_tag(), "sil_graph=subset_unavailable");
+        assert_eq!(graph.edge_count(), None);
+    }
+
+    #[tokio::test]
+    async fn emit_patch_records_compile_failure_skip_reason() {
+        let metrics_path = std::env::temp_dir().join(format!("hotreload-fail-{}.ndjson", now_ms()));
+        let pool = ClientPool::new();
+        let mut cache = CompileCache::new();
+        let patch = emit_patch(
+            "Missing.swift",
+            &["body".to_string()],
+            &metrics_path,
+            &pool,
+            &mut cache,
+        )
+        .await
+        .expect("patch emitted");
+        assert!(!patch.compatible);
+        let content = tokio::fs::read_to_string(&metrics_path)
+            .await
+            .expect("metric read");
+        assert!(content.contains("sil_graph=skipped_compile_fail"));
+        let _ = tokio::fs::remove_file(&metrics_path).await;
     }
 
     #[tokio::test]
