@@ -5,8 +5,9 @@
 //! without re-implementing the `.in` lexer.
 
 use crate::core_ir::{Decl, Typ, UnifiedModule};
-use crate::swift_subset::Stmt;
+use crate::swift_subset::{Expr, Stmt};
 use serde::Deserialize;
+use serde_json::{Map, Value};
 use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
@@ -80,14 +81,15 @@ pub fn parse_icore_file(path: &Path) -> Result<UnifiedModule, String> {
 /// Parse JSON (for tests and tooling that already hold the string).
 pub fn parse_icore_source(raw: &str) -> Result<UnifiedModule, String> {
     let file: IcoreFile = serde_json::from_str(raw).map_err(|e| format!("icore JSON: {e}"))?;
-    if file.icore_version != 1 {
+    if !matches!(file.icore_version, 1 | 2) {
         return Err(format!(
-            "icore: unsupported icoreVersion {} (only 1 supported)",
+            "icore: unsupported icoreVersion {} (only 1 and 2 supported)",
             file.icore_version
         ));
     }
 
     let mut decls = Vec::new();
+    let icore_version = file.icore_version;
     for d in file.decls {
         match d {
             IcoreDecl::Struct { name, fields } => {
@@ -103,11 +105,16 @@ pub fn parse_icore_source(raw: &str) -> Result<UnifiedModule, String> {
                 ret,
                 body,
             } => {
-                if !body.is_empty() {
-                    return Err(format!(
-                        "icore: function `{name}` has non-empty body (v1 only supports body: [])"
-                    ));
-                }
+                let body = if icore_version == 1 {
+                    if !body.is_empty() {
+                        return Err(format!(
+                            "icore: function `{name}` has non-empty body (v1 only supports body: [])"
+                        ));
+                    }
+                    Vec::new()
+                } else {
+                    parse_v2_body(&name, body)?
+                };
                 let params: Vec<(String, Typ)> = params
                     .into_iter()
                     .map(|p| (p.name, parse_typ(&p.ty)))
@@ -116,7 +123,7 @@ pub fn parse_icore_source(raw: &str) -> Result<UnifiedModule, String> {
                     name,
                     params,
                     ret: parse_typ(&ret),
-                    body: Vec::<Stmt>::new(),
+                    body,
                 });
             }
         }
@@ -125,6 +132,157 @@ pub fn parse_icore_source(raw: &str) -> Result<UnifiedModule, String> {
     let module = UnifiedModule { decls };
     validate_module(&module)?;
     Ok(module)
+}
+
+fn parse_v2_body(function_name: &str, body: Vec<Value>) -> Result<Vec<Stmt>, String> {
+    body.into_iter()
+        .enumerate()
+        .map(|(index, stmt)| {
+            let context = format!("icore v2 function `{function_name}` statement {index}");
+            parse_v2_stmt(&stmt, &context)
+        })
+        .collect()
+}
+
+fn parse_v2_stmt(value: &Value, context: &str) -> Result<Stmt, String> {
+    let object = value_object(value, context)?;
+    let kind = string_field(object, "kind", context)?;
+    match kind {
+        "return" => parse_optional_expr_field(object, context).map(Stmt::Return),
+        "assign" => {
+            let target = one_of_string_fields(object, "target", "name", context)?;
+            let value = required_field(object, "value", context)?;
+            Ok(Stmt::Assign(
+                target.to_string(),
+                parse_v2_expr(value, context)?,
+            ))
+        }
+        "expr" | "expression" => {
+            let value = expr_or_value_field(object, context)?;
+            Ok(Stmt::Expr(parse_v2_expr(value, context)?))
+        }
+        "call" => Ok(Stmt::Expr(parse_v2_expr(value, context)?)),
+        other => Err(format!("{context}: unsupported statement kind `{other}`")),
+    }
+}
+
+fn parse_v2_expr(value: &Value, context: &str) -> Result<Expr, String> {
+    if let Some(value) = value.as_i64() {
+        return Ok(Expr::IntLit(value));
+    }
+    if let Some(value) = value.as_bool() {
+        return Ok(Expr::BoolLit(value));
+    }
+    if let Some(value) = value.as_str() {
+        return Ok(Expr::StringLit(value.to_string()));
+    }
+    let object = value_object(value, context)?;
+    let kind = string_field(object, "kind", context)?;
+    match kind {
+        "int" => required_field(object, "value", context)?
+            .as_i64()
+            .map(Expr::IntLit)
+            .ok_or_else(|| format!("{context}: int literal `value` must be an integer")),
+        "string" => required_field(object, "value", context)?
+            .as_str()
+            .map(|value| Expr::StringLit(value.to_string()))
+            .ok_or_else(|| format!("{context}: string literal `value` must be a string")),
+        "bool" => required_field(object, "value", context)?
+            .as_bool()
+            .map(Expr::BoolLit)
+            .ok_or_else(|| format!("{context}: bool literal `value` must be a boolean")),
+        "ident" | "identifier" => {
+            let name = string_field(object, "name", context)?;
+            Ok(Expr::Ident(name.to_string()))
+        }
+        "call" => {
+            let callee = parse_callee(required_field(object, "callee", context)?, context)?;
+            let args = match object.get("args") {
+                Some(value) => value
+                    .as_array()
+                    .ok_or_else(|| format!("{context}: call `args` must be an array"))?
+                    .iter()
+                    .map(|arg| parse_v2_expr(arg, context))
+                    .collect::<Result<Vec<_>, _>>()?,
+                None => Vec::new(),
+            };
+            Ok(Expr::Call {
+                callee: Box::new(callee),
+                args,
+            })
+        }
+        other => Err(format!("{context}: unsupported expression kind `{other}`")),
+    }
+}
+
+fn parse_callee(value: &Value, context: &str) -> Result<Expr, String> {
+    if let Some(name) = value.as_str() {
+        return Ok(Expr::Ident(name.to_string()));
+    }
+    parse_v2_expr(value, context)
+}
+
+fn value_object<'a>(value: &'a Value, context: &str) -> Result<&'a Map<String, Value>, String> {
+    value
+        .as_object()
+        .ok_or_else(|| format!("{context}: expected object"))
+}
+
+fn required_field<'a>(
+    object: &'a Map<String, Value>,
+    field: &str,
+    context: &str,
+) -> Result<&'a Value, String> {
+    object
+        .get(field)
+        .ok_or_else(|| format!("{context}: missing `{field}`"))
+}
+
+fn string_field<'a>(
+    object: &'a Map<String, Value>,
+    field: &str,
+    context: &str,
+) -> Result<&'a str, String> {
+    required_field(object, field, context)?
+        .as_str()
+        .ok_or_else(|| format!("{context}: `{field}` must be a string"))
+}
+
+fn one_of_string_fields<'a>(
+    object: &'a Map<String, Value>,
+    left: &str,
+    right: &str,
+    context: &str,
+) -> Result<&'a str, String> {
+    match (object.get(left), object.get(right)) {
+        (Some(_), Some(_)) => Err(format!("{context}: use `{left}` or `{right}`, not both")),
+        (Some(value), None) | (None, Some(value)) => value
+            .as_str()
+            .ok_or_else(|| format!("{context}: `{left}`/`{right}` must be a string")),
+        (None, None) => Err(format!("{context}: missing `{left}` or `{right}`")),
+    }
+}
+
+fn expr_or_value_field<'a>(
+    object: &'a Map<String, Value>,
+    context: &str,
+) -> Result<&'a Value, String> {
+    match (object.get("expr"), object.get("value")) {
+        (Some(_), Some(_)) => Err(format!("{context}: use `expr` or `value`, not both")),
+        (Some(value), None) | (None, Some(value)) => Ok(value),
+        (None, None) => Err(format!("{context}: missing `expr` or `value`")),
+    }
+}
+
+fn parse_optional_expr_field(
+    object: &Map<String, Value>,
+    context: &str,
+) -> Result<Option<Expr>, String> {
+    match (object.get("expr"), object.get("value")) {
+        (Some(_), Some(_)) => Err(format!("{context}: use `expr` or `value`, not both")),
+        (Some(value), None) | (None, Some(value)) => Ok(Some(parse_v2_expr(value, context)?)),
+        (None, None) => Ok(None),
+    }
 }
 
 fn validate_module(module: &UnifiedModule) -> Result<(), String> {
@@ -215,6 +373,92 @@ mod tests {
                 { "kind": "function", "name": "main", "params": [], "return": "Void", "body": [1] }
             ]
         }"#;
-        assert!(parse_icore_source(j).is_err());
+        let err = parse_icore_source(j).expect_err("v1 body must be rejected");
+        assert!(err.contains("v1 only supports body: []"), "{err}");
+    }
+
+    #[test]
+    fn parses_v2_function_bodies() {
+        let j = r#"{
+            "icoreVersion": 2,
+            "decls": [
+                {
+                    "kind": "function",
+                    "name": "helper",
+                    "params": [],
+                    "return": "Int",
+                    "body": [
+                        { "kind": "return", "expr": { "kind": "int", "value": 7 } }
+                    ]
+                },
+                {
+                    "kind": "function",
+                    "name": "main",
+                    "params": [],
+                    "return": "Void",
+                    "body": [
+                        {
+                            "kind": "assign",
+                            "target": "value",
+                            "value": {
+                                "kind": "call",
+                                "callee": "helper",
+                                "args": []
+                            }
+                        },
+                        {
+                            "kind": "call",
+                            "callee": { "kind": "ident", "name": "helper" },
+                            "args": [
+                                1,
+                                "ok",
+                                true
+                            ]
+                        },
+                        { "kind": "return" }
+                    ]
+                }
+            ]
+        }"#;
+        let m = parse_icore_source(j).expect("ok");
+        let helper_body = m
+            .decls
+            .iter()
+            .find_map(|d| match d {
+                Decl::Function { name, body, .. } if name == "helper" => Some(body),
+                _ => None,
+            })
+            .expect("helper body");
+        assert_eq!(helper_body, &vec![Stmt::Return(Some(Expr::IntLit(7)))]);
+
+        let main_body = m
+            .decls
+            .iter()
+            .find_map(|d| match d {
+                Decl::Function { name, body, .. } if name == "main" => Some(body),
+                _ => None,
+            })
+            .expect("main body");
+        assert_eq!(
+            main_body,
+            &vec![
+                Stmt::Assign(
+                    "value".into(),
+                    Expr::Call {
+                        callee: Box::new(Expr::Ident("helper".into())),
+                        args: vec![],
+                    },
+                ),
+                Stmt::Expr(Expr::Call {
+                    callee: Box::new(Expr::Ident("helper".into())),
+                    args: vec![
+                        Expr::IntLit(1),
+                        Expr::StringLit("ok".into()),
+                        Expr::BoolLit(true),
+                    ],
+                }),
+                Stmt::Return(None),
+            ]
+        );
     }
 }
