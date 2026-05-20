@@ -866,10 +866,18 @@ fn run_swiftc_emit_sil(
 /// first attempt so a prior **`swift build`** (e.g. from CI or a benchmark warm-up) is honored.
 /// On failure, runs **`swift build`** in that package, then retries with refreshed **`-I`** paths.
 pub fn emit_textual_sil(path: &Path, module_id: &str) -> Result<String, SilEmitError> {
+    emit_textual_sil_with_mode(path, module_id, native_swift_sil_mode_from_env())
+}
+
+pub fn emit_textual_sil_with_mode(
+    path: &Path,
+    module_id: &str,
+    mode: NativeSwiftSilMode,
+) -> Result<String, SilEmitError> {
     let inputs = resolve_swift_inputs(path)?;
     let combined = load_combined_sources(&inputs)?;
 
-    match native_swift_sil_mode_from_env() {
+    match mode {
         NativeSwiftSilMode::Only => {
             return crate::native_swift_sil::emit_in_tree_sil_or_diagnose(&combined, module_id)
                 .map_err(SilEmitError::Msg);

@@ -45,6 +45,8 @@ pub struct RuntimeMetric {
     /// Count of `function_ref` edges from [`hybrid_sil::extract_call_graph`] when in-tree subset SIL exists (no `swiftc`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sil_call_edges: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sil_graph_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -119,6 +121,9 @@ pub enum SilGraphSource {
     Subset,
     SubsetZeroEdges,
     SubsetUnavailable,
+    Swiftc,
+    SwiftcZeroEdges,
+    SwiftcUnavailable,
     NonSwift,
     SkippedCompileFail,
 }
@@ -129,6 +134,9 @@ impl SilGraphSource {
             Self::Subset => "sil_graph=subset",
             Self::SubsetZeroEdges => "sil_graph=subset_zero_edges",
             Self::SubsetUnavailable => "sil_graph=subset_unavailable",
+            Self::Swiftc => "sil_graph=swiftc",
+            Self::SwiftcZeroEdges => "sil_graph=swiftc_zero_edges",
+            Self::SwiftcUnavailable => "sil_graph=swiftc_unavailable",
             Self::NonSwift => "sil_graph=non_swift",
             Self::SkippedCompileFail => "sil_graph=skipped_compile_fail",
         }
@@ -152,14 +160,25 @@ impl SilGraphDetail {
     }
 
     fn from_call_edges(call_edges: Vec<(String, String)>) -> Self {
+        Self::from_call_edges_with_source(call_edges, SilGraphSource::Subset)
+    }
+
+    fn from_swiftc_call_edges(call_edges: Vec<(String, String)>) -> Self {
+        Self::from_call_edges_with_source(call_edges, SilGraphSource::Swiftc)
+    }
+
+    fn from_call_edges_with_source(
+        call_edges: Vec<(String, String)>,
+        nonzero_source: SilGraphSource,
+    ) -> Self {
         let callees = call_edges
             .iter()
             .map(|(_, callee)| callee.clone())
             .collect::<HashSet<_>>();
-        let source = if call_edges.is_empty() {
-            SilGraphSource::SubsetZeroEdges
-        } else {
-            SilGraphSource::Subset
+        let source = match (call_edges.is_empty(), nonzero_source) {
+            (false, source) => source,
+            (true, SilGraphSource::Swiftc) => SilGraphSource::SwiftcZeroEdges,
+            (true, _) => SilGraphSource::SubsetZeroEdges,
         };
         Self {
             source,
@@ -174,10 +193,12 @@ impl SilGraphDetail {
 
     fn edge_count(&self) -> Option<u32> {
         match self.source {
-            SilGraphSource::Subset | SilGraphSource::SubsetZeroEdges => {
-                Some(self.call_edges.len() as u32)
-            }
+            SilGraphSource::Subset
+            | SilGraphSource::SubsetZeroEdges
+            | SilGraphSource::Swiftc
+            | SilGraphSource::SwiftcZeroEdges => Some(self.call_edges.len() as u32),
             SilGraphSource::SubsetUnavailable
+            | SilGraphSource::SwiftcUnavailable
             | SilGraphSource::NonSwift
             | SilGraphSource::SkippedCompileFail => None,
         }
@@ -326,6 +347,28 @@ fn compile_check_swift(path: &Path) -> bool {
     sil_emit::compile_check_swift_path(path)
 }
 
+fn swiftc_sil_graph_enabled() -> bool {
+    std::env::var("IN_HOTRELOAD_SWIFTC_SIL_GRAPH")
+        .ok()
+        .is_some_and(|value| parse_env_bool_like_in(&value))
+}
+
+fn parse_env_bool_like_in(value: &str) -> bool {
+    let trimmed = value.trim();
+    trimmed == "1" || trimmed.eq_ignore_ascii_case("true")
+}
+
+fn graph_detail_from_sil(sil: &str, swiftc: bool) -> SilGraphDetail {
+    let artifact = hybrid_sil::parse_textual_sil(sil);
+    let cleaned = hybrid_sil::remove_debug_insts(&artifact);
+    let call_edges = hybrid_sil::extract_call_graph(&cleaned).call_edges;
+    if swiftc {
+        SilGraphDetail::from_swiftc_call_edges(call_edges)
+    } else {
+        SilGraphDetail::from_call_edges(call_edges)
+    }
+}
+
 fn sil_subset_graph_detail(path: &Path) -> SilGraphDetail {
     let ext = path
         .extension()
@@ -339,11 +382,19 @@ fn sil_subset_graph_detail(path: &Path) -> SilGraphDetail {
         return SilGraphDetail::unavailable(SilGraphSource::SubsetUnavailable);
     };
     let Some(sil) = native_swift_sil::try_emit_in_tree_sil(&combined, "App") else {
+        if swiftc_sil_graph_enabled() {
+            return match sil_emit::emit_textual_sil_with_mode(
+                path,
+                "App",
+                native_swift_sil::NativeSwiftSilMode::Off,
+            ) {
+                Ok(sil) => graph_detail_from_sil(&sil, true),
+                Err(_) => SilGraphDetail::unavailable(SilGraphSource::SwiftcUnavailable),
+            };
+        }
         return SilGraphDetail::unavailable(SilGraphSource::SubsetUnavailable);
     };
-    let artifact = hybrid_sil::parse_textual_sil(&sil);
-    let cleaned = hybrid_sil::remove_debug_insts(&artifact);
-    SilGraphDetail::from_call_edges(hybrid_sil::extract_call_graph(&cleaned).call_edges)
+    graph_detail_from_sil(&sil, false)
 }
 
 #[cfg(test)]
@@ -478,10 +529,15 @@ async fn emit_patch(
 ) -> Result<ReloadPatch, DaemonError> {
     let (compile_ok, compile_cache_hit, compile_check_ms) =
         compile_check_cached(Path::new(target), compile_cache);
-    let sil_graph = if compile_ok {
-        sil_subset_graph_detail(Path::new(target))
+    let graph_start = std::time::Instant::now();
+    let (sil_graph, sil_graph_ms) = if compile_ok {
+        let graph = sil_subset_graph_detail(Path::new(target));
+        (graph, Some(graph_start.elapsed().as_millis() as u64))
     } else {
-        SilGraphDetail::unavailable(SilGraphSource::SkippedCompileFail)
+        (
+            SilGraphDetail::unavailable(SilGraphSource::SkippedCompileFail),
+            None,
+        )
     };
     let sil_call_edges = sil_graph.edge_count();
     let patch = plan_patch_with_sil_graph(target, symbols, Some(&sil_graph));
@@ -506,6 +562,7 @@ async fn emit_patch(
         compile_check_ms,
         compile_cache_hit,
         sil_call_edges,
+        sil_graph_ms,
     };
     append_metric(metrics_path, &metric).await?;
     let line = serde_json::to_string(&envelope)?;
@@ -639,6 +696,28 @@ mod tests {
     }
 
     #[test]
+    fn swiftc_graph_detail_has_distinct_source_tags() {
+        let graph = SilGraphDetail::from_swiftc_call_edges(vec![(
+            "main".to_string(),
+            "helper".to_string(),
+        )]);
+        assert_eq!(graph.reason_tag(), "sil_graph=swiftc");
+        assert_eq!(graph.edge_count(), Some(1));
+        let empty = SilGraphDetail::from_swiftc_call_edges(vec![]);
+        assert_eq!(empty.reason_tag(), "sil_graph=swiftc_zero_edges");
+        assert_eq!(empty.edge_count(), Some(0));
+    }
+
+    #[test]
+    fn hotreload_swiftc_graph_flag_uses_bool_env_semantics() {
+        assert!(parse_env_bool_like_in("1"));
+        assert!(parse_env_bool_like_in("true"));
+        assert!(parse_env_bool_like_in(" TRUE "));
+        assert!(!parse_env_bool_like_in("0"));
+        assert!(!parse_env_bool_like_in("false"));
+    }
+
+    #[test]
     fn content_view_prefers_view_body_patch() {
         let patch = plan_patch("ContentView.swift", &["body".to_string()]);
         assert_eq!(patch.patch_type, PatchType::ViewBody);
@@ -749,6 +828,7 @@ mod tests {
             compile_check_ms: 1,
             compile_cache_hit: false,
             sil_call_edges: None,
+            sil_graph_ms: None,
         };
         append_metric(&path, &metric).await.expect("metric write");
         let content = tokio::fs::read_to_string(&path).await.expect("metric read");
@@ -808,6 +888,31 @@ mod tests {
             .expect("metric read");
         assert!(content.contains("sil_graph=skipped_compile_fail"));
         let _ = tokio::fs::remove_file(&metrics_path).await;
+    }
+
+    #[tokio::test]
+    async fn emit_patch_records_graph_timing_when_compile_succeeds() {
+        let metrics_path = std::env::temp_dir().join(format!("hotreload-ok-{}.ndjson", now_ms()));
+        let path = std::env::temp_dir().join(format!("hotreload-ok-{}.swift", now_ms()));
+        std::fs::write(&path, "struct User\nfunc main(user: User) -> Void\n").expect("write swift");
+        let pool = ClientPool::new();
+        let mut cache = CompileCache::new();
+        let patch = emit_patch(
+            &path.to_string_lossy(),
+            &["body".to_string()],
+            &metrics_path,
+            &pool,
+            &mut cache,
+        )
+        .await
+        .expect("patch emitted");
+        assert!(patch.compatible);
+        let content = tokio::fs::read_to_string(&metrics_path)
+            .await
+            .expect("metric read");
+        assert!(content.contains("sil_graph_ms"));
+        let _ = tokio::fs::remove_file(&metrics_path).await;
+        let _ = tokio::fs::remove_file(&path).await;
     }
 
     #[tokio::test]

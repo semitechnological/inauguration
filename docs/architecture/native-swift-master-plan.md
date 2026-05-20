@@ -25,7 +25,7 @@ This document is the phased roadmap for growing inauguration’s **Rust-first** 
 | **`native_swift_sil`** | Brace-depth filter → subset parse/check → **template textual SIL** (stubs + `main` calling `function_ref`). |
 | **`sil_emit`** | **`IN_NATIVE_SWIFT_SIL`**: `try` / `only`; else **`swiftc -emit-sil`** (+ SwiftPM prep / `-I` retry). |
 | **`hybrid_pipeline` / `hybrid_sil`** | **`parse_textual_sil`** → strip `debug_value` → **`extract_call_graph`** from `function_ref`; Ast/Swift tasks time-only. |
-| **Hotreload** | **`swiftc -typecheck`** per patch only; **no** subset / SIL reuse yet. |
+| **Hotreload** | Compile gate follows `sil_emit::compile_check_swift_path`; graph metrics use subset SIL by default and can opt into **`swiftc -emit-sil`** with **`IN_HOTRELOAD_SWIFTC_SIL_GRAPH=1`**. |
 | **Publishing** | **`in-cli`** mirrors `compiler/rust-driver/crates/*`; changes often land in **both** places until extraction is automated. |
 
 **Test surface (subset/SIL slice)** is thin (~6 targeted tests across `swift_subset`, `native_swift_sil`, `sil_emit`); expand with each phase.
