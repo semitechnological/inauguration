@@ -47,4 +47,4 @@ See **`in-cli/src/parser_registry.rs`** (`resolve_parser_id`) and [parser-surfac
 - [parser-surface.md](parser-surface.md) — extension + magic-line routing, Tree-sitter vs full fronts.  
 - [in-language.md](in-language.md) — `.in` v0 vs v0.2 targets, grammar, `hybrid_sil` note.
 - [native-swift-master-plan.md](native-swift-master-plan.md) — Rust-first Swift / subset roadmap.
-- [README · `in build` / `.in`](../README.md#in-build-and-swiftpm-staging-macoslinux) — CLI flags and sample commands (no duplicate install steps here).
+- [README · `in build` / `.in`](../../README.md#in-build-and-swiftpm-staging-macoslinux) — CLI flags and sample commands (no duplicate install steps here).

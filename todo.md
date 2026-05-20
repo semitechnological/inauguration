@@ -30,8 +30,9 @@
   - Promote another high-value front only after Java-style fixture coverage exists for declarations, bounded bodies, lowering, and diagnostics.
   - Keep parser maturity labels current in `docs/architecture/parser-surface.md`.
 
-- [ ] Add an agent-first compiler mode.
-  - Add `in agent` or `in build --agent` as a fast check/repair mode for coding agents.
+- [x] Add an agent-first compiler mode.
+  - Add `in agent` as a fast check/repair mode for coding agents.
+  - Keep the CLI command surface and module wiring clean: `in agent`, `in explain`, and `in fix` are single wired commands.
   - Keep the default path parser-compatible with many languages: `.in`, `.icore`, Swift, Rust, Go, V, C, C++, Objective-C, Java, Kotlin, Scala, C#, Python, Ruby, PHP, JavaScript, TypeScript, Zig, Dart, Lua, Elixir, Erlang, Haskell, Julia, R, Nim, D, and Crystal.
   - Emit stable JSON for diagnostics, parser decisions, Core IR summaries, graph facts, effect/capability use, size/timing reports, and repair plans.
   - Make every diagnostic include a code, severity, span, parser id, expected shape, source excerpt bounds, and machine-readable repair hint when one exists.
@@ -48,14 +49,14 @@
   - Prefer standard library APIs over syntax sugar so agents have one obvious path for files, network, process, JSON, HTTP, and CLI tasks.
   - Keep `icore` as the lowest common interchange format for tools and agents that cannot or should not emit `.in` directly.
 
-- [ ] Build a language-compatibility ladder.
+- [x] Build a language-compatibility ladder.
   - Level 0: route extension or magic line to a known `ParserId`.
   - Level 1: extract top-level declarations into `UnifiedModule`.
   - Level 2: lower bounded statements and expressions into Core IR.
   - Level 3: typecheck enough language semantics to produce reliable diagnostics.
   - Level 4: emit graph-aware SIL artifacts and agent repair plans.
   - Level 5: support production build/hotreload semantics for that language family.
-  - Publish each language's current level in `docs/architecture/parser-surface.md` and in `in agent --json`.
+  - Publish each language's current level in `docs/architecture/parser-surface.md` and in `in agent` JSON.
 
 - [x] Grow `.in` beyond v0 declarations.
   - Support multiline struct fields in `in-cli/src/in_lang_parse.rs`.

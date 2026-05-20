@@ -32,7 +32,7 @@ This document is the phased roadmap for growing inauguration’s **Rust-first** 
 
 Also see [**multi-frontend IR**](multi-frontend-ir.md) (`UnifiedModule`, `.in` parser id, resolution order).
 
-**`.in` / Core IR (snapshot):** v0 is headers-only **`fn`** bodies plus **single-line** struct field lists in Core IR → **`lower_core`** stub SIL (same merged-string caveat as the subset emitter: last **`sil @`** wins for `hybrid_sil`’s single-function id). Roadmap for multiline structs, real bodies, and parser discovery lives in [**in-language**](in-language.md) (v0.2 targets).
+**`.in` / Core IR (snapshot):** v0.2 supports multiline struct fields plus bounded **`fn`** statement/expression bodies in Core IR, and **`lower_core`** emits non-empty textual SIL for those bodies. The merged textual SIL view now carries explicit per-function records while retaining the legacy last-**`sil @`** single-function label. Roadmap for richer grammar and parser discovery lives in [**in-language**](in-language.md).
 
 ---
 

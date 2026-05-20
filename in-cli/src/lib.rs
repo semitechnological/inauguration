@@ -3,6 +3,7 @@
 #[cfg(unix)]
 pub mod preview_client;
 
+pub mod agent_mode;
 pub mod bytecode;
 pub mod compiler;
 pub mod core_ir;
@@ -68,7 +69,7 @@ struct Session {
   String label
 }
 fn note(text: String) -> void { return; }
-fn main() -> void { let seed: Int = 0; return; }
+fn main() -> void { let seed: Int = 0; note("ready"); return; }
 "#;
         let module = in_lang_parse::parse_in_source(src).expect("parse .in");
         let sil = lower_core::lower_to_textual_sil(&module, "App");
@@ -112,7 +113,7 @@ fn main() -> void { let seed: Int = 0; return; }
 public class Hello {
   private static int helper(int value) { return value; }
   private static int twice(int value) { return helper(value); }
-  public static void main(String[] args) { twice(args.length); }
+  public static void main(String[] args) { twice(1); }
 }
 "#,
         )
@@ -179,13 +180,15 @@ int main(void) { return 0; }
             sil.contains("integer_literal $Builtin.Int64, 0"),
             "main return literal; sil:\n{sil}"
         );
-        assert!(
-            sil.contains("function_ref @helper"),
-            "main should reference helper; sil:\n{sil}"
-        );
         let artifact = hybrid_sil::parse_textual_sil(&sil);
         let cleaned = hybrid_sil::remove_debug_insts(&artifact);
         let report = hybrid_sil::extract_call_graph(&cleaned);
+        assert!(
+            !report
+                .call_edges
+                .contains(&("main".into(), "helper".into())),
+            "C helper declarations should not synthesize call edges; sil:\n{sil}"
+        );
         assert!(
             !artifact.instructions.is_empty() || !report.call_edges.is_empty(),
             "hybrid_sil should see instructions or call edges from lowered C SIL; sil:\n{sil}"
@@ -238,17 +241,20 @@ int main(void) { return 0; }
         let src = "fn main() -> void { return; }";
         let module = in_lang_parse::parse_in_source(src).expect("parse .in");
         let sil = lower_core::lower_to_textual_sil(&module, "App");
-        
+
         // Parse SIL into artifact
         let artifact = hybrid_sil::parse_textual_sil(&sil);
-        assert!(artifact.function_id.contains("main"), "should identify main function");
-        
+        assert!(
+            artifact.function_id.contains("main"),
+            "should identify main function"
+        );
+
         // Lower to bytecode
         let bytecode_module = crate::sil_to_bytecode::lower_sil_to_bytecode(&artifact)
             .expect("lower SIL to bytecode");
         assert_eq!(bytecode_module.functions.len(), 1);
         assert_eq!(bytecode_module.functions[0].name, "main");
-        
+
         // Execute bytecode
         let mut vm = crate::vm::BytecodeVM::new(bytecode_module);
         let result = vm.run().expect("bytecode execution");
@@ -268,29 +274,32 @@ fn main() -> void {
 "#;
         let module = in_lang_parse::parse_in_source(src).expect("parse .in");
         let sil = lower_core::lower_to_textual_sil(&module, "App");
-        
+
         // Parse SIL into artifact
         let artifact = hybrid_sil::parse_textual_sil(&sil);
-        
+
         // Lower to bytecode
         let bytecode_module = crate::sil_to_bytecode::lower_sil_to_bytecode(&artifact)
             .expect("lower SIL to bytecode");
-        
+
         // Should have at least 1 function (main)
         assert!(
             bytecode_module.functions.len() >= 1,
             "expected at least main function, got {} functions",
             bytecode_module.functions.len()
         );
-        
+
         // Find main function
         let main_func = bytecode_module
             .functions
             .iter()
             .find(|f| f.name == "main")
             .expect("main function");
-        assert!(!main_func.instructions.is_empty(), "main should have instructions");
-        
+        assert!(
+            !main_func.instructions.is_empty(),
+            "main should have instructions"
+        );
+
         // Execute
         let mut vm = crate::vm::BytecodeVM::new(bytecode_module);
         let result = vm.run().expect("bytecode execution");
@@ -308,15 +317,14 @@ fn main() -> void {
             sil.contains("integer_literal $Builtin.Int64"),
             "SIL should contain integer literals"
         );
-        
+
         let artifact = hybrid_sil::parse_textual_sil(&sil);
         let bytecode_module = crate::sil_to_bytecode::lower_sil_to_bytecode(&artifact)
             .expect("lower SIL to bytecode");
-        
+
         let mut vm = crate::vm::BytecodeVM::new(bytecode_module);
         let result = vm.run().expect("bytecode execution");
         // Should execute successfully
         let _ = result;
     }
-
 }

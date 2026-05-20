@@ -71,6 +71,43 @@ enum Commands {
         )]
         parser: ParserCli,
     },
+    #[command(about = "Emit agent-first compiler facts as stable JSON")]
+    Agent {
+        #[arg(
+            long,
+            default_value = ".",
+            help = "Source path: .in, .icore, .swift file, or supported frontend source"
+        )]
+        path: String,
+        #[arg(long, default_value = "App")]
+        module_id: String,
+        #[arg(
+            long,
+            value_enum,
+            default_value_t = ParserCli::Auto,
+            help = "`auto`: extension + `IN_PARSER` pick Core IR vs Swift; `in` / `icore` force `.in` or JSON icore"
+        )]
+        parser: ParserCli,
+    },
+    #[command(about = "Explain a compiler diagnostic code")]
+    Explain {
+        diagnostic_code: String,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    #[command(about = "Emit typed repair plans for agents")]
+    Fix {
+        #[arg(long, action = clap::ArgAction::SetTrue)]
+        plan: bool,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+        #[arg(long, default_value = ".")]
+        path: String,
+        #[arg(long, default_value = "App")]
+        module_id: String,
+        #[arg(long, value_enum, default_value_t = ParserCli::Auto)]
+        parser: ParserCli,
+    },
     #[command(about = "Run full local dev loop (daemon + client)")]
     Dev {
         #[arg(
@@ -157,6 +194,22 @@ fn run() -> Result<()> {
             swiftpm,
             parser,
         } => cmd_build(&invocation_cwd, &path, &module_id, verbose, swiftpm, parser),
+        Commands::Agent {
+            path,
+            module_id,
+            parser,
+        } => cmd_agent(&invocation_cwd, &path, &module_id, parser),
+        Commands::Explain {
+            diagnostic_code,
+            json,
+        } => cmd_explain(&diagnostic_code, json),
+        Commands::Fix {
+            plan,
+            json,
+            path,
+            module_id,
+            parser,
+        } => cmd_fix(&invocation_cwd, plan, json, &path, &module_id, parser),
         Commands::Dev { preview_client } => {
             cmd_dev(&workspace_root(invocation_cwd.clone())?, preview_client)
         }
@@ -274,6 +327,73 @@ fn cmd_build(
         );
     }
     result
+}
+
+fn cmd_agent(invocation_cwd: &Path, path: &str, module_id: &str, parser: ParserCli) -> Result<()> {
+    let report = inauguration::agent_mode::analyze_path(invocation_cwd, path, module_id, parser);
+    let json = serde_json::to_string_pretty(&report)
+        .map_err(|err| InError::Message(format!("serialize agent report: {err}")))?;
+    println!("{json}");
+    if report.diagnostics.iter().any(|diagnostic| {
+        matches!(
+            diagnostic.severity,
+            inauguration::agent_mode::DiagnosticSeverity::Error
+        )
+    }) {
+        Err(InError::Message("agent diagnostics failed".to_string()))
+    } else {
+        Ok(())
+    }
+}
+
+fn cmd_explain(diagnostic_code: &str, json: bool) -> Result<()> {
+    let Some(rule) = inauguration::agent_mode::explain_diagnostic(diagnostic_code) else {
+        return Err(InError::Message(format!(
+            "unknown diagnostic code: {diagnostic_code}"
+        )));
+    };
+    if json {
+        let raw = serde_json::to_string_pretty(&rule)
+            .map_err(|err| InError::Message(format!("serialize diagnostic rule: {err}")))?;
+        println!("{raw}");
+    } else {
+        println!("{}", rule.code);
+        println!("{}", rule.meaning);
+        println!("fix: {}", rule.fix);
+    }
+    Ok(())
+}
+
+fn cmd_fix(
+    invocation_cwd: &Path,
+    plan: bool,
+    json: bool,
+    path: &str,
+    module_id: &str,
+    parser: ParserCli,
+) -> Result<()> {
+    if !plan {
+        return Err(InError::Message(
+            "`in fix` currently requires --plan so agents review typed edits before applying"
+                .to_string(),
+        ));
+    }
+    let report = inauguration::agent_mode::fix_plan(invocation_cwd, path, module_id, parser);
+    if json {
+        let raw = serde_json::to_string_pretty(&report)
+            .map_err(|err| InError::Message(format!("serialize fix plan: {err}")))?;
+        println!("{raw}");
+    } else {
+        println!("repair plans: {}", report.repair_plans.len());
+        for plan in &report.repair_plans {
+            println!("{}: {}", plan.applies_to_code, plan.title);
+            println!("  {}", plan.rationale);
+            for action in &plan.actions {
+                println!("  {}: {}", action.kind, action.description);
+            }
+        }
+    }
+    Ok(())
 }
 
 fn run_pipeline_for_path(
@@ -1328,6 +1448,63 @@ mod tests {
         match cli.command {
             Commands::Build { parser, .. } => assert!(matches!(parser, ParserCli::Icore)),
             _ => panic!("expected build command"),
+        }
+    }
+
+    #[test]
+    fn parse_agent_subcommand_defaults() {
+        let cli = Cli::try_parse_from(["in", "agent", "--path", "hello.in"]).expect("cli parse");
+        match cli.command {
+            Commands::Agent {
+                path,
+                module_id,
+                parser,
+            } => {
+                assert_eq!(path, "hello.in");
+                assert_eq!(module_id, "App");
+                assert!(matches!(parser, ParserCli::Auto));
+            }
+            _ => panic!("expected agent command"),
+        }
+    }
+
+    #[test]
+    fn parse_explain_json_flag() {
+        let cli =
+            Cli::try_parse_from(["in", "explain", "INAGENT010", "--json"]).expect("cli parse");
+        match cli.command {
+            Commands::Explain {
+                diagnostic_code,
+                json,
+            } => {
+                assert_eq!(diagnostic_code, "INAGENT010");
+                assert!(json);
+            }
+            _ => panic!("expected explain command"),
+        }
+    }
+
+    #[test]
+    fn parse_fix_plan_json_flags() {
+        let cli = Cli::try_parse_from([
+            "in", "fix", "--plan", "--json", "--path", "bad.in", "--parser", "in",
+        ])
+        .expect("cli parse");
+        match cli.command {
+            Commands::Fix {
+                plan,
+                json,
+                path,
+                module_id,
+                parser,
+            } => {
+                assert!(plan);
+                assert!(json);
+                assert_eq!(path, "bad.in");
+                assert_eq!(module_id, "App");
+                assert!(matches!(parser, ParserCli::In));
+            }
+            _ => panic!("expected fix command"),
         }
     }
 

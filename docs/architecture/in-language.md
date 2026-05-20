@@ -2,7 +2,7 @@
 
 The **`.in`** front is inauguration’s **brace + line-oriented** companion to the sibling **crepuscularity** project ([`../crepuscularity`](../crepuscularity)): same *ideology* — ultraminimal surface, indentation-ready grammar evolution, TypeScript-flavored expressions and interpreters in the long run — but shipped here first as something **`in build` can lower to textual SIL** without `swiftc`.
 
-Workflow entry points (flags, sample path, CI script) stay in the repo [README](../README.md#in-build-and-swiftpm-staging-macoslinux); this page is grammar + IR shape only.
+Workflow entry points (flags, sample path, CI script) stay in the repo [README](../../README.md#in-build-and-swiftpm-staging-macoslinux); this page is grammar + IR shape only.
 
 ## Ideology (aligned with crepuscularity)
 
@@ -19,7 +19,7 @@ What `in-cli/src/in_lang_parse.rs` implements today:
 - Parameters: **`param: Type`** comma-separated.
 - Types: **`Int`**, **`String`**, **`Bool`**, **`void` / `Void`** (`void` matching is ASCII case-insensitive), and **named structs** declared above.
 - **`fn main`** is required (same spirit as the Swift subset front).
-- **Function bodies**: optional brace bodies support `let`, assignment, `return`, call expressions, simple literals, identifiers, and expression statements. Lowering (`in-cli/src/lower_core.rs`) emits bounded textual SIL from non-empty Core IR bodies and keeps the sorted helper `sil @` functions plus `@main` call graph shape.
+- **Function bodies**: optional brace bodies support `let`, assignment, `return`, call expressions, simple literals, identifiers, and expression statements. Lowering (`in-cli/src/lower_core.rs`) emits bounded textual SIL from non-empty Core IR bodies and records `function_ref` edges for explicit call expressions.
 - Nesting: lines inside **`{` … `}`** are ignored for **declaration discovery** when brace-depth ≠ 0 (nested `fn` lines are not top-level), matching the Swift subset filter.
 
 Optional spellings for forward compatibility: **`function`** as an alias may appear later; v0 **does not** accept it. **`Int`** lowers with the same **`Int64`** stub vocabulary as the Swift subset / Core IR `Typ`.

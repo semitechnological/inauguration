@@ -114,9 +114,9 @@ pub fn filter_top_level_decl_lines(source: &str) -> String {
 /// `"main"` (last `sil @…` wins). [`crate::hybrid_sil::extract_call_graph`] attributes each `function_ref` to the
 /// function body that contained that instruction. SSA ids are unique across the whole string because that parser
 /// concatenates instructions from every function into one list.
-fn program_to_textual_sil(program: &[Decl], module_id: &str) -> String {
+fn program_to_textual_sil(program: &[Decl], _module_id: &str) -> String {
     let um = subset_program_to_unified(program);
-    let body = crate::lower_core::lower_to_textual_sil(&um, module_id);
+    let body = crate::lower_core::lower_to_textual_sil_with_main_helper_refs(&um);
     format!("// inauguration in-tree subset SIL (no swiftc)\n{body}")
 }
 

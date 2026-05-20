@@ -162,6 +162,14 @@ fn find_fn<'a>(module: &'a UnifiedModule, name: &str) -> Option<&'a Decl> {
 /// Emit textual SIL: helper functions first (sorted), then `@main` with `function_ref` callees and a
 /// unique SSA id space (same contract as [`crate::native_swift_sil`]).
 pub fn lower_to_textual_sil(module: &UnifiedModule, _module_id: &str) -> String {
+    lower_to_textual_sil_inner(module, false)
+}
+
+pub(crate) fn lower_to_textual_sil_with_main_helper_refs(module: &UnifiedModule) -> String {
+    lower_to_textual_sil_inner(module, true)
+}
+
+fn lower_to_textual_sil_inner(module: &UnifiedModule, synthesize_main_helper_refs: bool) -> String {
     let mut fn_names: Vec<String> = module
         .decls
         .iter()
@@ -172,12 +180,6 @@ pub fn lower_to_textual_sil(module: &UnifiedModule, _module_id: &str) -> String 
         .collect();
     fn_names.sort();
     let mut sil = String::from("// inauguration core → textual SIL (multi-front v0)\n");
-    let helpers: Vec<&str> = fn_names
-        .iter()
-        .map(String::as_str)
-        .filter(|n| *n != "main")
-        .collect();
-
     let mut ssa = 0usize;
     for name in &fn_names {
         if *name == "main" {
@@ -195,12 +197,18 @@ pub fn lower_to_textual_sil(module: &UnifiedModule, _module_id: &str) -> String 
     }
 
     sil.push_str("sil @main\nbb0:\n");
-    for callee in &helpers {
-        let r = ssa;
-        ssa += 1;
-        sil.push_str(&format!(
-            "%{r} = function_ref @{callee} : $@convention(thin)\n"
-        ));
+    if synthesize_main_helper_refs {
+        for callee in fn_names
+            .iter()
+            .map(String::as_str)
+            .filter(|name| *name != "main")
+        {
+            let r = ssa;
+            ssa += 1;
+            sil.push_str(&format!(
+                "%{r} = function_ref @{callee} : $@convention(thin)\n"
+            ));
+        }
     }
     if let Some(Decl::Function { params, body, .. }) = find_fn(module, "main") {
         if body.is_empty() {
@@ -254,9 +262,11 @@ mod tests {
         assert!(sil.contains("sil @main"));
         assert!(sil.contains("sil @alpha"));
         assert!(sil.contains("sil @zeta"));
-        let pa = sil.find("function_ref @alpha").expect("alpha");
-        let pz = sil.find("function_ref @zeta").expect("zeta");
+        let pa = sil.find("sil @alpha").expect("alpha");
+        let pz = sil.find("sil @zeta").expect("zeta");
+        let pm = sil.find("sil @main").expect("main");
         assert!(pa < pz);
+        assert!(pz < pm);
     }
 
     #[test]
@@ -284,5 +294,30 @@ mod tests {
         assert!(sil.contains("sil @twice"));
         assert!(sil.contains("integer_literal $Builtin.Int64, 2"));
         assert!(sil.contains("return %"));
+    }
+
+    #[test]
+    fn lower_emits_function_ref_for_explicit_call() {
+        let module = UnifiedModule {
+            decls: vec![
+                Decl::Function {
+                    name: "helper".into(),
+                    params: vec![],
+                    ret: Typ::Void,
+                    body: vec![],
+                },
+                Decl::Function {
+                    name: "main".into(),
+                    params: vec![],
+                    ret: Typ::Void,
+                    body: vec![Stmt::Expr(Expr::Call {
+                        callee: Box::new(Expr::Ident("helper".into())),
+                        args: vec![],
+                    })],
+                },
+            ],
+        };
+        let sil = lower_to_textual_sil(&module, "App");
+        assert!(sil.contains("function_ref @helper"));
     }
 }

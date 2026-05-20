@@ -10,5 +10,6 @@ fn note(text: String) -> void {
 }
 fn main() -> void {
   let seed: Int = 0;
+  note("ready");
   return;
 }

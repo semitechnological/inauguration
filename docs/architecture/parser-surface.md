@@ -59,6 +59,19 @@ Resolution order is documented in the `parser_registry` module rustdoc. Summary:
 
 **`.h` headers** map to **`c`**; some Objective-C headers share `.h` — ambiguous paths stay **`c`** Tree-sitter (`function_definition` extraction).
 
+## Current compatibility ladder
+
+| Level | Meaning | Current fronts |
+|-------|---------|----------------|
+| 0 | Routes to a known `ParserId`, but no compatible grammar/front is wired; callers get an `.icore` hint. | `clojure`, `nim`, `d`, `crystal`, `vb` |
+| 1 | Extracts top-level declarations into `UnifiedModule`; bodies are empty or ignored. | `icore` v1, `kotlin`, `scala`, `csharp`, `fsharp`, `python`, `ruby`, `php`, `perl`, `javascript`, `typescript`, `zig`, `dart`, `lua`, `elixir`, `erlang`, `haskell`, `julia`, `r`; Objective-C methods are also declaration-only. |
+| 2 | Lowers a bounded statement/expression subset into Core IR. | `.in`, `rust`, `go`, `v`, `java`, `groovy`; C / C++ / Objective-C++ functions support only trivial `return <integer>;`, `return <param>;`, or `return;` bodies. |
+| 3 | Typechecks enough language semantics to produce reliable diagnostics. | Not landed for a full language family yet. |
+| 4 | Emits graph-aware SIL artifacts and agent repair plans. | Agent JSON exists; no language front is promoted to this level until its diagnostics and repair plans are source-semantic for that front. |
+| 5 | Supports production build/hotreload semantics for that language family. | Swift uses the separate Swift SIL path today; Core IR language families are not at this level yet. |
+
+The ladder is a routing and agent-contract signal, not a promise of full language semantics. `swift` is intentionally outside the Core IR extension table: it selects the Swift SIL path (`swiftc` and/or `IN_NATIVE_SWIFT_SIL`) until agent-mode JSON gives it a comparable compatibility report.
+
 ## Compiler roadmap (honest scope)
 
-Implementing every OO / C-like language means, per language: lexer/grammar → AST → [`UnifiedModule`](multi-frontend-ir.md) (or **icore** JSON) → [`compiler::driver` / `lower_core`](../in-cli/src/compiler/driver.rs) → textual SIL. That is **large, parallel work**; [general-compiler.md](general-compiler.md) is the umbrella roadmap. This document tracks **routing and names** so CI, agents, and contributors share one enum and extension table as fronts land.
+Implementing every OO / C-like language means, per language: lexer/grammar → AST → [`UnifiedModule`](multi-frontend-ir.md) (or **icore** JSON) → [`compiler::driver` / `lower_core`](../../in-cli/src/compiler/driver.rs) → textual SIL. That is **large, parallel work**; [general-compiler.md](general-compiler.md) is the umbrella roadmap. This document tracks **routing and names** so CI, agents, and contributors share one enum and extension table as fronts land.
