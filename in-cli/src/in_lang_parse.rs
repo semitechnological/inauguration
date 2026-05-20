@@ -311,7 +311,88 @@ fn parse_expr(s: &str) -> Expr {
     if s.len() >= 2 && s.starts_with('"') && s.ends_with('"') {
         return Expr::StringLit(s[1..s.len() - 1].to_string());
     }
+    if let Some(open) = find_call_open_paren(s)
+        && s.ends_with(')')
+    {
+        let callee = trim(&s[..open]);
+        if !callee.is_empty() {
+            let inner = &s[open + 1..s.len() - 1];
+            let args = split_call_args(inner)
+                .into_iter()
+                .map(|arg| parse_expr(&arg))
+                .collect();
+            return Expr::Call {
+                callee: Box::new(Expr::Ident(callee.to_string())),
+                args,
+            };
+        }
+    }
     Expr::Ident(s.to_string())
+}
+
+fn find_call_open_paren(s: &str) -> Option<usize> {
+    let mut in_string = false;
+    let mut escape = false;
+    for (i, c) in s.char_indices() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        if in_string {
+            if c == '\\' {
+                escape = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => in_string = true,
+            '(' => return Some(i),
+            _ => {}
+        }
+    }
+    None
+}
+
+fn split_call_args(inner: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut start = 0usize;
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escape = false;
+    for (i, c) in inner.char_indices() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        if in_string {
+            if c == '\\' {
+                escape = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => in_string = true,
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            ',' if depth == 0 => {
+                let arg = trim(&inner[start..i]);
+                if !arg.is_empty() {
+                    out.push(arg.to_string());
+                }
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    let tail = trim(&inner[start..]);
+    if !tail.is_empty() {
+        out.push(tail.to_string());
+    }
+    out
 }
 
 fn split_function_statements(body: &str) -> Vec<String> {
@@ -396,6 +477,26 @@ fn parse_return_stmt(s: &str) -> Result<Stmt, String> {
     Ok(Stmt::Return(Some(parse_expr(rest))))
 }
 
+fn parse_assign_stmt(s: &str) -> Option<Stmt> {
+    let eq_pos = s.find('=')?;
+    if s.get(eq_pos + 1..)
+        .is_some_and(|tail| tail.starts_with('='))
+    {
+        return None;
+    }
+    if eq_pos > 0 && s.get(eq_pos - 1..eq_pos) == Some("!") {
+        return None;
+    }
+    let name = trim(&s[..eq_pos]);
+    if name.is_empty() || name.contains(char::is_whitespace) {
+        return None;
+    }
+    Some(Stmt::Assign(
+        name.to_string(),
+        parse_expr(trim(&s[eq_pos + 1..])),
+    ))
+}
+
 fn parse_stmt_line(line: &str) -> Result<Stmt, String> {
     let s = trim(line);
     if s.is_empty() {
@@ -408,6 +509,9 @@ fn parse_stmt_line(line: &str) -> Result<Stmt, String> {
         && (s.len() == 6 || s.chars().nth(6).is_some_and(|c| c.is_whitespace()))
     {
         return parse_return_stmt(s);
+    }
+    if let Some(assign) = parse_assign_stmt(s) {
+        return Ok(assign);
     }
     Ok(Stmt::Expr(parse_expr(s)))
 }
@@ -751,5 +855,27 @@ fn main() -> void { return; }
             _ => panic!("g"),
         };
         assert!(matches!(&body[0], Stmt::Expr(Expr::IntLit(42))));
+    }
+
+    #[test]
+    fn fn_body_assignment_and_call_expr() {
+        use crate::swift_subset::Expr;
+        let src = "fn f() -> void { let n = 0; n = add(n, 1); return; }\nfn main() -> void\n";
+        let m = parse_in_source(src).expect("ok");
+        let body = match m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "f"))
+        {
+            Some(Decl::Function { body, .. }) => body,
+            _ => panic!("f"),
+        };
+        assert!(matches!(
+            &body[1],
+            Stmt::Assign(name, Expr::Call { callee, args })
+                if name == "n"
+                    && matches!(callee.as_ref(), Expr::Ident(c) if c == "add")
+                    && args.len() == 2
+        ));
     }
 }
