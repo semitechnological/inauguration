@@ -4,6 +4,6 @@ capability process.stdout;
 extern rust fn host_log(text: String) -> void requires process.stdout;
 
 fn main() -> void {
-  host_log(ready());
+  host_log(ready(true));
   return;
 }

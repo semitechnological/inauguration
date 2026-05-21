@@ -1,7 +1,7 @@
 //! `.in` v0.2: top-level `struct` / `fn` with multiline struct bodies and minimal `fn` bodies.
 
 use crate::core_ir::{Decl, Typ, UnifiedModule};
-use crate::swift_subset::{Expr, Stmt};
+use crate::swift_subset::{Expr, LoopKind, Stmt};
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -315,6 +315,23 @@ fn parse_struct_block(block: &str) -> Result<(String, Vec<(String, Typ)>), Strin
 
 fn parse_expr(s: &str) -> Expr {
     let s = trim(s);
+    for ops in [
+        &["==", "!=", ">=", "<=", ">", "<"][..],
+        &["+", "-"][..],
+        &["*", "/"][..],
+    ] {
+        if let Some((op, idx)) = find_top_level_binary_op(s, ops) {
+            let lhs = trim(&s[..idx]);
+            let rhs = trim(&s[idx + op.len()..]);
+            if !lhs.is_empty() && !rhs.is_empty() {
+                return Expr::Binary {
+                    op: op.to_string(),
+                    lhs: Box::new(parse_expr(lhs)),
+                    rhs: Box::new(parse_expr(rhs)),
+                };
+            }
+        }
+    }
     if s == "true" {
         return Expr::BoolLit(true);
     }
@@ -344,6 +361,41 @@ fn parse_expr(s: &str) -> Expr {
         }
     }
     Expr::Ident(s.to_string())
+}
+
+fn find_top_level_binary_op<'a>(s: &str, ops: &[&'a str]) -> Option<(&'a str, usize)> {
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escape = false;
+    let mut matches = Vec::new();
+    for (i, c) in s.char_indices() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        if in_string {
+            if c == '\\' {
+                escape = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => in_string = true,
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            _ if depth == 0 => {
+                for op in ops {
+                    if s[i..].starts_with(op) {
+                        matches.push((*op, i));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    matches.into_iter().last()
 }
 
 fn find_call_open_paren(s: &str) -> Option<usize> {
@@ -414,6 +466,7 @@ fn split_call_args(inner: &str) -> Vec<String> {
 fn split_function_statements(body: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut start = 0usize;
+    let mut depth = 0i32;
     let mut in_string = false;
     let mut escape = false;
     for (i, c) in body.char_indices() {
@@ -431,7 +484,21 @@ fn split_function_statements(body: &str) -> Vec<String> {
         }
         match c {
             '"' => in_string = true,
-            ';' => {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    if body[i + 1..].trim_start().starts_with("else") {
+                        continue;
+                    }
+                    let stmt = trim(&body[start..=i]);
+                    if !stmt.is_empty() {
+                        out.push(stmt.to_string());
+                    }
+                    start = i + 1;
+                }
+            }
+            ';' if depth == 0 => {
                 let stmt = trim(&body[start..i]);
                 if !stmt.is_empty() {
                     let stmt = strip_line_comment_outside_strings(stmt);
@@ -454,6 +521,42 @@ fn split_function_statements(body: &str) -> Vec<String> {
         }
     }
     out
+}
+
+fn brace_content_bounds_after_open(s: &str, open_idx: usize) -> Option<(&str, usize)> {
+    if open_idx >= s.len() || !s[open_idx..].starts_with('{') {
+        return None;
+    }
+    let mut d = 0i32;
+    let mut in_string = false;
+    let mut escape = false;
+    for (i, c) in s[open_idx..].char_indices() {
+        let abs = open_idx + i;
+        if escape {
+            escape = false;
+            continue;
+        }
+        if in_string {
+            if c == '\\' {
+                escape = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => in_string = true,
+            '{' => d += 1,
+            '}' => {
+                d -= 1;
+                if d == 0 {
+                    return Some((&s[open_idx + 1..abs], abs));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn parse_let_stmt(s: &str) -> Result<Stmt, String> {
@@ -513,6 +616,52 @@ fn parse_assign_stmt(s: &str) -> Option<Stmt> {
     ))
 }
 
+fn parse_if_stmt(s: &str) -> Result<Stmt, String> {
+    let rest = trim(s)
+        .strip_prefix("if ")
+        .ok_or_else(|| ".in: internal if parse".to_string())?;
+    let open = rest
+        .find('{')
+        .ok_or_else(|| ".in: `if` needs `{` body".to_string())?;
+    let cond = parse_expr(trim(&rest[..open]));
+    let (then_inner, then_close) = brace_content_bounds_after_open(rest, open)
+        .ok_or_else(|| ".in: unclosed `if` body".to_string())?;
+    let tail = trim(&rest[then_close + 1..]);
+    let else_body = if let Some(else_rest) = tail.strip_prefix("else") {
+        let else_rest = trim(else_rest);
+        let open = else_rest
+            .find('{')
+            .ok_or_else(|| ".in: `else` needs `{` body".to_string())?;
+        let (else_inner, _) = brace_content_bounds_after_open(else_rest, open)
+            .ok_or_else(|| ".in: unclosed `else` body".to_string())?;
+        parse_function_body(else_inner)?
+    } else {
+        Vec::new()
+    };
+    Ok(Stmt::If {
+        cond,
+        then_body: parse_function_body(then_inner)?,
+        else_body,
+    })
+}
+
+fn parse_while_stmt(s: &str) -> Result<Stmt, String> {
+    let rest = trim(s)
+        .strip_prefix("while ")
+        .ok_or_else(|| ".in: internal while parse".to_string())?;
+    let open = rest
+        .find('{')
+        .ok_or_else(|| ".in: `while` needs `{` body".to_string())?;
+    let cond = parse_expr(trim(&rest[..open]));
+    let (inner, _) = brace_content_bounds_after_open(rest, open)
+        .ok_or_else(|| ".in: unclosed `while` body".to_string())?;
+    Ok(Stmt::Loop {
+        kind: LoopKind::While,
+        cond: Some(cond),
+        body: parse_function_body(inner)?,
+    })
+}
+
 fn parse_stmt_line(line: &str) -> Result<Stmt, String> {
     let s = trim(line);
     if s.is_empty() {
@@ -520,6 +669,12 @@ fn parse_stmt_line(line: &str) -> Result<Stmt, String> {
     }
     if s.starts_with("let ") {
         return parse_let_stmt(s);
+    }
+    if s.starts_with("if ") {
+        return parse_if_stmt(s);
+    }
+    if s.starts_with("while ") {
+        return parse_while_stmt(s);
     }
     if s.starts_with("return")
         && (s.len() == 6 || s.chars().nth(6).is_some_and(|c| c.is_whitespace()))
@@ -1187,6 +1342,87 @@ fn main() -> void { return; }
                 if name == "n"
                     && matches!(callee.as_ref(), Expr::Ident(c) if c == "add")
                     && args.len() == 2
+        ));
+    }
+
+    #[test]
+    fn fn_body_parses_binary_expression() {
+        use crate::swift_subset::Expr;
+        let src = "fn f() -> Int { return 1 + 2 * 3; }\nfn main() -> void\n";
+        let m = parse_in_source(src).expect("ok");
+        let body = match m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "f"))
+        {
+            Some(Decl::Function { body, .. }) => body,
+            _ => panic!("f"),
+        };
+        assert!(matches!(
+            &body[0],
+            Stmt::Return(Some(Expr::Binary { op, .. })) if op == "+"
+        ));
+    }
+
+    #[test]
+    fn fn_body_parses_if_else() {
+        use crate::swift_subset::Expr;
+        let src = r#"
+fn label(flag: Bool) -> String {
+  if flag == true {
+    return "yes";
+  } else {
+    return "no";
+  }
+}
+fn main() -> void
+"#;
+        let m = parse_in_source(src).expect("ok");
+        let body = match m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "label"))
+        {
+            Some(Decl::Function { body, .. }) => body,
+            _ => panic!("label"),
+        };
+        assert!(matches!(
+            &body[0],
+            Stmt::If {
+                cond: Expr::Binary { op, .. },
+                then_body,
+                else_body
+            } if op == "==" && then_body.len() == 1 && else_body.len() == 1
+        ));
+    }
+
+    #[test]
+    fn fn_body_parses_while_loop() {
+        let src = r#"
+fn spin() -> void {
+  let n = 0;
+  while n < 1 {
+    n = n + 1;
+  }
+  return;
+}
+fn main() -> void
+"#;
+        let m = parse_in_source(src).expect("ok");
+        let body = match m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "spin"))
+        {
+            Some(Decl::Function { body, .. }) => body,
+            _ => panic!("spin"),
+        };
+        assert!(matches!(
+            &body[1],
+            Stmt::Loop {
+                kind: LoopKind::While,
+                ..
+            }
         ));
     }
 }
