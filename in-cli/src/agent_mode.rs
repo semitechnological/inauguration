@@ -358,6 +358,13 @@ pub fn explain_diagnostic(code: &str) -> Option<DiagnosticExplanation> {
             "The agent-mode module could not read the requested source file",
             "Check that the path exists and is readable from the invocation directory",
         ),
+        "AGENT_MISSING_CAPABILITY" | "INAGENT050" => (
+            AgentDiagnosticSeverity::Warning,
+            "top-level capability declaration matching an extern binding requirement",
+            "Add the missing top-level capability declaration or remove the extern requirement",
+            "An .in extern binding declares a required capability that the module did not declare",
+            "Add the missing top-level capability declaration",
+        ),
         _ => return None,
     };
     Some(DiagnosticExplanation {
@@ -411,18 +418,44 @@ fn build_report(path: &Path, config: &AgentModeConfig) -> Result<AgentReport, Ag
             if parser_id.as_deref() == Some("in")
                 && let Ok(surface) = crate::in_lang_parse::parse_in_surface_info(&source)
             {
+                let declared_capabilities = surface.capabilities.clone();
+                for binding in &surface.externs {
+                    for required in &binding.required_capabilities {
+                        if !declared_capabilities.contains(required) {
+                            diagnostics.push(diagnostic(
+                                "AGENT_MISSING_CAPABILITY",
+                                AgentDiagnosticSeverity::Warning,
+                                None,
+                                parser_id.as_deref(),
+                                Some("top-level capability declaration matching an extern binding requirement"),
+                                excerpt_bounds(&source, None),
+                                Some("Add the missing top-level capability declaration or remove the extern requirement"),
+                                &format!(
+                                    "extern {} fn {} requires missing capability {}",
+                                    binding.language, binding.name, required
+                                ),
+                            ));
+                        }
+                    }
+                }
                 effects.extend(
                     surface
                         .imports
                         .into_iter()
                         .map(|name| format!("import:{name}")),
                 );
-                effects.extend(
-                    surface
-                        .externs
-                        .into_iter()
-                        .map(|binding| format!("extern:{}:{}", binding.language, binding.name)),
-                );
+                effects.extend(surface.externs.into_iter().map(|binding| {
+                    if binding.required_capabilities.is_empty() {
+                        format!("extern:{}:{}", binding.language, binding.name)
+                    } else {
+                        format!(
+                            "extern:{}:{}:requires={}",
+                            binding.language,
+                            binding.name,
+                            binding.required_capabilities.join(",")
+                        )
+                    }
+                }));
                 capabilities.extend(surface.capabilities);
             }
             let summary = summarize_core_ir(&module);
@@ -864,8 +897,35 @@ fn repair_plan_for(diagnostic: &AgentDiagnostic, source: &str) -> Option<RepairP
             ],
             rationale: "agent-mode cannot parse, lower, or plan source changes until it can read the input file".to_string(),
         }),
+        "AGENT_MISSING_CAPABILITY" => Some(RepairPlan {
+            id: "declare-missing-capability".to_string(),
+            code: diagnostic.code.clone(),
+            title: "Declare missing capability".to_string(),
+            applies_to_code: diagnostic.code.clone(),
+            parser_id: diagnostic.parser_id.clone(),
+            confidence: 0.84,
+            actions: vec![RepairAction {
+                kind: "append".to_string(),
+                span: eof_span(source),
+                replacement: missing_capability_from_message(&diagnostic.message)
+                    .map(|capability| format!("\ncapability {capability};\n")),
+                description: "Append the missing top-level capability declaration".to_string(),
+            }],
+            notes: vec![
+                "extern bindings can declare required capabilities".to_string(),
+                "the module must declare each required capability explicitly".to_string(),
+            ],
+            rationale: "agent-mode can identify the missing capability and propose an explicit declaration".to_string(),
+        }),
         _ => None,
     }
+}
+
+fn missing_capability_from_message(message: &str) -> Option<String> {
+    message
+        .rsplit_once(" missing capability ")
+        .map(|(_, capability)| capability.trim().to_string())
+        .filter(|capability| !capability.is_empty())
 }
 
 fn excerpt_bounds(source: &str, span: Option<&AgentSourceSpan>) -> Option<SourceExcerptBounds> {
@@ -1095,6 +1155,45 @@ fn main() -> void { host_log("ready"); return; }
         assert!(report.effects.contains(&"import:host.log".to_string()));
         assert!(report.effects.contains(&"extern:rust:host_log".to_string()));
         assert!(report.capabilities.contains(&"process.stdout".to_string()));
+    }
+
+    #[test]
+    fn in_report_warns_when_extern_required_capability_is_missing() {
+        let temp = temp_source(
+            "missing-capability",
+            "in",
+            r#"
+extern rust fn host_log(text: String) -> void requires process.stdout;
+fn main() -> void { host_log("ready"); return; }
+"#,
+        );
+        let report = json_report(&temp.path, &AgentModeConfig::default()).expect("report");
+        assert_eq!(report.diagnostics[0].code, "AGENT_MISSING_CAPABILITY");
+        assert_eq!(report.repair_plans[0].id, "declare-missing-capability");
+        assert_eq!(
+            report.repair_plans[0].actions[0].replacement.as_deref(),
+            Some("\ncapability process.stdout;\n")
+        );
+    }
+
+    #[test]
+    fn in_report_accepts_declared_extern_capability() {
+        let temp = temp_source(
+            "declared-capability",
+            "in",
+            r#"
+capability process.stdout;
+extern rust fn host_log(text: String) -> void requires process.stdout;
+fn main() -> void { host_log("ready"); return; }
+"#,
+        );
+        let report = json_report(&temp.path, &AgentModeConfig::default()).expect("report");
+        assert!(report.diagnostics.is_empty(), "{:?}", report.diagnostics);
+        assert!(
+            report
+                .effects
+                .contains(&"extern:rust:host_log:requires=process.stdout".to_string())
+        );
     }
 
     #[test]

@@ -18,7 +18,7 @@ What `in-cli/src/in_lang_parse.rs` implements today:
 - Top-level **`capability name;`** — accepted as explicit outside-world capability facts. `in agent` exposes them in the `capabilities` list.
 - Top-level **`struct Name { … }`** — fields can appear inline or on their own lines between braces. Fields are **`Type fieldName`** segments separated by semicolons or line breaks (e.g. `struct Box { Int x; String label }`). Types must be built-ins or **struct names already declared above** in the file.
 - Top-level **`fn name(params) -> Ret`** — **`fn` only** (no `func`, no `function` keyword in v0).
-- Top-level **`extern language fn name(params) -> Ret;`** — declares an external binding without embedding a foreign parser. The binding lowers as an empty Core IR function declaration so `.in` code can call it and the textual SIL graph can record `function_ref` edges. It is not a foreign runtime call implementation yet.
+- Top-level **`extern language fn name(params) -> Ret;`** — declares an external binding without embedding a foreign parser. Optional **`requires capability.name`** or comma-separated requirements attach capability contracts; `in agent` warns when a required capability is not declared. The binding lowers as an empty Core IR function declaration so `.in` code can call it and the textual SIL graph can record `function_ref` edges. It is not a foreign runtime call implementation yet.
 - Parameters: **`param: Type`** comma-separated.
 - Types: **`Int`**, **`String`**, **`Bool`**, **`void` / `Void`** (`void` matching is ASCII case-insensitive), and **named structs** declared above.
 - **`fn main`** is required (same spirit as the Swift subset front).
@@ -29,7 +29,7 @@ Optional spellings for forward compatibility: **`function`** as an alias may app
 
 ## Planned
 
-- **Richer `fn` bodies**: control flow, richer expression operators, sharper diagnostics, and real capability checking.
+- **Richer `fn` bodies**: control flow, richer expression operators, and sharper diagnostics.
 - **External binding execution**: today extern declarations provide Core IR and graph shape; runtime/FFI/plugin invocation is still future work.
 - **Parser overrides / discovery**: today **`--parser in`**, **`IN_PARSER=in`**, path **`*.in`**, or magic first-line **`#!in parser=in`** under `--parser auto` select the `.in` front (`in-cli/src/parser_registry.rs`).
 

@@ -17,6 +17,7 @@ pub struct InSurfaceInfo {
 pub struct InExternBinding {
     pub language: String,
     pub name: String,
+    pub required_capabilities: Vec<String>,
 }
 
 fn brace_delta(line: &str) -> i32 {
@@ -573,6 +574,16 @@ fn parse_extern_fn_block(block: &str) -> Result<InExternBinding, String> {
     if language.is_empty() || language.contains(char::is_whitespace) {
         return Err(".in: invalid extern language".into());
     }
+    let (header, required_capabilities) =
+        if let Some((left, right)) = header.split_once(" requires ") {
+            let caps = split_and_trim(',', right);
+            if caps.is_empty() {
+                return Err(".in: extern requires at least one capability".into());
+            }
+            (left, caps)
+        } else {
+            (header, Vec::new())
+        };
     let (name, _, _) = parse_fn_header(header);
     if name.is_empty() {
         return Err(".in: extern function name missing".into());
@@ -580,6 +591,7 @@ fn parse_extern_fn_block(block: &str) -> Result<InExternBinding, String> {
     Ok(InExternBinding {
         language: language.to_string(),
         name,
+        required_capabilities,
     })
 }
 
@@ -608,6 +620,10 @@ fn parse_module_from_blocks(blocks: &[String]) -> Result<UnifiedModule, String> 
             let (_, header) = rest
                 .split_once(" fn ")
                 .ok_or_else(|| ".in: expected `extern <language> fn name(...)`".to_string())?;
+            let header = header
+                .split_once(" requires ")
+                .map(|(left, _)| left)
+                .unwrap_or(header);
             let (name, params, ret) = parse_fn_header(header);
             if name != binding.name {
                 return Err(".in: extern binding name mismatch".into());
@@ -924,8 +940,23 @@ fn main() -> void { read_file("x"); return; }
             info.externs,
             vec![InExternBinding {
                 language: "rust".into(),
-                name: "read_file".into()
+                name: "read_file".into(),
+                required_capabilities: Vec::new()
             }]
+        );
+    }
+
+    #[test]
+    fn extern_binding_parses_required_capabilities() {
+        let src = r#"
+capability fs.read;
+extern rust fn read_file(path: String) -> String requires fs.read, json.parse;
+fn main() -> void { read_file("x"); return; }
+"#;
+        let info = parse_in_surface_info(src).expect("surface");
+        assert_eq!(
+            info.externs[0].required_capabilities,
+            vec!["fs.read", "json.parse"]
         );
     }
 
