@@ -3,6 +3,11 @@
 
 struct User
 
-func helper() -> Void
+func helper() -> Void {
+  return
+}
 
-func main(user: User) -> Void
+func main(user: User) -> Void {
+  helper()
+  return
+}

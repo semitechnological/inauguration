@@ -9,7 +9,7 @@ Implementation today: `in-cli` modules **`native_swift_sil`** (filter + emit) an
 1. **Filter** (`filter_top_level_decl_lines`): line-oriented pass over the combined Swift inputs. It tracks `{` / `}` **brace depth** on each physical line (not inside strings—no lexer yet).
 2. **Drop** at any depth: empty lines; whole lines whose trimmed form starts with `//`.
 3. **Drop** at any depth: trimmed lines starting with `import ` (imports are **ignored** for subset purposes; they are not parsed as declarations).
-4. **Keep** only when **brace depth is 0 before applying this line’s brace delta** and the trimmed line starts with `func ` or `struct `.
+4. **Keep** only when **brace depth is 0 before applying this line’s brace delta** and the trimmed line starts with `func ` or `struct `. Top-level function bodies are retained until their braces balance so bounded body statements can lower.
 5. **Parse** the filtered text with **`swift_subset::parse`**: one top-level decl per non-empty trimmed line (see below).
 6. **Check** with **`swift_subset::check`**. Any diagnostic ⇒ **`only`** mode fails (no `swiftc` fallback).
 
@@ -31,7 +31,8 @@ Implementation today: `in-cli` modules **`native_swift_sil`** (filter + emit) an
 - A single line: trimmed text starts with `func ` (after optional leading **`public` / `private` / …** access keywords and optional **`async`**, **`throws`**, **`reasync`**, **`nonisolated`** tokens with spaces, each stripped in a bounded loop so `async throws func main() -> Void` is accepted).
 - **Name** and **parameters**: `func name(_ p1: T1, p2: T2) -> Ret` — parameter list between `(` and `)`; each parameter is `label: Type` split on the first `:` (see implementation). Empty `()` allowed.
 - **Return type**: if the substring after `)` contains `-> Type`, that `Type` is used; otherwise return type is **`Void`**.
-- **Body** is not parsed from source; the checker uses a **placeholder** body internally.
+- **Body** may be omitted or may appear in a brace-balanced top-level function block. The subset accepts bounded body statements: `let name = expr`, `let name: Type = expr`, `name = expr`, expression calls, `return`, and `return expr`.
+- **Expressions** in those bounded statements accept int/string/bool literals, identifiers, calls, and simple binary operators used by the shared Core IR lowering path.
 
 **Types** (checker)
 
@@ -40,7 +41,7 @@ Implementation today: `in-cli` modules **`native_swift_sil`** (filter + emit) an
 
 **Program rules** (checker)
 
-- There must be exactly one top-level function named **`main`** (after filtering).
+- A top-level function named **`main`** is optional. Hybrid/library-style subset files may omit `main`; executable-style files may include it.
 - No duplicate top-level names: struct names and function names share one namespace; duplicates are errors.
 - No duplicate **field** names within one struct (`E_DUP_FIELD`).
 - Parameter, return, and **struct field** types must be “known” (built-in or declared struct).
@@ -56,7 +57,7 @@ Treat the following as **out of contract** unless a future phase updates this do
 - **Nested** types or functions as subset decls (filtered out).
 - **Multi-line** declarations (header split across lines): not recognized; only complete headers on **one logical line** after trim.
 - **String-literal-aware** brace matching: `{`/`}` inside strings still affect depth.
-- Expression / statement bodies: not part of the contract (placeholders only).
+- Control-flow bodies, nested declarations, closures, member access, subscripts, operators outside the bounded expression set, and Swift-specific statement semantics.
 
 ## Related paths
 

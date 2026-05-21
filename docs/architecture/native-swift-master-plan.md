@@ -21,8 +21,8 @@ This document is the phased roadmap for growing inauguration’s **Rust-first** 
 
 | Layer | Role today |
 |-------|------------|
-| **`swift_subset`** | Line-oriented `struct` / `func` headers; dummy bodies; JSON artifact for **`in ocaml`**. |
-| **`native_swift_sil`** | Brace-depth filter → subset parse/check → **template textual SIL** (stubs + `main` calling `function_ref`). |
+| **`swift_subset`** | Line-oriented `struct` / `func` declarations plus bounded top-level function bodies; JSON artifact for **`in ocaml`**. |
+| **`native_swift_sil`** | Brace-depth filter → subset parse/check → shared Core IR textual SIL lowering. |
 | **`sil_emit`** | **`IN_NATIVE_SWIFT_SIL`**: `try` / `only`; else **`swiftc -emit-sil`** (+ SwiftPM prep / `-I` retry). |
 | **`hybrid_pipeline` / `hybrid_sil`** | **`parse_textual_sil`** → strip `debug_value` → **`extract_call_graph`** from `function_ref`; Ast/Swift tasks time-only. |
 | **Hotreload** | Compile gate follows `sil_emit::compile_check_swift_path`; graph metrics use subset SIL by default and can opt into **`swiftc -emit-sil`** with **`IN_HOTRELOAD_SWIFTC_SIL_GRAPH=1`**. |
@@ -53,7 +53,7 @@ Also see [**multi-frontend IR**](multi-frontend-ir.md) (`UnifiedModule`, `.in` p
 
 ## Phase 1 — Real AST for the subset (3–6 weeks)
 
-**Problem**: Headers-only parsing; `struct` fields empty; bodies are placeholders.
+**Problem**: Parsing is still line-oriented and shallow; one-line `struct` fields and bounded function bodies exist, but richer Swift declarations, scope/name resolution, and diagnostics are incomplete.
 
 **Workstreams** (parallel-friendly)
 

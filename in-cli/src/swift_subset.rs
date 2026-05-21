@@ -109,6 +109,18 @@ fn split_and_trim(sep: char, s: &str) -> Vec<String> {
         .collect()
 }
 
+fn brace_delta(line: &str) -> i32 {
+    let mut n = 0i32;
+    for ch in line.chars() {
+        match ch {
+            '{' => n += 1,
+            '}' => n -= 1,
+            _ => {}
+        }
+    }
+    n
+}
+
 fn parse_type(s: &str) -> Typ {
     match trim(s) {
         "Int" => Typ::Int,
@@ -122,6 +134,24 @@ fn parse_type(s: &str) -> Typ {
 #[allow(dead_code)] // OCaml AST parity; line parser does not emit `let` yet.
 fn parse_expr(s: &str) -> Expr {
     let s = trim(s);
+    for ops in [
+        &["==", "!=", "<=", ">="][..],
+        &["+", "-"][..],
+        &["*", "/"][..],
+        &["<", ">"][..],
+    ] {
+        if let Some((op, idx)) = find_top_level_binary_op(s, ops) {
+            let lhs = trim(&s[..idx]);
+            let rhs = trim(&s[idx + op.len()..]);
+            if !lhs.is_empty() && !rhs.is_empty() {
+                return Expr::Binary {
+                    op: op.to_string(),
+                    lhs: Box::new(parse_expr(lhs)),
+                    rhs: Box::new(parse_expr(rhs)),
+                };
+            }
+        }
+    }
     if s == "true" {
         return Expr::BoolLit(true);
     }
@@ -134,7 +164,126 @@ fn parse_expr(s: &str) -> Expr {
     if s.len() >= 2 && s.starts_with('"') && s.ends_with('"') {
         return Expr::StringLit(s[1..s.len() - 1].to_string());
     }
+    if let Some(open) = find_call_open_paren(s)
+        && s.ends_with(')')
+    {
+        let callee = trim(&s[..open]);
+        if !callee.is_empty() {
+            let inner = trim(&s[open + 1..s.len() - 1]);
+            let args = split_call_args(inner)
+                .into_iter()
+                .map(|arg| parse_expr(&arg))
+                .collect();
+            return Expr::Call {
+                callee: Box::new(Expr::Ident(callee.to_string())),
+                args,
+            };
+        }
+    }
     Expr::Ident(s.to_string())
+}
+
+fn find_top_level_binary_op<'a>(s: &str, ops: &[&'a str]) -> Option<(&'a str, usize)> {
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escape = false;
+    let mut matches = Vec::new();
+    for (i, c) in s.char_indices() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        if in_string {
+            if c == '\\' {
+                escape = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => in_string = true,
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            _ if depth == 0 => {
+                for op in ops {
+                    if s[i..].starts_with(op) {
+                        matches.push((*op, i));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    matches.into_iter().last()
+}
+
+fn find_call_open_paren(s: &str) -> Option<usize> {
+    let mut in_string = false;
+    let mut escape = false;
+    for (i, c) in s.char_indices() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        if in_string {
+            if c == '\\' {
+                escape = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => in_string = true,
+            '(' => return Some(i),
+            _ => {}
+        }
+    }
+    None
+}
+
+fn split_call_args(inner: &str) -> Vec<String> {
+    if inner.trim().is_empty() {
+        return Vec::new();
+    }
+    let mut args = Vec::new();
+    let mut start = 0usize;
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escape = false;
+    for (i, c) in inner.char_indices() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        if in_string {
+            if c == '\\' {
+                escape = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => in_string = true,
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            ',' if depth == 0 => {
+                let arg = trim(&inner[start..i]);
+                if !arg.is_empty() {
+                    args.push(arg.to_string());
+                }
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    let tail = trim(&inner[start..]);
+    if !tail.is_empty() {
+        args.push(tail.to_string());
+    }
+    args
 }
 
 fn parse_param(token: &str) -> (String, Typ) {
@@ -170,14 +319,14 @@ fn parse_func_header(after_func_keyword: &str) -> FnDecl {
             name,
             params,
             ret,
-            body: vec![Stmt::Return(None)],
+            body: Vec::new(),
         }
     } else {
         FnDecl {
             name: trim(after_func).to_string(),
             params: Vec::new(),
             ret: Typ::Void,
-            body: vec![Stmt::Return(None)],
+            body: Vec::new(),
         }
     }
 }
@@ -288,11 +437,218 @@ fn parse_struct_field_list(inner: &str) -> Vec<(String, Typ)> {
         .collect()
 }
 
+fn starts_top_level_decl(line: &str) -> bool {
+    let line = strip_leading_access_modifiers(line);
+    let line = strip_leading_func_effect_keywords(line);
+    line.starts_with("func ") || line.starts_with("struct ")
+}
+
+fn split_top_level_decl_blocks(source: &str) -> Vec<String> {
+    let mut blocks = Vec::new();
+    let mut current: Option<String> = None;
+    let mut depth = 0i32;
+    for raw_line in source.lines() {
+        let t = trim(raw_line);
+        if t.is_empty() || t.starts_with("//") || t.starts_with("import ") {
+            continue;
+        }
+        if current.is_none() {
+            if !starts_top_level_decl(t) {
+                depth += brace_delta(raw_line);
+                if depth < 0 {
+                    depth = 0;
+                }
+                continue;
+            }
+            let delta = brace_delta(raw_line);
+            if delta <= 0 {
+                blocks.push(t.to_string());
+                continue;
+            }
+            current = Some(t.to_string());
+            depth = delta;
+            continue;
+        }
+        if let Some(block) = current.as_mut() {
+            block.push('\n');
+            block.push_str(t);
+        }
+        depth += brace_delta(raw_line);
+        if depth <= 0 {
+            if let Some(block) = current.take() {
+                blocks.push(block);
+            }
+            depth = 0;
+        }
+    }
+    if let Some(block) = current {
+        blocks.push(block);
+    }
+    blocks
+}
+
+fn extract_braced_body(s: &str, open_idx: usize) -> Option<&str> {
+    if open_idx >= s.len() || !s[open_idx..].starts_with('{') {
+        return None;
+    }
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escape = false;
+    for (i, c) in s[open_idx..].char_indices() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        if in_string {
+            if c == '\\' {
+                escape = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => in_string = true,
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(&s[open_idx + 1..open_idx + i]);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn split_body_statements(body: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut start = 0usize;
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escape = false;
+    for (i, c) in body.char_indices() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        if in_string {
+            if c == '\\' {
+                escape = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => in_string = true,
+            '{' | '(' | '[' => depth += 1,
+            '}' | ')' | ']' => depth -= 1,
+            ';' | '\n' if depth == 0 => {
+                let stmt = trim(&body[start..i]);
+                if !stmt.is_empty() {
+                    out.push(stmt.to_string());
+                }
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    let tail = trim(&body[start..]);
+    if !tail.is_empty() {
+        out.push(tail.to_string());
+    }
+    out
+}
+
+fn parse_let_stmt(s: &str) -> Option<Stmt> {
+    let rest = trim(s.strip_prefix("let ")?);
+    let (lhs, rhs) = rest.split_once('=')?;
+    let lhs = trim(lhs);
+    let (name, typ) = if let Some((name, ty)) = lhs.split_once(':') {
+        (trim(name), Some(parse_type(ty)))
+    } else {
+        (lhs, None)
+    };
+    if name.is_empty() {
+        return None;
+    }
+    Some(Stmt::Let(name.to_string(), typ, parse_expr(rhs)))
+}
+
+fn parse_return_stmt(s: &str) -> Option<Stmt> {
+    let rest = trim(s.strip_prefix("return")?);
+    if rest.is_empty() {
+        return Some(Stmt::Return(None));
+    }
+    Some(Stmt::Return(Some(parse_expr(rest))))
+}
+
+fn parse_assign_stmt(s: &str) -> Option<Stmt> {
+    let eq_pos = s.find('=')?;
+    if s.get(eq_pos + 1..)
+        .is_some_and(|tail| tail.starts_with('='))
+    {
+        return None;
+    }
+    if eq_pos > 0 && s.get(eq_pos - 1..eq_pos) == Some("!") {
+        return None;
+    }
+    let name = trim(&s[..eq_pos]);
+    if name.is_empty() || name.contains(char::is_whitespace) {
+        return None;
+    }
+    Some(Stmt::Assign(
+        name.to_string(),
+        parse_expr(trim(&s[eq_pos + 1..])),
+    ))
+}
+
+fn parse_stmt(s: &str) -> Option<Stmt> {
+    let s = trim(s);
+    if s.is_empty() {
+        return None;
+    }
+    if s.starts_with("let ") {
+        return parse_let_stmt(s);
+    }
+    if s.starts_with("return") {
+        return parse_return_stmt(s);
+    }
+    if let Some(assign) = parse_assign_stmt(s) {
+        return Some(assign);
+    }
+    Some(Stmt::Expr(parse_expr(s)))
+}
+
+fn parse_body(body: &str) -> Vec<Stmt> {
+    split_body_statements(body)
+        .into_iter()
+        .filter_map(|stmt| parse_stmt(&stmt))
+        .collect()
+}
+
+fn parse_func_block(block: &str) -> FnDecl {
+    let line = strip_leading_access_modifiers(trim(block));
+    let line = strip_leading_func_effect_keywords(line);
+    let rest = line.strip_prefix("func ").unwrap_or(line);
+    if let Some(open) = rest.find('{') {
+        let mut decl = parse_func_header(&rest[..open]);
+        if let Some(body) = extract_braced_body(rest, open) {
+            decl.body = parse_body(body);
+        }
+        decl
+    } else {
+        parse_func_header(rest)
+    }
+}
+
 /// Parse minimal Swift-ish subset (line-oriented; matches OCaml `parser.ml`).
 pub fn parse(source: &str) -> Program {
     let mut acc = Vec::new();
-    for raw_line in source.split('\n') {
-        let line = trim(raw_line);
+    for block in split_top_level_decl_blocks(source) {
+        let line = trim(&block);
         if line.is_empty() {
             continue;
         }
@@ -304,8 +660,8 @@ pub fn parse(source: &str) -> Program {
         if line.is_empty() {
             continue;
         }
-        if let Some(rest) = line.strip_prefix("func ") {
-            acc.push(Decl::Function(parse_func_header(rest)));
+        if line.starts_with("func ") {
+            acc.push(Decl::Function(parse_func_block(line)));
         } else if line.starts_with("struct ") {
             acc.push(Decl::Struct(parse_struct_line(line)));
         }
@@ -654,5 +1010,66 @@ mod tests {
             diagnostics.iter().any(|d| d.code == "E_DUP_FIELD"),
             "{diagnostics:?}"
         );
+    }
+
+    #[test]
+    fn parse_func_body_return_and_call() {
+        let program = parse(
+            r#"
+func helper() -> Int {
+  return 1
+}
+func main() -> Void {
+  helper()
+  return
+}
+"#,
+        );
+        assert_eq!(program.len(), 2);
+        match &program[0] {
+            Decl::Function(f) => {
+                assert_eq!(f.body.len(), 1);
+                assert!(matches!(f.body[0], Stmt::Return(Some(Expr::IntLit(1)))));
+            }
+            _ => panic!("expected helper function"),
+        }
+        match &program[1] {
+            Decl::Function(f) => {
+                assert_eq!(f.body.len(), 2);
+                assert!(matches!(&f.body[0], Stmt::Expr(Expr::Call { callee, args })
+                        if matches!(callee.as_ref(), Expr::Ident(name) if name == "helper")
+                            && args.is_empty()));
+                assert!(matches!(f.body[1], Stmt::Return(None)));
+            }
+            _ => panic!("expected main function"),
+        }
+    }
+
+    #[test]
+    fn parse_func_body_let_assignment_and_binary() {
+        let program = parse(
+            r#"
+func add() -> Int {
+  let x: Int = 1
+  x = x + 1
+  return x
+}
+"#,
+        );
+        match &program[0] {
+            Decl::Function(f) => {
+                assert_eq!(f.body.len(), 3);
+                assert!(matches!(
+                    &f.body[0],
+                    Stmt::Let(name, Some(Typ::Int), Expr::IntLit(1)) if name == "x"
+                ));
+                assert!(matches!(
+                    &f.body[1],
+                    Stmt::Assign(name, Expr::Binary { op, .. }) if name == "x" && op == "+"
+                ));
+                assert!(matches!(&f.body[2], Stmt::Return(Some(Expr::Ident(name))) if name == "x"));
+            }
+            _ => panic!("expected function"),
+        }
     }
 }

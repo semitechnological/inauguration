@@ -70,7 +70,8 @@
   - Add `icoreVersion: 2` statement and expression JSON across parser, lowering, docs, and tests.
 
 - [ ] Expand the native Swift subset.
-  - Replace header-only parsing with a real subset AST for top-level declarations, struct fields, function signatures, and bounded bodies.
+  - First bounded-body slice landed: top-level Swift functions may now carry simple `let`, assignment, call, and return statements into shared Core IR lowering; `main` remains optional for hybrid/library-style sources.
+  - Continue replacing header-only parsing with a real subset AST for more top-level declarations, struct fields, function signatures, and bounded bodies.
   - Add name resolution, stable diagnostics, and SIL snapshots under `IN_NATIVE_SWIFT_SIL=only`.
   - Make `IN_NATIVE_SWIFT_SIL=try` distinguish unsupported syntax fallback from real subset errors.
 

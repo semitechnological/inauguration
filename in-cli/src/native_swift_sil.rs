@@ -80,10 +80,54 @@ fn brace_delta(line: &str) -> i32 {
     n
 }
 
+fn strip_leading_keyword<'a>(line: &'a str, keywords: &[&str], limit: usize) -> &'a str {
+    let mut line = line.trim();
+    for _ in 0..limit {
+        let mut peeled = false;
+        for kw in keywords {
+            if line == *kw {
+                return "";
+            }
+            if let Some(rest) = line.strip_prefix(kw)
+                && rest.starts_with(' ')
+            {
+                line = rest.trim_start().trim();
+                peeled = true;
+                break;
+            }
+        }
+        if !peeled {
+            break;
+        }
+    }
+    line
+}
+
+fn starts_top_level_decl(line: &str) -> bool {
+    let line = strip_leading_keyword(
+        line,
+        &["fileprivate", "internal", "private", "public", "open"],
+        4,
+    );
+    let line = strip_leading_keyword(line, &["async", "throws", "reasync", "nonisolated"], 4);
+    line.starts_with("func ") || line.starts_with("struct ")
+}
+
+fn starts_top_level_func(line: &str) -> bool {
+    let line = strip_leading_keyword(
+        line,
+        &["fileprivate", "internal", "private", "public", "open"],
+        4,
+    );
+    let line = strip_leading_keyword(line, &["async", "throws", "reasync", "nonisolated"], 4);
+    line.starts_with("func ")
+}
+
 /// Keep only top-level `func` / `struct` lines (brace-depth 0) for the line-oriented subset parser.
 pub fn filter_top_level_decl_lines(source: &str) -> String {
     let mut depth = 0i32;
     let mut out = String::new();
+    let mut collecting = false;
     for raw_line in source.lines() {
         let t = raw_line.trim();
         if t.is_empty() {
@@ -95,15 +139,21 @@ pub fn filter_top_level_decl_lines(source: &str) -> String {
         if t.starts_with("import ") {
             continue;
         }
-        let at_zero = depth == 0;
+        let at_zero = depth == 0 && !collecting;
         let delta = brace_delta(raw_line);
-        if at_zero && (t.starts_with("func ") || t.starts_with("struct ")) {
+        if collecting || (at_zero && starts_top_level_decl(t)) {
             out.push_str(t);
             out.push('\n');
         }
         depth += delta;
+        if at_zero && delta > 0 && starts_top_level_func(t) {
+            collecting = true;
+        }
         if depth < 0 {
             depth = 0;
+        }
+        if collecting && depth == 0 {
+            collecting = false;
         }
     }
     out
@@ -210,5 +260,31 @@ func main() -> Void
         let no_main = "struct X\n";
         assert!(swift_subset_typecheck_ok(no_main));
         assert!(try_emit_in_tree_sil(no_main, "App").is_some());
+    }
+
+    #[test]
+    fn emit_subset_sil_uses_function_body_calls() {
+        let src = r#"
+func leaf() -> Void {
+  return
+}
+func helper() -> Void {
+  leaf()
+  return
+}
+func main() -> Void {
+  helper()
+  return
+}
+"#;
+        let sil = try_emit_in_tree_sil(src, "App").expect("sil");
+        let artifact = crate::hybrid_sil::parse_textual_sil(&sil);
+        let report = crate::hybrid_sil::extract_call_graph(&artifact);
+        assert!(
+            report
+                .call_edges
+                .contains(&("helper".to_string(), "leaf".to_string())),
+            "{sil}"
+        );
     }
 }
