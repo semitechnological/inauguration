@@ -14,6 +14,8 @@ Rust type: `in_cli::core_ir::UnifiedModule`.
 |-------|--------|
 | `decls: Vec<Decl>` | Top-level declarations in source order (before lowering sorts functions for SIL). |
 
+`.in` also has a parser-side surface fact helper for `import`, `capability`, and `extern` declarations. Imports and capabilities are exposed through `in agent` JSON. Extern bindings lower into empty `Function` declarations today so call graph extraction can observe explicit `.in` calls without expanding the Core IR schema.
+
 **`Decl` variants**
 
 | Variant | Fields | Notes |
@@ -27,7 +29,7 @@ Rust type: `in_cli::core_ir::UnifiedModule`.
 
 | Id | Source | Entry |
 |----|--------|--------|
-| `In` | `.in` files (and `#!in parser=in`) | `in_lang_parse` → `UnifiedModule` → `compiler::driver` / `lower_core` |
+| `In` | `.in` files (and `#!in parser=in`) | `in_lang_parse` → `UnifiedModule` → `compiler::driver` / `lower_core`; parser-side surface facts feed agent `effects` / `capabilities` |
 | `Icore` | `.icore` files (and `#!in parser=icore`) | `compiler::icore` v1 declarations or v2 bounded body JSON → `UnifiedModule` → same lowering |
 | `c`, `cpp`, `java`, `python`, … | Known extensions or `#!in parser=<slug>` | **Tree-sitter polyglot** — [`compiler::tree_front`](../../in-cli/src/compiler/tree_front/mod.rs) grammar-backed AST → `UnifiedModule`; Java/Groovy and C-family have bounded body lowering where documented, other routed fronts remain declaration-level; icore-only ids documented in [parser-surface.md](parser-surface.md). |
 

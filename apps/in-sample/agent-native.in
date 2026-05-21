@@ -1,0 +1,8 @@
+import host.log;
+capability process.stdout;
+extern rust fn host_log(text: String) -> void;
+
+fn main() -> void {
+  host_log("ready");
+  return;
+}

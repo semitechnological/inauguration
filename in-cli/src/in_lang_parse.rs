@@ -6,6 +6,19 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct InSurfaceInfo {
+    pub imports: Vec<String>,
+    pub capabilities: Vec<String>,
+    pub externs: Vec<InExternBinding>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InExternBinding {
+    pub language: String,
+    pub name: String,
+}
+
 fn brace_delta(line: &str) -> i32 {
     let mut n = 0i32;
     for ch in line.chars() {
@@ -35,7 +48,9 @@ pub fn split_top_level_decl_blocks(source: &str) -> Vec<String> {
             if t.is_empty() || t.starts_with("//") {
                 continue;
             }
-            if depth == 0 && (t.starts_with("fn ") || t.starts_with("struct ")) {
+            if depth == 0
+                && (t.starts_with("fn ") || t.starts_with("struct ") || t.starts_with("extern "))
+            {
                 current = Some(vec![t.to_string()]);
                 depth += delta;
                 if depth == 0 {
@@ -97,7 +112,7 @@ fn parse_param(token: &str) -> (String, Typ) {
 }
 
 fn parse_fn_header(after_fn_keyword: &str) -> (String, Vec<(String, Typ)>, Typ) {
-    let after = trim(after_fn_keyword);
+    let after = trim(after_fn_keyword).trim_end_matches(';').trim();
     let open_idx = after.find('(');
     let close_idx = after.rfind(')');
     if let (Some(i), Some(j)) = (open_idx, close_idx)
@@ -543,6 +558,31 @@ fn parse_fn_block(block: &str) -> Result<(String, Vec<(String, Typ)>, Typ, Vec<S
     }
 }
 
+fn parse_extern_fn_block(block: &str) -> Result<InExternBinding, String> {
+    let t = trim(block).trim_end_matches(';').trim();
+    if t.contains('{') || t.contains('}') {
+        return Err(".in: `extern` bindings cannot contain bodies".into());
+    }
+    let rest = t
+        .strip_prefix("extern ")
+        .ok_or_else(|| ".in: expected `extern`".to_string())?;
+    let Some((language, header)) = rest.split_once(" fn ") else {
+        return Err(".in: expected `extern <language> fn name(...)`".into());
+    };
+    let language = trim(language);
+    if language.is_empty() || language.contains(char::is_whitespace) {
+        return Err(".in: invalid extern language".into());
+    }
+    let (name, _, _) = parse_fn_header(header);
+    if name.is_empty() {
+        return Err(".in: extern function name missing".into());
+    }
+    Ok(InExternBinding {
+        language: language.to_string(),
+        name,
+    })
+}
+
 fn parse_module_from_blocks(blocks: &[String]) -> Result<UnifiedModule, String> {
     let mut decls = Vec::new();
     for block in blocks {
@@ -558,6 +598,26 @@ fn parse_module_from_blocks(blocks: &[String]) -> Result<UnifiedModule, String> 
                 ret,
                 body,
             });
+        } else if line.starts_with("extern ") {
+            let binding = parse_extern_fn_block(block)?;
+            let rest = trim(block)
+                .trim_end_matches(';')
+                .trim()
+                .strip_prefix("extern ")
+                .ok_or_else(|| ".in: expected `extern`".to_string())?;
+            let (_, header) = rest
+                .split_once(" fn ")
+                .ok_or_else(|| ".in: expected `extern <language> fn name(...)`".to_string())?;
+            let (name, params, ret) = parse_fn_header(header);
+            if name != binding.name {
+                return Err(".in: extern binding name mismatch".into());
+            }
+            decls.push(Decl::Function {
+                name,
+                params,
+                ret,
+                body: Vec::new(),
+            });
         } else if line.starts_with("struct ") {
             let (name, fields) = parse_struct_block(block)?;
             decls.push(Decl::Struct { name, fields });
@@ -566,6 +626,56 @@ fn parse_module_from_blocks(blocks: &[String]) -> Result<UnifiedModule, String> 
         }
     }
     Ok(UnifiedModule { decls })
+}
+
+pub fn parse_in_surface_info(source: &str) -> Result<InSurfaceInfo, String> {
+    let mut info = InSurfaceInfo::default();
+    let mut depth = 0i32;
+    for raw_line in source.lines() {
+        let line = strip_line_comment_outside_strings(raw_line);
+        let line = trim(line);
+        if line.is_empty() || line.starts_with("//") {
+            depth += brace_delta(raw_line);
+            if depth < 0 {
+                depth = 0;
+            }
+            continue;
+        }
+        if depth == 0 {
+            if let Some(rest) = line.strip_prefix("import ") {
+                let import = trim(rest).trim_end_matches(';').trim();
+                if import.is_empty() {
+                    return Err(".in: import path missing".into());
+                }
+                info.imports.push(import.to_string());
+                depth += brace_delta(raw_line);
+                if depth < 0 {
+                    depth = 0;
+                }
+                continue;
+            }
+            if let Some(rest) = line.strip_prefix("capability ") {
+                let capability = trim(rest).trim_end_matches(';').trim();
+                if capability.is_empty() {
+                    return Err(".in: capability name missing".into());
+                }
+                info.capabilities.push(capability.to_string());
+                depth += brace_delta(raw_line);
+                if depth < 0 {
+                    depth = 0;
+                }
+                continue;
+            }
+            if line.starts_with("extern ") {
+                info.externs.push(parse_extern_fn_block(line)?);
+            }
+        }
+        depth += brace_delta(raw_line);
+        if depth < 0 {
+            depth = 0;
+        }
+    }
+    Ok(info)
 }
 
 fn collect_struct_names(module: &UnifiedModule) -> Vec<String> {
@@ -648,6 +758,7 @@ fn validate_stmt_types(fn_name: &str, structs: &HashSet<&str>, stmt: &Stmt) -> R
 
 /// Parse and validate `.in` v0.2 source; returns human-readable errors as strings.
 pub fn parse_in_source(source: &str) -> Result<UnifiedModule, String> {
+    let _surface = parse_in_surface_info(source)?;
     let blocks = split_top_level_decl_blocks(source);
     let module = parse_module_from_blocks(&blocks)?;
     if module.decls.is_empty() {
@@ -796,6 +907,67 @@ fn main() -> void
     fn struct_field_type_must_be_known() {
         let err = parse_in_source("struct Bad { Unknown z }\nfn main() -> void\n").expect_err("ty");
         assert!(err.contains("unknown type") || err.contains("Bad"));
+    }
+
+    #[test]
+    fn surface_info_parses_imports_capabilities_and_externs() {
+        let src = r#"
+import std.fs;
+capability fs.read;
+extern rust fn read_file(path: String) -> String;
+fn main() -> void { read_file("x"); return; }
+"#;
+        let info = parse_in_surface_info(src).expect("surface");
+        assert_eq!(info.imports, vec!["std.fs"]);
+        assert_eq!(info.capabilities, vec!["fs.read"]);
+        assert_eq!(
+            info.externs,
+            vec![InExternBinding {
+                language: "rust".into(),
+                name: "read_file".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn extern_binding_lowers_as_empty_function_decl() {
+        let src = r#"
+extern rust fn read_file(path: String) -> String;
+fn main() -> void { read_file("x"); return; }
+"#;
+        let m = parse_in_source(src).expect("ok");
+        let extern_decl = m.decls.iter().find_map(|d| match d {
+            Decl::Function {
+                name,
+                params,
+                ret,
+                body,
+            } if name == "read_file" => Some((params, ret, body)),
+            _ => None,
+        });
+        let (params, ret, body) = extern_decl.expect("read_file");
+        assert_eq!(params.len(), 1);
+        assert!(matches!(ret, Typ::String));
+        assert!(body.is_empty());
+    }
+
+    #[test]
+    fn malformed_surface_declaration_rejected() {
+        let err = parse_in_source("import ;\nfn main() -> void\n").expect_err("import");
+        assert!(err.contains("import path missing"), "{err}");
+    }
+
+    #[test]
+    fn malformed_capability_rejected() {
+        let err = parse_in_source("capability ;\nfn main() -> void\n").expect_err("capability");
+        assert!(err.contains("capability name missing"), "{err}");
+    }
+
+    #[test]
+    fn extern_body_rejected() {
+        let err = parse_in_source("extern rust fn f() -> void { return; }\nfn main() -> void\n")
+            .expect_err("extern body");
+        assert!(err.contains("extern") && err.contains("bodies"), "{err}");
     }
 
     #[test]

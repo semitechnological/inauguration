@@ -7,7 +7,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-exec cargo run --manifest-path in-cli/Cargo.toml --bin in -- build \
+cargo run --manifest-path in-cli/Cargo.toml --bin in -- build \
   --parser in \
   --path apps/in-sample/hello.in \
+  --module-id App
+
+cargo run --manifest-path in-cli/Cargo.toml --bin in -- build \
+  --parser in \
+  --path apps/in-sample/agent-native.in \
   --module-id App

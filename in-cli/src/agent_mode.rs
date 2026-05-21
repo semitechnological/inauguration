@@ -401,11 +401,30 @@ fn build_report(path: &Path, config: &AgentModeConfig) -> Result<AgentReport, Ag
     let mut core_decl_count = 0;
     let mut core_ir_summary = None;
     let mut graph_facts = None;
+    let mut effects = Vec::new();
+    let mut capabilities = Vec::new();
     match parsed {
         Ok(Some(module)) => {
             core_decl_count = module.decls.len();
             language_level =
                 language_level_for_module(language_level, parser_id.as_deref(), &source);
+            if parser_id.as_deref() == Some("in")
+                && let Ok(surface) = crate::in_lang_parse::parse_in_surface_info(&source)
+            {
+                effects.extend(
+                    surface
+                        .imports
+                        .into_iter()
+                        .map(|name| format!("import:{name}")),
+                );
+                effects.extend(
+                    surface
+                        .externs
+                        .into_iter()
+                        .map(|binding| format!("extern:{}:{}", binding.language, binding.name)),
+                );
+                capabilities.extend(surface.capabilities);
+            }
             let summary = summarize_core_ir(&module);
             diagnostics.extend(core_diagnostics(&module, parser_id.as_deref(), &source));
             let lower_start = Instant::now();
@@ -455,8 +474,8 @@ fn build_report(path: &Path, config: &AgentModeConfig) -> Result<AgentReport, Ag
         language_level,
         core_ir_summary,
         graph_facts,
-        effects: Vec::new(),
-        capabilities: Vec::new(),
+        effects,
+        capabilities,
         size_timing: SizeTiming {
             source_bytes,
             source_lines,
@@ -1058,6 +1077,24 @@ mod tests {
         let report = json_report(&temp.path, &AgentModeConfig::default()).expect("report");
         assert_eq!(report.language_level.level, 1);
         assert_eq!(report.language_level.label, "icore v1 declarations");
+    }
+
+    #[test]
+    fn in_report_includes_surface_effects_and_capabilities() {
+        let temp = temp_source(
+            "surface",
+            "in",
+            r#"
+import host.log;
+capability process.stdout;
+extern rust fn host_log(text: String) -> void;
+fn main() -> void { host_log("ready"); return; }
+"#,
+        );
+        let report = json_report(&temp.path, &AgentModeConfig::default()).expect("report");
+        assert!(report.effects.contains(&"import:host.log".to_string()));
+        assert!(report.effects.contains(&"extern:rust:host_log".to_string()));
+        assert!(report.capabilities.contains(&"process.stdout".to_string()));
     }
 
     #[test]
