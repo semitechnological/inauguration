@@ -20,6 +20,58 @@ pub struct InExternBinding {
     pub required_capabilities: Vec<String>,
 }
 
+pub fn in_standard_import_bindings(import: &str) -> Vec<InExternBinding> {
+    match normalize_import_path(import) {
+        "std.io" => vec![InExternBinding {
+            language: "std".into(),
+            name: "print".into(),
+            required_capabilities: vec!["process.stdout".into()],
+        }],
+        "std.fs" => vec![
+            InExternBinding {
+                language: "std".into(),
+                name: "read_file".into(),
+                required_capabilities: vec!["fs.read".into()],
+            },
+            InExternBinding {
+                language: "std".into(),
+                name: "write_file".into(),
+                required_capabilities: vec!["fs.write".into()],
+            },
+        ],
+        _ => Vec::new(),
+    }
+}
+
+fn binding_decl(binding: &InExternBinding) -> Decl {
+    match binding.name.as_str() {
+        "print" => Decl::Function {
+            name: binding.name.clone(),
+            params: vec![("text".into(), Typ::String)],
+            ret: Typ::Void,
+            body: Vec::new(),
+        },
+        "read_file" => Decl::Function {
+            name: binding.name.clone(),
+            params: vec![("path".into(), Typ::String)],
+            ret: Typ::String,
+            body: Vec::new(),
+        },
+        "write_file" => Decl::Function {
+            name: binding.name.clone(),
+            params: vec![("path".into(), Typ::String), ("text".into(), Typ::String)],
+            ret: Typ::Void,
+            body: Vec::new(),
+        },
+        _ => Decl::Function {
+            name: binding.name.clone(),
+            params: Vec::new(),
+            ret: Typ::Void,
+            body: Vec::new(),
+        },
+    }
+}
+
 fn brace_delta(line: &str) -> i32 {
     let mut n = 0i32;
     for ch in line.chars() {
@@ -928,9 +980,20 @@ fn validate_stmt_types(fn_name: &str, structs: &HashSet<&str>, stmt: &Stmt) -> R
 }
 
 fn parse_in_module_without_validation(source: &str) -> Result<UnifiedModule, String> {
-    let _surface = parse_in_surface_info(source)?;
+    let surface = parse_in_surface_info(source)?;
     let blocks = split_top_level_decl_blocks(source);
-    parse_module_from_blocks(&blocks)
+    let mut module = parse_module_from_blocks(&blocks)?;
+    let mut std_decls = Vec::new();
+    for import in surface.imports {
+        std_decls.extend(
+            in_standard_import_bindings(&import)
+                .into_iter()
+                .map(|binding| binding_decl(&binding)),
+        );
+    }
+    std_decls.extend(module.decls);
+    module.decls = std_decls;
+    Ok(module)
 }
 
 fn validate_module(module: &UnifiedModule, require_main: bool) -> Result<(), String> {
@@ -1262,6 +1325,18 @@ fn main() -> void { read_file("x"); return; }
         let err = parse_in_file(&path).expect_err("missing import");
         let _ = fs::remove_file(&path);
         assert!(err.contains("missing.in"), "{err}");
+    }
+
+    #[test]
+    fn std_import_adds_core_function_declarations() {
+        let src = "import std.io;\ncapability process.stdout;\nfn main() -> void { print(\"ok\"); return; }\n";
+        let module = parse_in_source(src).expect("std import");
+        assert!(
+            module
+                .decls
+                .iter()
+                .any(|decl| matches!(decl, Decl::Function { name, .. } if name == "print"))
+        );
     }
 
     #[test]

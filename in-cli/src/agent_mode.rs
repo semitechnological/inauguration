@@ -419,7 +419,12 @@ fn build_report(path: &Path, config: &AgentModeConfig) -> Result<AgentReport, Ag
                 && let Ok(surface) = crate::in_lang_parse::parse_in_surface_info(&source)
             {
                 let declared_capabilities = surface.capabilities.clone();
-                for binding in &surface.externs {
+                let mut extern_bindings = surface.externs.clone();
+                for import in &surface.imports {
+                    extern_bindings
+                        .extend(crate::in_lang_parse::in_standard_import_bindings(import));
+                }
+                for binding in &extern_bindings {
                     for required in &binding.required_capabilities {
                         if !declared_capabilities.contains(required) {
                             diagnostics.push(diagnostic(
@@ -444,7 +449,7 @@ fn build_report(path: &Path, config: &AgentModeConfig) -> Result<AgentReport, Ag
                         .into_iter()
                         .map(|name| format!("import:{name}")),
                 );
-                effects.extend(surface.externs.into_iter().map(|binding| {
+                effects.extend(extern_bindings.into_iter().map(|binding| {
                     if binding.required_capabilities.is_empty() {
                         format!("extern:{}:{}", binding.language, binding.name)
                     } else {
@@ -1193,6 +1198,25 @@ fn main() -> void { host_log("ready"); return; }
             report
                 .effects
                 .contains(&"extern:rust:host_log:requires=process.stdout".to_string())
+        );
+    }
+
+    #[test]
+    fn in_report_checks_std_import_capabilities() {
+        let temp = temp_source(
+            "std-missing-capability",
+            "in",
+            r#"
+import std.io;
+fn main() -> void { print("ready"); return; }
+"#,
+        );
+        let report = json_report(&temp.path, &AgentModeConfig::default()).expect("report");
+        assert_eq!(report.diagnostics[0].code, "AGENT_MISSING_CAPABILITY");
+        assert!(
+            report
+                .effects
+                .contains(&"extern:std:print:requires=process.stdout".to_string())
         );
     }
 

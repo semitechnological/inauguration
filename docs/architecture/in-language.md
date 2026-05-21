@@ -15,6 +15,7 @@ Workflow entry points (flags, sample path, CI script) stay in the repo [README](
 What `in-cli/src/in_lang_parse.rs` implements today:
 
 - Top-level **`import path;`** — accepted as agent-facing source dependency facts. Local relative `.in` imports such as `import "./lib.in";` merge imported declarations into the parsed Core IR module when reading a file. `in agent` exposes imports in the `effects` list as `import:<path>`.
+- Standard imports **`std.io`** and **`std.fs`** synthesize bounded extern-style Core IR declarations for `print`, `read_file`, and `write_file`, with capability requirements checked by `in agent`.
 - Top-level **`capability name;`** — accepted as explicit outside-world capability facts. `in agent` exposes them in the `capabilities` list.
 - Top-level **`struct Name { … }`** — fields can appear inline or on their own lines between braces. Fields are **`Type fieldName`** segments separated by semicolons or line breaks (e.g. `struct Box { Int x; String label }`). Types must be built-ins or **struct names already declared above** in the file.
 - Top-level **`fn name(params) -> Ret`** — **`fn` only** (no `func`, no `function` keyword in v0).
@@ -30,7 +31,7 @@ Optional spellings for forward compatibility: **`function`** as an alias may app
 ## Planned
 
 - **Richer `fn` bodies**: more control-flow forms, richer expression operators, and sharper diagnostics.
-- **External binding execution**: today extern declarations provide Core IR and graph shape; runtime/FFI/plugin invocation is still future work.
+- **External / stdlib execution**: today extern declarations and std imports provide Core IR and graph shape; runtime/FFI/plugin invocation is still future work.
 - **Parser overrides / discovery**: today **`--parser in`**, **`IN_PARSER=in`**, path **`*.in`**, or magic first-line **`#!in parser=in`** under `--parser auto` select the `.in` front (`in-cli/src/parser_registry.rs`).
 
 Until a feature is implemented in `in_lang_parse.rs` / `lower_core.rs`, treat roadmap bullets as **targets**, not guarantees.
