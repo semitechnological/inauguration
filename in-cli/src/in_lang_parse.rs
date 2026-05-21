@@ -4,7 +4,7 @@ use crate::core_ir::{Decl, Typ, UnifiedModule};
 use crate::swift_subset::{Expr, Stmt};
 use std::collections::HashSet;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct InSurfaceInfo {
@@ -772,11 +772,13 @@ fn validate_stmt_types(fn_name: &str, structs: &HashSet<&str>, stmt: &Stmt) -> R
     Ok(())
 }
 
-/// Parse and validate `.in` v0.2 source; returns human-readable errors as strings.
-pub fn parse_in_source(source: &str) -> Result<UnifiedModule, String> {
+fn parse_in_module_without_validation(source: &str) -> Result<UnifiedModule, String> {
     let _surface = parse_in_surface_info(source)?;
     let blocks = split_top_level_decl_blocks(source);
-    let module = parse_module_from_blocks(&blocks)?;
+    parse_module_from_blocks(&blocks)
+}
+
+fn validate_module(module: &UnifiedModule, require_main: bool) -> Result<(), String> {
     if module.decls.is_empty() {
         return Err(".in: no top-level struct or fn after filtering".into());
     }
@@ -789,7 +791,7 @@ pub fn parse_in_source(source: &str) -> Result<UnifiedModule, String> {
         .decls
         .iter()
         .any(|d| matches!(d, Decl::Function { name, .. } if name == "main"));
-    if !has_main {
+    if require_main && !has_main {
         return Err(".in: missing required `fn main`".into());
     }
 
@@ -826,13 +828,70 @@ pub fn parse_in_source(source: &str) -> Result<UnifiedModule, String> {
         }
     }
 
+    Ok(())
+}
+
+/// Parse and validate `.in` v0.2 source; returns human-readable errors as strings.
+pub fn parse_in_source(source: &str) -> Result<UnifiedModule, String> {
+    let module = parse_in_module_without_validation(source)?;
+    validate_module(&module, true)?;
     Ok(module)
+}
+
+fn normalize_import_path(raw: &str) -> &str {
+    raw.trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .trim_end_matches(';')
+        .trim()
+}
+
+fn local_in_import_path(base: &Path, raw: &str) -> Option<PathBuf> {
+    let import = normalize_import_path(raw);
+    if !(import.ends_with(".in") || import.starts_with("./") || import.starts_with("../")) {
+        return None;
+    }
+    let path = Path::new(import);
+    let resolved = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        base.parent().unwrap_or_else(|| Path::new(".")).join(path)
+    };
+    Some(resolved)
+}
+
+fn parse_in_file_inner(path: &Path, seen: &mut HashSet<PathBuf>) -> Result<UnifiedModule, String> {
+    let key = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    if !seen.insert(key) {
+        return Ok(UnifiedModule { decls: Vec::new() });
+    }
+    let source = fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let surface = parse_in_surface_info(&source)?;
+    let mut decls = Vec::new();
+    for import in surface.imports {
+        if let Some(import_path) = local_in_import_path(path, &import) {
+            let imported = parse_in_file_inner(&import_path, seen)?;
+            decls.extend(imported.decls);
+        }
+    }
+    let module = parse_in_module_without_validation(&source)?;
+    decls.extend(module.decls);
+    Ok(UnifiedModule { decls })
 }
 
 /// Read a `.in` file and parse to core IR.
 pub fn parse_in_file(path: &Path) -> Result<UnifiedModule, String> {
-    let source = fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    parse_in_source(&source)
+    let mut seen = HashSet::new();
+    let module = parse_in_file_inner(path, &mut seen)?;
+    validate_module(&module, true)?;
+    Ok(module)
+}
+
+pub fn parse_in_library_file(path: &Path) -> Result<UnifiedModule, String> {
+    let mut seen = HashSet::new();
+    let module = parse_in_file_inner(path, &mut seen)?;
+    validate_module(&module, false)?;
+    Ok(module)
 }
 
 #[cfg(test)]
@@ -999,6 +1058,55 @@ fn main() -> void { read_file("x"); return; }
         let err = parse_in_source("extern rust fn f() -> void { return; }\nfn main() -> void\n")
             .expect_err("extern body");
         assert!(err.contains("extern") && err.contains("bodies"), "{err}");
+    }
+
+    #[test]
+    fn file_import_merges_local_in_declarations() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock before UNIX_EPOCH")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "inauguration-in-import-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).expect("temp dir");
+        let lib = dir.join("lib.in");
+        let main = dir.join("main.in");
+        fs::write(&lib, "fn helper() -> Int { return 1; }\n").expect("write lib");
+        fs::write(
+            &main,
+            "import \"./lib.in\";\nfn main() -> void { helper(); return; }\n",
+        )
+        .expect("write main");
+        let module = parse_in_file(&main).expect("parse imported file");
+        let _ = fs::remove_dir_all(&dir);
+        assert!(
+            module
+                .decls
+                .iter()
+                .any(|decl| matches!(decl, Decl::Function { name, .. } if name == "helper"))
+        );
+    }
+
+    #[test]
+    fn file_import_reports_missing_local_in_file() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock before UNIX_EPOCH")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "inauguration-missing-import-{}-{unique}.in",
+            std::process::id()
+        ));
+        fs::write(
+            &path,
+            "import \"./missing.in\";\nfn main() -> void { return; }\n",
+        )
+        .expect("write main");
+        let err = parse_in_file(&path).expect_err("missing import");
+        let _ = fs::remove_file(&path);
+        assert!(err.contains("missing.in"), "{err}");
     }
 
     #[test]

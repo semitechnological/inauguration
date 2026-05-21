@@ -14,7 +14,7 @@ Workflow entry points (flags, sample path, CI script) stay in the repo [README](
 
 What `in-cli/src/in_lang_parse.rs` implements today:
 
-- Top-level **`import path;`** — accepted as agent-facing source dependency facts. The current Core IR schema does not store imports, but `in agent` exposes them in the `effects` list as `import:<path>`.
+- Top-level **`import path;`** — accepted as agent-facing source dependency facts. Local relative `.in` imports such as `import "./lib.in";` merge imported declarations into the parsed Core IR module when reading a file. `in agent` exposes imports in the `effects` list as `import:<path>`.
 - Top-level **`capability name;`** — accepted as explicit outside-world capability facts. `in agent` exposes them in the `capabilities` list.
 - Top-level **`struct Name { … }`** — fields can appear inline or on their own lines between braces. Fields are **`Type fieldName`** segments separated by semicolons or line breaks (e.g. `struct Box { Int x; String label }`). Types must be built-ins or **struct names already declared above** in the file.
 - Top-level **`fn name(params) -> Ret`** — **`fn` only** (no `func`, no `function` keyword in v0).

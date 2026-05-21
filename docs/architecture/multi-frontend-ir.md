@@ -14,7 +14,7 @@ Rust type: `in_cli::core_ir::UnifiedModule`.
 |-------|--------|
 | `decls: Vec<Decl>` | Top-level declarations in source order (before lowering sorts functions for SIL). |
 
-`.in` also has a parser-side surface fact helper for `import`, `capability`, and `extern` declarations. Imports and capabilities are exposed through `in agent` JSON, and extern `requires` contracts produce agent diagnostics when required capabilities are missing. Extern bindings lower into empty `Function` declarations today so call graph extraction can observe explicit `.in` calls without expanding the Core IR schema.
+`.in` also has a parser-side surface fact helper for `import`, `capability`, and `extern` declarations. Local relative `.in` imports merge imported declarations into the current `UnifiedModule`; imports and capabilities are exposed through `in agent` JSON, and extern `requires` contracts produce agent diagnostics when required capabilities are missing. Extern bindings lower into empty `Function` declarations today so call graph extraction can observe explicit `.in` calls without expanding the Core IR schema.
 
 **`Decl` variants**
 
