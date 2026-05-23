@@ -2,7 +2,7 @@
 
 `in` is evolving into a **general hybrid compiler driver**: many **source fronts** converge on shared **Core IR** ([`UnifiedModule`](multi-frontend-ir.md)), then one **SIL lowering** path feeds the existing **`hybrid_sil`** pipeline (textual SIL → passes → metrics).
 
-This is **not** “30 production compilers in one repo overnight.” It is an **architecture** for landing languages incrementally while keeping one observable pipeline.
+This is **not** “30 production compilers in one repo overnight.” It is an **architecture** for landing languages incrementally while keeping one observable pipeline. The current source-of-truth matrix is available through **`in languages`** and **`in languages --json`**; the phased universal roadmap lives in [universal-compiler-roadmap.md](universal-compiler-roadmap.md).
 
 ## Layers
 
@@ -54,6 +54,7 @@ Swift-shaped work in parallel: [native-swift-master-plan.md](native-swift-master
 ## See also
 
 - [future-work-roadmap.md](future-work-roadmap.md) — phased backlog (parsers, driver, SIL, hot reload)
+- [universal-compiler-roadmap.md](universal-compiler-roadmap.md) — full language/runtime ambition and compatibility ladder
 - [parser-surface.md](parser-surface.md) — extensions, magic line, routing matrix  
 - [multi-frontend-ir.md](multi-frontend-ir.md) — `UnifiedModule` schema  
 - [README · in build](../../README.md#in-build-and-swiftpm-staging-macoslinux) — CLI flags

@@ -23,6 +23,9 @@ pub fn parse_polyglot_file(id: ParserId, path: &Path) -> Result<UnifiedModule, S
         | ParserId::D
         | ParserId::Crystal
         | ParserId::VbNet
+        | ParserId::OCaml
+        | ParserId::Odin
+        | ParserId::Hare
         | ParserId::V => Err(format!(
             "parser `{}` ({}): {}.",
             id.as_str(),
@@ -103,6 +106,9 @@ fn dispatch(id: ParserId, path: &Path, src: &str) -> Result<UnifiedModule, Strin
         | ParserId::D
         | ParserId::Crystal
         | ParserId::VbNet
+        | ParserId::OCaml
+        | ParserId::Odin
+        | ParserId::Hare
         | ParserId::V => unreachable!("filtered above"),
     }
 }

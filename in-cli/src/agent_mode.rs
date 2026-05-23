@@ -614,7 +614,14 @@ fn language_level(resolved: ResolvedBuildParser) -> LanguageLevel {
             label: "bounded body lowering".to_string(),
         },
         ResolvedBuildParser::CoreIr(
-            ParserId::Clojure | ParserId::Nim | ParserId::D | ParserId::Crystal | ParserId::VbNet,
+            ParserId::Clojure
+            | ParserId::Nim
+            | ParserId::D
+            | ParserId::Crystal
+            | ParserId::VbNet
+            | ParserId::OCaml
+            | ParserId::Odin
+            | ParserId::Hare,
         ) => LanguageLevel {
             level: 0,
             label: "known parser id without compatible wired front".to_string(),

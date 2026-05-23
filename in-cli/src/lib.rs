@@ -13,6 +13,7 @@ pub mod hybrid_pipeline;
 pub mod hybrid_scheduler;
 pub mod hybrid_sil;
 pub mod in_lang_parse;
+pub mod language_support;
 pub mod lower_core;
 pub mod native_swift_sil;
 pub mod parser_registry;

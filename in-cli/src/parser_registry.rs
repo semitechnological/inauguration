@@ -63,11 +63,14 @@ pub enum ParserId {
     Elixir,
     Erlang,
     Haskell,
+    OCaml,
     Julia,
     R,
     Nim,
     D,
     Crystal,
+    Odin,
+    Hare,
 }
 
 impl ParserId {
@@ -103,11 +106,14 @@ impl ParserId {
             ParserId::Elixir => "elixir",
             ParserId::Erlang => "erlang",
             ParserId::Haskell => "haskell",
+            ParserId::OCaml => "ocaml",
             ParserId::Julia => "julia",
             ParserId::R => "r",
             ParserId::Nim => "nim",
             ParserId::D => "d",
             ParserId::Crystal => "crystal",
+            ParserId::Odin => "odin",
+            ParserId::Hare => "hare",
         }
     }
 
@@ -125,12 +131,15 @@ impl ParserId {
             ParserId::JavaScript | ParserId::TypeScript => "ECMAScript-shaped",
             ParserId::Go | ParserId::V | ParserId::Rust | ParserId::Zig => "systems / curly-brace",
             ParserId::Dart | ParserId::Lua => "OO / embeddable",
-            ParserId::Clojure | ParserId::Elixir | ParserId::Erlang | ParserId::Haskell => {
-                "functional"
-            }
+            ParserId::Clojure
+            | ParserId::Elixir
+            | ParserId::Erlang
+            | ParserId::Haskell
+            | ParserId::OCaml => "functional",
             ParserId::Groovy => "JVM scripting",
             ParserId::Julia | ParserId::R => "numeric / scientific",
             ParserId::Nim | ParserId::D | ParserId::Crystal => "ALGOL-descended",
+            ParserId::Odin | ParserId::Hare => "systems / native",
         }
     }
 }
@@ -169,11 +178,14 @@ pub fn parser_id_from_extension(ext: &str) -> Option<ParserId> {
         "ex" | "exs" => Some(ParserId::Elixir),
         "erl" | "hrl" => Some(ParserId::Erlang),
         "hs" | "lhs" => Some(ParserId::Haskell),
+        "ml" | "mli" => Some(ParserId::OCaml),
         "jl" => Some(ParserId::Julia),
         "r" => Some(ParserId::R),
         "nim" => Some(ParserId::Nim),
         "d" => Some(ParserId::D),
         "cr" => Some(ParserId::Crystal),
+        "odin" => Some(ParserId::Odin),
+        "ha" => Some(ParserId::Hare),
         _ => None,
     }
 }
@@ -194,6 +206,7 @@ pub fn parser_id_from_magic_token(token: &str) -> Option<ParserId> {
             "javascript" => Some(ParserId::JavaScript),
             "vlang" => Some(ParserId::V),
             "cplusplus" | "c++" => Some(ParserId::Cpp),
+            "ocaml" => Some(ParserId::OCaml),
             "icore" => Some(ParserId::Icore),
             _ => None,
         }
@@ -466,6 +479,22 @@ mod tests {
         assert!(matches!(
             resolve_parser_id(Path::new("lib.cc"), ParserCli::Auto),
             ResolvedBuildParser::CoreIr(ParserId::Cpp)
+        ));
+    }
+
+    #[test]
+    fn auto_resolves_ocaml_odin_and_hare_extensions() {
+        assert!(matches!(
+            resolve_parser_id(Path::new("main.ml"), ParserCli::Auto),
+            ResolvedBuildParser::CoreIr(ParserId::OCaml)
+        ));
+        assert!(matches!(
+            resolve_parser_id(Path::new("main.odin"), ParserCli::Auto),
+            ResolvedBuildParser::CoreIr(ParserId::Odin)
+        ));
+        assert!(matches!(
+            resolve_parser_id(Path::new("main.ha"), ParserCli::Auto),
+            ResolvedBuildParser::CoreIr(ParserId::Hare)
         ));
     }
 

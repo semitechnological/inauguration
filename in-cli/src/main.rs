@@ -108,6 +108,11 @@ enum Commands {
         #[arg(long, value_enum, default_value_t = ParserCli::Auto)]
         parser: ParserCli,
     },
+    #[command(about = "List language front maturity, examples, and runtime boundaries")]
+    Languages {
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
     #[command(about = "Run full local dev loop (daemon + client)")]
     Dev {
         #[arg(
@@ -210,6 +215,7 @@ fn run() -> Result<()> {
             module_id,
             parser,
         } => cmd_fix(&invocation_cwd, plan, json, &path, &module_id, parser),
+        Commands::Languages { json } => cmd_languages(json),
         Commands::Dev { preview_client } => {
             cmd_dev(&workspace_root(invocation_cwd.clone())?, preview_client)
         }
@@ -392,6 +398,32 @@ fn cmd_fix(
                 println!("  {}: {}", action.kind, action.description);
             }
         }
+    }
+    Ok(())
+}
+
+fn cmd_languages(json: bool) -> Result<()> {
+    let entries = inauguration::language_support::all_language_support();
+    if json {
+        let raw = serde_json::to_string_pretty(entries)
+            .map_err(|err| InError::Message(format!("serialize language support: {err}")))?;
+        println!("{raw}");
+        return Ok(());
+    }
+
+    println!(
+        "{:<12} {:<12} {:<5} {:<34} {}",
+        "language", "parser", "level", "front", "runtime"
+    );
+    for entry in entries {
+        println!(
+            "{:<12} {:<12} {:<5} {:<34} {}",
+            entry.language,
+            entry.parser_id.unwrap_or("swift"),
+            entry.level,
+            entry.front,
+            entry.runtime_boundary
+        );
     }
     Ok(())
 }
@@ -1535,6 +1567,15 @@ mod tests {
                 assert_eq!(metrics, ".brisk/hotreload/metrics/latest.ndjson");
             }
             _ => panic!("expected bench command"),
+        }
+    }
+
+    #[test]
+    fn parse_languages_json_flag() {
+        let cli = Cli::try_parse_from(["in", "languages", "--json"]).expect("cli parse");
+        match cli.command {
+            Commands::Languages { json } => assert!(json),
+            _ => panic!("expected languages command"),
         }
     }
 

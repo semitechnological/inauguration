@@ -52,6 +52,9 @@ Resolution order is documented in the `parser_registry` module rustdoc. Summary:
 | Julia | `jl` | `julia` |
 | R | `r` | `r` |
 | Nim | `nim` | `nim` |
+| OCaml | `ml`, `mli` | `ocaml` |
+| Odin | `odin` | `odin` |
+| Hare | `ha` | `hare` |
 | D | `d` | `d` |
 | Crystal | `cr` | `crystal` |
 
@@ -63,7 +66,7 @@ Resolution order is documented in the `parser_registry` module rustdoc. Summary:
 
 | Level | Meaning | Current fronts |
 |-------|---------|----------------|
-| 0 | Routes to a known `ParserId`, but no compatible grammar/front is wired; callers get an `.icore` hint. | `clojure`, `nim`, `d`, `crystal`, `vb` |
+| 0 | Routes to a known `ParserId`, but no compatible grammar/front is wired; callers get an `.icore` hint. | `clojure`, `nim`, `ocaml`, `odin`, `hare`, `d`, `crystal`, `vb` |
 | 1 | Extracts top-level declarations into `UnifiedModule`; bodies are empty or ignored. | `icore` v1, `kotlin`, `scala`, `csharp`, `fsharp`, `python`, `ruby`, `php`, `perl`, `javascript`, `typescript`, `zig`, `dart`, `lua`, `elixir`, `erlang`, `haskell`, `julia`, `r`; Objective-C methods are also declaration-only. |
 | 2 | Lowers a bounded statement/expression subset into Core IR. | `.in` (including agent-facing imports, capabilities, and extern function binding declarations), `icore` v2, `rust`, `go`, `v`, `java`, `groovy`; C / C++ / Objective-C++ functions support only trivial `return <integer>;`, `return <param>;`, or `return;` bodies. |
 | 3 | Typechecks enough language semantics to produce reliable diagnostics. | Not landed for a full language family yet. |
@@ -74,4 +77,4 @@ The ladder is a routing and agent-contract signal, not a promise of full languag
 
 ## Compiler roadmap (honest scope)
 
-Implementing every OO / C-like language means, per language: lexer/grammar → AST → [`UnifiedModule`](multi-frontend-ir.md) (or **icore** JSON) → [`compiler::driver` / `lower_core`](../../in-cli/src/compiler/driver.rs) → textual SIL. That is **large, parallel work**; [general-compiler.md](general-compiler.md) is the umbrella roadmap. This document tracks **routing and names** so CI, agents, and contributors share one enum and extension table as fronts land.
+Implementing every OO / C-like language means, per language: lexer/grammar → AST → [`UnifiedModule`](multi-frontend-ir.md) (or **icore** JSON) → [`compiler::driver` / `lower_core`](../../in-cli/src/compiler/driver.rs) → textual SIL. That is **large, parallel work**; [general-compiler.md](general-compiler.md) and [universal-compiler-roadmap.md](universal-compiler-roadmap.md) are the umbrella roadmaps. Run **`in languages`** or **`in languages --json`** for the current machine-readable support matrix.

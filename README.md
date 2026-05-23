@@ -100,6 +100,8 @@ in build --parser in --path apps/in-sample/hello.in --module-id App
 in build --parser in --path apps/in-sample/agent-native.in --module-id App
 in build --swiftpm --path ../aurorality/examples   # native pipeline + SwiftPM emit + staging
 in agent --path apps/in-sample/agent-native.in --parser in
+in languages
+in languages --json
 in explain INAGENT020 --json
 in fix --plan --json --path apps/in-sample/hello.in --parser in
 in dev
