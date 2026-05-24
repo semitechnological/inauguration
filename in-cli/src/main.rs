@@ -537,21 +537,76 @@ fn cmd_graph(
 
 fn cmd_package(invocation_cwd: &Path, path: &str, json: bool) -> Result<()> {
     let package_path = resolve_invocation_path(invocation_cwd, path);
-    let manifest = inauguration::package_manifest::load_package_manifest(&package_path)
-        .map_err(|err| InError::Message(format!("package: {err}")))?;
+    let report = package_report_for_path(&package_path)?;
     if json {
-        let raw = serde_json::to_string_pretty(&manifest)
-            .map_err(|err| InError::Message(format!("serialize package manifest: {err}")))?;
+        let manifest = &report.manifest;
+        let raw = serde_json::to_string_pretty(&serde_json::json!({
+            "schema_version": 1,
+            "root": report.root,
+            "manifest_path": report.manifest_path,
+            "name": manifest.name,
+            "version": manifest.version,
+            "targets": manifest.targets,
+            "dependencies": manifest.dependencies,
+            "capabilities": manifest.capabilities,
+            "extensions": manifest.extensions,
+            "target_selection": report.target_selection,
+            "capability_policy": report.capability_policy,
+            "package_graph": report.graph,
+        }))
+        .map_err(|err| InError::Message(format!("serialize package report: {err}")))?;
         println!("{raw}");
     } else {
+        let manifest = &report.manifest;
         println!("name: {}", manifest.name);
         println!("version: {}", manifest.version);
+        println!("root: {}", report.root.display());
         println!("targets: {}", manifest.targets.len());
+        println!(
+            "enabled_targets: {}",
+            report.target_selection.enabled.join(", ")
+        );
         println!("dependencies: {}", manifest.dependencies.len());
         println!("capabilities: {}", manifest.capabilities.join(", "));
         println!("extensions: {}", manifest.extensions.join(", "));
     }
     Ok(())
+}
+
+fn package_report_for_path(path: &Path) -> Result<inauguration::package_manifest::PackageReport> {
+    if path.is_file()
+        && path.file_name()
+            != Some(OsStr::new(
+                inauguration::package_manifest::PACKAGE_MANIFEST_FILE,
+            ))
+    {
+        return inauguration::package_manifest::load_package_report_from_source(
+            path,
+            std::iter::empty::<&str>(),
+            std::iter::empty::<&str>(),
+        )
+        .map_err(|err| InError::Message(format!("package: {err}")));
+    }
+    let manifest_path = if path.is_dir() {
+        path.join(inauguration::package_manifest::PACKAGE_MANIFEST_FILE)
+    } else {
+        path.to_path_buf()
+    };
+    let root = manifest_path
+        .parent()
+        .ok_or_else(|| InError::Message(format!("package: {} has no parent", path.display())))?
+        .to_path_buf();
+    let manifest = inauguration::package_manifest::load_package_manifest(&manifest_path)
+        .map_err(|err| InError::Message(format!("package: {err}")))?;
+    Ok(inauguration::package_manifest::package_report(
+        inauguration::package_manifest::PackageRoot {
+            root,
+            manifest_path,
+        },
+        manifest,
+        std::iter::empty::<&str>(),
+        std::iter::empty::<&str>(),
+    ))
 }
 
 fn cmd_languages(json: bool) -> Result<()> {

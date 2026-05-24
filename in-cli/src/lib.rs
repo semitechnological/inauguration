@@ -9,6 +9,7 @@ pub mod bytecode_compiler;
 pub mod compiler;
 pub mod core_ir;
 pub mod core_typecheck;
+pub mod extension_registry;
 pub mod graph_report;
 pub mod hotreload;
 pub mod hybrid_core;

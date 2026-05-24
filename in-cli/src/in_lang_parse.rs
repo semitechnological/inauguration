@@ -27,12 +27,19 @@ pub struct InOrchestrationFacts {
     pub annotations: Vec<InAnnotationFact>,
     pub distributed_functions: Vec<String>,
     pub parallel_regions: usize,
+    pub parallel_tasks: Vec<InParallelTaskFact>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InAnnotationFact {
     pub name: String,
     pub target: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InParallelTaskFact {
+    pub region: usize,
+    pub name: String,
 }
 
 pub fn in_standard_import_bindings(import: &str) -> Vec<InExternBinding> {
@@ -860,6 +867,60 @@ where
     None
 }
 
+fn collect_parallel_tasks(
+    lines: &[&str],
+    start_idx: usize,
+    region: usize,
+) -> Vec<InParallelTaskFact> {
+    let mut depth = 0i32;
+    let mut started = false;
+    let mut content = String::new();
+    for raw in lines.iter().skip(start_idx) {
+        let line = strip_line_comment_outside_strings(raw);
+        for ch in line.chars() {
+            match ch {
+                '{' => {
+                    depth += 1;
+                    started = true;
+                }
+                '}' => {
+                    depth -= 1;
+                    if depth <= 0 {
+                        return parallel_tasks_from_content(&content, region);
+                    }
+                }
+                _ if started && depth > 0 => content.push(ch),
+                _ => {}
+            }
+        }
+        if started && depth > 0 {
+            content.push('\n');
+        }
+    }
+    parallel_tasks_from_content(&content, region)
+}
+
+fn parallel_tasks_from_content(content: &str, region: usize) -> Vec<InParallelTaskFact> {
+    content
+        .split([';', '\n'])
+        .filter_map(|token| {
+            let token = trim(token);
+            let name = token.split_once('(')?.0.trim();
+            if name.is_empty()
+                || !name
+                    .chars()
+                    .all(|ch| ch == '_' || ch == '.' || ch.is_ascii_alphanumeric())
+            {
+                return None;
+            }
+            Some(InParallelTaskFact {
+                region,
+                name: name.to_string(),
+            })
+        })
+        .collect()
+}
+
 fn parse_module_from_blocks(blocks: &[String]) -> Result<UnifiedModule, String> {
     let mut decls = Vec::new();
     for block in blocks {
@@ -953,6 +1014,9 @@ pub fn parse_in_surface_info(source: &str) -> Result<InSurfaceInfo, String> {
                 if extension.is_empty() {
                     return Err(".in: enable extension missing".into());
                 }
+                if !crate::extension_registry::is_known_extension(extension) {
+                    return Err(format!(".in: unknown extension `{extension}`"));
+                }
                 info.orchestration
                     .enabled_extensions
                     .push(extension.to_string());
@@ -990,6 +1054,10 @@ pub fn parse_in_surface_info(source: &str) -> Result<InSurfaceInfo, String> {
                     );
                 }
                 info.orchestration.parallel_regions += 1;
+                let region = info.orchestration.parallel_regions - 1;
+                info.orchestration
+                    .parallel_tasks
+                    .extend(collect_parallel_tasks(&lines, idx, region));
                 depth += brace_delta(raw_line);
                 if depth < 0 {
                     depth = 0;
@@ -1365,6 +1433,19 @@ fn main() -> void { return; }
         );
         assert_eq!(info.orchestration.parallel_regions, 1);
         assert_eq!(
+            info.orchestration.parallel_tasks,
+            vec![
+                InParallelTaskFact {
+                    region: 0,
+                    name: "warm_cache".into()
+                },
+                InParallelTaskFact {
+                    region: 0,
+                    name: "build_index".into()
+                }
+            ]
+        );
+        assert_eq!(
             info.orchestration.distributed_functions,
             vec!["process_video"]
         );
@@ -1396,6 +1477,10 @@ fn main() -> void { return; }
         let err = parse_in_source("gpu fn kernel() -> void { }\nfn main() -> void { return; }\n")
             .expect_err("unknown orchestration");
         assert!(err.contains("unknown top-level syntax"), "{err}");
+
+        let err = parse_in_source("enable unknown-runtime;\nfn main() -> void { return; }\n")
+            .expect_err("unknown extension");
+        assert!(err.contains("unknown extension"), "{err}");
     }
 
     #[test]

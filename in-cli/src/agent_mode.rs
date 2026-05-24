@@ -132,6 +132,8 @@ pub struct OrchestrationFacts {
     pub annotations: Vec<AnnotationFact>,
     pub distributed_functions: Vec<String>,
     pub parallel_regions: usize,
+    pub local_plan: Vec<OrchestrationPlanStep>,
+    pub distributed_jobs: Vec<DistributedJobFact>,
     pub runtime_status: Vec<RuntimeStatusFact>,
 }
 
@@ -146,6 +148,24 @@ pub struct RuntimeStatusFact {
     pub name: String,
     pub implemented: bool,
     pub reason_code: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OrchestrationPlanStep {
+    pub id: String,
+    pub kind: String,
+    pub name: String,
+    pub mode: String,
+    pub depends_on: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DistributedJobFact {
+    pub id: String,
+    pub function: String,
+    pub worker: String,
+    pub max_retries: u8,
+    pub status: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -794,14 +814,10 @@ fn orchestration_facts_from_surface(
 ) -> OrchestrationFacts {
     let mut runtime_status = Vec::new();
     for name in &facts.enabled_extensions {
-        let reason_code = match name.as_str() {
-            "distributed-workers" => "distributed-runtime-not-implemented",
-            "gpu-optimizer" => "gpu-runtime-not-implemented",
-            _ => "extension-runtime-not-implemented",
-        };
+        let (implemented, reason_code) = crate::extension_registry::runtime_status(name);
         runtime_status.push(RuntimeStatusFact {
             name: name.clone(),
-            implemented: false,
+            implemented,
             reason_code: reason_code.to_string(),
         });
     }
@@ -812,8 +828,8 @@ fn orchestration_facts_from_surface(
     {
         runtime_status.push(RuntimeStatusFact {
             name: "distributed-workers".to_string(),
-            implemented: false,
-            reason_code: "distributed-runtime-not-implemented".to_string(),
+            implemented: true,
+            reason_code: "local-distributed-simulator".to_string(),
         });
     }
     if facts
@@ -830,6 +846,37 @@ fn orchestration_facts_from_surface(
             reason_code: "gpu-runtime-not-implemented".to_string(),
         });
     }
+    let mut local_plan = Vec::new();
+    for (idx, task) in facts.parallel_tasks.iter().enumerate() {
+        local_plan.push(OrchestrationPlanStep {
+            id: format!("parallel:{}:{idx}", task.region),
+            kind: "parallel_task".to_string(),
+            name: task.name.clone(),
+            mode: "local-deterministic-sequential".to_string(),
+            depends_on: Vec::new(),
+        });
+    }
+    for name in &facts.distributed_functions {
+        local_plan.push(OrchestrationPlanStep {
+            id: format!("distributed:{name}"),
+            kind: "distributed_fn".to_string(),
+            name: name.clone(),
+            mode: "local-worker-simulator".to_string(),
+            depends_on: Vec::new(),
+        });
+    }
+    let distributed_jobs = facts
+        .distributed_functions
+        .iter()
+        .enumerate()
+        .map(|(idx, name)| DistributedJobFact {
+            id: format!("job:{idx}:{name}"),
+            function: name.clone(),
+            worker: "local-simulated-worker".to_string(),
+            max_retries: 0,
+            status: "planned".to_string(),
+        })
+        .collect();
     OrchestrationFacts {
         enabled_extensions: facts.enabled_extensions,
         annotations: facts
@@ -842,6 +889,8 @@ fn orchestration_facts_from_surface(
             .collect(),
         distributed_functions: facts.distributed_functions,
         parallel_regions: facts.parallel_regions,
+        local_plan,
+        distributed_jobs,
         runtime_status,
     }
 }
@@ -1357,11 +1406,14 @@ fn main() -> void { return; }
         assert!(
             report
                 .orchestration
-                .runtime_status
+                .local_plan
                 .iter()
-                .any(|status| !status.implemented
-                    && status.reason_code == "distributed-runtime-not-implemented")
+                .any(|step| step.kind == "distributed_fn" && step.name == "process")
         );
+        assert_eq!(report.orchestration.distributed_jobs[0].function, "process");
+        assert!(report.orchestration.runtime_status.iter().any(
+            |status| status.implemented && status.reason_code == "local-distributed-simulator"
+        ));
         assert!(
             report
                 .effects

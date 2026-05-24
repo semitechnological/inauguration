@@ -16,20 +16,20 @@ It is not the frontend framework, declarative UI system, rendering layer, or cro
 | Backend execution | Textual SIL analysis and the bytecode VM subset where supported. |
 | Package and runtime boundaries | `in languages --json`, architecture docs, and explicit runtime-boundary strings per language front. |
 
-Long-range ideas such as distributed workers, GPU execution, native binaries, semantic package installation, and durable task execution are contracts only until the repo contains the runtime implementation, tests, and command output that prove the claim.
+Long-range ideas such as remote distributed workers, GPU execution, native binaries, semantic package installation, and durable task execution are contracts only until the repo contains the runtime implementation, tests, and command output that prove the claim.
 
-## Strict v0.3 surfaces
+## Strict v0.4 surfaces
 
-The v0.3 orchestration surface is deliberately small. Public docs, CLI help, agent JSON, and tests should use these terms rather than broad language-runtime claims.
+The v0.4 orchestration surface is deliberately small. Public docs, CLI help, agent JSON, and tests should use these terms rather than broad language-runtime claims.
 
 | Surface | Contract | Current implementation status |
 |---------|----------|-------------------------------|
 | Canonicalization | A source-to-canonical-source report for `.in` that preserves semantics, produces stable formatting, exposes parser diagnostics, and reports whether output changed. | `in canonicalize --path <file> [--check]` is implemented and covered by `scripts/check-orchestration-compiler.sh`. |
 | Graph command | A command surface that reports parser decision, Core IR declarations, SIL functions, call edges, entry function, effects, capabilities, orchestration facts, and timing in stable JSON. | `in graph --path <file> [--imports] [--capabilities] [--symbols] [--calls] [--json]` is implemented; text mode prints selected sections and JSON returns the stable fact set. |
-| Package manifest report | A machine-readable report for package identity, targets, dependencies, capabilities, extensions, parser fronts, runtime boundaries, and reason codes. | `in package --path <dir\|manifest> [--json]` parses the dependency-free `inauguration.package` shape and reports metadata only. It does not install dependencies or load extensions. |
-| Orchestration facts | `.in` surface facts for enabled extensions, annotations, distributed function declarations, and parallel region count. | `parse_in_surface_info` records facts, and `in agent` plus `in graph --json` report them with status-only runtime reason codes. |
+| Package manifest report | A machine-readable report for package identity, targets, dependencies, capabilities, extensions, package graph nodes, target selection, capability policy, and reason codes. | `in package --path <dir\|manifest\|source> [--json]` parses the dependency-free `inauguration.package` shape and reports metadata plus graph facts. It does not install dependencies or load extensions. |
+| Orchestration facts | `.in` surface facts for enabled extensions, annotations, distributed function declarations, parallel region count, local plan steps, and local distributed jobs. | `parse_in_surface_info` records facts, and `in agent` plus `in graph --json` report them with explicit runtime reason codes. |
 
-These four surfaces define v0.3 orchestration visibility. Anything beyond them needs an explicit status field and a reason code instead of implied support.
+These four surfaces define v0.4 orchestration visibility. Anything beyond them needs an explicit status field and a reason code instead of implied support.
 
 ## Runtime status rules
 
@@ -38,7 +38,7 @@ The compiler may parse or lower syntax before it can execute it. Runtime executi
 | Capability | Status until code and tests land |
 |------------|----------------------------------|
 | GPU tokenization, GPU transforms, GPU scheduling, `@gpu` execution | Status/contract-only. `.in` may parse `@gpu` as metadata, but no GPU runtime execution is owned here. |
-| Distributed workers, `distributed fn`, remote scheduling, retries, persistence | Status/contract-only. `.in` may parse distributed function declarations as orchestration facts, but no distributed runtime execution is owned here. |
+| Distributed workers, `distributed fn`, remote scheduling, retries, persistence | Deterministic local simulator only. `.in` records distributed function declarations, emits local job facts, and reports `local-distributed-simulator`; remote workers, retries, and persistence remain status/contract-only. |
 | Native machine-code execution | Status/contract-only. The current self-hosted path stops at Core IR, textual SIL, SIL analysis, and bytecode VM subset support. See [native-backend.md](native-backend.md). |
 | Language runtimes such as JVM, CLR, JavaScript, Python, Ruby, libc, C++ standard library, Dart VM, OCaml runtime | Not bundled unless the repository contains the implementation and tests for the claimed boundary. |
 
@@ -70,4 +70,4 @@ If a surface is not implemented, the report should still be deterministic: `stat
 
 ## Checked example
 
-`apps/in-sample/orchestration.in` is the v0.3 integration fixture. It contains `enable distributed-workers`, `enable gpu-optimizer`, `@gpu`, `@parallel_safe`, `distributed fn`, and a `parallel { ... }` region. `in build --path apps/in-sample/orchestration.in` still succeeds because those constructs are metadata/status facts only; `in agent` and `in graph --json` expose the orchestration facts and reason-coded runtime status.
+`apps/in-sample/orchestration.in` is the v0.4 integration fixture. It contains `enable distributed-workers`, `enable gpu-optimizer`, `@gpu`, `@parallel_safe`, `distributed fn`, and a `parallel { ... }` region. `in build --path apps/in-sample/orchestration.in` still succeeds because those constructs do not lower into remote runtime work. `in agent` and `in graph --json` expose the local orchestration plan, local distributed job facts, and reason-coded runtime status.

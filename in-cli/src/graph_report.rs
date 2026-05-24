@@ -415,10 +415,16 @@ fn main() -> void { return; }
         assert!(
             report
                 .orchestration
-                .runtime_status
+                .local_plan
                 .iter()
-                .any(|status| !status.implemented
-                    && status.reason_code == "distributed-runtime-not-implemented")
+                .any(|step| step.kind == "parallel_task" && step.name == "process_video")
         );
+        assert_eq!(
+            report.orchestration.distributed_jobs[0].function,
+            "process_video"
+        );
+        assert!(report.orchestration.runtime_status.iter().any(
+            |status| status.implemented && status.reason_code == "local-distributed-simulator"
+        ));
     }
 }

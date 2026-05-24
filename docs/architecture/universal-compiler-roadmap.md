@@ -14,7 +14,7 @@ The target is a safe, small, fast compiler for V, Go, Rust, OCaml, TypeScript, J
 | Safe | Unsupported semantics fail closed with a diagnostic or `.icore` redirect. No silent external compiler fallback on self-hosted paths. |
 | Smaller | Native fronts and `.icore` emitters avoid bundling full language toolchains unless a runtime boundary explicitly requires it. |
 | Faster | The default hot path avoids subprocess compilers for supported subsets and reports timing per stage. |
-| Runtimes included | The repo owns the runtime boundary it claims: bytecode VM subset first, Swift hot reload host for SwiftUI integration, and explicit non-bundled status for JVM, CLR, JS, Python, Ruby, libc, GPU execution, distributed execution, native machine-code execution, and language standard libraries until those runtimes have concrete in-tree implementations. |
+| Runtimes included | The repo owns the runtime boundary it claims: bytecode VM subset first, deterministic local orchestration simulation, Swift hot reload host for SwiftUI integration, and explicit non-bundled status for JVM, CLR, JS, Python, Ruby, libc, GPU execution, remote distributed execution, native machine-code execution, and language standard libraries until those runtimes have concrete in-tree implementations. |
 
 ## Compatibility ladder
 
@@ -39,24 +39,24 @@ The target is a safe, small, fast compiler for V, Go, Rust, OCaml, TypeScript, J
 | 5 | Native runtime spine | Bytecode VM supports the common Core IR subset with deterministic execution, capability checks, and conformance examples. |
 | 6 | Production claims | A language reaches level 5 only when examples compile and run without external compilers on the claimed path, quality gates are green, and benchmarks prove the speed claim for that scope. |
 
-## v0.3 surface contract
+## v0.4 surface contract
 
-Phase work should route through the strict v0.3 orchestration surfaces before claiming broader execution semantics:
+Phase work should route through the strict v0.4 orchestration surfaces before claiming broader execution semantics:
 
 | Surface | Roadmap meaning |
 |---------|-----------------|
 | Canonicalization | Source can be parsed, normalized, diagnosed, and compared deterministically for supported `.in` syntax. |
-| Graph command | Compiler graph facts are visible as stable JSON: parser decision, declarations, functions, call edges, effects, capabilities, entrypoint, reason codes, and timing. |
-| Package manifest report | Package-level identity, targets, dependencies, capabilities, extensions, runtime boundaries, and parser-front decisions are reportable without installing or executing external systems. |
-| Orchestration facts | Metadata such as `enable`, `@pure`, `@gpu`, `@parallel_safe`, `distributed fn`, and `parallel` is reported as facts before runtime execution is claimed. |
+| Graph command | Compiler graph facts are visible as stable JSON: parser decision, declarations, functions, call edges, effects, capabilities, orchestration facts, entrypoint, reason codes, and timing. |
+| Package manifest report | Package-level identity, targets, dependencies, capabilities, extensions, package graph nodes, target selection, capability policy, runtime boundaries, and parser-front decisions are reportable without installing or executing external systems. |
+| Orchestration facts | Metadata such as `enable`, `@pure`, `@gpu`, `@parallel_safe`, `distributed fn`, and `parallel` is reported with local plan steps and local distributed job facts before remote runtime execution is claimed. |
 
-These are visibility and status surfaces. They do not imply GPU kernels, remote workers, native binaries, package installation, or language runtime execution.
+These are visibility and local-planning surfaces. They do not imply GPU kernels, remote workers, native binaries, package installation, or language runtime execution.
 
 ## Runtime policy
 
-Runtime claims must be explicit. The compiler can lower a source language before it owns that language's runtime. A front may be useful at level 1 or 2 for graph facts, diagnostics, and tool-generated `.icore`, but it must not claim to include GPU execution, distributed worker execution, native machine-code execution, JVM, CLR, JavaScript, Python, Ruby, libc, C++ standard library, Dart VM, OCaml runtime, or SwiftUI runtime until the repo contains the runtime path and tests.
+Runtime claims must be explicit. The compiler can lower a source language before it owns that language's runtime. A front may be useful at level 1 or 2 for graph facts, diagnostics, and tool-generated `.icore`, but it must not claim to include GPU execution, remote distributed worker execution, native machine-code execution, JVM, CLR, JavaScript, Python, Ruby, libc, C++ standard library, Dart VM, OCaml runtime, or SwiftUI runtime until the repo contains the runtime path and tests.
 
-The first owned runtime is the existing bytecode VM subset fed by Core IR/SIL. The SwiftUI preview host remains a Swift-specific runtime integration. Every new runtime must document supported values, calls, effects, ABI boundary, size budget, and benchmark method.
+The first owned runtime is the existing bytecode VM subset fed by Core IR/SIL. The orchestration slice owns deterministic local planning and local distributed job simulation only. The SwiftUI preview host remains a Swift-specific runtime integration. Every new runtime must document supported values, calls, effects, ABI boundary, size budget, and benchmark method.
 
 ## Implementation order
 
@@ -72,6 +72,6 @@ This roadmap starts by landing Phase 0: a CLI/library language support matrix pl
 
 ## See also
 
-- [orchestration-compiler.md](orchestration-compiler.md) — v0.3 orchestration/status contract.
+- [orchestration-compiler.md](orchestration-compiler.md) — v0.4 orchestration/status contract.
 - [general-compiler.md](general-compiler.md) — source-front to Core IR to textual SIL architecture.
 - [native-backend.md](native-backend.md) — native execution status contract.

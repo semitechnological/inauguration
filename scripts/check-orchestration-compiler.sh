@@ -89,12 +89,32 @@ statuses = {
     for status in orch.get("runtime_status") or []
 }
 require(
-    ("distributed-workers", False, "distributed-runtime-not-implemented") in statuses,
-    "graph orchestration missing distributed status-only runtime fact",
+    ("distributed-workers", True, "local-distributed-simulator") in statuses,
+    "graph orchestration missing local distributed simulator fact",
 )
 require(
     ("gpu-optimizer", False, "gpu-runtime-not-implemented") in statuses,
     "graph orchestration missing gpu status-only runtime fact",
+)
+plan = {
+    (step.get("kind"), step.get("name"), step.get("mode"))
+    for step in orch.get("local_plan") or []
+}
+require(
+    ("parallel_task", "warm_cache", "local-deterministic-sequential") in plan,
+    "graph orchestration missing local parallel task plan",
+)
+require(
+    ("distributed_fn", "process_video", "local-worker-simulator") in plan,
+    "graph orchestration missing local distributed function plan",
+)
+jobs = {
+    (job.get("function"), job.get("worker"), job.get("status"))
+    for job in orch.get("distributed_jobs") or []
+}
+require(
+    ("process_video", "local-simulated-worker", "planned") in jobs,
+    "graph orchestration missing local distributed job fact",
 )
 PY
 
@@ -124,13 +144,22 @@ statuses = {
     for status in orch.get("runtime_status") or []
 }
 require(
-    ("distributed-workers", False, "distributed-runtime-not-implemented") in statuses,
-    "agent orchestration missing distributed status-only runtime fact",
+    ("distributed-workers", True, "local-distributed-simulator") in statuses,
+    "agent orchestration missing local distributed simulator fact",
+)
+require(
+    any(job.get("function") == "process_video" for job in orch.get("distributed_jobs") or []),
+    "agent orchestration missing local distributed job fact",
 )
 PY
 
-echo "check orchestration build status-only core path"
+echo "check orchestration build local-plan core path"
 "${in_cmd[@]}" build --path apps/in-sample/orchestration.in > "$tmp_dir/orchestration-build.txt"
+
+echo "check bytecode execution examples"
+"${in_cmd[@]}" execute-bytecode apps/in-sample/hello.in > "$tmp_dir/hello-bytecode.txt"
+"${in_cmd[@]}" execute-bytecode apps/in-sample/agent-native.in > "$tmp_dir/agent-native-bytecode.txt"
+"${in_cmd[@]}" execute-bytecode apps/in-sample/orchestration.in > "$tmp_dir/orchestration-bytecode.txt"
 
 echo "check package json"
 package_json="$tmp_dir/package.json"
@@ -160,6 +189,20 @@ require("filesystem.read" in capabilities, "package missing filesystem.read capa
 extensions = set(data.get("extensions") or [])
 require("distributed-workers" in extensions, "package missing distributed-workers extension")
 require("gpu-optimizer" in extensions, "package missing gpu-optimizer extension")
+
+selection = data.get("target_selection") or {}
+require(set(selection.get("enabled") or []) == {"linux", "macos", "web"}, "package enabled target selection mismatch")
+
+policy = data.get("capability_policy") or {}
+require(policy.get("valid") is True, "package empty capability policy should be valid")
+
+graph = data.get("package_graph") or {}
+nodes = {
+    (node.get("kind"), node.get("id"))
+    for node in graph.get("nodes") or []
+}
+require(("package", "package:hyperchat") in nodes, "package graph missing package node")
+require(("extension", "extension:distributed-workers") in nodes, "package graph missing distributed-workers extension node")
 PY
 
 echo "orchestration compiler checks passed"

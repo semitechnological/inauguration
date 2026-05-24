@@ -18,18 +18,18 @@ This is **not** “30 production compilers in one repo overnight.” It is an **
 | **rust-driver** | Mirror of in-cli crates | Same IR/SIL contracts as fronts mature |
 | **Hot reload** | Swift: `swiftc -typecheck`; Core IR paths: `resolve_parser_id` + `parse_with_resolved` | Tighten semantics as polyglot lowering fills bodies and diagnostics |
 
-## v0.3 orchestration/status surfaces
+## v0.4 orchestration/status surfaces
 
-The general compiler roadmap should expose orchestration in four strict surfaces before widening execution claims:
+The general compiler roadmap should expose orchestration in strict surfaces before widening execution claims:
 
 | Surface | Compiler role | Status rule |
 |---------|---------------|-------------|
 | Canonicalization | Use the parser/IR path to produce deterministic source or a rejected diagnostic set. | `in canonicalize --path <file> [--check]` is the shipped source-format surface. |
 | Graph command | Report parser decision, declarations, textual SIL functions, call edges, effects, capabilities, orchestration facts, and timing. | `in graph --path <file> [--imports] [--capabilities] [--symbols] [--calls] [--json]` matches the stable Core IR graph facts. |
-| Package manifest report | Report package identity, targets, dependencies, capabilities, extensions, parser fronts, runtime boundaries, and reason codes. | `in package --path <dir\|manifest> [--json]` reports manifest metadata only. It does not perform dependency installation or extension loading. |
-| Orchestration facts | Surface `.in` extension, annotation, distributed-function, and parallel-region facts in agent/graph JSON. | `in agent` and `in graph --json` expose orchestration facts with status-only runtime reason codes; execution remains unavailable until runtime code and tests land. |
+| Package manifest report | Report package identity, targets, dependencies, capabilities, extensions, package graph nodes, target selection, and capability policy. | `in package --path <dir\|manifest\|source> [--json]` reports package metadata and graph facts. It does not perform dependency installation or extension loading. |
+| Orchestration facts | Surface `.in` extension, annotation, distributed-function, parallel-region, local plan, and local distributed job facts in agent/graph JSON. | `in agent` and `in graph --json` expose orchestration facts. `distributed-workers` has a deterministic local simulator boundary; GPU/native execution remains unavailable until runtime code and tests land. |
 
-GPU execution, distributed execution, native machine-code execution, and non-owned language runtimes are status/contract-only until in-tree runtime code and tests back the claim. See [orchestration-compiler.md](orchestration-compiler.md) and [native-backend.md](native-backend.md).
+GPU execution, native machine-code execution, remote distributed execution, and non-owned language runtimes are status/contract-only until in-tree runtime code and tests back the claim. See [orchestration-compiler.md](orchestration-compiler.md) and [native-backend.md](native-backend.md).
 
 ## icore (JSON Core IR)
 
@@ -69,7 +69,7 @@ Swift-shaped work in parallel: [native-swift-master-plan.md](native-swift-master
 ## See also
 
 - [future-work-roadmap.md](future-work-roadmap.md) — phased backlog (parsers, driver, SIL, hot reload)
-- [orchestration-compiler.md](orchestration-compiler.md) — v0.3 orchestration/status contract
+- [orchestration-compiler.md](orchestration-compiler.md) — v0.4 orchestration/status contract
 - [universal-compiler-roadmap.md](universal-compiler-roadmap.md) — full language/runtime ambition and compatibility ladder
 - [parser-surface.md](parser-surface.md) — extensions, magic line, routing matrix  
 - [multi-frontend-ir.md](multi-frontend-ir.md) — `UnifiedModule` schema  

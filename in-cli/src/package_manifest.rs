@@ -1,8 +1,10 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+
+pub const PACKAGE_MANIFEST_FILE: &str = "inauguration.package";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PackageManifest {
@@ -19,6 +21,59 @@ pub struct PackageDependency {
     pub version: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PackageRoot {
+    pub root: PathBuf,
+    pub manifest_path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PackageTargetSelection {
+    pub requested: Vec<String>,
+    pub enabled: Vec<String>,
+    pub disabled: Vec<String>,
+    pub unknown: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CapabilityPolicyValidation {
+    pub valid: bool,
+    pub allowed: Vec<String>,
+    pub required: Vec<String>,
+    pub missing: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PackageReport {
+    pub root: PathBuf,
+    pub manifest_path: PathBuf,
+    pub manifest: PackageManifest,
+    pub target_selection: PackageTargetSelection,
+    pub capability_policy: CapabilityPolicyValidation,
+    pub graph: PackageGraphReport,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PackageGraphReport {
+    pub package_id: String,
+    pub nodes: Vec<PackageGraphNode>,
+    pub edges: Vec<PackageGraphEdge>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PackageGraphNode {
+    pub id: String,
+    pub kind: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PackageGraphEdge {
+    pub from: String,
+    pub to: String,
+    pub kind: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Section {
     Targets,
@@ -29,13 +84,270 @@ enum Section {
 
 pub fn load_package_manifest(path: &Path) -> Result<PackageManifest, String> {
     let manifest_path = if path.is_dir() {
-        path.join("inauguration.package")
+        path.join(PACKAGE_MANIFEST_FILE)
     } else {
         path.to_path_buf()
     };
     let source = fs::read_to_string(&manifest_path)
         .map_err(|err| format!("failed to read {}: {err}", manifest_path.display()))?;
     parse_package_manifest(&source)
+}
+
+pub fn discover_package_root(path: &Path) -> Option<PackageRoot> {
+    let mut current = if path
+        .file_name()
+        .is_some_and(|name| name == PACKAGE_MANIFEST_FILE)
+    {
+        path.parent()
+    } else if path.is_dir() {
+        Some(path)
+    } else {
+        path.parent()
+    };
+
+    while let Some(dir) = current {
+        let manifest_path = dir.join(PACKAGE_MANIFEST_FILE);
+        if manifest_path.is_file() {
+            return Some(PackageRoot {
+                root: dir.to_path_buf(),
+                manifest_path,
+            });
+        }
+        current = dir.parent();
+    }
+
+    None
+}
+
+pub fn load_package_manifest_from_source(
+    source_path: &Path,
+) -> Result<(PackageRoot, PackageManifest), String> {
+    let root = discover_package_root(source_path).ok_or_else(|| {
+        format!(
+            "could not find {PACKAGE_MANIFEST_FILE} for {}",
+            source_path.display()
+        )
+    })?;
+    let manifest = load_package_manifest(&root.manifest_path)?;
+    Ok((root, manifest))
+}
+
+pub fn load_package_report_from_source<I, S, J, T>(
+    source_path: &Path,
+    requested_targets: I,
+    required_capabilities: J,
+) -> Result<PackageReport, String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+    J: IntoIterator<Item = T>,
+    T: AsRef<str>,
+{
+    let (root, manifest) = load_package_manifest_from_source(source_path)?;
+    Ok(package_report(
+        root,
+        manifest,
+        requested_targets,
+        required_capabilities,
+    ))
+}
+
+pub fn package_report<I, S, J, T>(
+    root: PackageRoot,
+    manifest: PackageManifest,
+    requested_targets: I,
+    required_capabilities: J,
+) -> PackageReport
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+    J: IntoIterator<Item = T>,
+    T: AsRef<str>,
+{
+    let target_selection = manifest.select_targets(requested_targets);
+    let capability_policy = manifest.validate_capability_policy(required_capabilities);
+    let graph = package_graph_report(&manifest);
+    PackageReport {
+        root: root.root,
+        manifest_path: root.manifest_path,
+        manifest,
+        target_selection,
+        capability_policy,
+        graph,
+    }
+}
+
+pub fn package_graph_report(manifest: &PackageManifest) -> PackageGraphReport {
+    let package_id = format!("package:{}", manifest.name);
+    let mut nodes = vec![PackageGraphNode {
+        id: package_id.clone(),
+        kind: "package".to_string(),
+        label: format!("{}@{}", manifest.name, manifest.version),
+    }];
+    let mut edges = Vec::new();
+
+    for target in manifest.targets.keys() {
+        let node_id = format!("target:{target}");
+        nodes.push(PackageGraphNode {
+            id: node_id.clone(),
+            kind: "target".to_string(),
+            label: target.clone(),
+        });
+        edges.push(PackageGraphEdge {
+            from: package_id.clone(),
+            to: node_id,
+            kind: "targets".to_string(),
+        });
+    }
+
+    for dependency in manifest.dependencies.keys() {
+        let node_id = format!("dependency:{dependency}");
+        nodes.push(PackageGraphNode {
+            id: node_id.clone(),
+            kind: "dependency".to_string(),
+            label: dependency.clone(),
+        });
+        edges.push(PackageGraphEdge {
+            from: package_id.clone(),
+            to: node_id,
+            kind: "depends-on".to_string(),
+        });
+    }
+
+    for capability in &manifest.capabilities {
+        let node_id = format!("capability:{capability}");
+        nodes.push(PackageGraphNode {
+            id: node_id.clone(),
+            kind: "capability".to_string(),
+            label: capability.clone(),
+        });
+        edges.push(PackageGraphEdge {
+            from: package_id.clone(),
+            to: node_id,
+            kind: "allows-capability".to_string(),
+        });
+    }
+
+    for extension in &manifest.extensions {
+        let node_id = format!("extension:{extension}");
+        nodes.push(PackageGraphNode {
+            id: node_id.clone(),
+            kind: "extension".to_string(),
+            label: extension.clone(),
+        });
+        edges.push(PackageGraphEdge {
+            from: package_id.clone(),
+            to: node_id,
+            kind: "uses-extension".to_string(),
+        });
+    }
+
+    PackageGraphReport {
+        package_id,
+        nodes,
+        edges,
+    }
+}
+
+impl PackageManifest {
+    pub fn enabled_targets(&self) -> Vec<String> {
+        self.targets
+            .iter()
+            .filter(|(_, enabled)| **enabled)
+            .map(|(target, _)| target.clone())
+            .collect()
+    }
+
+    pub fn disabled_targets(&self) -> Vec<String> {
+        self.targets
+            .iter()
+            .filter(|(_, enabled)| !**enabled)
+            .map(|(target, _)| target.clone())
+            .collect()
+    }
+
+    pub fn target_enabled(&self, target: &str) -> bool {
+        self.targets.get(target).copied().unwrap_or(false)
+    }
+
+    pub fn select_targets<I, S>(&self, requested_targets: I) -> PackageTargetSelection
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let requested = unique_strings(requested_targets);
+        if requested.is_empty() {
+            return PackageTargetSelection {
+                requested,
+                enabled: self.enabled_targets(),
+                disabled: Vec::new(),
+                unknown: Vec::new(),
+            };
+        }
+
+        let mut enabled = Vec::new();
+        let mut disabled = Vec::new();
+        let mut unknown = Vec::new();
+        for target in &requested {
+            match self.targets.get(target.as_str()) {
+                Some(true) => enabled.push(target.clone()),
+                Some(false) => disabled.push(target.clone()),
+                None => unknown.push(target.clone()),
+            }
+        }
+
+        PackageTargetSelection {
+            requested,
+            enabled,
+            disabled,
+            unknown,
+        }
+    }
+
+    pub fn has_capability(&self, capability: &str) -> bool {
+        self.capabilities.iter().any(|item| item == capability)
+    }
+
+    pub fn validate_capability_policy<I, S>(
+        &self,
+        required_capabilities: I,
+    ) -> CapabilityPolicyValidation
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let allowed = unique_strings(self.capabilities.iter().map(String::as_str));
+        let required = unique_strings(required_capabilities);
+        let allowed_set: BTreeSet<&str> = allowed.iter().map(String::as_str).collect();
+        let missing = required
+            .iter()
+            .filter(|capability| !allowed_set.contains(capability.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
+
+        CapabilityPolicyValidation {
+            valid: missing.is_empty(),
+            allowed,
+            required,
+            missing,
+        }
+    }
+}
+
+fn unique_strings<I, S>(items: I) -> Vec<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut seen = BTreeSet::new();
+    let mut unique = Vec::new();
+    for item in items {
+        let item = item.as_ref().trim();
+        if !item.is_empty() && seen.insert(item.to_string()) {
+            unique.push(item.to_string());
+        }
+    }
+    unique
 }
 
 fn parse_package_manifest(source: &str) -> Result<PackageManifest, String> {
@@ -127,6 +439,11 @@ fn parse_package_manifest(source: &str) -> Result<PackageManifest, String> {
             return Err(format!(
                 "dependency `{name}` is missing required field `version`"
             ));
+        }
+    }
+    for extension in &manifest.extensions {
+        if !crate::extension_registry::is_known_extension(extension) {
+            return Err(format!("unknown extension `{extension}`"));
         }
     }
 
@@ -465,5 +782,132 @@ scripts:
 
         assert!(err.contains("line 3"), "{err}");
         assert!(err.contains("scripts"), "{err}");
+    }
+
+    #[test]
+    fn rejects_unknown_extension() {
+        let err = parse_text(
+            r#"name: bad
+version: 0.1.0
+extensions:
+  - unknown-runtime
+"#,
+        )
+        .expect_err("reject unknown extension");
+
+        assert!(err.contains("unknown extension"), "{err}");
+    }
+
+    #[test]
+    fn discovers_package_root_from_nested_source_path() {
+        let temp = TempDirGuard::new();
+        fs::write(
+            temp.path.join("inauguration.package"),
+            r#"name: rooted
+version: 0.1.0
+"#,
+        )
+        .expect("write manifest");
+        let source_path = temp.path.join("Sources").join("App").join("main.in");
+        fs::create_dir_all(source_path.parent().expect("source parent")).expect("create sources");
+        fs::write(&source_path, "fn main() -> void { return; }\n").expect("write source");
+
+        let root = discover_package_root(&source_path).expect("discover package root");
+
+        assert_eq!(root.root, temp.path);
+        assert_eq!(root.manifest_path, temp.path.join("inauguration.package"));
+    }
+
+    #[test]
+    fn selects_enabled_disabled_and_unknown_targets() {
+        let manifest = parse_text(
+            r#"name: targets
+version: 0.1.0
+targets:
+  macos: true
+  linux: false
+  web: true
+"#,
+        )
+        .expect("parse manifest");
+
+        let selection = manifest.select_targets(["web", "linux", "ios"]);
+
+        assert_eq!(manifest.enabled_targets(), vec!["macos", "web"]);
+        assert_eq!(selection.enabled, vec!["web"]);
+        assert_eq!(selection.disabled, vec!["linux"]);
+        assert_eq!(selection.unknown, vec!["ios"]);
+    }
+
+    #[test]
+    fn validates_required_capabilities_against_package_policy() {
+        let manifest = parse_text(
+            r#"name: caps
+version: 0.1.0
+capabilities:
+  - fs.read
+  - process.stdout
+"#,
+        )
+        .expect("parse manifest");
+
+        let validation = manifest.validate_capability_policy(["process.stdout", "network.http"]);
+
+        assert!(!validation.valid);
+        assert_eq!(validation.allowed, vec!["fs.read", "process.stdout"]);
+        assert_eq!(validation.required, vec!["process.stdout", "network.http"]);
+        assert_eq!(validation.missing, vec!["network.http"]);
+    }
+
+    #[test]
+    fn builds_package_report_with_graph_nodes_and_edges() {
+        let temp = TempDirGuard::new();
+        fs::write(
+            temp.path.join("inauguration.package"),
+            r#"name: graphable
+version: 0.1.0
+targets:
+  macos: true
+dependencies:
+  corelib:
+    version: ^1.2.0
+capabilities:
+  - process.stdout
+extensions:
+  - preview-host
+"#,
+        )
+        .expect("write manifest");
+        let source_path = temp.path.join("src").join("main.in");
+        fs::create_dir_all(source_path.parent().expect("source parent"))
+            .expect("create source dir");
+        fs::write(&source_path, "capability process.stdout;\n").expect("write source");
+
+        let report = load_package_report_from_source(
+            &source_path,
+            ["macos", "web"],
+            ["process.stdout", "fs.read"],
+        )
+        .expect("load package report");
+
+        assert_eq!(report.root, temp.path);
+        assert_eq!(report.manifest.name, "graphable");
+        assert_eq!(report.target_selection.enabled, vec!["macos"]);
+        assert_eq!(report.target_selection.unknown, vec!["web"]);
+        assert_eq!(report.capability_policy.missing, vec!["fs.read"]);
+        assert!(
+            report
+                .graph
+                .nodes
+                .iter()
+                .any(|node| node.id == "package:graphable")
+        );
+        assert!(
+            report
+                .graph
+                .edges
+                .iter()
+                .any(|edge| edge.from == "package:graphable" && edge.to == "dependency:corelib")
+        );
     }
 }
