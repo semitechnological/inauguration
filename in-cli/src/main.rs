@@ -108,6 +108,39 @@ enum Commands {
         #[arg(long, value_enum, default_value_t = ParserCli::Auto)]
         parser: ParserCli,
     },
+    #[command(about = "Canonicalize strict .in source")]
+    Canonicalize {
+        #[arg(long, default_value = ".")]
+        path: String,
+        #[arg(long, default_value_t = false)]
+        check: bool,
+    },
+    #[command(about = "Inspect parser, Core IR, and SIL graph facts")]
+    Graph {
+        #[arg(long, default_value = ".")]
+        path: String,
+        #[arg(long, default_value = "App")]
+        module_id: String,
+        #[arg(long, value_enum, default_value_t = ParserCli::Auto)]
+        parser: ParserCli,
+        #[arg(long, default_value_t = false)]
+        imports: bool,
+        #[arg(long, default_value_t = false)]
+        capabilities: bool,
+        #[arg(long, default_value_t = false)]
+        symbols: bool,
+        #[arg(long, default_value_t = false)]
+        calls: bool,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    #[command(about = "Report inauguration.package metadata")]
+    Package {
+        #[arg(long, default_value = ".")]
+        path: String,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
     #[command(about = "List language front maturity, examples, and runtime boundaries")]
     Languages {
         #[arg(long, default_value_t = false)]
@@ -235,6 +268,30 @@ fn run() -> Result<()> {
             module_id,
             parser,
         } => cmd_fix(&invocation_cwd, plan, json, &path, &module_id, parser),
+        Commands::Canonicalize { path, check } => cmd_canonicalize(&invocation_cwd, &path, check),
+        Commands::Graph {
+            path,
+            module_id,
+            parser,
+            imports,
+            capabilities,
+            symbols,
+            calls,
+            json,
+        } => cmd_graph(
+            &invocation_cwd,
+            &path,
+            &module_id,
+            parser,
+            inauguration::graph_report::GraphReportSelection {
+                imports,
+                capabilities,
+                symbols,
+                calls,
+            },
+            json,
+        ),
+        Commands::Package { path, json } => cmd_package(&invocation_cwd, &path, json),
         Commands::Languages { json } => cmd_languages(json),
         Commands::Dev { preview_client } => {
             cmd_dev(&workspace_root(invocation_cwd.clone())?, preview_client)
@@ -428,6 +485,71 @@ fn cmd_fix(
                 println!("  {}: {}", action.kind, action.description);
             }
         }
+    }
+    Ok(())
+}
+
+fn cmd_canonicalize(invocation_cwd: &Path, path: &str, check: bool) -> Result<()> {
+    let source_path = resolve_invocation_path(invocation_cwd, path);
+    let source = fs::read_to_string(&source_path)?;
+    let canonical = inauguration::in_canonical::canonicalize_in_source(&source)
+        .map_err(|err| InError::Message(format!("canonicalize: {err}")))?;
+    if check {
+        if source == canonical {
+            return Ok(());
+        }
+        return Err(InError::Message(format!(
+            "{} is not canonical",
+            source_path.display()
+        )));
+    }
+    print!("{canonical}");
+    Ok(())
+}
+
+fn cmd_graph(
+    invocation_cwd: &Path,
+    path: &str,
+    module_id: &str,
+    parser: ParserCli,
+    selection: inauguration::graph_report::GraphReportSelection,
+    json: bool,
+) -> Result<()> {
+    let report = inauguration::graph_report::build_graph_report(
+        invocation_cwd,
+        path,
+        module_id,
+        parser,
+        selection,
+    );
+    if json {
+        let raw = inauguration::graph_report::graph_report_to_json(&report)
+            .map_err(|err| InError::Message(format!("serialize graph report: {err}")))?;
+        println!("{raw}");
+    } else {
+        println!(
+            "{}",
+            inauguration::graph_report::graph_report_text(&report, selection)
+        );
+    }
+    Ok(())
+}
+
+fn cmd_package(invocation_cwd: &Path, path: &str, json: bool) -> Result<()> {
+    let package_path = resolve_invocation_path(invocation_cwd, path);
+    let manifest = inauguration::package_manifest::load_package_manifest(&package_path)
+        .map_err(|err| InError::Message(format!("package: {err}")))?;
+    if json {
+        let raw = serde_json::to_string_pretty(&manifest)
+            .map_err(|err| InError::Message(format!("serialize package manifest: {err}")))?;
+        println!("{raw}");
+    } else {
+        println!("name: {}", manifest.name);
+        println!("version: {}", manifest.version);
+        println!("targets: {}", manifest.targets.len());
+        println!("dependencies: {}", manifest.dependencies.len());
+        println!("capabilities: {}", manifest.capabilities.join(", "));
+        println!("extensions: {}", manifest.extensions.join(", "));
     }
     Ok(())
 }
@@ -1089,25 +1211,31 @@ fn cmd_test(root: &Path) -> Result<()> {
             .arg("scripts/check-bytecode-compiler.sh")
             .current_dir(root),
     )?;
+    run_test_step(
+        steps[5],
+        Command::new("bash")
+            .arg("scripts/check-orchestration-compiler.sh")
+            .current_dir(root),
+    )?;
     if skip_swift_tests() {
         eprintln!("Skipping runtime/swift-preview-host steps (IN_TEST_SKIP_SWIFT set).");
     } else {
         run_test_step(
-            steps[5],
+            steps[6],
             Command::new("swift")
                 .arg("package")
                 .arg("clean")
                 .current_dir(root.join("runtime").join("swift-preview-host")),
         )?;
         run_test_step(
-            steps[6],
+            steps[7],
             Command::new("swift")
                 .arg("test")
                 .current_dir(root.join("runtime").join("swift-preview-host")),
         )?;
     }
     run_test_step(
-        steps[7],
+        steps[8],
         Command::new("cargo")
             .arg("test")
             .current_dir(root.join("runtime").join("hotreload-daemon")),
@@ -1115,13 +1243,14 @@ fn cmd_test(root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn test_step_names() -> [&'static str; 8] {
+fn test_step_names() -> [&'static str; 9] {
     [
         "protocol models (scripts/check-protocol-models.sh)",
         "compiler/rust-driver (cargo test --all)",
         "in-cli (cargo test)",
         "polyglot samples (scripts/check-polyglot-sample.sh)",
         "bytecode compiler (scripts/check-bytecode-compiler.sh)",
+        "orchestration compiler (scripts/check-orchestration-compiler.sh)",
         "runtime/swift-preview-host (swift package clean)",
         "runtime/swift-preview-host (swift test)",
         "runtime/hotreload-daemon (cargo test)",
@@ -1635,6 +1764,67 @@ mod tests {
     }
 
     #[test]
+    fn parse_canonicalize_check_flag() {
+        let cli = Cli::try_parse_from(["in", "canonicalize", "--path", "example.in", "--check"])
+            .expect("cli parse");
+        match cli.command {
+            Commands::Canonicalize { path, check } => {
+                assert_eq!(path, "example.in");
+                assert!(check);
+            }
+            _ => panic!("expected canonicalize command"),
+        }
+    }
+
+    #[test]
+    fn parse_graph_flags() {
+        let cli = Cli::try_parse_from([
+            "in",
+            "graph",
+            "--path",
+            "apps/in-sample/agent-native.in",
+            "--imports",
+            "--capabilities",
+            "--symbols",
+            "--calls",
+            "--json",
+        ])
+        .expect("cli parse");
+        match cli.command {
+            Commands::Graph {
+                path,
+                imports,
+                capabilities,
+                symbols,
+                calls,
+                json,
+                ..
+            } => {
+                assert_eq!(path, "apps/in-sample/agent-native.in");
+                assert!(imports);
+                assert!(capabilities);
+                assert!(symbols);
+                assert!(calls);
+                assert!(json);
+            }
+            _ => panic!("expected graph command"),
+        }
+    }
+
+    #[test]
+    fn parse_package_json_flag() {
+        let cli = Cli::try_parse_from(["in", "package", "--path", "apps/package-sample", "--json"])
+            .expect("cli parse");
+        match cli.command {
+            Commands::Package { path, json } => {
+                assert_eq!(path, "apps/package-sample");
+                assert!(json);
+            }
+            _ => panic!("expected package command"),
+        }
+    }
+
+    #[test]
     fn parse_run_subcommand_defaults() {
         let cli = Cli::try_parse_from(["in", "run"]).expect("cli parse");
         match cli.command {
@@ -1737,6 +1927,11 @@ mod tests {
             super::test_step_names()
                 .iter()
                 .any(|step| step.contains("check-bytecode-compiler.sh"))
+        );
+        assert!(
+            super::test_step_names()
+                .iter()
+                .any(|step| step.contains("check-orchestration-compiler.sh"))
         );
     }
 

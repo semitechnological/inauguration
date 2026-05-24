@@ -2,6 +2,8 @@
 
 `in` is evolving into a **general hybrid compiler driver**: many **source fronts** converge on shared **Core IR** ([`UnifiedModule`](multi-frontend-ir.md)), then one **SIL lowering** path feeds the existing **`hybrid_sil`** pipeline (textual SIL → passes → metrics).
 
+The scope is compiler and backend infrastructure. Inauguration owns source-front routing, Core IR, textual SIL, graph facts, agent reports, bytecode subset execution, hot reload/compiler orchestration, and runtime-boundary reporting. Crepuscularity owns frontend UI, declarative view trees, rendering, and cross-platform visual abstraction; it should consume this compiler infrastructure rather than move UI ownership into inauguration.
+
 This is **not** “30 production compilers in one repo overnight.” It is an **architecture** for landing languages incrementally while keeping one observable pipeline. The current source-of-truth matrix is available through **`in languages`** and **`in languages --json`**; the phased universal roadmap lives in [universal-compiler-roadmap.md](universal-compiler-roadmap.md).
 
 ## Layers
@@ -15,6 +17,19 @@ This is **not** “30 production compilers in one repo overnight.” It is an **
 | **Pipeline** | `hybrid_pipeline` / `hybrid_sil` | Merged textual SIL with explicit per-function records while retaining the legacy last-`sil @` single-function view (see [in-language.md](in-language.md)) |
 | **rust-driver** | Mirror of in-cli crates | Same IR/SIL contracts as fronts mature |
 | **Hot reload** | Swift: `swiftc -typecheck`; Core IR paths: `resolve_parser_id` + `parse_with_resolved` | Tighten semantics as polyglot lowering fills bodies and diagnostics |
+
+## v0.3 orchestration/status surfaces
+
+The general compiler roadmap should expose orchestration in four strict surfaces before widening execution claims:
+
+| Surface | Compiler role | Status rule |
+|---------|---------------|-------------|
+| Canonicalization | Use the parser/IR path to produce deterministic source or a rejected diagnostic set. | `in canonicalize --path <file> [--check]` is the shipped source-format surface. |
+| Graph command | Report parser decision, declarations, textual SIL functions, call edges, effects, capabilities, and timing. | `in graph --path <file> [--imports] [--capabilities] [--symbols] [--calls] [--json]` matches the stable Core IR graph facts. |
+| Package manifest report | Report package identity, targets, dependencies, capabilities, extensions, parser fronts, runtime boundaries, and reason codes. | `in package --path <dir\|manifest> [--json]` reports manifest metadata only. It does not perform dependency installation or extension loading. |
+| Orchestration facts | Surface `.in` extension, annotation, distributed-function, and parallel-region facts in agent/graph JSON. | `in agent --json` exposes orchestration facts with status-only runtime reason codes; execution remains unavailable until runtime code and tests land. |
+
+GPU execution, distributed execution, native machine-code execution, and non-owned language runtimes are status/contract-only until in-tree runtime code and tests back the claim. See [orchestration-compiler.md](orchestration-compiler.md) and [native-backend.md](native-backend.md).
 
 ## icore (JSON Core IR)
 
@@ -54,6 +69,7 @@ Swift-shaped work in parallel: [native-swift-master-plan.md](native-swift-master
 ## See also
 
 - [future-work-roadmap.md](future-work-roadmap.md) — phased backlog (parsers, driver, SIL, hot reload)
+- [orchestration-compiler.md](orchestration-compiler.md) — v0.3 orchestration/status contract
 - [universal-compiler-roadmap.md](universal-compiler-roadmap.md) — full language/runtime ambition and compatibility ladder
 - [parser-surface.md](parser-surface.md) — extensions, magic line, routing matrix  
 - [multi-frontend-ir.md](multi-frontend-ir.md) — `UnifiedModule` schema  

@@ -1,0 +1,8 @@
+fn main() -> void {
+  let one: Int = 1
+  printone(one)
+}
+
+fn printone(one: Int) -> void {
+  print(one.toStr())
+}

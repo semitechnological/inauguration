@@ -2,6 +2,8 @@
 
 `inauguration` will pursue one compiler architecture, not one giant parser rewrite. Every language enters through a front, lowers into shared Core IR or `.icore`, emits textual SIL through one lowering path, then reuses `hybrid_sil`, bytecode, metrics, and hot reload contracts where they apply.
 
+The universal ambition is bounded by ownership. Inauguration owns orchestration, backend, and compiler infrastructure. Crepuscularity owns frontend UI, declarative view trees, rendering, and cross-platform visual abstraction. A UI framework may compile through inauguration, but UI runtime ownership is not part of this roadmap.
+
 ## North star
 
 The target is a safe, small, fast compiler for V, Go, Rust, OCaml, TypeScript, JavaScript, Swift, Dart, Python, Java, Kotlin, C++, C#, C, Zig, Nim, Odin, Hare, Ruby, and adjacent languages. The promise is measured per language family:
@@ -12,7 +14,7 @@ The target is a safe, small, fast compiler for V, Go, Rust, OCaml, TypeScript, J
 | Safe | Unsupported semantics fail closed with a diagnostic or `.icore` redirect. No silent external compiler fallback on self-hosted paths. |
 | Smaller | Native fronts and `.icore` emitters avoid bundling full language toolchains unless a runtime boundary explicitly requires it. |
 | Faster | The default hot path avoids subprocess compilers for supported subsets and reports timing per stage. |
-| Runtimes included | The repo owns the runtime boundary it claims: bytecode VM subset first, Swift hot reload host for SwiftUI, and explicit non-bundled status for JVM, CLR, JS, Python, Ruby, libc, and language standard libraries until those runtimes have concrete in-tree implementations. |
+| Runtimes included | The repo owns the runtime boundary it claims: bytecode VM subset first, Swift hot reload host for SwiftUI integration, and explicit non-bundled status for JVM, CLR, JS, Python, Ruby, libc, GPU execution, distributed execution, native machine-code execution, and language standard libraries until those runtimes have concrete in-tree implementations. |
 
 ## Compatibility ladder
 
@@ -37,9 +39,22 @@ The target is a safe, small, fast compiler for V, Go, Rust, OCaml, TypeScript, J
 | 5 | Native runtime spine | Bytecode VM supports the common Core IR subset with deterministic execution, capability checks, and conformance examples. |
 | 6 | Production claims | A language reaches level 5 only when examples compile and run without external compilers on the claimed path, quality gates are green, and benchmarks prove the speed claim for that scope. |
 
+## v0.3 surface contract
+
+Phase work should route through the strict v0.3 orchestration surfaces before claiming broader execution semantics:
+
+| Surface | Roadmap meaning |
+|---------|-----------------|
+| Canonicalization | Source can be parsed, normalized, diagnosed, and compared deterministically for supported `.in` syntax. |
+| Graph command | Compiler graph facts are visible as stable JSON: parser decision, declarations, functions, call edges, effects, capabilities, entrypoint, reason codes, and timing. |
+| Package manifest report | Package-level identity, targets, dependencies, capabilities, extensions, runtime boundaries, and parser-front decisions are reportable without installing or executing external systems. |
+| Orchestration facts | Metadata such as `enable`, `@pure`, `@gpu`, `@parallel_safe`, `distributed fn`, and `parallel` is reported as facts before runtime execution is claimed. |
+
+These are visibility and status surfaces. They do not imply GPU kernels, remote workers, native binaries, package installation, or language runtime execution.
+
 ## Runtime policy
 
-Runtime claims must be explicit. The compiler can lower a source language before it owns that language's runtime. A front may be useful at level 1 or 2 for graph facts, diagnostics, and tool-generated `.icore`, but it must not claim to include JVM, CLR, JavaScript, Python, Ruby, libc, C++ standard library, Dart VM, OCaml runtime, or SwiftUI runtime until the repo contains the runtime path and tests.
+Runtime claims must be explicit. The compiler can lower a source language before it owns that language's runtime. A front may be useful at level 1 or 2 for graph facts, diagnostics, and tool-generated `.icore`, but it must not claim to include GPU execution, distributed worker execution, native machine-code execution, JVM, CLR, JavaScript, Python, Ruby, libc, C++ standard library, Dart VM, OCaml runtime, or SwiftUI runtime until the repo contains the runtime path and tests.
 
 The first owned runtime is the existing bytecode VM subset fed by Core IR/SIL. The SwiftUI preview host remains a Swift-specific runtime integration. Every new runtime must document supported values, calls, effects, ABI boundary, size budget, and benchmark method.
 
@@ -54,3 +69,9 @@ The first owned runtime is the existing bytecode VM subset fed by Core IR/SIL. T
 ## Current slice
 
 This roadmap starts by landing Phase 0: a CLI/library language support matrix plus parser ids for OCaml, Odin, and Hare. Those three are tracked at level 0 until a grammar or dedicated front exists.
+
+## See also
+
+- [orchestration-compiler.md](orchestration-compiler.md) — v0.3 orchestration/status contract.
+- [general-compiler.md](general-compiler.md) — source-front to Core IR to textual SIL architecture.
+- [native-backend.md](native-backend.md) — native execution status contract.

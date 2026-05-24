@@ -1,0 +1,19 @@
+name: hyperchat
+version: 0.1.0
+targets:
+  linux: true
+  macos: true
+  web: true
+dependencies:
+  postgres:
+    version: ^1.0.0
+  redis:
+    version: latest
+capabilities:
+  - filesystem.read
+  - filesystem.write
+  - network.http
+extensions:
+  - postgres-driver
+  - distributed-workers
+  - gpu-optimizer

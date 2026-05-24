@@ -11,6 +11,7 @@ pub struct InSurfaceInfo {
     pub imports: Vec<String>,
     pub capabilities: Vec<String>,
     pub externs: Vec<InExternBinding>,
+    pub orchestration: InOrchestrationFacts,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,6 +19,20 @@ pub struct InExternBinding {
     pub language: String,
     pub name: String,
     pub required_capabilities: Vec<String>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct InOrchestrationFacts {
+    pub enabled_extensions: Vec<String>,
+    pub annotations: Vec<InAnnotationFact>,
+    pub distributed_functions: Vec<String>,
+    pub parallel_regions: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InAnnotationFact {
+    pub name: String,
+    pub target: Option<String>,
 }
 
 pub fn in_standard_import_bindings(import: &str) -> Vec<InExternBinding> {
@@ -550,7 +565,7 @@ fn split_function_statements(body: &str) -> Vec<String> {
                     start = i + 1;
                 }
             }
-            ';' if depth == 0 => {
+            ';' | '\n' if depth == 0 => {
                 let stmt = trim(&body[start..i]);
                 if !stmt.is_empty() {
                     let stmt = strip_line_comment_outside_strings(stmt);
@@ -802,6 +817,49 @@ fn parse_extern_fn_block(block: &str) -> Result<InExternBinding, String> {
     })
 }
 
+fn parse_distributed_fn_name(line: &str) -> Result<String, String> {
+    let rest = trim(line)
+        .strip_prefix("distributed fn ")
+        .ok_or_else(|| ".in: expected `distributed fn name(...)`".to_string())?;
+    let (name, _, _) = parse_fn_header(rest);
+    if name.is_empty() {
+        return Err(".in: distributed function name missing".into());
+    }
+    Ok(name)
+}
+
+fn parse_annotation_name(line: &str) -> Result<String, String> {
+    let name = trim(line)
+        .strip_prefix('@')
+        .ok_or_else(|| ".in: expected annotation".to_string())?
+        .trim_end_matches(';')
+        .trim();
+    match name {
+        "pure" | "gpu" | "parallel_safe" => Ok(name.to_string()),
+        _ => Err(format!(".in: unsupported annotation `{name}`")),
+    }
+}
+
+fn next_function_name_after_annotation<'a, I>(lines: I) -> Option<String>
+where
+    I: Iterator<Item = &'a str>,
+{
+    for raw in lines {
+        let line = trim(strip_line_comment_outside_strings(raw));
+        if line.is_empty() || line.starts_with('@') {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("fn ") {
+            return Some(parse_fn_header(rest).0);
+        }
+        if let Some(rest) = line.strip_prefix("distributed fn ") {
+            return Some(parse_fn_header(rest).0);
+        }
+        return None;
+    }
+    None
+}
+
 fn parse_module_from_blocks(blocks: &[String]) -> Result<UnifiedModule, String> {
     let mut decls = Vec::new();
     for block in blocks {
@@ -854,7 +912,8 @@ fn parse_module_from_blocks(blocks: &[String]) -> Result<UnifiedModule, String> 
 pub fn parse_in_surface_info(source: &str) -> Result<InSurfaceInfo, String> {
     let mut info = InSurfaceInfo::default();
     let mut depth = 0i32;
-    for raw_line in source.lines() {
+    let lines: Vec<&str> = source.lines().collect();
+    for (idx, raw_line) in lines.iter().enumerate() {
         let line = strip_line_comment_outside_strings(raw_line);
         let line = trim(line);
         if line.is_empty() || line.starts_with("//") {
@@ -889,9 +948,70 @@ pub fn parse_in_surface_info(source: &str) -> Result<InSurfaceInfo, String> {
                 }
                 continue;
             }
+            if let Some(rest) = line.strip_prefix("enable ") {
+                let extension = trim(rest).trim_end_matches(';').trim();
+                if extension.is_empty() {
+                    return Err(".in: enable extension missing".into());
+                }
+                info.orchestration
+                    .enabled_extensions
+                    .push(extension.to_string());
+                depth += brace_delta(raw_line);
+                if depth < 0 {
+                    depth = 0;
+                }
+                continue;
+            }
+            if line.starts_with('@') {
+                let name = parse_annotation_name(line)?;
+                let target = next_function_name_after_annotation(lines[idx + 1..].iter().copied());
+                info.orchestration
+                    .annotations
+                    .push(InAnnotationFact { name, target });
+                depth += brace_delta(raw_line);
+                if depth < 0 {
+                    depth = 0;
+                }
+                continue;
+            }
+            if line.starts_with("distributed ") {
+                let name = parse_distributed_fn_name(line)?;
+                info.orchestration.distributed_functions.push(name);
+                depth += brace_delta(raw_line);
+                if depth < 0 {
+                    depth = 0;
+                }
+                continue;
+            }
+            if line.starts_with("parallel") {
+                if !(line == "parallel {" || line.starts_with("parallel {")) {
+                    return Err(
+                        ".in: `parallel` must be a top-level `parallel { ... }` region".into(),
+                    );
+                }
+                info.orchestration.parallel_regions += 1;
+                depth += brace_delta(raw_line);
+                if depth < 0 {
+                    depth = 0;
+                }
+                continue;
+            }
             if line.starts_with("extern ") {
                 info.externs.push(parse_extern_fn_block(line)?);
+                depth += brace_delta(raw_line);
+                if depth < 0 {
+                    depth = 0;
+                }
+                continue;
             }
+            if line.starts_with("fn ") || line.starts_with("struct ") {
+                depth += brace_delta(raw_line);
+                if depth < 0 {
+                    depth = 0;
+                }
+                continue;
+            }
+            return Err(format!(".in: unknown top-level syntax `{line}`"));
         }
         depth += brace_delta(raw_line);
         if depth < 0 {
@@ -1224,6 +1344,61 @@ fn main() -> void { read_file("x"); return; }
     }
 
     #[test]
+    fn surface_info_parses_orchestration_facts_without_core_lowering() {
+        let src = r#"
+enable distributed-workers;
+@gpu
+distributed fn process_video(video: Video) -> void {
+  return;
+}
+parallel {
+  warm_cache();
+  build_index();
+}
+struct Video { Int id }
+fn main() -> void { return; }
+"#;
+        let info = parse_in_surface_info(src).expect("surface");
+        assert_eq!(
+            info.orchestration.enabled_extensions,
+            vec!["distributed-workers"]
+        );
+        assert_eq!(info.orchestration.parallel_regions, 1);
+        assert_eq!(
+            info.orchestration.distributed_functions,
+            vec!["process_video"]
+        );
+        assert_eq!(info.orchestration.annotations[0].name, "gpu");
+        assert_eq!(
+            info.orchestration.annotations[0].target.as_deref(),
+            Some("process_video")
+        );
+
+        let module = parse_in_source(src).expect("parse");
+        assert!(
+            !module
+                .decls
+                .iter()
+                .any(|decl| matches!(decl, Decl::Function { name, .. } if name == "process_video"))
+        );
+    }
+
+    #[test]
+    fn malformed_orchestration_syntax_is_rejected() {
+        let err = parse_in_source("parallel warm_cache();\nfn main() -> void { return; }\n")
+            .expect_err("parallel shape");
+        assert!(err.contains("parallel"), "{err}");
+
+        let err = parse_in_source("@unknown\nfn main() -> void { return; }\n")
+            .expect_err("annotation shape");
+        assert!(err.contains("unsupported annotation"), "{err}");
+
+        let err = parse_in_source("gpu fn kernel() -> void { }\nfn main() -> void { return; }\n")
+            .expect_err("unknown orchestration");
+        assert!(err.contains("unknown top-level syntax"), "{err}");
+    }
+
+    #[test]
     fn extern_binding_parses_required_capabilities() {
         let src = r#"
 capability fs.read;
@@ -1364,6 +1539,27 @@ fn main() -> void { return; }
             matches!(&body[1], Stmt::Return(Some(Expr::Ident(x))) if x == "x"),
             "{body:?}"
         );
+    }
+
+    #[test]
+    fn fn_body_accepts_newline_separated_statements_without_semicolons() {
+        let src = r#"
+fn main() -> void {
+  let seed: Int = 0
+  seed = 1
+  return
+}
+"#;
+        let module = parse_in_source(src).expect("parse");
+        let body = module
+            .decls
+            .iter()
+            .find_map(|decl| match decl {
+                Decl::Function { name, body, .. } if name == "main" => Some(body),
+                _ => None,
+            })
+            .expect("main body");
+        assert_eq!(body.len(), 3);
     }
 
     #[test]

@@ -126,6 +126,28 @@ pub struct GraphFacts {
     pub entry_function: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct OrchestrationFacts {
+    pub enabled_extensions: Vec<String>,
+    pub annotations: Vec<AnnotationFact>,
+    pub distributed_functions: Vec<String>,
+    pub parallel_regions: usize,
+    pub runtime_status: Vec<RuntimeStatusFact>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AnnotationFact {
+    pub name: String,
+    pub target: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RuntimeStatusFact {
+    pub name: String,
+    pub implemented: bool,
+    pub reason_code: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CallEdge {
     pub caller: String,
@@ -174,6 +196,7 @@ pub struct AgentReport {
     pub language_level: LanguageLevel,
     pub core_ir_summary: Option<CoreIrSummary>,
     pub graph_facts: Option<GraphFacts>,
+    pub orchestration: OrchestrationFacts,
     pub effects: Vec<String>,
     pub capabilities: Vec<String>,
     pub size_timing: SizeTiming,
@@ -408,6 +431,7 @@ fn build_report(path: &Path, config: &AgentModeConfig) -> Result<AgentReport, Ag
     let mut core_decl_count = 0;
     let mut core_ir_summary = None;
     let mut graph_facts = None;
+    let mut orchestration = OrchestrationFacts::default();
     let mut effects = Vec::new();
     let mut capabilities = Vec::new();
     match parsed {
@@ -461,7 +485,28 @@ fn build_report(path: &Path, config: &AgentModeConfig) -> Result<AgentReport, Ag
                         )
                     }
                 }));
+                effects.extend(
+                    surface
+                        .orchestration
+                        .enabled_extensions
+                        .iter()
+                        .map(|name| format!("enable:{name}")),
+                );
+                effects.extend(
+                    surface
+                        .orchestration
+                        .distributed_functions
+                        .iter()
+                        .map(|name| format!("distributed:{name}")),
+                );
+                if surface.orchestration.parallel_regions > 0 {
+                    effects.push(format!(
+                        "parallel_regions:{}",
+                        surface.orchestration.parallel_regions
+                    ));
+                }
                 capabilities.extend(surface.capabilities);
+                orchestration = orchestration_facts_from_surface(surface.orchestration);
             }
             let summary = summarize_core_ir(&module);
             diagnostics.extend(core_diagnostics(&module, parser_id.as_deref(), &source));
@@ -512,6 +557,7 @@ fn build_report(path: &Path, config: &AgentModeConfig) -> Result<AgentReport, Ag
         language_level,
         core_ir_summary,
         graph_facts,
+        orchestration,
         effects,
         capabilities,
         size_timing: SizeTiming {
@@ -743,6 +789,63 @@ fn lower_textual_sil(module: &UnifiedModule, module_id: &str) -> String {
     sil
 }
 
+fn orchestration_facts_from_surface(
+    facts: crate::in_lang_parse::InOrchestrationFacts,
+) -> OrchestrationFacts {
+    let mut runtime_status = Vec::new();
+    for name in &facts.enabled_extensions {
+        let reason_code = match name.as_str() {
+            "distributed-workers" => "distributed-runtime-not-implemented",
+            "gpu-optimizer" => "gpu-runtime-not-implemented",
+            _ => "extension-runtime-not-implemented",
+        };
+        runtime_status.push(RuntimeStatusFact {
+            name: name.clone(),
+            implemented: false,
+            reason_code: reason_code.to_string(),
+        });
+    }
+    if !facts.distributed_functions.is_empty()
+        && !runtime_status
+            .iter()
+            .any(|status| status.name == "distributed-workers")
+    {
+        runtime_status.push(RuntimeStatusFact {
+            name: "distributed-workers".to_string(),
+            implemented: false,
+            reason_code: "distributed-runtime-not-implemented".to_string(),
+        });
+    }
+    if facts
+        .annotations
+        .iter()
+        .any(|annotation| annotation.name == "gpu")
+        && !runtime_status
+            .iter()
+            .any(|status| status.name == "gpu-optimizer")
+    {
+        runtime_status.push(RuntimeStatusFact {
+            name: "gpu-optimizer".to_string(),
+            implemented: false,
+            reason_code: "gpu-runtime-not-implemented".to_string(),
+        });
+    }
+    OrchestrationFacts {
+        enabled_extensions: facts.enabled_extensions,
+        annotations: facts
+            .annotations
+            .into_iter()
+            .map(|annotation| AnnotationFact {
+                name: annotation.name,
+                target: annotation.target,
+            })
+            .collect(),
+        distributed_functions: facts.distributed_functions,
+        parallel_regions: facts.parallel_regions,
+        runtime_status,
+    }
+}
+
 fn io_error_report(path: &Path, config: &AgentModeConfig, err: AgentModeError) -> AgentReport {
     let parser_decision = parser_decision(
         path,
@@ -770,6 +873,7 @@ fn io_error_report(path: &Path, config: &AgentModeConfig, err: AgentModeError) -
         )),
         core_ir_summary: None,
         graph_facts: None,
+        orchestration: OrchestrationFacts::default(),
         effects: Vec::new(),
         capabilities: Vec::new(),
         size_timing: SizeTiming {
@@ -1227,6 +1331,43 @@ fn main() -> void { print("ready"); return; }
                 .effects
                 .contains(&"extern:std:print:requires=process.stdout".to_string())
         );
+    }
+
+    #[test]
+    fn in_report_includes_orchestration_facts_as_status_only() {
+        let temp = temp_source(
+            "orchestration",
+            "in",
+            r#"
+enable distributed-workers;
+@gpu
+distributed fn process(video: Video) -> void { return; }
+parallel { process(ready()); }
+struct Video { Int id }
+fn main() -> void { return; }
+"#,
+        );
+        let report = json_report(&temp.path, &AgentModeConfig::default()).expect("report");
+        assert_eq!(
+            report.orchestration.enabled_extensions,
+            vec!["distributed-workers"]
+        );
+        assert_eq!(report.orchestration.distributed_functions, vec!["process"]);
+        assert_eq!(report.orchestration.parallel_regions, 1);
+        assert!(
+            report
+                .orchestration
+                .runtime_status
+                .iter()
+                .any(|status| !status.implemented
+                    && status.reason_code == "distributed-runtime-not-implemented")
+        );
+        assert!(
+            report
+                .effects
+                .contains(&"enable:distributed-workers".into())
+        );
+        assert!(report.effects.contains(&"distributed:process".into()));
     }
 
     #[test]

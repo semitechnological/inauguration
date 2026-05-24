@@ -1,5 +1,5 @@
 //! Simple stack-based bytecode IR and emitter.
-//! 
+//!
 //! Bytecode is a minimal intermediate representation that SIL can lower to,
 //! enabling code generation without external compilers or complex backends.
 
@@ -18,7 +18,13 @@ impl Value {
     pub fn to_int(&self) -> i64 {
         match self {
             Value::Int(n) => *n,
-            Value::Bool(b) => if *b { 1 } else { 0 },
+            Value::Bool(b) => {
+                if *b {
+                    1
+                } else {
+                    0
+                }
+            }
             Value::String(_) => 0,
             Value::Nil => 0,
         }
@@ -117,7 +123,10 @@ impl BytecodeModule {
 /// Emit textual bytecode assembly (.bca format).
 pub fn module_to_text(module: &BytecodeModule) -> String {
     let mut out = String::new();
-    out.push_str(&format!("; Bytecode module (entry: {})\n", module.entry_point));
+    out.push_str(&format!(
+        "; Bytecode module (entry: {})\n",
+        module.entry_point
+    ));
     out.push_str("; ---\n\n");
 
     for func in &module.functions {
