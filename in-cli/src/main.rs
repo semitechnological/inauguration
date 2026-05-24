@@ -148,6 +148,26 @@ enum Commands {
         #[arg(long, default_value_t = false)]
         verbose: bool,
     },
+    #[command(about = "Compile source to bytecode assembly")]
+    CompileBytecode {
+        #[arg(help = "Source file path (.in, .icore, .go, .v, .rs, etc.)")]
+        path: String,
+        #[arg(long, default_value = "App")]
+        module_id: String,
+        #[arg(long, value_enum, default_value_t = ParserCli::Auto)]
+        parser: ParserCli,
+        #[arg(long, short = 'o')]
+        out: String,
+        #[arg(long, default_value_t = false)]
+        verbose: bool,
+    },
+    #[command(about = "Run bytecode assembly")]
+    RunBytecode {
+        #[arg(help = "Bytecode assembly path (.bca)")]
+        path: String,
+        #[arg(long, default_value_t = false)]
+        verbose: bool,
+    },
     #[command(about = "Run test suites")]
     Test,
     /// Reinstall the `in` CLI from the enclosing inauguration checkout (`cargo install --path in-cli`).
@@ -237,6 +257,16 @@ fn run() -> Result<()> {
             module_id,
             verbose,
         } => cmd_execute_bytecode(&invocation_cwd, &path, &module_id, verbose),
+        Commands::CompileBytecode {
+            path,
+            module_id,
+            parser,
+            out,
+            verbose,
+        } => cmd_compile_bytecode(&invocation_cwd, &path, &module_id, parser, &out, verbose),
+        Commands::RunBytecode { path, verbose } => {
+            cmd_run_bytecode(&invocation_cwd, &path, verbose)
+        }
         Commands::Test => cmd_test(&workspace_root(invocation_cwd.clone())?),
         Commands::Update => match workspace_root(invocation_cwd.clone()) {
             Ok(root) => cmd_update(&root),
@@ -864,11 +894,87 @@ fn cmd_run(
     }
 }
 
-fn cmd_execute_bytecode(cwd: &Path, path: &str, module_id: &str, verbose: bool) -> Result<()> {
-    use std::fs;
+fn resolve_invocation_path(cwd: &Path, path: &str) -> PathBuf {
+    let candidate = Path::new(path);
+    if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else {
+        cwd.join(candidate)
+    }
+}
 
+fn cmd_compile_bytecode(
+    cwd: &Path,
+    path: &str,
+    module_id: &str,
+    parser: ParserCli,
+    out: &str,
+    verbose: bool,
+) -> Result<()> {
     let start = Instant::now();
-    let source_path = cwd.join(path);
+    let source_path = resolve_invocation_path(cwd, path);
+    let out_path = resolve_invocation_path(cwd, out);
+    if !source_path.exists() {
+        return Err(InError::Message(format!(
+            "file not found: {}",
+            source_path.display()
+        )));
+    }
+
+    let output =
+        inauguration::bytecode_compiler::compile_source_path(&source_path, module_id, parser)
+            .map_err(|e| InError::Message(format!("bytecode compile: {e}")))?;
+    inauguration::bytecode_compiler::write_bytecode_module(&output.module, &out_path)
+        .map_err(|e| InError::Message(format!("bytecode write: {e}")))?;
+
+    if verbose {
+        eprintln!("[bytecode] Generated SIL ({} bytes)", output.sil.len());
+        eprintln!(
+            "[bytecode] Generated {} functions",
+            output.module.functions.len()
+        );
+        eprintln!("[bytecode] Wrote {}", out_path.display());
+    }
+
+    let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+    println!(
+        "[bytecode] Compiled {} -> {} in {:.3}ms",
+        source_path.display(),
+        out_path.display(),
+        elapsed_ms
+    );
+    Ok(())
+}
+
+fn cmd_run_bytecode(cwd: &Path, path: &str, verbose: bool) -> Result<()> {
+    let start = Instant::now();
+    let bytecode_path = resolve_invocation_path(cwd, path);
+    if !bytecode_path.exists() {
+        return Err(InError::Message(format!(
+            "file not found: {}",
+            bytecode_path.display()
+        )));
+    }
+
+    let module = inauguration::bytecode_compiler::read_bytecode_module(&bytecode_path)
+        .map_err(|e| InError::Message(format!("bytecode read: {e}")))?;
+    if verbose {
+        eprintln!("[bytecode] Executing entry point: @{}", module.entry_point);
+    }
+    let result = inauguration::bytecode_compiler::run_bytecode_module(module)
+        .map_err(|e| InError::Message(format!("bytecode execution: {e}")))?;
+    if verbose {
+        eprintln!("[bytecode] Execution completed with result: {:?}", result);
+    }
+
+    let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+    println!("[bytecode] Finished execution in {:.3}ms", elapsed_ms);
+    Ok(())
+}
+
+fn cmd_execute_bytecode(cwd: &Path, path: &str, module_id: &str, verbose: bool) -> Result<()> {
+    let start = Instant::now();
+    let source_path = resolve_invocation_path(cwd, path);
 
     if !source_path.exists() {
         return Err(InError::Message(format!(
@@ -878,66 +984,32 @@ fn cmd_execute_bytecode(cwd: &Path, path: &str, module_id: &str, verbose: bool) 
     }
 
     // Read source file
-    let source = fs::read_to_string(&source_path)
-        .map_err(|e| InError::Message(format!("read file: {e}")))?;
 
     // Compile to Core IR based on file extension
-    let module = if let Some(ext) = source_path.extension().and_then(|s| s.to_str()) {
+    if let Some(ext) = source_path.extension().and_then(|s| s.to_str()) {
         if verbose {
             eprintln!("[bytecode] Detected file extension: {}", ext);
-        }
-
-        match ext {
-            "in" => inauguration::in_lang_parse::parse_in_source(&source)
-                .map_err(|e| InError::Message(format!("parse error: {e}")))?,
-            "icore" => inauguration::compiler::icore::parse_icore_source(&source)
-                .map_err(|e| InError::Message(format!("icore parse error: {e}")))?,
-            "go" => inauguration::compiler::go_front::parse_go_file(&source_path)
-                .map_err(|e| InError::Message(format!("go frontend error: {e}")))?,
-            "rs" => inauguration::compiler::rust_front::parse_rust_file(&source_path)
-                .map_err(|e| InError::Message(format!("rust frontend error: {e}")))?,
-            "v" => inauguration::compiler::v_front::parse_v_file(&source_path)
-                .map_err(|e| InError::Message(format!("v frontend error: {e}")))?,
-            "java" => {
-                use inauguration::parser_registry::ParserId;
-                inauguration::compiler::tree_front::parse_polyglot_file(
-                    ParserId::Java,
-                    &source_path,
-                )
-                .map_err(|e| InError::Message(format!("java frontend error: {e}")))?
-            }
-            "c" => {
-                use inauguration::parser_registry::ParserId;
-                inauguration::compiler::tree_front::parse_polyglot_file(ParserId::C, &source_path)
-                    .map_err(|e| InError::Message(format!("c frontend error: {e}")))?
-            }
-            "cpp" | "cc" | "cxx" => {
-                use inauguration::parser_registry::ParserId;
-                inauguration::compiler::tree_front::parse_polyglot_file(ParserId::Cpp, &source_path)
-                    .map_err(|e| InError::Message(format!("cpp frontend error: {e}")))?
-            }
-            _ => {
-                return Err(InError::Message(format!(
-                    "unsupported file extension: {}",
-                    ext
-                )));
-            }
         }
     } else {
         return Err(InError::Message(
             "unable to determine file type (no extension)".into(),
         ));
-    };
+    }
 
     // Lower to SIL
-    let sil = inauguration::lower_core::lower_to_textual_sil(&module, module_id);
+    let output = inauguration::bytecode_compiler::compile_source_path(
+        &source_path,
+        module_id,
+        ParserCli::Auto,
+    )
+    .map_err(|e| InError::Message(format!("bytecode compile: {e}")))?;
 
     if verbose {
-        eprintln!("[bytecode] Generated SIL ({} bytes)", sil.len());
+        eprintln!("[bytecode] Generated SIL ({} bytes)", output.sil.len());
     }
 
     // Parse SIL artifact
-    let artifact = inauguration::hybrid_sil::parse_textual_sil(&sil);
+    let artifact = inauguration::hybrid_sil::parse_textual_sil(&output.sil);
 
     if verbose {
         eprintln!(
@@ -948,15 +1020,13 @@ fn cmd_execute_bytecode(cwd: &Path, path: &str, module_id: &str, verbose: bool) 
     }
 
     // Lower to bytecode
-    let bytecode_module = inauguration::sil_to_bytecode::lower_sil_to_bytecode(&artifact)
-        .map_err(|e| InError::Message(format!("bytecode lowering: {e}")))?;
 
     if verbose {
         eprintln!(
             "[bytecode] Generated {} functions",
-            bytecode_module.functions.len()
+            output.module.functions.len()
         );
-        for func in &bytecode_module.functions {
+        for func in &output.module.functions {
             eprintln!(
                 "  - @{} ({} instructions)",
                 func.name,
@@ -969,13 +1039,11 @@ fn cmd_execute_bytecode(cwd: &Path, path: &str, module_id: &str, verbose: bool) 
     if verbose {
         eprintln!(
             "[bytecode] Executing entry point: @{}",
-            bytecode_module.entry_point
+            output.module.entry_point
         );
     }
 
-    let mut vm = inauguration::vm::BytecodeVM::new(bytecode_module);
-    let result = vm
-        .run()
+    let result = inauguration::bytecode_compiler::run_bytecode_module(output.module)
         .map_err(|e| InError::Message(format!("bytecode execution: {e}")))?;
 
     if verbose {
@@ -1015,25 +1083,31 @@ fn cmd_test(root: &Path) -> Result<()> {
             .arg("scripts/check-polyglot-sample.sh")
             .current_dir(root),
     )?;
+    run_test_step(
+        steps[4],
+        Command::new("bash")
+            .arg("scripts/check-bytecode-compiler.sh")
+            .current_dir(root),
+    )?;
     if skip_swift_tests() {
         eprintln!("Skipping runtime/swift-preview-host steps (IN_TEST_SKIP_SWIFT set).");
     } else {
         run_test_step(
-            steps[4],
+            steps[5],
             Command::new("swift")
                 .arg("package")
                 .arg("clean")
                 .current_dir(root.join("runtime").join("swift-preview-host")),
         )?;
         run_test_step(
-            steps[5],
+            steps[6],
             Command::new("swift")
                 .arg("test")
                 .current_dir(root.join("runtime").join("swift-preview-host")),
         )?;
     }
     run_test_step(
-        steps[6],
+        steps[7],
         Command::new("cargo")
             .arg("test")
             .current_dir(root.join("runtime").join("hotreload-daemon")),
@@ -1041,12 +1115,13 @@ fn cmd_test(root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn test_step_names() -> [&'static str; 7] {
+fn test_step_names() -> [&'static str; 8] {
     [
         "protocol models (scripts/check-protocol-models.sh)",
         "compiler/rust-driver (cargo test --all)",
         "in-cli (cargo test)",
         "polyglot samples (scripts/check-polyglot-sample.sh)",
+        "bytecode compiler (scripts/check-bytecode-compiler.sh)",
         "runtime/swift-preview-host (swift package clean)",
         "runtime/swift-preview-host (swift test)",
         "runtime/hotreload-daemon (cargo test)",
@@ -1599,6 +1674,51 @@ mod tests {
     }
 
     #[test]
+    fn parse_compile_bytecode_subcommand() {
+        let cli = Cli::try_parse_from([
+            "in",
+            "compile-bytecode",
+            "hello.in",
+            "--module-id",
+            "Hello",
+            "--parser",
+            "in",
+            "--out",
+            "target/hello.bca",
+        ])
+        .expect("cli parse");
+        match cli.command {
+            Commands::CompileBytecode {
+                path,
+                module_id,
+                parser,
+                out,
+                verbose,
+            } => {
+                assert_eq!(path, "hello.in");
+                assert_eq!(module_id, "Hello");
+                assert!(matches!(parser, ParserCli::In));
+                assert_eq!(out, "target/hello.bca");
+                assert!(!verbose);
+            }
+            _ => panic!("expected compile-bytecode command"),
+        }
+    }
+
+    #[test]
+    fn parse_run_bytecode_subcommand() {
+        let cli = Cli::try_parse_from(["in", "run-bytecode", "target/hello.bca", "--verbose"])
+            .expect("cli parse");
+        match cli.command {
+            Commands::RunBytecode { path, verbose } => {
+                assert_eq!(path, "target/hello.bca");
+                assert!(verbose);
+            }
+            _ => panic!("expected run-bytecode command"),
+        }
+    }
+
+    #[test]
     fn parse_update_and_self_update_alias() {
         for argv in [["in", "update"], ["in", "self-update"]] {
             let cli = Cli::try_parse_from(argv).expect("cli parse");
@@ -1612,6 +1732,11 @@ mod tests {
             super::test_step_names()
                 .iter()
                 .any(|step| step.contains("check-polyglot-sample.sh"))
+        );
+        assert!(
+            super::test_step_names()
+                .iter()
+                .any(|step| step.contains("check-bytecode-compiler.sh"))
         );
     }
 

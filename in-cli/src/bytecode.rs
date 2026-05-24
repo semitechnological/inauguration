@@ -171,6 +171,8 @@ pub fn text_to_module(text: &str) -> Result<BytecodeModule, String> {
                     .unwrap_or("main")
                     .trim()
                     .to_string();
+            } else if let Some(rest) = trimmed.strip_prefix("; Bytecode module (entry:") {
+                entry_point = rest.trim_end_matches(')').trim().to_string();
             }
             continue;
         }
@@ -346,6 +348,9 @@ mod tests {
         assert!(text.contains("function @main"));
         assert!(text.contains("load_int 42"));
         assert!(text.contains("call_builtin print 1"));
+
+        let parsed = text_to_module(&text).unwrap();
+        assert_eq!(parsed.entry_point, "main");
     }
 
     #[test]

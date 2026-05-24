@@ -5,8 +5,10 @@ pub mod preview_client;
 
 pub mod agent_mode;
 pub mod bytecode;
+pub mod bytecode_compiler;
 pub mod compiler;
 pub mod core_ir;
+pub mod core_typecheck;
 pub mod hotreload;
 pub mod hybrid_core;
 pub mod hybrid_pipeline;
@@ -15,6 +17,7 @@ pub mod hybrid_sil;
 pub mod in_lang_parse;
 pub mod language_support;
 pub mod lower_core;
+pub mod native_backend;
 pub mod native_swift_sil;
 pub mod parser_registry;
 pub mod sil_emit;

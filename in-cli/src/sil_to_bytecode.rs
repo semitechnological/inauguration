@@ -43,6 +43,7 @@ fn lower_function(name: &str, instructions: &[String]) -> Result<BytecodeFunctio
     let mut bytecode = Vec::new();
     let mut local_counter = 0;
     let mut value_map: HashMap<String, usize> = HashMap::new();
+    let mut function_refs: HashMap<String, String> = HashMap::new();
     let mut _label_counter = 0;
 
     for line in instructions {
@@ -56,6 +57,7 @@ fn lower_function(name: &str, instructions: &[String]) -> Result<BytecodeFunctio
             line,
             &mut local_counter,
             &mut value_map,
+            &mut function_refs,
             &mut _label_counter,
         ) {
             bytecode.extend(insts);
@@ -79,6 +81,7 @@ fn parse_sil_instruction_to_bytecode(
     line: &str,
     local_counter: &mut usize,
     value_map: &mut HashMap<String, usize>,
+    function_refs: &mut HashMap<String, String>,
     _label_counter: &mut usize,
 ) -> Result<Vec<Instruction>, String> {
     let mut out = Vec::new();
@@ -123,7 +126,7 @@ fn parse_sil_instruction_to_bytecode(
     // %0 = apply %1(%2, %3) : $... (function call)
     if line.contains("= apply") {
         if let Some(eq_split) = line.split('=').nth(1) {
-            if let Some(apply_rest) = eq_split.strip_prefix("apply").map(str::trim) {
+            if let Some(apply_rest) = eq_split.trim().strip_prefix("apply").map(str::trim) {
                 // Extract function ref
                 if let Some(paren_idx) = apply_rest.find('(') {
                     let func_ref = &apply_rest[..paren_idx].trim();
@@ -144,9 +147,16 @@ fn parse_sil_instruction_to_bytecode(
                                 }
                             }
                         }
-                        // Emit the call (arg count)
-                        let argc = args_str.split(',').count();
-                        out.push(Instruction::CallFunction("user_func".to_string(), argc));
+                        let callee = function_refs
+                            .get(*func_ref)
+                            .cloned()
+                            .unwrap_or_else(|| "user_func".to_string());
+                        let argc = args_str
+                            .split(',')
+                            .map(str::trim)
+                            .filter(|arg| !arg.is_empty())
+                            .count();
+                        out.push(Instruction::CallFunction(callee, argc));
 
                         // Store result
                         if let Some(before_eq) = line.split('=').next() {
@@ -172,6 +182,18 @@ fn parse_sil_instruction_to_bytecode(
                 .split(|c: char| c.is_whitespace() || c == ':' || c == '(')
                 .next()
                 .unwrap_or("?");
+            if let Some(before_eq) = line.split('=').next() {
+                let reg = before_eq.trim();
+                if reg.starts_with('%') {
+                    function_refs.insert(reg.to_string(), func_name.to_string());
+                    let slot = *local_counter;
+                    *local_counter += 1;
+                    value_map.insert(reg.to_string(), slot);
+                    out.push(Instruction::LoadString(func_name.to_string()));
+                    out.push(Instruction::Store(slot));
+                    return Ok(out);
+                }
+            }
             out.push(Instruction::LoadString(func_name.to_string()));
         }
         return Ok(out);
@@ -260,12 +282,14 @@ mod tests {
     fn lower_simple_integer_literal() {
         let mut local_counter = 0;
         let mut value_map = HashMap::new();
+        let mut function_refs = HashMap::new();
         let mut label_counter = 0;
 
         let insts = parse_sil_instruction_to_bytecode(
             "integer_literal $Builtin.Int64, 42",
             &mut local_counter,
             &mut value_map,
+            &mut function_refs,
             &mut label_counter,
         )
         .unwrap();
@@ -278,12 +302,14 @@ mod tests {
     fn lower_return() {
         let mut local_counter = 0;
         let mut value_map = HashMap::new();
+        let mut function_refs = HashMap::new();
         let mut label_counter = 0;
 
         let insts = parse_sil_instruction_to_bytecode(
             "return",
             &mut local_counter,
             &mut value_map,
+            &mut function_refs,
             &mut label_counter,
         )
         .unwrap();
@@ -309,5 +335,32 @@ mod tests {
         assert_eq!(module.entry_point, "main");
         assert_eq!(module.functions.len(), 1);
         assert_eq!(module.functions[0].name, "main");
+    }
+
+    #[test]
+    fn lowers_apply_to_referenced_function_name() {
+        let artifact = SilArtifact {
+            function_id: "main".to_string(),
+            cfg_blocks: vec!["entry".to_string()],
+            instructions: vec![
+                "%0 = function_ref @helper : $@convention(thin)".to_string(),
+                "%1 = apply %0() : $@convention(thin)".to_string(),
+                "return".to_string(),
+            ],
+            instruction_callers: vec![],
+            functions: vec![],
+        };
+
+        let module = lower_sil_to_bytecode(&artifact).unwrap();
+        let main = module
+            .functions
+            .iter()
+            .find(|function| function.name == "main")
+            .unwrap();
+        assert!(
+            main.instructions
+                .iter()
+                .any(|inst| matches!(inst, Instruction::CallFunction(name, 0) if name == "helper"))
+        );
     }
 }
