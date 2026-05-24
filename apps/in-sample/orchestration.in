@@ -1,0 +1,23 @@
+enable distributed-workers;
+enable gpu-optimizer;
+
+@gpu
+distributed fn process_video(video: Video) -> void {
+  return;
+}
+
+@parallel_safe
+fn warm_cache() -> void {
+  return
+}
+
+parallel {
+  warm_cache();
+}
+
+struct Video { Int id }
+
+fn main() -> void {
+  warm_cache()
+  return
+}

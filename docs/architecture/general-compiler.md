@@ -25,9 +25,9 @@ The general compiler roadmap should expose orchestration in four strict surfaces
 | Surface | Compiler role | Status rule |
 |---------|---------------|-------------|
 | Canonicalization | Use the parser/IR path to produce deterministic source or a rejected diagnostic set. | `in canonicalize --path <file> [--check]` is the shipped source-format surface. |
-| Graph command | Report parser decision, declarations, textual SIL functions, call edges, effects, capabilities, and timing. | `in graph --path <file> [--imports] [--capabilities] [--symbols] [--calls] [--json]` matches the stable Core IR graph facts. |
+| Graph command | Report parser decision, declarations, textual SIL functions, call edges, effects, capabilities, orchestration facts, and timing. | `in graph --path <file> [--imports] [--capabilities] [--symbols] [--calls] [--json]` matches the stable Core IR graph facts. |
 | Package manifest report | Report package identity, targets, dependencies, capabilities, extensions, parser fronts, runtime boundaries, and reason codes. | `in package --path <dir\|manifest> [--json]` reports manifest metadata only. It does not perform dependency installation or extension loading. |
-| Orchestration facts | Surface `.in` extension, annotation, distributed-function, and parallel-region facts in agent/graph JSON. | `in agent --json` exposes orchestration facts with status-only runtime reason codes; execution remains unavailable until runtime code and tests land. |
+| Orchestration facts | Surface `.in` extension, annotation, distributed-function, and parallel-region facts in agent/graph JSON. | `in agent` and `in graph --json` expose orchestration facts with status-only runtime reason codes; execution remains unavailable until runtime code and tests land. |
 
 GPU execution, distributed execution, native machine-code execution, and non-owned language runtimes are status/contract-only until in-tree runtime code and tests back the claim. See [orchestration-compiler.md](orchestration-compiler.md) and [native-backend.md](native-backend.md).
 

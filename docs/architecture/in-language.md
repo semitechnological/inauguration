@@ -41,9 +41,9 @@ The v0.3 contract is visibility before execution. `.in` should feed four strict 
 | Surface | `.in` contribution |
 |---------|--------------------|
 | Canonicalization | `in canonicalize --path <file> [--check]` parses source through the strict `.in` front and emits deterministic `.in` with normalized types, explicit `-> void`, braced bodies, and semicolon-free statements. |
-| Graph command | `in graph --path <file> [--imports] [--capabilities] [--symbols] [--calls] [--json]` reports parser decision, imports/effects, capabilities, symbols, call edges, entry function, and timing. |
+| Graph command | `in graph --path <file> [--imports] [--capabilities] [--symbols] [--calls] [--json]` reports parser decision, imports/effects, capabilities, symbols, call edges, entry function, orchestration facts, and timing. |
 | Package manifest report | `in package --path <dir\|manifest> [--json]` reports package identity, targets, dependencies, capabilities, and extensions as metadata only. |
-| Orchestration facts | `parse_in_surface_info` and `in agent --json` expose enabled extensions, annotations, distributed function declarations, parallel region count, and explicit status-only runtime reason codes. |
+| Orchestration facts | `parse_in_surface_info`, `in agent`, and `in graph --json` expose enabled extensions, annotations, distributed function declarations, parallel region count, and explicit status-only runtime reason codes. |
 
 See [orchestration-compiler.md](orchestration-compiler.md) for the command/status contract.
 

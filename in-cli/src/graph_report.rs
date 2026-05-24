@@ -1,4 +1,4 @@
-use crate::agent_mode::{self, CallEdge, ParserDecision, SizeTiming};
+use crate::agent_mode::{self, CallEdge, OrchestrationFacts, ParserDecision, SizeTiming};
 use crate::parser_registry::ParserCli;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -60,6 +60,7 @@ pub struct GraphReport {
     pub symbols: Vec<GraphSymbol>,
     pub call_edges: Vec<CallEdge>,
     pub entry_function: Option<String>,
+    pub orchestration: OrchestrationFacts,
     pub timing: SizeTiming,
 }
 
@@ -148,6 +149,7 @@ pub fn build_graph_report(
         symbols,
         call_edges,
         entry_function,
+        orchestration: report.orchestration,
         timing: report.size_timing,
     }
 }
@@ -353,6 +355,7 @@ fn main() -> void { print("ok"); return; }
         assert!(json.contains("\"imports\""));
         assert!(json.contains("\"capabilities\""));
         assert!(json.contains("\"call_edges\""));
+        assert!(json.contains("\"orchestration\""));
         assert!(json.contains("\"timing\""));
         let text = graph_report_text(&report, GraphReportSelection::default());
         assert!(text.contains("parser: in via core_ir"));
@@ -377,5 +380,45 @@ fn main() -> void { print("ok"); return; }
         assert!(!text.contains("imports:"));
         assert!(!text.contains("capabilities:"));
         assert!(!text.contains("symbols:"));
+    }
+
+    #[test]
+    fn graph_json_carries_orchestration_status_facts() {
+        let temp = temp_source(
+            "orchestration",
+            r#"
+enable distributed-workers;
+@gpu
+distributed fn process_video(video: Video) -> void { return; }
+parallel { process_video(video()); }
+struct Video { Int id }
+fn main() -> void { return; }
+"#,
+        );
+        let path = temp.path.to_string_lossy().to_string();
+        let report = build_graph_report(
+            Path::new("."),
+            &path,
+            "App",
+            ParserCli::Auto,
+            GraphReportSelection::default(),
+        );
+        assert_eq!(
+            report.orchestration.enabled_extensions,
+            vec!["distributed-workers"]
+        );
+        assert_eq!(
+            report.orchestration.distributed_functions,
+            vec!["process_video"]
+        );
+        assert_eq!(report.orchestration.parallel_regions, 1);
+        assert!(
+            report
+                .orchestration
+                .runtime_status
+                .iter()
+                .any(|status| !status.implemented
+                    && status.reason_code == "distributed-runtime-not-implemented")
+        );
     }
 }

@@ -25,9 +25,9 @@ The v0.3 orchestration surface is deliberately small. Public docs, CLI help, age
 | Surface | Contract | Current implementation status |
 |---------|----------|-------------------------------|
 | Canonicalization | A source-to-canonical-source report for `.in` that preserves semantics, produces stable formatting, exposes parser diagnostics, and reports whether output changed. | `in canonicalize --path <file> [--check]` is implemented and covered by `scripts/check-orchestration-compiler.sh`. |
-| Graph command | A command surface that reports parser decision, Core IR declarations, SIL functions, call edges, entry function, effects, capabilities, and timing in stable JSON. | `in graph --path <file> [--imports] [--capabilities] [--symbols] [--calls] [--json]` is implemented; text mode prints selected sections and JSON returns the stable fact set. |
+| Graph command | A command surface that reports parser decision, Core IR declarations, SIL functions, call edges, entry function, effects, capabilities, orchestration facts, and timing in stable JSON. | `in graph --path <file> [--imports] [--capabilities] [--symbols] [--calls] [--json]` is implemented; text mode prints selected sections and JSON returns the stable fact set. |
 | Package manifest report | A machine-readable report for package identity, targets, dependencies, capabilities, extensions, parser fronts, runtime boundaries, and reason codes. | `in package --path <dir\|manifest> [--json]` parses the dependency-free `inauguration.package` shape and reports metadata only. It does not install dependencies or load extensions. |
-| Orchestration facts | `.in` surface facts for enabled extensions, annotations, distributed function declarations, and parallel region count. | `parse_in_surface_info` records facts and `in agent --json` reports them with status-only runtime reason codes. |
+| Orchestration facts | `.in` surface facts for enabled extensions, annotations, distributed function declarations, and parallel region count. | `parse_in_surface_info` records facts, and `in agent` plus `in graph --json` report them with status-only runtime reason codes. |
 
 These four surfaces define v0.3 orchestration visibility. Anything beyond them needs an explicit status field and a reason code instead of implied support.
 
@@ -47,8 +47,6 @@ The compiler may parse or lower syntax before it can execute it. Runtime executi
 New orchestration commands should return stable JSON first and human output second. Reports should include:
 
 - `schema_version`
-- `command`
-- `status`
 - `parser_decision`
 - `language_level`
 - `source`
@@ -56,7 +54,7 @@ New orchestration commands should return stable JSON first and human output seco
 - `graph_facts`
 - `effects`
 - `capabilities`
-- `orchestration_facts`
+- `orchestration`
 - `runtime_boundary`
 - `reason_codes`
 - `size_timing`
@@ -69,3 +67,7 @@ If a surface is not implemented, the report should still be deterministic: `stat
 - [general-compiler.md](general-compiler.md) defines the multi-front Core IR to textual SIL path.
 - [universal-compiler-roadmap.md](universal-compiler-roadmap.md) defines language maturity and runtime-boundary rules.
 - [native-backend.md](native-backend.md) defines the native execution status contract.
+
+## Checked example
+
+`apps/in-sample/orchestration.in` is the v0.3 integration fixture. It contains `enable distributed-workers`, `enable gpu-optimizer`, `@gpu`, `@parallel_safe`, `distributed fn`, and a `parallel { ... }` region. `in build --path apps/in-sample/orchestration.in` still succeeds because those constructs are metadata/status facts only; `in agent` and `in graph --json` expose the orchestration facts and reason-coded runtime status.

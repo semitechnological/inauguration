@@ -55,6 +55,83 @@ timing = data.get("timing") or {}
 require(isinstance(timing.get("total_micros"), int), "graph missing total_micros timing")
 PY
 
+echo "check orchestration graph json"
+orchestration_graph_json="$tmp_dir/orchestration-graph.json"
+"${in_cmd[@]}" graph --path apps/in-sample/orchestration.in --json > "$orchestration_graph_json"
+python3 - "$orchestration_graph_json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+data = json.loads(Path(sys.argv[1]).read_text())
+
+def require(condition, message):
+    if not condition:
+        raise SystemExit(message)
+
+orch = data.get("orchestration") or {}
+require(
+    "distributed-workers" in (orch.get("enabled_extensions") or []),
+    "graph orchestration missing distributed-workers extension",
+)
+require(
+    "gpu-optimizer" in (orch.get("enabled_extensions") or []),
+    "graph orchestration missing gpu-optimizer extension",
+)
+require(
+    "process_video" in (orch.get("distributed_functions") or []),
+    "graph orchestration missing distributed process_video fact",
+)
+require(orch.get("parallel_regions") == 1, "graph orchestration parallel region count was not 1")
+
+statuses = {
+    (status.get("name"), status.get("implemented"), status.get("reason_code"))
+    for status in orch.get("runtime_status") or []
+}
+require(
+    ("distributed-workers", False, "distributed-runtime-not-implemented") in statuses,
+    "graph orchestration missing distributed status-only runtime fact",
+)
+require(
+    ("gpu-optimizer", False, "gpu-runtime-not-implemented") in statuses,
+    "graph orchestration missing gpu status-only runtime fact",
+)
+PY
+
+echo "check orchestration agent json"
+agent_json="$tmp_dir/orchestration-agent.json"
+"${in_cmd[@]}" agent --path apps/in-sample/orchestration.in > "$agent_json"
+python3 - "$agent_json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+data = json.loads(Path(sys.argv[1]).read_text())
+
+def require(condition, message):
+    if not condition:
+        raise SystemExit(message)
+
+require(not data.get("diagnostics"), "agent report had diagnostics")
+orch = data.get("orchestration") or {}
+require(
+    "process_video" in (orch.get("distributed_functions") or []),
+    "agent orchestration missing distributed process_video fact",
+)
+require(orch.get("parallel_regions") == 1, "agent orchestration parallel region count was not 1")
+statuses = {
+    (status.get("name"), status.get("implemented"), status.get("reason_code"))
+    for status in orch.get("runtime_status") or []
+}
+require(
+    ("distributed-workers", False, "distributed-runtime-not-implemented") in statuses,
+    "agent orchestration missing distributed status-only runtime fact",
+)
+PY
+
+echo "check orchestration build status-only core path"
+"${in_cmd[@]}" build --path apps/in-sample/orchestration.in > "$tmp_dir/orchestration-build.txt"
+
 echo "check package json"
 package_json="$tmp_dir/package.json"
 "${in_cmd[@]}" package --path apps/package-sample --json > "$package_json"
