@@ -286,7 +286,7 @@ int main(void) { return 0; }
         // Execute bytecode
         let mut vm = crate::vm::BytecodeVM::new(bytecode_module);
         let result = vm.run().expect("bytecode execution");
-        assert!(matches!(result, crate::bytecode::Value::Nil));
+        assert!(matches!(result, crate::bytecode::Value::Int(0)));
     }
 
     #[test]

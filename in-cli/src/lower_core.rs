@@ -44,22 +44,37 @@ fn lower_expr(e: &Expr, env: &HashMap<String, usize>, ssa: &mut usize, out: &mut
             id
         }
         Expr::Call { callee, args } => {
+            let mut arg_ids = Vec::new();
             if let Expr::Ident(name) = callee.as_ref() {
                 let r = *ssa;
                 *ssa += 1;
                 out.push_str(&format!(
                     "%{r} = function_ref @{name} : $@convention(thin)\n"
                 ));
+                for arg in args {
+                    arg_ids.push(lower_expr(arg, env, ssa, out));
+                }
+                let id = *ssa;
+                *ssa += 1;
+                let rendered_args = arg_ids
+                    .iter()
+                    .map(|id| format!("%{id}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                out.push_str(&format!(
+                    "%{id} = apply %{r}({rendered_args}) : $@convention(thin)\n"
+                ));
+                id
             } else {
                 let _ = lower_expr(callee, env, ssa, out);
+                for arg in args {
+                    let _ = lower_expr(arg, env, ssa, out);
+                }
+                let id = *ssa;
+                *ssa += 1;
+                out.push_str(&format!("%{id} = integer_literal $Builtin.Int64, 0\n"));
+                id
             }
-            for arg in args {
-                let _ = lower_expr(arg, env, ssa, out);
-            }
-            let id = *ssa;
-            *ssa += 1;
-            out.push_str(&format!("%{id} = integer_literal $Builtin.Int64, 0\n"));
-            id
         }
     }
 }
@@ -73,10 +88,10 @@ fn lower_stmts_into(
 ) -> String {
     let mut out = String::new();
     let mut env: HashMap<String, usize> = HashMap::new();
-    for (pname, _) in params {
+    for (idx, (pname, _)) in params.iter().enumerate() {
         let id = *ssa;
         *ssa += 1;
-        out.push_str(&format!("%{id} = integer_literal $Builtin.Int64, 0\n"));
+        out.push_str(&format!("%{id} = argument {idx} : $Builtin.Int64\n"));
         env.insert(pname.clone(), id);
     }
     for st in body {
@@ -319,5 +334,6 @@ mod tests {
         };
         let sil = lower_to_textual_sil(&module, "App");
         assert!(sil.contains("function_ref @helper"));
+        assert!(sil.contains("apply %"));
     }
 }

@@ -70,7 +70,7 @@ mod tests {
         let path = temp_file("main.in");
         fs::write(
             &path,
-            "fn helper() -> Int { return 7; }\nfn main() -> Int { return helper(); }\n",
+            "fn helper(value: Int) -> Int { return value; }\nfn main() -> Int { return helper(7); }\n",
         )
         .unwrap();
 
@@ -87,7 +87,7 @@ mod tests {
                 .iter()
                 .any(|function| function.name == "main")
         );
-        run_bytecode_module(output.module).unwrap();
+        assert_eq!(run_bytecode_module(output.module).unwrap(), Value::Int(7));
 
         fs::remove_file(path).unwrap();
     }

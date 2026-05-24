@@ -123,6 +123,18 @@ fn parse_sil_instruction_to_bytecode(
         }
     }
 
+    if line.contains("=") && line.contains("argument ") {
+        if let Some(before_eq) = line.split('=').next() {
+            let reg = before_eq.trim();
+            if reg.starts_with('%') {
+                let slot = *local_counter;
+                *local_counter += 1;
+                value_map.insert(reg.to_string(), slot);
+                return Ok(out);
+            }
+        }
+    }
+
     // %0 = apply %1(%2, %3) : $... (function call)
     if line.contains("= apply") {
         if let Some(eq_split) = line.split('=').nth(1) {
@@ -130,11 +142,6 @@ fn parse_sil_instruction_to_bytecode(
                 // Extract function ref
                 if let Some(paren_idx) = apply_rest.find('(') {
                     let func_ref = &apply_rest[..paren_idx].trim();
-                    // Try to look up in value_map or treat as literal
-                    if value_map.contains_key(&func_ref.to_string()) {
-                        let slot = value_map[&func_ref.to_string()];
-                        out.push(Instruction::Load(slot));
-                    }
 
                     // Extract arguments between parens
                     if let Some(close_paren) = apply_rest.find(')') {
@@ -203,8 +210,12 @@ fn parse_sil_instruction_to_bytecode(
     if line.starts_with("return") {
         if let Some(rest) = line.strip_prefix("return").map(str::trim) {
             if !rest.is_empty() && rest.starts_with('%') {
+                let reg = rest
+                    .split(|c: char| c.is_whitespace() || c == ':')
+                    .next()
+                    .unwrap_or(rest);
                 // Load the return value
-                if let Some(slot) = value_map.get(rest) {
+                if let Some(slot) = value_map.get(reg) {
                     out.push(Instruction::Load(*slot));
                 }
             }
@@ -362,5 +373,31 @@ mod tests {
                 .iter()
                 .any(|inst| matches!(inst, Instruction::CallFunction(name, 0) if name == "helper"))
         );
+    }
+
+    #[test]
+    fn lowers_argument_register_to_local_slot() {
+        let artifact = SilArtifact {
+            function_id: "helper".to_string(),
+            cfg_blocks: vec!["entry".to_string()],
+            instructions: vec![
+                "%0 = argument 0 : $Builtin.Int64".to_string(),
+                "return %0 : $Builtin.Int64".to_string(),
+            ],
+            instruction_callers: vec![],
+            functions: vec![],
+        };
+
+        let module = lower_sil_to_bytecode(&artifact).unwrap();
+        let helper = module
+            .functions
+            .iter()
+            .find(|function| function.name == "helper")
+            .unwrap();
+        assert_eq!(helper.local_count, 1);
+        assert!(matches!(
+            helper.instructions.first(),
+            Some(Instruction::Load(0))
+        ));
     }
 }
