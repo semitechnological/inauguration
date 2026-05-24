@@ -858,11 +858,7 @@ fn extract_js_family(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
         src,
         root,
         &["function_declaration", "generator_function_declaration"],
-        |src, n| {
-            let name_n = n.child_by_field_name("name")?;
-            let name = normalize_entry(node_txt(src, name_n).trim());
-            Some(decl_fn(name, vec![], Typ::Void))
-        },
+        js_function_decl,
     )
 }
 
@@ -881,11 +877,101 @@ fn extract_ts_family(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
                 let name = normalize_entry(node_txt(src, name_n).trim());
                 return Some(decl_fn(name, vec![], Typ::Void));
             }
-            let name_n = n.child_by_field_name("name")?;
-            let name = normalize_entry(node_txt(src, name_n).trim());
-            Some(decl_fn(name, vec![], Typ::Void))
+            js_function_decl(src, n)
         },
     )
+}
+
+fn js_function_decl<'a>(src: &[u8], n: Node<'a>) -> Option<Decl> {
+    let name_n = n.child_by_field_name("name")?;
+    let name = normalize_entry(node_txt(src, name_n).trim());
+    let body = n
+        .child_by_field_name("body")
+        .map(|b| js_body(src, b))
+        .unwrap_or_default();
+    Some(Decl::Function {
+        name,
+        params: vec![],
+        ret: Typ::Void,
+        body,
+    })
+}
+
+fn js_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
+    let mut out = Vec::new();
+    let mut w = body.walk();
+    for ch in body.named_children(&mut w) {
+        if let Some(stmt) = js_stmt(src, ch) {
+            out.push(stmt);
+        }
+    }
+    out
+}
+
+fn js_stmt(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
+    match stmt.kind() {
+        "return_statement" => Some(Stmt::Return(js_return_expr(src, stmt))),
+        "expression_statement" => first_named(stmt, "call_expression")
+            .or_else(|| named_descendant(stmt, "call_expression"))
+            .and_then(|call| js_expr(src, call))
+            .map(Stmt::Expr),
+        _ => None,
+    }
+}
+
+fn js_return_expr(src: &[u8], ret: Node<'_>) -> Option<Expr> {
+    let mut w = ret.walk();
+    ret.named_children(&mut w).find_map(|ch| js_expr(src, ch))
+}
+
+fn js_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
+    match expr.kind() {
+        "identifier" => Some(Expr::Ident(node_txt(src, expr).trim().to_string())),
+        "number" => node_txt(src, expr)
+            .trim()
+            .parse::<i64>()
+            .ok()
+            .map(Expr::IntLit),
+        "string" => Some(Expr::StringLit(
+            node_txt(src, expr)
+                .trim()
+                .trim_matches(['"', '\''])
+                .to_string(),
+        )),
+        "true" => Some(Expr::BoolLit(true)),
+        "false" => Some(Expr::BoolLit(false)),
+        "call_expression" => js_call_expr(src, expr),
+        _ => None,
+    }
+}
+
+fn js_call_expr(src: &[u8], call: Node<'_>) -> Option<Expr> {
+    let callee = call
+        .child_by_field_name("function")
+        .and_then(|n| js_expr(src, n))
+        .or_else(|| {
+            first_named(call, "identifier")
+                .map(|id| Expr::Ident(node_txt(src, id).trim().to_string()))
+        })?;
+    let args = call
+        .child_by_field_name("arguments")
+        .map(|n| js_args(src, n))
+        .unwrap_or_default();
+    Some(Expr::Call {
+        callee: Box::new(callee),
+        args,
+    })
+}
+
+fn js_args(src: &[u8], args: Node<'_>) -> Vec<Expr> {
+    let mut out = Vec::new();
+    let mut w = args.walk();
+    for ch in args.named_children(&mut w) {
+        if let Some(expr) = js_expr(src, ch) {
+            out.push(expr);
+        }
+    }
+    out
 }
 
 // Go uses dedicated compiler::go_front.
@@ -939,21 +1025,9 @@ fn rust_pattern_name<'a>(src: &[u8], pat: Node<'a>) -> Option<String> {
 
 fn extract_zig(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
     extract_fn_nodes(src, root, &["function_declaration"], |src, n| {
-        let mut saw_fn = false;
-        let mut name_n: Option<Node<'_>> = None;
-        let mut w = n.walk();
-        for ch in n.named_children(&mut w) {
-            let k = ch.kind();
-            if k == "Fn" || node_txt(src, ch).trim() == "fn" {
-                saw_fn = true;
-                continue;
-            }
-            if saw_fn && k == "identifier" {
-                name_n = Some(ch);
-                break;
-            }
-        }
-        let name_n = name_n?;
+        let name_n = n
+            .child_by_field_name("name")
+            .or_else(|| named_descendant(n, "identifier"))?;
         let name = normalize_entry(node_txt(src, name_n).trim());
         Some(decl_fn(name, vec![], Typ::Void))
     })
@@ -1272,6 +1346,81 @@ class X {
         let src = "fn main() {}\n";
         let m = parse_lang(tree_sitter_rust::LANGUAGE.into(), src, extract_rust).expect("ok");
         assert!(matches!(m.decls.as_slice(), [Decl::Function { name, .. }] if name == "main"));
+    }
+
+    #[test]
+    fn zig_function_declarations_extract() {
+        let src =
+            "fn helper(value: i32) i32 { return value; }\npub fn main() void { _ = helper(1); }\n";
+        let m = parse_lang(tree_sitter_zig::LANGUAGE.into(), src, extract_zig).expect("ok");
+        assert!(
+            m.decls
+                .iter()
+                .any(|d| matches!(d, Decl::Function { name, .. } if name == "helper")),
+            "{m:?}"
+        );
+        assert!(
+            m.decls
+                .iter()
+                .any(|d| matches!(d, Decl::Function { name, .. } if name == "main")),
+            "{m:?}"
+        );
+    }
+
+    #[test]
+    fn javascript_function_bodies_extract_calls() {
+        let src = "function helper(value) { return value; }\nfunction main() { helper(1); }\n";
+        let m = parse_lang(
+            tree_sitter_javascript::LANGUAGE.into(),
+            src,
+            extract_js_family,
+        )
+        .expect("ok");
+        let main = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+            .expect("main");
+        match main {
+            Decl::Function { body, .. } => assert!(
+                matches!(
+                    body.as_slice(),
+                    [Stmt::Expr(Expr::Call { callee, args })]
+                        if matches!(callee.as_ref(), Expr::Ident(name) if name == "helper")
+                            && matches!(args.as_slice(), [Expr::IntLit(1)])
+                ),
+                "{body:?}"
+            ),
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn typescript_function_bodies_extract_calls() {
+        let src = "function helper(value: number): number { return value; }\nfunction main(): void { helper(1); }\n";
+        let m = parse_lang(
+            tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            src,
+            extract_ts_family,
+        )
+        .expect("ok");
+        let main = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+            .expect("main");
+        match main {
+            Decl::Function { body, .. } => assert!(
+                matches!(
+                    body.as_slice(),
+                    [Stmt::Expr(Expr::Call { callee, args })]
+                        if matches!(callee.as_ref(), Expr::Ident(name) if name == "helper")
+                            && matches!(args.as_slice(), [Expr::IntLit(1)])
+                ),
+                "{body:?}"
+            ),
+            _ => panic!("expected function"),
+        }
     }
 
     #[test]

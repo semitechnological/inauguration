@@ -608,7 +608,9 @@ fn language_level(resolved: ResolvedBuildParser) -> LanguageLevel {
             | ParserId::Groovy
             | ParserId::C
             | ParserId::Cpp
-            | ParserId::ObjCpp,
+            | ParserId::ObjCpp
+            | ParserId::JavaScript
+            | ParserId::TypeScript,
         ) => LanguageLevel {
             level: 2,
             label: "bounded body lowering".to_string(),

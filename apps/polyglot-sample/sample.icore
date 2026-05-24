@@ -1,0 +1,26 @@
+{
+  "icoreVersion": 2,
+  "decls": [
+    {
+      "kind": "function",
+      "name": "helper",
+      "params": [
+        { "name": "value", "type": "Int" }
+      ],
+      "return": "Int",
+      "body": [
+        { "kind": "return", "value": { "kind": "ident", "name": "value" } }
+      ]
+    },
+    {
+      "kind": "function",
+      "name": "main",
+      "params": [],
+      "return": "Void",
+      "body": [
+        { "kind": "expr", "expr": { "kind": "call", "callee": "helper", "args": [1] } },
+        { "kind": "return" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+struct Sample {
+  Int value
+}
+fn helper(value: Int) -> Int {
+  return value;
+}
+fn main() -> void {
+  helper(1);
+  return;
+}

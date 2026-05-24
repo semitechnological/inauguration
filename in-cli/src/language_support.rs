@@ -22,7 +22,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         level_label: "Core IR body subset",
         front: "in_lang_parse",
         runtime_boundary: "self-hosted Core IR to textual SIL and bytecode VM subset",
-        example: "apps/in-sample/hello.in",
+        example: "apps/polyglot-sample/sample.in",
         next_step: "Deepen diagnostics, type rules, and executable runtime coverage",
     },
     LanguageSupport {
@@ -33,7 +33,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         level_label: "versioned Core IR JSON with bounded bodies",
         front: "compiler::icore",
         runtime_boundary: "self-hosted Core IR to textual SIL and bytecode VM subset",
-        example: "apps/icore-sample/min.icore",
+        example: "apps/polyglot-sample/sample.icore",
         next_step: "Keep schema stable and add conformance fixtures from external emitters",
     },
     LanguageSupport {
@@ -44,7 +44,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         level_label: "Swift subset or swiftc textual SIL path",
         front: "swift_subset, native_swift_sil, sil_emit",
         runtime_boundary: "in-tree subset when IN_NATIVE_SWIFT_SIL=only; optional Swift toolchain fallback",
-        example: "apps/native-subset-sample/App.swift",
+        example: "apps/polyglot-sample/sample.swift",
         next_step: "Widen the in-tree subset and shrink the swiftc dependency on hot paths",
     },
     LanguageSupport {
@@ -55,7 +55,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         level_label: "dedicated bounded body lowering",
         front: "compiler::rust_front",
         runtime_boundary: "Core IR and textual SIL; rustc is validation only",
-        example: "in build --path path/to/main.rs",
+        example: "apps/polyglot-sample/sample.rs",
         next_step: "Deepen CFG-aware lowering and remove validation from default success paths",
     },
     LanguageSupport {
@@ -66,7 +66,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         level_label: "dedicated bounded body lowering",
         front: "compiler::go_front",
         runtime_boundary: "Core IR and textual SIL",
-        example: "in build --path path/to/main.go",
+        example: "apps/polyglot-sample/sample.go",
         next_step: "Deepen declarations, method sets, packages, and control flow",
     },
     LanguageSupport {
@@ -77,7 +77,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         level_label: "dedicated bounded body lowering",
         front: "compiler::v_front",
         runtime_boundary: "Core IR and textual SIL",
-        example: "in build --path path/to/main.v",
+        example: "apps/polyglot-sample/sample.v",
         next_step: "Deepen module syntax, structs, and control flow",
     },
     LanguageSupport {
@@ -88,7 +88,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         level_label: "Tree-sitter trivial return lowering",
         front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL; libc/runtime ABI is not bundled",
-        example: "in build --path path/to/main.c",
+        example: "apps/polyglot-sample/sample.c",
         next_step: "Add locals, calls, pointer types, and ABI boundaries",
     },
     LanguageSupport {
@@ -99,7 +99,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         level_label: "Tree-sitter trivial return lowering",
         front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL; standard library/runtime ABI is not bundled",
-        example: "in build --path path/to/main.cpp",
+        example: "apps/polyglot-sample/sample.cpp",
         next_step: "Add namespaces, methods, calls, templates-as-metadata, and ABI boundaries",
     },
     LanguageSupport {
@@ -110,7 +110,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         level_label: "Tree-sitter bounded body lowering",
         front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL; JVM runtime is not bundled",
-        example: "in build --path path/to/Main.java",
+        example: "apps/polyglot-sample/Sample.java",
         next_step: "Add class metadata, constructors, fields, and JVM runtime strategy",
     },
     LanguageSupport {
@@ -121,30 +121,30 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         level_label: "Tree-sitter bounded body lowering",
         front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL; JVM runtime is not bundled",
-        example: "in build --path path/to/Main.groovy",
+        example: "apps/polyglot-sample/Sample.groovy",
         next_step: "Share JVM-family lowering with Java and Kotlin",
     },
     LanguageSupport {
         language: "JavaScript",
         parser_id: Some("javascript"),
         extensions: &["js", "mjs", "cjs", "jsx"],
-        level: 1,
-        level_label: "Tree-sitter declaration extraction",
+        level: 2,
+        level_label: "Tree-sitter bounded body lowering",
         front: "compiler::tree_front",
-        runtime_boundary: "Core IR declarations only; JS runtime is not bundled",
-        example: "in build --path path/to/app.js",
-        next_step: "Add function bodies, module imports, closures, and JS runtime policy",
+        runtime_boundary: "Core IR and textual SIL; JS runtime is not bundled",
+        example: "apps/polyglot-sample/sample.js",
+        next_step: "Add module imports, closures, and JS runtime policy",
     },
     LanguageSupport {
         language: "TypeScript",
         parser_id: Some("typescript"),
         extensions: &["ts", "tsx", "mts", "cts"],
-        level: 1,
-        level_label: "Tree-sitter declaration extraction",
+        level: 2,
+        level_label: "Tree-sitter bounded body lowering",
         front: "compiler::tree_front",
-        runtime_boundary: "Core IR declarations only; TS checker/runtime is not bundled",
-        example: "in build --path path/to/app.ts",
-        next_step: "Add typed function bodies and a checker boundary",
+        runtime_boundary: "Core IR and textual SIL; TS checker/runtime is not bundled",
+        example: "apps/polyglot-sample/sample.ts",
+        next_step: "Add typed parameters, richer statements, and a checker boundary",
     },
     LanguageSupport {
         language: "Kotlin",
@@ -154,7 +154,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         level_label: "Tree-sitter declaration extraction",
         front: "compiler::tree_front",
         runtime_boundary: "Core IR declarations only; JVM runtime is not bundled",
-        example: "in build --path path/to/Main.kt",
+        example: "apps/polyglot-sample/Sample.kt",
         next_step: "Lift Java/Groovy body lowering into Kotlin",
     },
     LanguageSupport {
@@ -165,7 +165,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         level_label: "Tree-sitter declaration extraction",
         front: "compiler::tree_front",
         runtime_boundary: "Core IR declarations only; CLR runtime is not bundled",
-        example: "in build --path path/to/Program.cs",
+        example: "apps/polyglot-sample/Program.cs",
         next_step: "Add method bodies, properties, generics metadata, and CLR runtime strategy",
     },
     LanguageSupport {
@@ -176,7 +176,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         level_label: "Tree-sitter declaration extraction",
         front: "compiler::tree_front",
         runtime_boundary: "Core IR declarations only; Python runtime is not bundled",
-        example: "in build --path path/to/app.py",
+        example: "apps/polyglot-sample/sample.py",
         next_step: "Add def bodies, imports, dynamic object model, and runtime strategy",
     },
     LanguageSupport {
@@ -187,7 +187,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         level_label: "Tree-sitter declaration extraction",
         front: "compiler::tree_front",
         runtime_boundary: "Core IR declarations only; Ruby runtime is not bundled",
-        example: "in build --path path/to/app.rb",
+        example: "apps/polyglot-sample/sample.rb",
         next_step: "Add method bodies, blocks, classes, and runtime strategy",
     },
     LanguageSupport {
@@ -198,7 +198,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         level_label: "Tree-sitter declaration extraction",
         front: "compiler::tree_front",
         runtime_boundary: "Core IR declarations only; Zig runtime/ABI is not bundled",
-        example: "in build --path path/to/main.zig",
+        example: "apps/polyglot-sample/sample.zig",
         next_step: "Add comptime-aware boundaries and bounded function bodies",
     },
     LanguageSupport {
@@ -209,7 +209,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         level_label: "Tree-sitter declaration extraction",
         front: "compiler::tree_front",
         runtime_boundary: "Core IR declarations only; Dart runtime is not bundled",
-        example: "in build --path path/to/main.dart",
+        example: "apps/polyglot-sample/sample.dart",
         next_step: "Add class/function bodies and runtime policy",
     },
     LanguageSupport {
@@ -220,7 +220,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         level_label: "known parser id without compatible wired front",
         front: "icore redirect",
         runtime_boundary: "not compiled directly; tools can emit .icore",
-        example: "emit apps/icore-sample/min.icore shape from Nim tooling",
+        example: "apps/polyglot-sample/sample.nim",
         next_step: "Wire a grammar or dedicated front before direct source lowering",
     },
     LanguageSupport {
@@ -231,7 +231,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         level_label: "known parser id without compatible wired front",
         front: "icore redirect",
         runtime_boundary: "not compiled directly; tools can emit .icore",
-        example: "emit apps/icore-sample/min.icore shape from OCaml tooling",
+        example: "apps/polyglot-sample/sample.ml",
         next_step: "Wire a grammar or dedicated front before direct source lowering",
     },
     LanguageSupport {
@@ -242,7 +242,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         level_label: "known parser id without compatible wired front",
         front: "icore redirect",
         runtime_boundary: "not compiled directly; tools can emit .icore",
-        example: "emit apps/icore-sample/min.icore shape from Odin tooling",
+        example: "apps/polyglot-sample/sample.odin",
         next_step: "Wire a grammar or dedicated front before direct source lowering",
     },
     LanguageSupport {
@@ -253,7 +253,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         level_label: "known parser id without compatible wired front",
         front: "icore redirect",
         runtime_boundary: "not compiled directly; tools can emit .icore",
-        example: "emit apps/icore-sample/min.icore shape from Hare tooling",
+        example: "apps/polyglot-sample/sample.ha",
         next_step: "Wire a grammar or dedicated front before direct source lowering",
     },
 ];
@@ -311,6 +311,23 @@ mod tests {
         for entry in LANGUAGE_SUPPORT.iter().filter(|entry| entry.level == 0) {
             assert!(entry.front.contains("icore"));
             assert!(entry.runtime_boundary.contains(".icore"));
+        }
+    }
+
+    #[test]
+    fn routed_languages_point_at_polyglot_sample_files() {
+        for entry in LANGUAGE_SUPPORT.iter().filter(|entry| {
+            entry.parser_id.is_some()
+                && entry.language != "in"
+                && entry.language != "icore"
+                && entry.level <= 2
+        }) {
+            assert!(
+                entry.example.starts_with("apps/polyglot-sample/"),
+                "{} should use a checked-in polyglot sample, got {}",
+                entry.language,
+                entry.example
+            );
         }
     }
 }

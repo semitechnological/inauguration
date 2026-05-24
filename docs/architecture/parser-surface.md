@@ -67,8 +67,8 @@ Resolution order is documented in the `parser_registry` module rustdoc. Summary:
 | Level | Meaning | Current fronts |
 |-------|---------|----------------|
 | 0 | Routes to a known `ParserId`, but no compatible grammar/front is wired; callers get an `.icore` hint. | `clojure`, `nim`, `ocaml`, `odin`, `hare`, `d`, `crystal`, `vb` |
-| 1 | Extracts top-level declarations into `UnifiedModule`; bodies are empty or ignored. | `icore` v1, `kotlin`, `scala`, `csharp`, `fsharp`, `python`, `ruby`, `php`, `perl`, `javascript`, `typescript`, `zig`, `dart`, `lua`, `elixir`, `erlang`, `haskell`, `julia`, `r`; Objective-C methods are also declaration-only. |
-| 2 | Lowers a bounded statement/expression subset into Core IR. | `.in` (including agent-facing imports, capabilities, and extern function binding declarations), `icore` v2, `rust`, `go`, `v`, `java`, `groovy`; C / C++ / Objective-C++ functions support only trivial `return <integer>;`, `return <param>;`, or `return;` bodies. |
+| 1 | Extracts top-level declarations into `UnifiedModule`; bodies are empty or ignored. | `icore` v1, `kotlin`, `scala`, `csharp`, `fsharp`, `python`, `ruby`, `php`, `perl`, `zig`, `dart`, `lua`, `elixir`, `erlang`, `haskell`, `julia`, `r`; Objective-C methods are also declaration-only. |
+| 2 | Lowers a bounded statement/expression subset into Core IR. | `.in` (including agent-facing imports, capabilities, and extern function binding declarations), `icore` v2, `rust`, `go`, `v`, `java`, `groovy`, `javascript`, `typescript`; C / C++ / Objective-C++ functions support only trivial `return <integer>;`, `return <param>;`, or `return;` bodies. |
 | 3 | Typechecks enough language semantics to produce reliable diagnostics. | Not landed for a full language family yet. |
 | 4 | Emits graph-aware SIL artifacts and agent repair plans. | Agent JSON exists; no language front is promoted to this level until its diagnostics and repair plans are source-semantic for that front. |
 | 5 | Supports production build/hotreload semantics for that language family. | Swift uses the separate Swift SIL path today; Core IR language families are not at this level yet. |

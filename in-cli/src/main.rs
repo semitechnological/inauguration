@@ -989,49 +989,68 @@ fn cmd_execute_bytecode(cwd: &Path, path: &str, module_id: &str, verbose: bool) 
 }
 
 fn cmd_test(root: &Path) -> Result<()> {
+    let steps = test_step_names();
     run_test_step(
-        "protocol models (scripts/check-protocol-models.sh)",
+        steps[0],
         Command::new("bash")
             .arg("scripts/check-protocol-models.sh")
             .current_dir(root),
     )?;
     run_test_step(
-        "compiler/rust-driver (cargo test --all)",
+        steps[1],
         Command::new("cargo")
             .arg("test")
             .arg("--all")
             .current_dir(root.join("compiler").join("rust-driver")),
     )?;
     run_test_step(
-        "in-cli (cargo test)",
+        steps[2],
         Command::new("cargo")
             .arg("test")
             .current_dir(root.join("in-cli")),
+    )?;
+    run_test_step(
+        steps[3],
+        Command::new("bash")
+            .arg("scripts/check-polyglot-sample.sh")
+            .current_dir(root),
     )?;
     if skip_swift_tests() {
         eprintln!("Skipping runtime/swift-preview-host steps (IN_TEST_SKIP_SWIFT set).");
     } else {
         run_test_step(
-            "runtime/swift-preview-host (swift package clean)",
+            steps[4],
             Command::new("swift")
                 .arg("package")
                 .arg("clean")
                 .current_dir(root.join("runtime").join("swift-preview-host")),
         )?;
         run_test_step(
-            "runtime/swift-preview-host (swift test)",
+            steps[5],
             Command::new("swift")
                 .arg("test")
                 .current_dir(root.join("runtime").join("swift-preview-host")),
         )?;
     }
     run_test_step(
-        "runtime/hotreload-daemon (cargo test)",
+        steps[6],
         Command::new("cargo")
             .arg("test")
             .current_dir(root.join("runtime").join("hotreload-daemon")),
     )?;
     Ok(())
+}
+
+fn test_step_names() -> [&'static str; 7] {
+    [
+        "protocol models (scripts/check-protocol-models.sh)",
+        "compiler/rust-driver (cargo test --all)",
+        "in-cli (cargo test)",
+        "polyglot samples (scripts/check-polyglot-sample.sh)",
+        "runtime/swift-preview-host (swift package clean)",
+        "runtime/swift-preview-host (swift test)",
+        "runtime/hotreload-daemon (cargo test)",
+    ]
 }
 
 fn cmd_update(root: &Path) -> Result<()> {
@@ -1585,6 +1604,15 @@ mod tests {
             let cli = Cli::try_parse_from(argv).expect("cli parse");
             assert!(matches!(cli.command, Commands::Update));
         }
+    }
+
+    #[test]
+    fn in_test_includes_polyglot_sample_gate() {
+        assert!(
+            super::test_step_names()
+                .iter()
+                .any(|step| step.contains("check-polyglot-sample.sh"))
+        );
     }
 
     #[test]
