@@ -2,9 +2,15 @@
 
 use crate::core_ir::{Decl, Typ, UnifiedModule};
 use crate::swift_subset::{Expr, Stmt};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-fn lower_expr(e: &Expr, env: &HashMap<String, usize>, ssa: &mut usize, out: &mut String) -> usize {
+fn lower_expr(
+    e: &Expr,
+    env: &HashMap<String, usize>,
+    direct_env: &HashSet<String>,
+    ssa: &mut usize,
+    out: &mut String,
+) -> usize {
     match e {
         Expr::IntLit(n) => {
             let id = *ssa;
@@ -25,6 +31,11 @@ fn lower_expr(e: &Expr, env: &HashMap<String, usize>, ssa: &mut usize, out: &mut
             id
         }
         Expr::Ident(name) => {
+            if direct_env.contains(name)
+                && let Some(id) = env.get(name)
+            {
+                return *id;
+            }
             if env.contains_key(name) {
                 let id = *ssa;
                 *ssa += 1;
@@ -37,15 +48,21 @@ fn lower_expr(e: &Expr, env: &HashMap<String, usize>, ssa: &mut usize, out: &mut
             id
         }
         Expr::Unary { op, expr } => {
-            let arg = lower_expr(expr, env, ssa, out);
+            let arg = lower_expr(expr, env, direct_env, ssa, out);
             let id = *ssa;
             *ssa += 1;
             out.push_str(&format!("%{id} = builtin_unop {op:?} %{arg}\n"));
             id
         }
         Expr::Binary { op, lhs, rhs } => {
-            let lhs_id = lower_expr(lhs, env, ssa, out);
-            let rhs_id = lower_expr(rhs, env, ssa, out);
+            if let Some(n) = fold_int_binop(op, lhs, rhs) {
+                let id = *ssa;
+                *ssa += 1;
+                out.push_str(&format!("%{id} = integer_literal $Builtin.Int64, {n}\n"));
+                return id;
+            }
+            let lhs_id = lower_expr(lhs, env, direct_env, ssa, out);
+            let rhs_id = lower_expr(rhs, env, direct_env, ssa, out);
             let id = *ssa;
             *ssa += 1;
             out.push_str(&format!(
@@ -56,7 +73,7 @@ fn lower_expr(e: &Expr, env: &HashMap<String, usize>, ssa: &mut usize, out: &mut
         Expr::StructInit { name, fields } => {
             let mut rendered_fields = Vec::new();
             for (field, expr) in fields {
-                let value_id = lower_expr(expr, env, ssa, out);
+                let value_id = lower_expr(expr, env, direct_env, ssa, out);
                 rendered_fields.push(format!("{field}:%{value_id}"));
             }
             let id = *ssa;
@@ -68,7 +85,7 @@ fn lower_expr(e: &Expr, env: &HashMap<String, usize>, ssa: &mut usize, out: &mut
             id
         }
         Expr::Field { base, name } => {
-            let base_id = lower_expr(base, env, ssa, out);
+            let base_id = lower_expr(base, env, direct_env, ssa, out);
             let id = *ssa;
             *ssa += 1;
             out.push_str(&format!("%{id} = field_access %{base_id} {name}\n"));
@@ -83,7 +100,7 @@ fn lower_expr(e: &Expr, env: &HashMap<String, usize>, ssa: &mut usize, out: &mut
                     "%{r} = function_ref @{name} : $@convention(thin)\n"
                 ));
                 for arg in args {
-                    arg_ids.push(lower_expr(arg, env, ssa, out));
+                    arg_ids.push(lower_expr(arg, env, direct_env, ssa, out));
                 }
                 let id = *ssa;
                 *ssa += 1;
@@ -97,9 +114,9 @@ fn lower_expr(e: &Expr, env: &HashMap<String, usize>, ssa: &mut usize, out: &mut
                 ));
                 id
             } else {
-                let _ = lower_expr(callee, env, ssa, out);
+                let _ = lower_expr(callee, env, direct_env, ssa, out);
                 for arg in args {
-                    let _ = lower_expr(arg, env, ssa, out);
+                    let _ = lower_expr(arg, env, direct_env, ssa, out);
                 }
                 let id = *ssa;
                 *ssa += 1;
@@ -108,6 +125,96 @@ fn lower_expr(e: &Expr, env: &HashMap<String, usize>, ssa: &mut usize, out: &mut
             }
         }
     }
+}
+
+fn const_int(e: &Expr) -> Option<i64> {
+    match e {
+        Expr::IntLit(n) => Some(*n),
+        Expr::Unary { op, expr } if op == "-" => const_int(expr).map(|n| -n),
+        Expr::Binary { op, lhs, rhs } => fold_int_binop(op, lhs, rhs),
+        _ => None,
+    }
+}
+
+fn fold_int_binop(op: &str, lhs: &Expr, rhs: &Expr) -> Option<i64> {
+    let lhs = const_int(lhs)?;
+    let rhs = const_int(rhs)?;
+    match op {
+        "+" => lhs.checked_add(rhs),
+        "-" => lhs.checked_sub(rhs),
+        "*" => lhs.checked_mul(rhs),
+        "/" if rhs != 0 => lhs.checked_div(rhs),
+        "%" if rhs != 0 => lhs.checked_rem(rhs),
+        _ => None,
+    }
+}
+
+fn collect_expr_reads(e: &Expr, reads: &mut HashSet<String>) {
+    match e {
+        Expr::Ident(name) => {
+            reads.insert(name.clone());
+        }
+        Expr::Unary { expr, .. } => collect_expr_reads(expr, reads),
+        Expr::Binary { lhs, rhs, .. } => {
+            collect_expr_reads(lhs, reads);
+            collect_expr_reads(rhs, reads);
+        }
+        Expr::StructInit { fields, .. } => {
+            for (_, expr) in fields {
+                collect_expr_reads(expr, reads);
+            }
+        }
+        Expr::Field { base, .. } => collect_expr_reads(base, reads),
+        Expr::Call { callee, args } => {
+            collect_expr_reads(callee, reads);
+            for arg in args {
+                collect_expr_reads(arg, reads);
+            }
+        }
+        Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => {}
+    }
+}
+
+fn collect_stmt_reads(st: &Stmt, reads: &mut HashSet<String>) {
+    match st {
+        Stmt::Let(_, _, e) | Stmt::Assign(_, e) | Stmt::Expr(e) | Stmt::Return(Some(e)) => {
+            collect_expr_reads(e, reads)
+        }
+        Stmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            collect_expr_reads(cond, reads);
+            collect_body_reads(then_body, reads);
+            collect_body_reads(else_body, reads);
+        }
+        Stmt::Loop { cond, body, .. } => {
+            if let Some(cond) = cond {
+                collect_expr_reads(cond, reads);
+            }
+            collect_body_reads(body, reads);
+        }
+        Stmt::Match { scrutinee, arms } => {
+            collect_expr_reads(scrutinee, reads);
+            for arm in arms {
+                collect_body_reads(&arm.body, reads);
+            }
+        }
+        Stmt::Return(None) => {}
+    }
+}
+
+fn collect_body_reads(body: &[Stmt], reads: &mut HashSet<String>) {
+    for st in body {
+        collect_stmt_reads(st, reads);
+    }
+}
+
+fn future_reads(body: &[Stmt], idx: usize) -> HashSet<String> {
+    let mut reads = HashSet::new();
+    collect_body_reads(&body[idx + 1..], &mut reads);
+    reads
 }
 
 /// Emit `bb0` instructions (params + statements). If `finish_with_return`, append `bb1` + `return`.
@@ -119,12 +226,13 @@ fn lower_stmts_into(
 ) -> String {
     let mut out = String::new();
     let mut env: HashMap<String, usize> = HashMap::new();
+    let mut direct_env: HashSet<String> = HashSet::new();
     for (idx, (pname, _)) in params.iter().enumerate() {
         let id = *ssa;
         *ssa += 1;
         out.push_str(&format!("%{id} = argument {idx} : $Builtin.Int64\n"));
         env.insert(pname.clone(), id);
-        out.push_str(&format!("store_var {pname} %{id}\n"));
+        direct_env.insert(pname.clone());
     }
     out.push_str(&lower_stmts_with_env(
         body,
@@ -132,6 +240,8 @@ fn lower_stmts_into(
         finish_with_return,
         true,
         &mut env,
+        &direct_env,
+        false,
     ));
     out
 }
@@ -142,29 +252,35 @@ fn lower_stmts_with_env(
     finish_with_return: bool,
     implicit_default: bool,
     env: &mut HashMap<String, usize>,
+    direct_env: &HashSet<String>,
+    force_stores: bool,
 ) -> String {
     let mut out = String::new();
-    for st in body {
+    for (idx, st) in body.iter().enumerate() {
         match st {
             Stmt::Let(name, _, e) => {
-                let id = lower_expr(e, env, ssa, &mut out);
+                let id = lower_expr(e, env, direct_env, ssa, &mut out);
                 env.insert(name.clone(), id);
-                out.push_str(&format!("store_var {name} %{id}\n"));
+                if force_stores || future_reads(body, idx).contains(name) {
+                    out.push_str(&format!("store_var {name} %{id}\n"));
+                }
             }
             Stmt::Assign(name, e) => {
-                let id = lower_expr(e, env, ssa, &mut out);
+                let id = lower_expr(e, env, direct_env, ssa, &mut out);
                 env.insert(name.clone(), id);
-                out.push_str(&format!("store_var {name} %{id}\n"));
+                if force_stores || future_reads(body, idx).contains(name) {
+                    out.push_str(&format!("store_var {name} %{id}\n"));
+                }
             }
             Stmt::Expr(e) => {
-                let _ = lower_expr(e, env, ssa, &mut out);
+                let _ = lower_expr(e, env, direct_env, ssa, &mut out);
             }
             Stmt::If {
                 cond,
                 then_body,
                 else_body,
             } => {
-                let cond_id = lower_expr(cond, env, ssa, &mut out);
+                let cond_id = lower_expr(cond, env, direct_env, ssa, &mut out);
                 let label_id = *ssa;
                 *ssa += 1;
                 let then_label = format!("bb_if_then_{label_id}");
@@ -179,6 +295,8 @@ fn lower_stmts_with_env(
                     finish_with_return,
                     false,
                     &mut then_env,
+                    direct_env,
+                    true,
                 ));
                 out.push_str(&format!("br {end_label}\n"));
                 out.push_str(&format!("label {else_label}\n"));
@@ -190,6 +308,8 @@ fn lower_stmts_with_env(
                         finish_with_return,
                         false,
                         &mut else_env,
+                        direct_env,
+                        true,
                     ));
                 }
                 out.push_str(&format!("br {end_label}\n"));
@@ -204,7 +324,7 @@ fn lower_stmts_with_env(
                 out.push_str(&format!("br {head_label}\n"));
                 out.push_str(&format!("label {head_label}\n"));
                 if let Some(c) = cond {
-                    let cond_id = lower_expr(c, env, ssa, &mut out);
+                    let cond_id = lower_expr(c, env, direct_env, ssa, &mut out);
                     out.push_str(&format!("cond_br %{cond_id}, {body_label}, {end_label}\n"));
                 } else {
                     out.push_str(&format!("br {body_label}\n"));
@@ -217,12 +337,14 @@ fn lower_stmts_with_env(
                     finish_with_return,
                     false,
                     &mut loop_env,
+                    direct_env,
+                    true,
                 ));
                 out.push_str(&format!("br {head_label}\n"));
                 out.push_str(&format!("label {end_label}\n"));
             }
             Stmt::Match { scrutinee, arms } => {
-                let _ = lower_expr(scrutinee, env, ssa, &mut out);
+                let _ = lower_expr(scrutinee, env, direct_env, ssa, &mut out);
                 for arm in arms {
                     out.push_str("// match.arm\n");
                     let mut arm_env = env.clone();
@@ -232,6 +354,8 @@ fn lower_stmts_with_env(
                         finish_with_return,
                         false,
                         &mut arm_env,
+                        direct_env,
+                        true,
                     ));
                 }
             }
@@ -245,7 +369,7 @@ fn lower_stmts_with_env(
                 return out;
             }
             Stmt::Return(Some(e)) => {
-                let id = lower_expr(e, env, ssa, &mut out);
+                let id = lower_expr(e, env, direct_env, ssa, &mut out);
                 if finish_with_return {
                     out.push_str(&format!("bb1:\nreturn %{id} : $Builtin.Int64\n"));
                 }
@@ -439,5 +563,66 @@ mod tests {
         let sil = lower_to_textual_sil(&module, "App");
         assert!(sil.contains("function_ref @helper"));
         assert!(sil.contains("apply %"));
+    }
+
+    #[test]
+    fn lower_omits_store_var_for_never_read_let_and_param() {
+        let module = UnifiedModule {
+            decls: vec![Decl::Function {
+                name: "main".into(),
+                params: vec![("unused".into(), Typ::Int)],
+                ret: Typ::Int,
+                body: vec![
+                    Stmt::Let("dead".into(), None, Expr::IntLit(2)),
+                    Stmt::Return(Some(Expr::IntLit(3))),
+                ],
+            }],
+        };
+
+        let sil = lower_to_textual_sil(&module, "App");
+
+        assert!(sil.contains("argument 0"));
+        assert!(!sil.contains("store_var unused"));
+        assert!(!sil.contains("store_var dead"));
+    }
+
+    #[test]
+    fn lower_keeps_store_var_for_read_variable() {
+        let module = UnifiedModule {
+            decls: vec![Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![
+                    Stmt::Let("used".into(), None, Expr::IntLit(2)),
+                    Stmt::Return(Some(Expr::Ident("used".into()))),
+                ],
+            }],
+        };
+
+        let sil = lower_to_textual_sil(&module, "App");
+
+        assert!(sil.contains("store_var used"));
+    }
+
+    #[test]
+    fn lower_folds_constant_integer_binop() {
+        let module = UnifiedModule {
+            decls: vec![Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![Stmt::Return(Some(Expr::Binary {
+                    op: "+".into(),
+                    lhs: Box::new(Expr::IntLit(2)),
+                    rhs: Box::new(Expr::IntLit(3)),
+                }))],
+            }],
+        };
+
+        let sil = lower_to_textual_sil(&module, "App");
+
+        assert!(sil.contains("integer_literal $Builtin.Int64, 5"));
+        assert!(!sil.contains("builtin_binop"));
     }
 }

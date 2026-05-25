@@ -50,6 +50,11 @@ pub fn bl(offset_bytes: i32) -> u32 {
     0x9400_0000 | imm26
 }
 
+pub fn b(offset_bytes: i32) -> u32 {
+    let imm26 = ((offset_bytes >> 2) as u32) & 0x03FF_FFFF;
+    0x1400_0000 | imm26
+}
+
 pub fn ret() -> u32 {
     0xD65F_03C0
 }

@@ -43,6 +43,7 @@ fn lower_function(name: &str, instructions: &[String]) -> Result<BytecodeFunctio
     let mut bytecode = Vec::new();
     let mut local_counter = 0;
     let mut value_map: HashMap<String, usize> = HashMap::new();
+    let mut value_ints: HashMap<String, i64> = HashMap::new();
     let mut var_slots: HashMap<String, usize> = HashMap::new();
     let mut function_refs: HashMap<String, String> = HashMap::new();
     let mut _label_counter = 0;
@@ -58,6 +59,7 @@ fn lower_function(name: &str, instructions: &[String]) -> Result<BytecodeFunctio
             line,
             &mut local_counter,
             &mut value_map,
+            &mut value_ints,
             &mut var_slots,
             &mut function_refs,
             &mut _label_counter,
@@ -65,6 +67,8 @@ fn lower_function(name: &str, instructions: &[String]) -> Result<BytecodeFunctio
             bytecode.extend(insts);
         }
     }
+
+    optimize_bytecode(&mut bytecode);
 
     // Always end with return
     if !matches!(bytecode.last(), Some(Instruction::Return)) {
@@ -167,11 +171,50 @@ fn is_builtin_function(name: &str) -> bool {
     )
 }
 
+fn fold_int_binop(op: &str, lhs: i64, rhs: i64) -> Option<i64> {
+    match op {
+        "+" => lhs.checked_add(rhs),
+        "-" => lhs.checked_sub(rhs),
+        "*" => lhs.checked_mul(rhs),
+        "/" if rhs != 0 => lhs.checked_div(rhs),
+        "%" if rhs != 0 => lhs.checked_rem(rhs),
+        _ => None,
+    }
+}
+
+fn optimize_bytecode(bytecode: &mut Vec<Instruction>) {
+    let mut optimized = Vec::with_capacity(bytecode.len());
+    let mut idx = 0;
+    while idx < bytecode.len() {
+        if let Some(Instruction::Jump(target)) = bytecode.get(idx)
+            && let Some(Instruction::Label(label)) = bytecode.get(idx + 1)
+            && target == label
+        {
+            idx += 1;
+            continue;
+        }
+        if let Some(Instruction::Store(slot)) = bytecode.get(idx)
+            && let Some(Instruction::Load(load_slot)) = bytecode.get(idx + 1)
+            && slot == load_slot
+            && !bytecode[idx + 2..]
+                .iter()
+                .any(|inst| matches!(inst, Instruction::Load(later_slot) if later_slot == slot))
+        {
+            idx += 2;
+            continue;
+        }
+        optimized.push(bytecode[idx].clone());
+        idx += 1;
+    }
+    *bytecode = optimized;
+}
+
 /// Parse a single SIL instruction and emit bytecode equivalent(s).
 fn parse_sil_instruction_to_bytecode(
     line: &str,
     local_counter: &mut usize,
     value_map: &mut HashMap<String, usize>,
+    value_ints: &mut HashMap<String, i64>,
     var_slots: &mut HashMap<String, usize>,
     function_refs: &mut HashMap<String, String>,
     _label_counter: &mut usize,
@@ -197,20 +240,32 @@ fn parse_sil_instruction_to_bytecode(
                 out.push(Instruction::LoadNil);
             }
             store_register(reg, local_counter, value_map, &mut out);
+            value_ints.remove(reg);
             return Ok(out);
         }
         if let Some(s) = rhs.strip_prefix("string_literal ").map(str::trim) {
             out.push(Instruction::LoadString(parse_string_payload(s)));
             store_register(reg, local_counter, value_map, &mut out);
+            value_ints.remove(reg);
             return Ok(out);
         }
         if let Some(b) = rhs.strip_prefix("bool_literal ").map(str::trim) {
             out.push(Instruction::LoadBool(b == "true"));
             store_register(reg, local_counter, value_map, &mut out);
+            value_ints.remove(reg);
             return Ok(out);
         }
         if let Some(rest) = rhs.strip_prefix("builtin_binop ").map(str::trim) {
             let (op, args) = parse_quoted_op_and_args(rest);
+            if args.len() == 2
+                && let (Some(lhs), Some(rhs)) = (value_ints.get(args[0]), value_ints.get(args[1]))
+                && let Some(n) = fold_int_binop(&op, *lhs, *rhs)
+            {
+                out.push(Instruction::LoadInt(n));
+                store_register(reg, local_counter, value_map, &mut out);
+                value_ints.insert(reg.to_string(), n);
+                return Ok(out);
+            }
             for reg in args {
                 if let Some(slot) = value_map.get(reg) {
                     out.push(Instruction::Load(*slot));
@@ -218,6 +273,7 @@ fn parse_sil_instruction_to_bytecode(
             }
             out.push(Instruction::BinOp(op));
             store_register(reg, local_counter, value_map, &mut out);
+            value_ints.remove(reg);
             return Ok(out);
         }
         if let Some(rest) = rhs.strip_prefix("builtin_unop ").map(str::trim) {
@@ -229,6 +285,7 @@ fn parse_sil_instruction_to_bytecode(
             }
             out.push(Instruction::UnOp(op));
             store_register(reg, local_counter, value_map, &mut out);
+            value_ints.remove(reg);
             return Ok(out);
         }
         if let Some(rest) = rhs.strip_prefix("struct_init ").map(str::trim) {
@@ -243,6 +300,7 @@ fn parse_sil_instruction_to_bytecode(
                 fields.into_iter().map(|(field, _)| field).collect(),
             ));
             store_register(reg, local_counter, value_map, &mut out);
+            value_ints.remove(reg);
             return Ok(out);
         }
         if let Some(rest) = rhs.strip_prefix("field_access ").map(str::trim) {
@@ -254,6 +312,7 @@ fn parse_sil_instruction_to_bytecode(
             }
             out.push(Instruction::FieldAccess(field_name.to_string()));
             store_register(reg, local_counter, value_map, &mut out);
+            value_ints.remove(reg);
             return Ok(out);
         }
     }
@@ -283,6 +342,7 @@ fn parse_sil_instruction_to_bytecode(
                             let slot = *local_counter;
                             *local_counter += 1;
                             value_map.insert(reg.to_string(), slot);
+                            value_ints.insert(reg.to_string(), n);
                             out.push(Instruction::Store(slot));
                             return Ok(out);
                         }
@@ -307,6 +367,7 @@ fn parse_sil_instruction_to_bytecode(
                 let slot = *local_counter;
                 *local_counter += 1;
                 value_map.insert(reg.to_string(), slot);
+                value_ints.remove(reg);
                 return Ok(out);
             }
         }
@@ -351,6 +412,7 @@ fn parse_sil_instruction_to_bytecode(
                             let res_reg = before_eq.trim();
                             if res_reg.starts_with('%') {
                                 store_register(res_reg, local_counter, value_map, &mut out);
+                                value_ints.remove(res_reg);
                             }
                         }
                     }
@@ -374,6 +436,7 @@ fn parse_sil_instruction_to_bytecode(
                     let slot = *local_counter;
                     *local_counter += 1;
                     value_map.insert(reg.to_string(), slot);
+                    value_ints.remove(reg);
                     out.push(Instruction::LoadString(func_name.to_string()));
                     out.push(Instruction::Store(slot));
                     return Ok(out);
@@ -455,6 +518,7 @@ fn parse_sil_instruction_to_bytecode(
                 let slot = *local_counter;
                 *local_counter += 1;
                 value_map.insert(reg.to_string(), slot);
+                value_ints.remove(reg);
                 out.push(Instruction::Store(slot));
             }
         }
@@ -471,6 +535,7 @@ mod tests {
     fn lower_simple_integer_literal() {
         let mut local_counter = 0;
         let mut value_map = HashMap::new();
+        let mut value_ints = HashMap::new();
         let mut var_slots = HashMap::new();
         let mut function_refs = HashMap::new();
         let mut label_counter = 0;
@@ -479,6 +544,7 @@ mod tests {
             "integer_literal $Builtin.Int64, 42",
             &mut local_counter,
             &mut value_map,
+            &mut value_ints,
             &mut var_slots,
             &mut function_refs,
             &mut label_counter,
@@ -493,6 +559,7 @@ mod tests {
     fn lower_return() {
         let mut local_counter = 0;
         let mut value_map = HashMap::new();
+        let mut value_ints = HashMap::new();
         let mut var_slots = HashMap::new();
         let mut function_refs = HashMap::new();
         let mut label_counter = 0;
@@ -501,6 +568,7 @@ mod tests {
             "return",
             &mut local_counter,
             &mut value_map,
+            &mut value_ints,
             &mut var_slots,
             &mut function_refs,
             &mut label_counter,
@@ -580,6 +648,81 @@ mod tests {
         assert!(matches!(
             helper.instructions.first(),
             Some(Instruction::Load(0))
+        ));
+    }
+
+    #[test]
+    fn removes_adjacent_store_load_pair() {
+        let artifact = SilArtifact {
+            function_id: "main".to_string(),
+            cfg_blocks: vec!["entry".to_string()],
+            instructions: vec![
+                "%0 = integer_literal $Builtin.Int64, 4".to_string(),
+                "store_var x %0".to_string(),
+                "%1 = load_var x".to_string(),
+                "return %1 : $Builtin.Int64".to_string(),
+            ],
+            instruction_callers: vec![],
+            functions: vec![],
+        };
+
+        let module = lower_sil_to_bytecode(&artifact).unwrap();
+        let main = module.find_function("main").unwrap();
+
+        assert!(
+            !main.instructions.windows(2).any(
+                |pair| matches!(pair, [Instruction::Store(a), Instruction::Load(b)] if a == b)
+            )
+        );
+    }
+
+    #[test]
+    fn folds_literal_binop_bytecode() {
+        let artifact = SilArtifact {
+            function_id: "main".to_string(),
+            cfg_blocks: vec!["entry".to_string()],
+            instructions: vec![
+                "%0 = integer_literal $Builtin.Int64, 2".to_string(),
+                "%1 = integer_literal $Builtin.Int64, 3".to_string(),
+                "%2 = builtin_binop \"+\" %0, %1".to_string(),
+                "return %2 : $Builtin.Int64".to_string(),
+            ],
+            instruction_callers: vec![],
+            functions: vec![],
+        };
+
+        let module = lower_sil_to_bytecode(&artifact).unwrap();
+        let main = module.find_function("main").unwrap();
+
+        assert!(main.instructions.contains(&Instruction::LoadInt(5)));
+        assert!(
+            !main
+                .instructions
+                .iter()
+                .any(|inst| matches!(inst, Instruction::BinOp(op) if op == "+"))
+        );
+    }
+
+    #[test]
+    fn removes_jump_to_immediately_following_label() {
+        let artifact = SilArtifact {
+            function_id: "main".to_string(),
+            cfg_blocks: vec!["entry".to_string()],
+            instructions: vec![
+                "br bb1".to_string(),
+                "label bb1".to_string(),
+                "return".to_string(),
+            ],
+            instruction_callers: vec![],
+            functions: vec![],
+        };
+
+        let module = lower_sil_to_bytecode(&artifact).unwrap();
+        let main = module.find_function("main").unwrap();
+
+        assert!(!matches!(
+            main.instructions.as_slice(),
+            [Instruction::Jump(target), Instruction::Label(label), ..] if target == label
         ));
     }
 }

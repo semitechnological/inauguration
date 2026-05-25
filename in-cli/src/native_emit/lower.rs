@@ -69,18 +69,13 @@ fn lower_module(module: &UnifiedModule, entry: &str) -> Result<LoweredModule, St
         let func = &functions[name];
         let offset = emitter.len();
         function_offsets.insert(name.clone(), offset);
-        lower_function(
-            &mut emitter,
-            func,
-            &functions,
-            &mut pending_calls,
-        )?;
+        lower_function(&mut emitter, func, &functions, &mut pending_calls)?;
     }
 
     for call in pending_calls {
-        let target_offset = *function_offsets.get(&call.target).ok_or_else(|| {
-            format!("native-lower: unresolved call target `{}`", call.target)
-        })?;
+        let target_offset = *function_offsets
+            .get(&call.target)
+            .ok_or_else(|| format!("native-lower: unresolved call target `{}`", call.target))?;
         let offset = target_offset as i32 - call.site as i32;
         emitter.patch_u32(call.site, aarch64::bl(offset));
     }
@@ -150,18 +145,55 @@ fn lower_function(
     emitter.emit_u32(aarch64::mov_reg64(REG_FP, aarch64::REG_SP));
 
     let mut ctx = LowerCtx::new(&func.params);
+    for name in collect_local_names(&func.body) {
+        ctx.alloc_local(&name);
+    }
+    if ctx.stack_size > 0 {
+        emitter.emit_u32(aarch64::sub_imm64(
+            aarch64::REG_SP,
+            aarch64::REG_SP,
+            ctx.stack_reserve() as u16,
+        ));
+    }
     for stmt in &func.body {
-        lower_stmt(emitter, &mut ctx, stmt, functions, pending_calls, &func.name)?;
+        lower_stmt(
+            emitter,
+            &mut ctx,
+            stmt,
+            functions,
+            pending_calls,
+            &func.name,
+        )?;
     }
 
     if !ctx.emitted_return {
         if func.ret == Typ::Void {
             emitter.emit_insns(&aarch64::load_i64(0, 0));
         }
-        emit_epilogue(emitter);
+        emit_epilogue(emitter, ctx.stack_reserve());
     }
 
     Ok(())
+}
+
+fn collect_local_names(body: &[Stmt]) -> Vec<String> {
+    let mut names = Vec::new();
+    for stmt in body {
+        match stmt {
+            Stmt::Let(name, _, _) => names.push(name.clone()),
+            Stmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                names.extend(collect_local_names(then_body));
+                names.extend(collect_local_names(else_body));
+            }
+            Stmt::Loop { body, .. } => names.extend(collect_local_names(body)),
+            Stmt::Return(_) | Stmt::Assign(_, _) | Stmt::Match { .. } | Stmt::Expr(_) => {}
+        }
+    }
+    names
 }
 
 struct LowerCtx<'a> {
@@ -193,10 +225,14 @@ impl<'a> LowerCtx<'a> {
         if let Some(offset) = self.locals.get(name) {
             return *offset;
         }
-        self.stack_size += 8;
         let offset = self.stack_size;
+        self.stack_size += 8;
         self.locals.insert(name.to_string(), offset);
         offset
+    }
+
+    fn stack_reserve(&self) -> u32 {
+        self.stack_size.next_multiple_of(16)
     }
 }
 
@@ -215,7 +251,7 @@ fn lower_stmt(
             } else {
                 emitter.emit_insns(&aarch64::load_i64(0, 0));
             }
-            emit_epilogue(emitter);
+            emit_epilogue(emitter, ctx.stack_reserve());
             ctx.emitted_return = true;
             Ok(())
         }
@@ -245,10 +281,21 @@ fn lower_stmt(
             pending_calls,
             fn_name,
         ),
-        Stmt::Assign(_, _)
-        | Stmt::Loop { .. }
-        | Stmt::Match { .. }
-        | Stmt::Expr(_) => Err(format!(
+        Stmt::Assign(name, expr) => {
+            let Some(offset) = ctx.locals.get(name).copied() else {
+                return Err(format!(
+                    "native-lower: assignment to unknown local `{name}` in `{fn_name}`"
+                ));
+            };
+            lower_expr_into(emitter, ctx, expr, 0, functions, pending_calls, fn_name)?;
+            emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, offset));
+            Ok(())
+        }
+        Stmt::Expr(expr) => {
+            lower_expr_into(emitter, ctx, expr, 0, functions, pending_calls, fn_name)?;
+            Ok(())
+        }
+        Stmt::Loop { .. } | Stmt::Match { .. } => Err(format!(
             "native-lower: unsupported statement in `{fn_name}`"
         )),
     }
@@ -264,25 +311,20 @@ fn lower_if(
     pending_calls: &mut Vec<PendingCall>,
     fn_name: &str,
 ) -> Result<(), String> {
-    let (take_then, take_else) = match cond {
-        Expr::BoolLit(true) => (true, false),
-        Expr::BoolLit(false) => (false, true),
-        _ => {
-            return Err(format!(
-                "native-lower: unsupported if condition in `{fn_name}` (only bool literals)"
-            ));
-        }
-    };
-
-    if take_then {
-        for stmt in then_body {
-            lower_stmt(emitter, ctx, stmt, functions, pending_calls, fn_name)?;
-        }
-    } else if take_else {
-        for stmt in else_body {
-            lower_stmt(emitter, ctx, stmt, functions, pending_calls, fn_name)?;
-        }
+    lower_expr_into(emitter, ctx, cond, 0, functions, pending_calls, fn_name)?;
+    emitter.emit_u32(aarch64::cmp_reg64(0, aarch64::REG_XZR));
+    let else_branch = emitter.emit_insn(aarch64::b_cond(0, 0));
+    for stmt in then_body {
+        lower_stmt(emitter, ctx, stmt, functions, pending_calls, fn_name)?;
     }
+    let end_branch = emitter.emit_insn(aarch64::b(0));
+    let else_offset = emitter.len() as i32 - else_branch as i32;
+    emitter.patch_u32(else_branch, aarch64::b_cond(0, else_offset));
+    for stmt in else_body {
+        lower_stmt(emitter, ctx, stmt, functions, pending_calls, fn_name)?;
+    }
+    let end_offset = emitter.len() as i32 - end_branch as i32;
+    emitter.patch_u32(end_branch, aarch64::b(end_offset));
     Ok(())
 }
 
@@ -300,6 +342,10 @@ fn lower_expr_into(
             emitter.emit_insns(&aarch64::load_i64(rd, *value));
             Ok(())
         }
+        Expr::BoolLit(value) => {
+            emitter.emit_insns(&aarch64::load_i64(rd, i64::from(*value)));
+            Ok(())
+        }
         Expr::Ident(name) => {
             if let Some(reg) = ctx.params.get(name) {
                 if rd != *reg {
@@ -314,18 +360,70 @@ fn lower_expr_into(
             }
             Ok(())
         }
-        Expr::Binary { op, lhs, rhs } => {
-            lower_binary(emitter, ctx, op, lhs, rhs, rd, functions, pending_calls, fn_name)
-        }
-        Expr::Call { callee, args } => {
-            lower_call(emitter, ctx, callee, args, rd, functions, pending_calls, fn_name)
-        }
-        Expr::StringLit(_)
-        | Expr::BoolLit(_)
-        | Expr::Unary { .. }
-        | Expr::StructInit { .. }
-        | Expr::Field { .. } => Err(format!(
+        Expr::Binary { op, lhs, rhs } => lower_binary(
+            emitter,
+            ctx,
+            op,
+            lhs,
+            rhs,
+            rd,
+            functions,
+            pending_calls,
+            fn_name,
+        ),
+        Expr::Unary { op, expr } => lower_unary(
+            emitter,
+            ctx,
+            op,
+            expr,
+            rd,
+            functions,
+            pending_calls,
+            fn_name,
+        ),
+        Expr::Call { callee, args } => lower_call(
+            emitter,
+            ctx,
+            callee,
+            args,
+            rd,
+            functions,
+            pending_calls,
+            fn_name,
+        ),
+        Expr::StringLit(_) | Expr::StructInit { .. } | Expr::Field { .. } => Err(format!(
             "native-lower: unsupported expression in `{fn_name}`"
+        )),
+    }
+}
+
+fn lower_unary(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    op: &str,
+    expr: &Expr,
+    rd: u8,
+    functions: &HashMap<String, FunctionInfo>,
+    pending_calls: &mut Vec<PendingCall>,
+    fn_name: &str,
+) -> Result<(), String> {
+    lower_expr_into(emitter, ctx, expr, rd, functions, pending_calls, fn_name)?;
+    match op {
+        "-" => {
+            emitter.emit_u32(aarch64::sub_reg64(rd, aarch64::REG_XZR, rd));
+            Ok(())
+        }
+        "!" => {
+            emitter.emit_u32(aarch64::cmp_reg64(rd, aarch64::REG_XZR));
+            emitter.emit_insns(&aarch64::load_i64(rd, 0));
+            let false_branch = emitter.emit_insn(aarch64::b_cond(1, 0));
+            emitter.emit_insns(&aarch64::load_i64(rd, 1));
+            let end_offset = emitter.len() as i32 - false_branch as i32;
+            emitter.patch_u32(false_branch, aarch64::b_cond(1, end_offset));
+            Ok(())
+        }
+        _ => Err(format!(
+            "native-lower: unsupported unary operator `{op}` in `{fn_name}`"
         )),
     }
 }
@@ -418,7 +516,14 @@ fn lower_call(
     Ok(())
 }
 
-fn emit_epilogue(emitter: &mut CodeEmitter) {
+fn emit_epilogue(emitter: &mut CodeEmitter, stack_reserve: u32) {
+    if stack_reserve > 0 {
+        emitter.emit_u32(aarch64::add_imm64(
+            aarch64::REG_SP,
+            aarch64::REG_SP,
+            stack_reserve as u16,
+        ));
+    }
     emitter.emit_u32(0xA8C1_7BFD);
     emitter.emit_u32(aarch64::ret());
 }
@@ -492,10 +597,7 @@ mod tests {
         let module = answer_module();
         let lowered = lower_module(&module, "answer").expect("lower");
         assert!(lowered.code.len() > ENTRY_STUB_SIZE as usize);
-        assert_eq!(
-            &lowered.code[0..4],
-            &inrt::build_entry_stub(12)[0..4]
-        );
+        assert_eq!(&lowered.code[0..4], &inrt::build_entry_stub(12)[0..4]);
     }
 
     #[test]
@@ -510,6 +612,116 @@ mod tests {
         } else {
             assert_eq!(result.unwrap_err(), "native-host-unsupported");
         }
+    }
+
+    #[test]
+    fn lowers_expression_statement_for_side_effects() {
+        let module = UnifiedModule {
+            decls: vec![
+                Decl::Function {
+                    name: "side".into(),
+                    params: vec![("value".into(), Typ::Int)],
+                    ret: Typ::Int,
+                    body: vec![Stmt::Return(Some(Expr::Ident("value".into())))],
+                },
+                Decl::Function {
+                    name: "main".into(),
+                    params: vec![],
+                    ret: Typ::Int,
+                    body: vec![
+                        Stmt::Expr(Expr::Call {
+                            callee: Box::new(Expr::Ident("side".into())),
+                            args: vec![Expr::IntLit(1)],
+                        }),
+                        Stmt::Return(Some(Expr::IntLit(2))),
+                    ],
+                },
+            ],
+        };
+
+        lower_module(&module, "main").expect("lower");
+    }
+
+    #[test]
+    fn lowers_bool_literals_as_scalar_values() {
+        let module = UnifiedModule {
+            decls: vec![Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![Stmt::Return(Some(Expr::BoolLit(true)))],
+            }],
+        };
+
+        lower_module(&module, "main").expect("lower");
+    }
+
+    #[test]
+    fn lowers_unary_scalar_expressions() {
+        let module = UnifiedModule {
+            decls: vec![
+                Decl::Function {
+                    name: "neg".into(),
+                    params: vec![],
+                    ret: Typ::Int,
+                    body: vec![Stmt::Return(Some(Expr::Unary {
+                        op: "-".into(),
+                        expr: Box::new(Expr::IntLit(7)),
+                    }))],
+                },
+                Decl::Function {
+                    name: "not".into(),
+                    params: vec![],
+                    ret: Typ::Int,
+                    body: vec![Stmt::Return(Some(Expr::Unary {
+                        op: "!".into(),
+                        expr: Box::new(Expr::IntLit(0)),
+                    }))],
+                },
+            ],
+        };
+
+        lower_module(&module, "neg").expect("lower");
+    }
+
+    #[test]
+    fn lowers_local_reassignment() {
+        let module = UnifiedModule {
+            decls: vec![Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![
+                    Stmt::Let("x".into(), Some(Typ::Int), Expr::IntLit(1)),
+                    Stmt::Assign("x".into(), Expr::IntLit(2)),
+                    Stmt::Return(Some(Expr::Ident("x".into()))),
+                ],
+            }],
+        };
+
+        lower_module(&module, "main").expect("lower");
+    }
+
+    #[test]
+    fn lowers_runtime_if_conditions() {
+        let module = UnifiedModule {
+            decls: vec![Decl::Function {
+                name: "main".into(),
+                params: vec![("flag".into(), Typ::Int)],
+                ret: Typ::Int,
+                body: vec![
+                    Stmt::Let("x".into(), Some(Typ::Int), Expr::IntLit(1)),
+                    Stmt::If {
+                        cond: Expr::Ident("flag".into()),
+                        then_body: vec![Stmt::Assign("x".into(), Expr::IntLit(2))],
+                        else_body: vec![Stmt::Assign("x".into(), Expr::IntLit(3))],
+                    },
+                    Stmt::Return(Some(Expr::Ident("x".into()))),
+                ],
+            }],
+        };
+
+        lower_module(&module, "main").expect("lower");
     }
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -550,9 +762,94 @@ mod tests {
             }
             other => panic!(
                 "unexpected native exit {:?}; stdout={:?} stderr={:?}",
-                other,
-                output.stdout,
-                output.stderr
+                other, output.stdout, output.stderr
+            ),
+        }
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    #[test]
+    fn scalar_subset_executable_exits_with_return_value() {
+        let module = UnifiedModule {
+            decls: vec![
+                Decl::Function {
+                    name: "side".into(),
+                    params: vec![("value".into(), Typ::Int)],
+                    ret: Typ::Int,
+                    body: vec![Stmt::Return(Some(Expr::Ident("value".into())))],
+                },
+                Decl::Function {
+                    name: "main".into(),
+                    params: vec![],
+                    ret: Typ::Int,
+                    body: vec![
+                        Stmt::Expr(Expr::Call {
+                            callee: Box::new(Expr::Ident("side".into())),
+                            args: vec![Expr::IntLit(5)],
+                        }),
+                        Stmt::Let("x".into(), Some(Typ::Int), Expr::IntLit(1)),
+                        Stmt::If {
+                            cond: Expr::Unary {
+                                op: "!".into(),
+                                expr: Box::new(Expr::BoolLit(false)),
+                            },
+                            then_body: vec![Stmt::Assign(
+                                "x".into(),
+                                Expr::Unary {
+                                    op: "-".into(),
+                                    expr: Box::new(Expr::IntLit(7)),
+                                },
+                            )],
+                            else_body: vec![Stmt::Assign("x".into(), Expr::IntLit(3))],
+                        },
+                        Stmt::Return(Some(Expr::Binary {
+                            op: "+".into(),
+                            lhs: Box::new(Expr::Ident("x".into())),
+                            rhs: Box::new(Expr::IntLit(8)),
+                        })),
+                    ],
+                },
+            ],
+        };
+        let path = temp_executable("scalar-subset-exe");
+        let _ = std::fs::remove_file(&path);
+        compile_native_executable(&module, "main", &path).expect("compile");
+
+        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::process::ExitStatusExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let sign = std::process::Command::new("codesign")
+            .args(["-s", "-", "-f", path.to_str().unwrap()])
+            .status()
+            .expect("codesign spawn");
+        assert!(sign.success(), "codesign failed for native executable");
+
+        let output = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(path.to_str().unwrap())
+            .output()
+            .expect("run executable");
+        match output.status.code() {
+            Some(1) => {}
+            None if output.status.signal() == Some(9) => {
+                let otool = std::process::Command::new("otool")
+                    .args(["-tV", path.to_str().unwrap()])
+                    .output()
+                    .expect("otool");
+                let dump = String::from_utf8_lossy(&otool.stdout);
+                assert!(
+                    dump.contains("b.eq")
+                        && dump.contains("neg\tx0, x0")
+                        && dump.contains("str\tx0, [sp]")
+                        && dump.contains("add\tx0, x0, x1"),
+                    "expected scalar subset instructions in __text; otool:\n{dump}"
+                );
+            }
+            other => panic!(
+                "unexpected native exit {:?}; stdout={:?} stderr={:?}",
+                other, output.stdout, output.stderr
             ),
         }
         let _ = std::fs::remove_file(path);

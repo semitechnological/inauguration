@@ -200,6 +200,15 @@ fn first_named<'a>(n: Node<'a>, kind: &str) -> Option<Node<'a>> {
     n.named_children(&mut w).find(|ch| ch.kind() == kind)
 }
 
+fn last_named<'a>(n: Node<'a>) -> Option<Node<'a>> {
+    let mut out = None;
+    let mut w = n.walk();
+    for ch in n.named_children(&mut w) {
+        out = Some(ch);
+    }
+    out
+}
+
 fn named_descendant<'a>(root: Node<'a>, kind: &str) -> Option<Node<'a>> {
     if root.kind() == kind {
         return Some(root);
@@ -680,9 +689,39 @@ fn extract_kotlin(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
         let ret = n
             .child_by_field_name("type")
             .map(|t| Typ::Named(node_txt(src, t).trim().to_string()))
+            .or_else(|| kotlin_return_type(src, n))
             .unwrap_or(Typ::Void);
-        Some(decl_fn(name, params, ret))
+        let body = n
+            .child_by_field_name("body")
+            .or_else(|| first_named(n, "function_body"))
+            .map(|b| kotlin_body(src, b))
+            .unwrap_or_default();
+        Some(Decl::Function {
+            name,
+            params,
+            ret,
+            body,
+        })
     })
+}
+
+fn kotlin_return_type(src: &[u8], fun: Node<'_>) -> Option<Typ> {
+    let params = named_descendant(fun, "function_value_parameters")?;
+    let mut after_params = false;
+    let mut w = fun.walk();
+    for ch in fun.named_children(&mut w) {
+        if ch == params {
+            after_params = true;
+            continue;
+        }
+        if after_params && matches!(ch.kind(), "user_type" | "type") {
+            return Some(Typ::Named(node_txt(src, ch).trim().to_string()));
+        }
+        if ch.kind() == "function_body" {
+            break;
+        }
+    }
+    None
 }
 
 fn kotlin_params<'a>(src: &[u8], fun: Node<'a>) -> Vec<(String, Typ)> {
@@ -708,6 +747,94 @@ fn kotlin_params<'a>(src: &[u8], fun: Node<'a>) -> Vec<(String, Typ)> {
             }
         }
         out.push((pname, ty));
+    }
+    out
+}
+
+fn kotlin_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
+    let block = first_named(body, "block").unwrap_or(body);
+    let mut out = Vec::new();
+    let mut w = block.walk();
+    for ch in block.named_children(&mut w) {
+        if let Some(stmt) = kotlin_stmt(src, ch) {
+            out.push(stmt);
+        }
+    }
+    out
+}
+
+fn kotlin_stmt(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
+    match stmt.kind() {
+        "return_expression" => kotlin_return_expr(src, stmt).map(Stmt::Return),
+        "assignment" => kotlin_assignment(src, stmt),
+        "call_expression" => kotlin_expr(src, stmt).map(Stmt::Expr),
+        _ => None,
+    }
+}
+
+fn kotlin_return_expr(src: &[u8], ret: Node<'_>) -> Option<Option<Expr>> {
+    let mut w = ret.walk();
+    if let Some(ch) = ret.named_children(&mut w).next() {
+        return kotlin_expr(src, ch).map(Some);
+    }
+    Some(None)
+}
+
+fn kotlin_assignment(src: &[u8], expr: Node<'_>) -> Option<Stmt> {
+    let left = expr.named_child(0)?;
+    let right = last_named(expr)?;
+    if left == right {
+        return None;
+    }
+    if left.kind() != "identifier" {
+        return None;
+    }
+    Some(Stmt::Assign(
+        node_txt(src, left).trim().to_string(),
+        kotlin_expr(src, right)?,
+    ))
+}
+
+fn kotlin_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
+    match expr.kind() {
+        "identifier" => Some(Expr::Ident(node_txt(src, expr).trim().to_string())),
+        "number_literal" => node_txt(src, expr)
+            .trim()
+            .parse::<i64>()
+            .ok()
+            .map(Expr::IntLit),
+        "string_literal" => Some(Expr::StringLit(
+            node_txt(src, expr).trim().trim_matches('"').to_string(),
+        )),
+        "boolean_literal" => match node_txt(src, expr).trim() {
+            "true" => Some(Expr::BoolLit(true)),
+            "false" => Some(Expr::BoolLit(false)),
+            _ => None,
+        },
+        "call_expression" => kotlin_call_expr(src, expr),
+        "value_argument" => expr.named_child(0).and_then(|n| kotlin_expr(src, n)),
+        _ => None,
+    }
+}
+
+fn kotlin_call_expr(src: &[u8], call: Node<'_>) -> Option<Expr> {
+    let callee = first_named(call, "identifier")?;
+    let args = named_descendant(call, "value_arguments")
+        .map(|n| kotlin_args(src, n))
+        .unwrap_or_default();
+    Some(Expr::Call {
+        callee: Box::new(Expr::Ident(node_txt(src, callee).trim().to_string())),
+        args,
+    })
+}
+
+fn kotlin_args(src: &[u8], args: Node<'_>) -> Vec<Expr> {
+    let mut out = Vec::new();
+    let mut w = args.walk();
+    for ch in args.named_children(&mut w) {
+        if let Some(expr) = kotlin_expr(src, ch) {
+            out.push(expr);
+        }
     }
     out
 }
@@ -743,7 +870,17 @@ fn extract_csharp(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
             .unwrap_or(Typ::Void);
         let plist = n.child_by_field_name("parameters")?;
         let params = csharp_params(src, plist);
-        Some(decl_fn(name, params, ret))
+        let body = n
+            .child_by_field_name("body")
+            .or_else(|| first_named(n, "block"))
+            .map(|b| csharp_body(src, b))
+            .unwrap_or_default();
+        Some(Decl::Function {
+            name,
+            params,
+            ret,
+            body,
+        })
     })
 }
 
@@ -766,17 +903,131 @@ fn csharp_params<'a>(src: &[u8], plist: Node<'a>) -> Vec<(String, Typ)> {
     out
 }
 
+fn csharp_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
+    let mut out = Vec::new();
+    let mut w = body.walk();
+    for ch in body.named_children(&mut w) {
+        if let Some(stmt) = csharp_stmt(src, ch) {
+            out.push(stmt);
+        }
+    }
+    out
+}
+
+fn csharp_stmt(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
+    match stmt.kind() {
+        "return_statement" => csharp_return_expr(src, stmt).map(Stmt::Return),
+        "expression_statement" => csharp_expr_statement(src, stmt),
+        _ => None,
+    }
+}
+
+fn csharp_return_expr(src: &[u8], ret: Node<'_>) -> Option<Option<Expr>> {
+    let mut w = ret.walk();
+    if let Some(ch) = ret.named_children(&mut w).next() {
+        return csharp_expr(src, ch).map(Some);
+    }
+    Some(None)
+}
+
+fn csharp_expr_statement(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
+    let mut w = stmt.walk();
+    let expr = stmt.named_children(&mut w).next()?;
+    match expr.kind() {
+        "assignment_expression" => csharp_assignment(src, expr),
+        _ => csharp_expr(src, expr).map(Stmt::Expr),
+    }
+}
+
+fn csharp_assignment(src: &[u8], expr: Node<'_>) -> Option<Stmt> {
+    let left = expr.named_child(0)?;
+    let right = last_named(expr)?;
+    if left == right || left.kind() != "identifier" {
+        return None;
+    }
+    Some(Stmt::Assign(
+        node_txt(src, left).trim().to_string(),
+        csharp_expr(src, right)?,
+    ))
+}
+
+fn csharp_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
+    match expr.kind() {
+        "identifier" => Some(Expr::Ident(node_txt(src, expr).trim().to_string())),
+        "integer_literal" => java_int_literal(node_txt(src, expr)).map(Expr::IntLit),
+        "true" => Some(Expr::BoolLit(true)),
+        "false" => Some(Expr::BoolLit(false)),
+        "string_literal" => Some(Expr::StringLit(
+            node_txt(src, expr).trim().trim_matches('"').to_string(),
+        )),
+        "invocation_expression" => csharp_call_expr(src, expr),
+        "parenthesized_expression" => expr.named_child(0).and_then(|n| csharp_expr(src, n)),
+        "argument" => expr.named_child(0).and_then(|n| csharp_expr(src, n)),
+        _ => None,
+    }
+}
+
+fn csharp_call_expr(src: &[u8], call: Node<'_>) -> Option<Expr> {
+    let callee = first_named(call, "identifier")?;
+    let args = named_descendant(call, "argument_list")
+        .map(|n| csharp_args(src, n))
+        .unwrap_or_default();
+    Some(Expr::Call {
+        callee: Box::new(Expr::Ident(node_txt(src, callee).trim().to_string())),
+        args,
+    })
+}
+
+fn csharp_args(src: &[u8], args: Node<'_>) -> Vec<Expr> {
+    let mut out = Vec::new();
+    let mut w = args.walk();
+    for ch in args.named_children(&mut w) {
+        if let Some(expr) = csharp_expr(src, ch) {
+            out.push(expr);
+        }
+    }
+    out
+}
+
 fn extract_python(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
     extract_fn_nodes(src, root, &["function_definition"], |src, n| {
         let name_n = n.child_by_field_name("name")?;
         let name = normalize_entry(node_txt(src, name_n).trim());
         let ret = n
             .child_by_field_name("return_type")
+            .or_else(|| {
+                let params = n.child_by_field_name("parameters")?;
+                let mut seen_params = false;
+                let mut w = n.walk();
+                for ch in n.named_children(&mut w) {
+                    if ch == params {
+                        seen_params = true;
+                        continue;
+                    }
+                    if seen_params && ch.kind() == "type" {
+                        return Some(ch);
+                    }
+                    if ch.kind() == "block" {
+                        break;
+                    }
+                }
+                None
+            })
             .map(|t| Typ::Named(node_txt(src, t).trim().to_string()))
             .unwrap_or(Typ::Void);
         let plist = n.child_by_field_name("parameters")?;
         let params = simple_param_names(src, plist);
-        Some(decl_fn(name, params, ret))
+        let body = n
+            .child_by_field_name("body")
+            .or_else(|| first_named(n, "block"))
+            .map(|b| python_body(src, b))
+            .unwrap_or_default();
+        Some(Decl::Function {
+            name,
+            params,
+            ret,
+            body,
+        })
     })
 }
 
@@ -803,6 +1054,102 @@ fn simple_param_names<'a>(src: &[u8], plist: Node<'a>) -> Vec<(String, Typ)> {
                 (nm, ty)
             };
             out.push((name, ty));
+        }
+    }
+    out
+}
+
+fn python_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
+    let mut out = Vec::new();
+    let mut w = body.walk();
+    for ch in body.named_children(&mut w) {
+        if let Some(stmt) = python_stmt(src, ch) {
+            out.push(stmt);
+        }
+    }
+    out
+}
+
+fn python_stmt(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
+    match stmt.kind() {
+        "return_statement" => python_return_expr(src, stmt).map(Stmt::Return),
+        "expression_statement" => python_expr_statement(src, stmt),
+        _ => None,
+    }
+}
+
+fn python_return_expr(src: &[u8], ret: Node<'_>) -> Option<Option<Expr>> {
+    let mut w = ret.walk();
+    if let Some(ch) = ret.named_children(&mut w).next() {
+        return python_expr(src, ch).map(Some);
+    }
+    Some(None)
+}
+
+fn python_expr_statement(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
+    let mut w = stmt.walk();
+    let expr = stmt.named_children(&mut w).next()?;
+    match expr.kind() {
+        "assignment" => python_assignment(src, expr),
+        _ => python_expr(src, expr).map(Stmt::Expr),
+    }
+}
+
+fn python_assignment(src: &[u8], expr: Node<'_>) -> Option<Stmt> {
+    let left = expr.named_child(0)?;
+    let right = last_named(expr)?;
+    if left == right || left.kind() != "identifier" {
+        return None;
+    }
+    Some(Stmt::Assign(
+        node_txt(src, left).trim().to_string(),
+        python_expr(src, right)?,
+    ))
+}
+
+fn python_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
+    match expr.kind() {
+        "identifier" => Some(Expr::Ident(node_txt(src, expr).trim().to_string())),
+        "integer" => node_txt(src, expr)
+            .trim()
+            .parse::<i64>()
+            .ok()
+            .map(Expr::IntLit),
+        "string" => Some(Expr::StringLit(
+            node_txt(src, expr)
+                .trim()
+                .trim_matches(['"', '\''])
+                .to_string(),
+        )),
+        "true" => Some(Expr::BoolLit(true)),
+        "false" => Some(Expr::BoolLit(false)),
+        "call" => python_call_expr(src, expr),
+        "argument_list" => expr.named_child(0).and_then(|n| python_expr(src, n)),
+        _ => match node_txt(src, expr).trim() {
+            "True" => Some(Expr::BoolLit(true)),
+            "False" => Some(Expr::BoolLit(false)),
+            _ => None,
+        },
+    }
+}
+
+fn python_call_expr(src: &[u8], call: Node<'_>) -> Option<Expr> {
+    let callee = first_named(call, "identifier")?;
+    let args = named_descendant(call, "argument_list")
+        .map(|n| python_args(src, n))
+        .unwrap_or_default();
+    Some(Expr::Call {
+        callee: Box::new(Expr::Ident(node_txt(src, callee).trim().to_string())),
+        args,
+    })
+}
+
+fn python_args(src: &[u8], args: Node<'_>) -> Vec<Expr> {
+    let mut out = Vec::new();
+    let mut w = args.walk();
+    for ch in args.named_children(&mut w) {
+        if let Some(expr) = python_expr(src, ch) {
+            out.push(expr);
         }
     }
     out
@@ -875,11 +1222,78 @@ fn extract_ts_family(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
             if n.kind() == "function_signature" {
                 let name_n = n.child_by_field_name("name")?;
                 let name = normalize_entry(node_txt(src, name_n).trim());
-                return Some(decl_fn(name, vec![], Typ::Void));
+                let params = ts_params(src, n);
+                let ret = ts_return_type(src, n);
+                return Some(decl_fn(name, params, ret));
             }
-            js_function_decl(src, n)
+            ts_function_decl(src, n)
         },
     )
+}
+
+fn ts_function_decl<'a>(src: &[u8], n: Node<'a>) -> Option<Decl> {
+    let name_n = n.child_by_field_name("name")?;
+    let name = normalize_entry(node_txt(src, name_n).trim());
+    let body = n
+        .child_by_field_name("body")
+        .map(|b| js_body(src, b))
+        .unwrap_or_default();
+    Some(Decl::Function {
+        name,
+        params: ts_params(src, n),
+        ret: ts_return_type(src, n),
+        body,
+    })
+}
+
+fn ts_params(src: &[u8], n: Node<'_>) -> Vec<(String, Typ)> {
+    let mut out = Vec::new();
+    let Some(plist) = n.child_by_field_name("parameters") else {
+        return out;
+    };
+    let mut w = plist.walk();
+    for ch in plist.named_children(&mut w) {
+        if !matches!(
+            ch.kind(),
+            "required_parameter" | "optional_parameter" | "rest_pattern"
+        ) {
+            continue;
+        }
+        let Some(id) = first_named(ch, "identifier") else {
+            continue;
+        };
+        let name = node_txt(src, id).trim().to_string();
+        let ty = named_descendant(ch, "type_annotation")
+            .and_then(|a| first_named(a, "predefined_type").or_else(|| a.named_child(0)))
+            .map(|t| Typ::Named(node_txt(src, t).trim().to_string()))
+            .unwrap_or(Typ::Named("Any".into()));
+        out.push((name, ty));
+    }
+    out
+}
+
+fn ts_return_type(src: &[u8], n: Node<'_>) -> Typ {
+    let Some(params) = n.child_by_field_name("parameters") else {
+        return Typ::Void;
+    };
+    let mut after_params = false;
+    let mut w = n.walk();
+    for ch in n.named_children(&mut w) {
+        if ch == params {
+            after_params = true;
+            continue;
+        }
+        if after_params && ch.kind() == "type_annotation" {
+            return ch
+                .named_child(0)
+                .map(|t| Typ::Named(node_txt(src, t).trim().to_string()))
+                .unwrap_or(Typ::Void);
+        }
+        if ch.kind() == "statement_block" {
+            break;
+        }
+    }
+    Typ::Void
 }
 
 fn js_function_decl<'a>(src: &[u8], n: Node<'a>) -> Option<Decl> {
@@ -1029,7 +1443,144 @@ fn extract_zig(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
             .child_by_field_name("name")
             .or_else(|| named_descendant(n, "identifier"))?;
         let name = normalize_entry(node_txt(src, name_n).trim());
-        Some(decl_fn(name, vec![], Typ::Void))
+        let params = zig_params(src, n);
+        let ret = zig_return_type(src, n).unwrap_or(Typ::Void);
+        let body = n
+            .child_by_field_name("body")
+            .or_else(|| first_named(n, "block"))
+            .map(|b| zig_body(src, b))
+            .unwrap_or_default();
+        Some(Decl::Function {
+            name,
+            params,
+            ret,
+            body,
+        })
+    })
+}
+
+fn zig_params<'a>(src: &[u8], fun: Node<'a>) -> Vec<(String, Typ)> {
+    let mut out = Vec::new();
+    let Some(params) = named_descendant(fun, "parameters") else {
+        return out;
+    };
+    let mut w = params.walk();
+    for ch in params.named_children(&mut w) {
+        if ch.kind() != "parameter" {
+            continue;
+        }
+        let Some(id) = first_named(ch, "identifier") else {
+            continue;
+        };
+        let ty = last_named(ch)
+            .filter(|t| *t != id)
+            .map(|t| Typ::Named(node_txt(src, t).trim().to_string()))
+            .unwrap_or(Typ::Named("Any".into()));
+        out.push((node_txt(src, id).trim().to_string(), ty));
+    }
+    out
+}
+
+fn zig_return_type(src: &[u8], fun: Node<'_>) -> Option<Typ> {
+    let params = named_descendant(fun, "parameters")?;
+    let mut after_params = false;
+    let mut w = fun.walk();
+    for ch in fun.named_children(&mut w) {
+        if ch == params {
+            after_params = true;
+            continue;
+        }
+        if after_params && ch.kind() != "block" {
+            return Some(Typ::Named(node_txt(src, ch).trim().to_string()));
+        }
+        if ch.kind() == "block" {
+            break;
+        }
+    }
+    None
+}
+
+fn zig_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
+    let mut out = Vec::new();
+    let mut w = body.walk();
+    for ch in body.named_children(&mut w) {
+        if let Some(stmt) = zig_stmt(src, ch) {
+            out.push(stmt);
+        }
+    }
+    out
+}
+
+fn zig_stmt(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
+    match stmt.kind() {
+        "expression_statement" => {
+            let mut w = stmt.walk();
+            let expr = stmt.named_children(&mut w).next()?;
+            match expr.kind() {
+                "return_expression" => zig_return_expr(src, expr).map(Stmt::Return),
+                _ => zig_expr(src, expr).map(Stmt::Expr),
+            }
+        }
+        "variable_declaration" => zig_assignment(src, stmt),
+        "return_expression" => zig_return_expr(src, stmt).map(Stmt::Return),
+        "call_expression" => zig_expr(src, stmt).map(Stmt::Expr),
+        _ => None,
+    }
+}
+
+fn zig_return_expr(src: &[u8], ret: Node<'_>) -> Option<Option<Expr>> {
+    let mut w = ret.walk();
+    if let Some(ch) = ret.named_children(&mut w).next() {
+        return zig_expr(src, ch).map(Some);
+    }
+    Some(None)
+}
+
+fn zig_assignment(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
+    let left = first_named(stmt, "identifier")?;
+    let right = last_named(stmt)?;
+    if left == right {
+        return None;
+    }
+    Some(Stmt::Assign(
+        node_txt(src, left).trim().to_string(),
+        zig_expr(src, right)?,
+    ))
+}
+
+fn zig_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
+    match expr.kind() {
+        "identifier" => Some(Expr::Ident(node_txt(src, expr).trim().to_string())),
+        "integer" => node_txt(src, expr)
+            .trim()
+            .parse::<i64>()
+            .ok()
+            .map(Expr::IntLit),
+        "string_literal" => Some(Expr::StringLit(
+            node_txt(src, expr).trim().trim_matches('"').to_string(),
+        )),
+        "true" => Some(Expr::BoolLit(true)),
+        "false" => Some(Expr::BoolLit(false)),
+        "call_expression" => zig_call_expr(src, expr),
+        _ => None,
+    }
+}
+
+fn zig_call_expr(src: &[u8], call: Node<'_>) -> Option<Expr> {
+    let callee = first_named(call, "identifier")?;
+    let mut args = Vec::new();
+    let mut w = call.walk();
+    for ch in call.named_children(&mut w) {
+        if ch == callee {
+            continue;
+        }
+        if let Some(expr) = zig_expr(src, ch) {
+            args.push(expr);
+        }
+    }
+    Some(Expr::Call {
+        callee: Box::new(Expr::Ident(node_txt(src, callee).trim().to_string())),
+        args,
     })
 }
 
@@ -1419,6 +1970,248 @@ class X {
                 ),
                 "{body:?}"
             ),
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn typescript_functions_extract_params_return_and_body() {
+        let src = "function helper(value: number, label: string): number { return value; }\nfunction declared(value: number): boolean;\n";
+        let m = parse_lang(
+            tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            src,
+            extract_ts_family,
+        )
+        .expect("ok");
+        let helper = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "helper"))
+            .expect("helper");
+        match helper {
+            Decl::Function {
+                params, ret, body, ..
+            } => {
+                assert_eq!(
+                    params,
+                    &vec![
+                        ("value".into(), Typ::Named("number".into())),
+                        ("label".into(), Typ::Named("string".into())),
+                    ]
+                );
+                assert_eq!(ret, &Typ::Named("number".into()));
+                assert_eq!(body, &vec![Stmt::Return(Some(Expr::Ident("value".into())))]);
+            }
+            _ => panic!("expected function"),
+        }
+        let declared = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "declared"))
+            .expect("declared");
+        match declared {
+            Decl::Function {
+                params, ret, body, ..
+            } => {
+                assert_eq!(params, &vec![("value".into(), Typ::Named("number".into()))]);
+                assert_eq!(ret, &Typ::Named("boolean".into()));
+                assert!(body.is_empty(), "{body:?}");
+            }
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn csharp_methods_extract_bounded_bodies() {
+        let src = r#"
+class X {
+  int Helper(int value) { return value; }
+  void Main() { value = Helper(2); Helper(value); return; }
+}
+"#;
+        let m = parse_lang(tree_sitter_c_sharp::LANGUAGE.into(), src, extract_csharp).expect("ok");
+        let helper = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "Helper"))
+            .expect("Helper");
+        match helper {
+            Decl::Function { body, .. } => {
+                assert_eq!(body, &vec![Stmt::Return(Some(Expr::Ident("value".into())))]);
+            }
+            _ => panic!("expected function"),
+        }
+        let main = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+            .expect("Main");
+        match main {
+            Decl::Function { body, .. } => {
+                assert_eq!(
+                    body,
+                    &vec![
+                        Stmt::Assign(
+                            "value".into(),
+                            Expr::Call {
+                                callee: Box::new(Expr::Ident("Helper".into())),
+                                args: vec![Expr::IntLit(2)],
+                            },
+                        ),
+                        Stmt::Expr(Expr::Call {
+                            callee: Box::new(Expr::Ident("Helper".into())),
+                            args: vec![Expr::Ident("value".into())],
+                        }),
+                        Stmt::Return(None),
+                    ]
+                );
+            }
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn python_functions_extract_bounded_bodies() {
+        let src = r#"
+def helper(value: int) -> int:
+    return value
+
+def main():
+    value = helper(2)
+    helper(value)
+    return
+"#;
+        let m = parse_lang(tree_sitter_python::LANGUAGE.into(), src, extract_python).expect("ok");
+        let helper = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "helper"))
+            .expect("helper");
+        match helper {
+            Decl::Function { body, .. } => {
+                assert_eq!(body, &vec![Stmt::Return(Some(Expr::Ident("value".into())))]);
+            }
+            _ => panic!("expected function"),
+        }
+        let main = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+            .expect("main");
+        match main {
+            Decl::Function { body, .. } => {
+                assert_eq!(
+                    body,
+                    &vec![
+                        Stmt::Assign(
+                            "value".into(),
+                            Expr::Call {
+                                callee: Box::new(Expr::Ident("helper".into())),
+                                args: vec![Expr::IntLit(2)],
+                            },
+                        ),
+                        Stmt::Expr(Expr::Call {
+                            callee: Box::new(Expr::Ident("helper".into())),
+                            args: vec![Expr::Ident("value".into())],
+                        }),
+                        Stmt::Return(None),
+                    ]
+                );
+            }
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn zig_functions_extract_params_return_and_body() {
+        let src = "fn helper(value: i32) i32 { return value; }\npub fn main() void { value = helper(2); helper(value); return; }\n";
+        let m = parse_lang(tree_sitter_zig::LANGUAGE.into(), src, extract_zig).expect("ok");
+        let helper = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "helper"))
+            .expect("helper");
+        match helper {
+            Decl::Function {
+                params, ret, body, ..
+            } => {
+                assert_eq!(params, &vec![("value".into(), Typ::Named("i32".into()))]);
+                assert_eq!(ret, &Typ::Named("i32".into()));
+                assert_eq!(body, &vec![Stmt::Return(Some(Expr::Ident("value".into())))]);
+            }
+            _ => panic!("expected function"),
+        }
+        let main = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+            .expect("main");
+        match main {
+            Decl::Function { ret, body, .. } => {
+                assert_eq!(ret, &Typ::Named("void".into()));
+                assert_eq!(
+                    body,
+                    &vec![
+                        Stmt::Assign(
+                            "value".into(),
+                            Expr::Call {
+                                callee: Box::new(Expr::Ident("helper".into())),
+                                args: vec![Expr::IntLit(2)],
+                            },
+                        ),
+                        Stmt::Expr(Expr::Call {
+                            callee: Box::new(Expr::Ident("helper".into())),
+                            args: vec![Expr::Ident("value".into())],
+                        }),
+                        Stmt::Return(None),
+                    ]
+                );
+            }
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn kotlin_functions_extract_bounded_bodies() {
+        let src = "fun helper(value: Int): Int { return value }\nfun main() { value = helper(2); helper(value); return }\n";
+        let m =
+            parse_lang(tree_sitter_kotlin_ng::LANGUAGE.into(), src, extract_kotlin).expect("ok");
+        let helper = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "helper"))
+            .expect("helper");
+        match helper {
+            Decl::Function { body, .. } => {
+                assert_eq!(body, &vec![Stmt::Return(Some(Expr::Ident("value".into())))]);
+            }
+            _ => panic!("expected function"),
+        }
+        let main = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+            .expect("main");
+        match main {
+            Decl::Function { body, .. } => {
+                assert_eq!(
+                    body,
+                    &vec![
+                        Stmt::Assign(
+                            "value".into(),
+                            Expr::Call {
+                                callee: Box::new(Expr::Ident("helper".into())),
+                                args: vec![Expr::IntLit(2)],
+                            },
+                        ),
+                        Stmt::Expr(Expr::Call {
+                            callee: Box::new(Expr::Ident("helper".into())),
+                            args: vec![Expr::Ident("value".into())],
+                        }),
+                        Stmt::Return(None),
+                    ]
+                );
+            }
             _ => panic!("expected function"),
         }
     }
