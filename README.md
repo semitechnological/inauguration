@@ -134,6 +134,7 @@ cd runtime/hotreload-daemon && cargo test
 ./scripts/check-in-lang-sample.sh       # in build --parser in; no swiftc
 ./scripts/check-icore-sample.sh         # icore v1/v2 samples; no swiftc
 ./scripts/check-polyglot-sample.sh
+./scripts/check-external-compiler-parity.sh # opportunistic installed-compiler comparisons
 # Optional: same outputs via V (header comment differs); not run in CI.
 v -gc none run shared/protocol/generate_models.v "$(pwd)"   # omit "$(pwd)" to walk up to repo root
 ```

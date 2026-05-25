@@ -1269,6 +1269,12 @@ fn cmd_test(root: &Path) -> Result<()> {
     run_test_step(
         steps[5],
         Command::new("bash")
+            .arg("scripts/check-external-compiler-parity.sh")
+            .current_dir(root),
+    )?;
+    run_test_step(
+        steps[6],
+        Command::new("bash")
             .arg("scripts/check-orchestration-compiler.sh")
             .current_dir(root),
     )?;
@@ -1276,21 +1282,21 @@ fn cmd_test(root: &Path) -> Result<()> {
         eprintln!("Skipping runtime/swift-preview-host steps (IN_TEST_SKIP_SWIFT set).");
     } else {
         run_test_step(
-            steps[6],
+            steps[7],
             Command::new("swift")
                 .arg("package")
                 .arg("clean")
                 .current_dir(root.join("runtime").join("swift-preview-host")),
         )?;
         run_test_step(
-            steps[7],
+            steps[8],
             Command::new("swift")
                 .arg("test")
                 .current_dir(root.join("runtime").join("swift-preview-host")),
         )?;
     }
     run_test_step(
-        steps[8],
+        steps[9],
         Command::new("cargo")
             .arg("test")
             .current_dir(root.join("runtime").join("hotreload-daemon")),
@@ -1298,13 +1304,14 @@ fn cmd_test(root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn test_step_names() -> [&'static str; 9] {
+fn test_step_names() -> [&'static str; 10] {
     [
         "protocol models (scripts/check-protocol-models.sh)",
         "compiler/rust-driver (cargo test --all)",
         "in-cli (cargo test)",
         "polyglot samples (scripts/check-polyglot-sample.sh)",
         "bytecode compiler (scripts/check-bytecode-compiler.sh)",
+        "external compiler parity (scripts/check-external-compiler-parity.sh)",
         "orchestration compiler (scripts/check-orchestration-compiler.sh)",
         "runtime/swift-preview-host (swift package clean)",
         "runtime/swift-preview-host (swift test)",
@@ -1982,6 +1989,11 @@ mod tests {
             super::test_step_names()
                 .iter()
                 .any(|step| step.contains("check-bytecode-compiler.sh"))
+        );
+        assert!(
+            super::test_step_names()
+                .iter()
+                .any(|step| step.contains("check-external-compiler-parity.sh"))
         );
         assert!(
             super::test_step_names()

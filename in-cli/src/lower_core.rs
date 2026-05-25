@@ -15,14 +15,13 @@ fn lower_expr(e: &Expr, env: &HashMap<String, usize>, ssa: &mut usize, out: &mut
         Expr::BoolLit(b) => {
             let id = *ssa;
             *ssa += 1;
-            let v = if *b { 1 } else { 0 };
-            out.push_str(&format!("%{id} = integer_literal $Builtin.Int64, {v}\n"));
+            out.push_str(&format!("%{id} = bool_literal {b}\n"));
             id
         }
-        Expr::StringLit(_) => {
+        Expr::StringLit(s) => {
             let id = *ssa;
             *ssa += 1;
-            out.push_str(&format!("%{id} = integer_literal $Builtin.Int64, 0\n"));
+            out.push_str(&format!("%{id} = string_literal {s:?}\n"));
             id
         }
         Expr::Ident(name) => {
@@ -34,13 +33,21 @@ fn lower_expr(e: &Expr, env: &HashMap<String, usize>, ssa: &mut usize, out: &mut
             out.push_str(&format!("%{id} = integer_literal $Builtin.Int64, 0\n"));
             id
         }
-        Expr::Unary { expr, .. } => lower_expr(expr, env, ssa, out),
-        Expr::Binary { lhs, rhs, .. } => {
-            let _ = lower_expr(lhs, env, ssa, out);
-            let _ = lower_expr(rhs, env, ssa, out);
+        Expr::Unary { op, expr } => {
+            let arg = lower_expr(expr, env, ssa, out);
             let id = *ssa;
             *ssa += 1;
-            out.push_str(&format!("%{id} = integer_literal $Builtin.Int64, 0\n"));
+            out.push_str(&format!("%{id} = builtin_unop {op:?} %{arg}\n"));
+            id
+        }
+        Expr::Binary { op, lhs, rhs } => {
+            let lhs_id = lower_expr(lhs, env, ssa, out);
+            let rhs_id = lower_expr(rhs, env, ssa, out);
+            let id = *ssa;
+            *ssa += 1;
+            out.push_str(&format!(
+                "%{id} = builtin_binop {op:?} %{lhs_id}, %{rhs_id}\n"
+            ));
             id
         }
         Expr::Call { callee, args } => {
@@ -94,44 +101,99 @@ fn lower_stmts_into(
         out.push_str(&format!("%{id} = argument {idx} : $Builtin.Int64\n"));
         env.insert(pname.clone(), id);
     }
+    out.push_str(&lower_stmts_with_env(
+        body,
+        ssa,
+        finish_with_return,
+        true,
+        &mut env,
+    ));
+    out
+}
+
+fn lower_stmts_with_env(
+    body: &[Stmt],
+    ssa: &mut usize,
+    finish_with_return: bool,
+    implicit_default: bool,
+    env: &mut HashMap<String, usize>,
+) -> String {
+    let mut out = String::new();
     for st in body {
         match st {
             Stmt::Let(name, _, e) => {
-                let id = lower_expr(e, &env, ssa, &mut out);
+                let id = lower_expr(e, env, ssa, &mut out);
                 env.insert(name.clone(), id);
             }
             Stmt::Assign(name, e) => {
-                let id = lower_expr(e, &env, ssa, &mut out);
+                let id = lower_expr(e, env, ssa, &mut out);
                 env.insert(name.clone(), id);
             }
             Stmt::Expr(e) => {
-                let _ = lower_expr(e, &env, ssa, &mut out);
+                let _ = lower_expr(e, env, ssa, &mut out);
             }
             Stmt::If {
                 cond,
                 then_body,
                 else_body,
             } => {
-                let _ = lower_expr(cond, &env, ssa, &mut out);
-                out.push_str("// if.then\n");
-                out.push_str(&lower_stmts_into(params, then_body, ssa, false));
+                let cond_id = lower_expr(cond, env, ssa, &mut out);
+                let label_id = *ssa;
+                *ssa += 1;
+                let then_label = format!("bb_if_then_{label_id}");
+                let else_label = format!("bb_if_else_{label_id}");
+                let end_label = format!("bb_if_end_{label_id}");
+                out.push_str(&format!("cond_br %{cond_id}, {then_label}, {else_label}\n"));
+                out.push_str(&format!("label {then_label}\n"));
+                let mut then_env = env.clone();
+                out.push_str(&lower_stmts_with_env(
+                    then_body,
+                    ssa,
+                    finish_with_return,
+                    false,
+                    &mut then_env,
+                ));
+                out.push_str(&format!("br {end_label}\n"));
+                out.push_str(&format!("label {else_label}\n"));
                 if !else_body.is_empty() {
-                    out.push_str("// if.else\n");
-                    out.push_str(&lower_stmts_into(params, else_body, ssa, false));
+                    let mut else_env = env.clone();
+                    out.push_str(&lower_stmts_with_env(
+                        else_body,
+                        ssa,
+                        finish_with_return,
+                        false,
+                        &mut else_env,
+                    ));
                 }
+                out.push_str(&format!("br {end_label}\n"));
+                out.push_str(&format!("label {end_label}\n"));
             }
             Stmt::Loop { cond, body, .. } => {
                 if let Some(c) = cond {
-                    let _ = lower_expr(c, &env, ssa, &mut out);
+                    let _ = lower_expr(c, env, ssa, &mut out);
                 }
                 out.push_str("// loop.body\n");
-                out.push_str(&lower_stmts_into(params, body, ssa, false));
+                let mut loop_env = env.clone();
+                out.push_str(&lower_stmts_with_env(
+                    body,
+                    ssa,
+                    finish_with_return,
+                    false,
+                    &mut loop_env,
+                ));
             }
             Stmt::Match { scrutinee, arms } => {
-                let _ = lower_expr(scrutinee, &env, ssa, &mut out);
+                let _ = lower_expr(scrutinee, env, ssa, &mut out);
                 for arm in arms {
                     out.push_str("// match.arm\n");
-                    out.push_str(&lower_stmts_into(params, &arm.body, ssa, false));
+                    let mut arm_env = env.clone();
+                    out.push_str(&lower_stmts_with_env(
+                        &arm.body,
+                        ssa,
+                        finish_with_return,
+                        false,
+                        &mut arm_env,
+                    ));
                 }
             }
             Stmt::Return(None) => {
@@ -144,13 +206,16 @@ fn lower_stmts_into(
                 return out;
             }
             Stmt::Return(Some(e)) => {
-                let id = lower_expr(e, &env, ssa, &mut out);
+                let id = lower_expr(e, env, ssa, &mut out);
                 if finish_with_return {
                     out.push_str(&format!("bb1:\nreturn %{id} : $Builtin.Int64\n"));
                 }
                 return out;
             }
         }
+    }
+    if !implicit_default {
+        return out;
     }
     let v = *ssa;
     *ssa += 1;

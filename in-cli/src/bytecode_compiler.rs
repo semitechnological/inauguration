@@ -107,4 +107,22 @@ mod tests {
         fs::remove_file(source_path).unwrap();
         fs::remove_file(bytecode_path).unwrap();
     }
+
+    #[test]
+    fn runs_string_bool_and_if_return_bytecode() {
+        let path = temp_file("agent.in");
+        fs::write(
+            &path,
+            "fn ready(flag: Bool) -> String { if flag { return \"ready\"; } return \"no\"; }\nfn main() -> String { return ready(true); }\n",
+        )
+        .unwrap();
+
+        let output = compile_source_path(&path, "App", ParserCli::Auto).unwrap();
+        assert_eq!(
+            run_bytecode_module(output.module).unwrap(),
+            Value::String("ready".to_string())
+        );
+
+        fs::remove_file(path).unwrap();
+    }
 }

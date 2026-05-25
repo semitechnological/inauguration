@@ -76,6 +76,65 @@ fn lower_function(name: &str, instructions: &[String]) -> Result<BytecodeFunctio
     })
 }
 
+fn assignment(line: &str) -> Option<(&str, &str)> {
+    let (lhs, rhs) = line.split_once('=')?;
+    let reg = lhs.trim();
+    if reg.starts_with('%') {
+        Some((reg, rhs.trim()))
+    } else {
+        None
+    }
+}
+
+fn store_register(
+    reg: &str,
+    local_counter: &mut usize,
+    value_map: &mut HashMap<String, usize>,
+    out: &mut Vec<Instruction>,
+) {
+    let slot = *local_counter;
+    *local_counter += 1;
+    value_map.insert(reg.to_string(), slot);
+    out.push(Instruction::Store(slot));
+}
+
+fn parse_string_payload(raw: &str) -> String {
+    raw.trim()
+        .trim_matches('"')
+        .replace("\\\"", "\"")
+        .replace("\\\\", "\\")
+}
+
+fn parse_quoted_op_and_args(rest: &str) -> (String, Vec<&str>) {
+    let rest = rest.trim();
+    if let Some(after_open) = rest.strip_prefix('"')
+        && let Some(end) = after_open.find('"')
+    {
+        let op = after_open[..end].to_string();
+        let args = after_open[end + 1..]
+            .split(',')
+            .flat_map(str::split_whitespace)
+            .filter(|part| part.starts_with('%'))
+            .collect();
+        return (op, args);
+    }
+    let mut parts = rest.split_whitespace();
+    let op = parts.next().unwrap_or("").to_string();
+    let args = parts
+        .flat_map(|part| part.split(','))
+        .map(str::trim)
+        .filter(|part| part.starts_with('%'))
+        .collect();
+    (op, args)
+}
+
+fn is_builtin_function(name: &str) -> bool {
+    matches!(
+        name,
+        "print" | "print_int" | "print_string" | "to_int" | "to_string" | "len"
+    )
+}
+
 /// Parse a single SIL instruction and emit bytecode equivalent(s).
 fn parse_sil_instruction_to_bytecode(
     line: &str,
@@ -90,6 +149,46 @@ fn parse_sil_instruction_to_bytecode(
     // Skip empty and comment lines
     if line.is_empty() || line.starts_with("//") {
         return Ok(out);
+    }
+
+    if let Some(label) = line.strip_prefix("label ").map(str::trim) {
+        out.push(Instruction::Label(label.to_string()));
+        return Ok(out);
+    }
+
+    if let Some((reg, rhs)) = assignment(line) {
+        if let Some(s) = rhs.strip_prefix("string_literal ").map(str::trim) {
+            out.push(Instruction::LoadString(parse_string_payload(s)));
+            store_register(reg, local_counter, value_map, &mut out);
+            return Ok(out);
+        }
+        if let Some(b) = rhs.strip_prefix("bool_literal ").map(str::trim) {
+            out.push(Instruction::LoadBool(b == "true"));
+            store_register(reg, local_counter, value_map, &mut out);
+            return Ok(out);
+        }
+        if let Some(rest) = rhs.strip_prefix("builtin_binop ").map(str::trim) {
+            let (op, args) = parse_quoted_op_and_args(rest);
+            for reg in args {
+                if let Some(slot) = value_map.get(reg) {
+                    out.push(Instruction::Load(*slot));
+                }
+            }
+            out.push(Instruction::BinOp(op));
+            store_register(reg, local_counter, value_map, &mut out);
+            return Ok(out);
+        }
+        if let Some(rest) = rhs.strip_prefix("builtin_unop ").map(str::trim) {
+            let (op, args) = parse_quoted_op_and_args(rest);
+            if let Some(reg) = args.first()
+                && let Some(slot) = value_map.get(*reg)
+            {
+                out.push(Instruction::Load(*slot));
+            }
+            out.push(Instruction::UnOp(op));
+            store_register(reg, local_counter, value_map, &mut out);
+            return Ok(out);
+        }
     }
 
     // %0 = integer_literal $Builtin.Int64, 42
@@ -163,16 +262,17 @@ fn parse_sil_instruction_to_bytecode(
                             .map(str::trim)
                             .filter(|arg| !arg.is_empty())
                             .count();
-                        out.push(Instruction::CallFunction(callee, argc));
+                        if is_builtin_function(&callee) {
+                            out.push(Instruction::CallBuiltin(callee, argc));
+                        } else {
+                            out.push(Instruction::CallFunction(callee, argc));
+                        }
 
                         // Store result
                         if let Some(before_eq) = line.split('=').next() {
                             let res_reg = before_eq.trim();
                             if res_reg.starts_with('%') {
-                                let slot = *local_counter;
-                                *local_counter += 1;
-                                value_map.insert(res_reg.to_string(), slot);
-                                out.push(Instruction::Store(slot));
+                                store_register(res_reg, local_counter, value_map, &mut out);
                             }
                         }
                     }
