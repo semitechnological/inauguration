@@ -2,7 +2,7 @@
 
 use crate::core_ir::{Decl, Typ, UnifiedModule};
 use crate::swift_subset::{Expr, LoopKind, Stmt};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -1222,41 +1222,105 @@ fn type_known(structs: &HashSet<&str>, t: &Typ) -> bool {
     }
 }
 
-fn validate_stmt_types(fn_name: &str, structs: &HashSet<&str>, stmt: &Stmt) -> Result<(), String> {
+fn validate_expr_shapes(
+    fn_name: &str,
+    structs: &HashMap<String, Vec<String>>,
+    expr: &Expr,
+) -> Result<(), String> {
+    match expr {
+        Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Ident(_) => Ok(()),
+        Expr::Unary { expr, .. } => validate_expr_shapes(fn_name, structs, expr),
+        Expr::Binary { lhs, rhs, .. } => {
+            validate_expr_shapes(fn_name, structs, lhs)?;
+            validate_expr_shapes(fn_name, structs, rhs)
+        }
+        Expr::Call { callee, args } => {
+            validate_expr_shapes(fn_name, structs, callee)?;
+            for arg in args {
+                validate_expr_shapes(fn_name, structs, arg)?;
+            }
+            Ok(())
+        }
+        Expr::Field { base, .. } => validate_expr_shapes(fn_name, structs, base),
+        Expr::StructInit { name, fields } => {
+            let schema = structs.get(name).ok_or(format!(
+                ".in: unknown struct initializer `{name}` in fn {fn_name}"
+            ))?;
+            let mut seen = HashSet::new();
+            for (field, expr) in fields {
+                if !seen.insert(field.as_str()) {
+                    return Err(format!(
+                        ".in: duplicate field `{name}.{field}` in fn {fn_name}"
+                    ));
+                }
+                if !schema.iter().any(|known| known == field) {
+                    return Err(format!(
+                        ".in: unknown field `{name}.{field}` in fn {fn_name}"
+                    ));
+                }
+                validate_expr_shapes(fn_name, structs, expr)?;
+            }
+            for field in schema {
+                if !seen.contains(field.as_str()) {
+                    return Err(format!(
+                        ".in: missing field `{name}.{field}` in fn {fn_name}"
+                    ));
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
+fn validate_stmt_types(
+    fn_name: &str,
+    structs: &HashSet<&str>,
+    struct_fields: &HashMap<String, Vec<String>>,
+    stmt: &Stmt,
+) -> Result<(), String> {
     match stmt {
-        Stmt::Let(_, Some(ty), _) => {
+        Stmt::Let(_, Some(ty), expr) => {
             if !type_known(structs, ty) {
                 return Err(format!(
                     ".in: unknown type in `let` annotation in fn {fn_name}"
                 ));
             }
+            validate_expr_shapes(fn_name, struct_fields, expr)?;
         }
-        Stmt::Let(_, None, _)
-        | Stmt::Assign(_, _)
-        | Stmt::Return(None)
-        | Stmt::Return(Some(_))
-        | Stmt::Expr(_) => {}
+        Stmt::Let(_, None, expr)
+        | Stmt::Assign(_, expr)
+        | Stmt::Return(Some(expr))
+        | Stmt::Expr(expr) => {
+            validate_expr_shapes(fn_name, struct_fields, expr)?;
+        }
+        Stmt::Return(None) => {}
         Stmt::If {
+            cond,
             then_body,
             else_body,
             ..
         } => {
+            validate_expr_shapes(fn_name, struct_fields, cond)?;
             for nested in then_body {
-                validate_stmt_types(fn_name, structs, nested)?;
+                validate_stmt_types(fn_name, structs, struct_fields, nested)?;
             }
             for nested in else_body {
-                validate_stmt_types(fn_name, structs, nested)?;
+                validate_stmt_types(fn_name, structs, struct_fields, nested)?;
             }
         }
-        Stmt::Loop { body, .. } => {
+        Stmt::Loop { cond, body, .. } => {
+            if let Some(cond) = cond {
+                validate_expr_shapes(fn_name, struct_fields, cond)?;
+            }
             for nested in body {
-                validate_stmt_types(fn_name, structs, nested)?;
+                validate_stmt_types(fn_name, structs, struct_fields, nested)?;
             }
         }
-        Stmt::Match { arms, .. } => {
+        Stmt::Match { scrutinee, arms } => {
+            validate_expr_shapes(fn_name, struct_fields, scrutinee)?;
             for arm in arms {
                 for nested in &arm.body {
-                    validate_stmt_types(fn_name, structs, nested)?;
+                    validate_stmt_types(fn_name, structs, struct_fields, nested)?;
                 }
             }
         }
@@ -1300,6 +1364,17 @@ fn validate_module(module: &UnifiedModule, require_main: bool) -> Result<(), Str
 
     let struct_names = collect_struct_names(&module);
     let struct_set: HashSet<&str> = struct_names.iter().map(String::as_str).collect();
+    let struct_fields: HashMap<String, Vec<String>> = module
+        .decls
+        .iter()
+        .filter_map(|d| match d {
+            Decl::Struct { name, fields } => Some((
+                name.clone(),
+                fields.iter().map(|(field, _)| field.clone()).collect(),
+            )),
+            _ => None,
+        })
+        .collect();
 
     for d in &module.decls {
         match d {
@@ -1325,7 +1400,7 @@ fn validate_module(module: &UnifiedModule, require_main: bool) -> Result<(), Str
                     return Err(format!(".in: unknown return type in fn {name}",));
                 }
                 for st in body {
-                    validate_stmt_types(name, &struct_set, st)?;
+                    validate_stmt_types(name, &struct_set, &struct_fields, st)?;
                 }
             }
         }
@@ -1507,6 +1582,45 @@ fn main() -> void
                 if name == "y"
                     && matches!(base.as_ref(), Expr::StructInit { name: init, .. } if init == "Point")
         ));
+    }
+
+    #[test]
+    fn struct_initializer_rejects_unknown_field() {
+        let err = parse_in_source(
+            "struct Point { Int x; Int y }\nfn main() -> Point { return Point { x: 1, z: 2 }; }\n",
+        )
+        .expect_err("unknown initializer field should fail");
+
+        assert!(
+            err.contains("unknown field `Point.z`"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn struct_initializer_rejects_missing_field() {
+        let err = parse_in_source(
+            "struct Point { Int x; Int y }\nfn main() -> Point { return Point { x: 1 }; }\n",
+        )
+        .expect_err("missing initializer field should fail");
+
+        assert!(
+            err.contains("missing field `Point.y`"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn struct_initializer_rejects_duplicate_field() {
+        let err = parse_in_source(
+            "struct Point { Int x; Int y }\nfn main() -> Point { return Point { x: 1, x: 2, y: 3 }; }\n",
+        )
+        .expect_err("duplicate initializer field should fail");
+
+        assert!(
+            err.contains("duplicate field `Point.x`"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
