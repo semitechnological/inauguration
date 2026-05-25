@@ -659,6 +659,9 @@ fn split_function_statements(body: &str) -> Vec<String> {
                     if body[i + 1..].trim_start().starts_with("else") {
                         continue;
                     }
+                    if body[i + 1..].trim_start().starts_with('.') {
+                        continue;
+                    }
                     let stmt = trim(&body[start..=i]);
                     if !stmt.is_empty() {
                         out.push(stmt.to_string());
@@ -1485,6 +1488,24 @@ fn main() -> void
             &body[1],
             Stmt::Return(Some(Expr::Field { base, name }))
                 if name == "y" && matches!(base.as_ref(), Expr::Ident(ident) if ident == "p")
+        ));
+    }
+
+    #[test]
+    fn direct_struct_initializer_field_access_stays_one_statement() {
+        let module = parse_in_source(
+            "struct Point { Int x; Int y }\nfn main() -> Int { return Point { x: 2, y: 5 }.y; }\n",
+        )
+        .expect("ok");
+        let Decl::Function { body, .. } = &module.decls[1] else {
+            panic!("fn");
+        };
+        assert_eq!(body.len(), 1);
+        assert!(matches!(
+            &body[0],
+            Stmt::Return(Some(Expr::Field { base, name }))
+                if name == "y"
+                    && matches!(base.as_ref(), Expr::StructInit { name: init, .. } if init == "Point")
         ));
     }
 
