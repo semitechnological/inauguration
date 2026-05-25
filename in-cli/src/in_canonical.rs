@@ -189,6 +189,17 @@ fn format_expr(expr: &Expr) -> String {
         Expr::Binary { op, lhs, rhs } => {
             format!("{} {} {}", format_expr(lhs), op, format_expr(rhs))
         }
+        Expr::StructInit { name, fields } => {
+            let rendered = fields
+                .iter()
+                .map(|(field, expr)| format!("{field}: {}", format_expr(expr)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{name} {{ {rendered} }}")
+        }
+        Expr::Field { base, name } => {
+            format!("{}.{}", format_expr(base), name)
+        }
         Expr::Call { callee, args } => {
             let mut out = format_expr(callee);
             out.push('(');

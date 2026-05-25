@@ -11,6 +11,10 @@ pub enum Value {
     Int(i64),
     Bool(bool),
     String(String),
+    Struct {
+        name: String,
+        fields: Vec<(String, Value)>,
+    },
     Nil,
 }
 
@@ -26,6 +30,7 @@ impl Value {
                 }
             }
             Value::String(_) => 0,
+            Value::Struct { .. } => 0,
             Value::Nil => 0,
         }
     }
@@ -35,6 +40,7 @@ impl Value {
             Value::Int(n) => *n != 0,
             Value::Bool(b) => *b,
             Value::String(s) => !s.is_empty(),
+            Value::Struct { .. } => true,
             Value::Nil => false,
         }
     }
@@ -44,6 +50,7 @@ impl Value {
             Value::Int(n) => n.to_string(),
             Value::Bool(b) => b.to_string(),
             Value::String(s) => s.clone(),
+            Value::Struct { name, .. } => name.clone(),
             Value::Nil => "nil".to_string(),
         }
     }
@@ -70,6 +77,8 @@ pub enum Instruction {
     BinOp(String),
     /// Unary operation: pop 1 value, apply op, push result
     UnOp(String),
+    StructInit(String, Vec<String>),
+    FieldAccess(String),
     /// Jump to label
     Jump(String),
     /// Jump if top of stack is false (pop value)
@@ -152,6 +161,10 @@ fn instruction_to_text(inst: &Instruction) -> String {
         Instruction::Return => "return".to_string(),
         Instruction::BinOp(op) => format!("binop {}", op),
         Instruction::UnOp(op) => format!("unop {}", op),
+        Instruction::StructInit(name, fields) => {
+            format!("struct_init {} {}", name, fields.join(","))
+        }
+        Instruction::FieldAccess(name) => format!("field {}", name),
         Instruction::Jump(label) => format!("jmp {}", label),
         Instruction::JumpIfFalse(label) => format!("jmpf {}", label),
         Instruction::JumpIfTrue(label) => format!("jmpt {}", label),
@@ -288,6 +301,23 @@ fn parse_instruction(line: &str) -> Result<Instruction, String> {
             let op = parts.get(1).ok_or("parse error")?.to_string();
             Ok(Instruction::UnOp(op))
         }
+        "struct_init" => {
+            let name = parts.get(1).ok_or("parse error")?.to_string();
+            let fields = parts
+                .get(2)
+                .map(|raw| {
+                    raw.split(',')
+                        .filter(|field| !field.is_empty())
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default();
+            Ok(Instruction::StructInit(name, fields))
+        }
+        "field" => {
+            let name = parts.get(1).ok_or("parse error")?.to_string();
+            Ok(Instruction::FieldAccess(name))
+        }
         "jmp" => {
             let label = parts.get(1).ok_or("parse error")?.to_string();
             Ok(Instruction::Jump(label))
@@ -394,5 +424,14 @@ mod tests {
 
         let inst = parse_instruction("call foo 2").unwrap();
         assert_eq!(inst, Instruction::CallFunction("foo".to_string(), 2));
+
+        let inst = parse_instruction("struct_init Point x,y").unwrap();
+        assert_eq!(
+            inst,
+            Instruction::StructInit("Point".to_string(), vec!["x".to_string(), "y".to_string()])
+        );
+
+        let inst = parse_instruction("field y").unwrap();
+        assert_eq!(inst, Instruction::FieldAccess("y".to_string()));
     }
 }

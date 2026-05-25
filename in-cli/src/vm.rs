@@ -120,6 +120,26 @@ impl BytecodeVM {
                     let result = self.apply_unop(&op, val)?;
                     self.stack.push(result);
                 }
+                Instruction::StructInit(name, fields) => {
+                    let values = self.pop_n(fields.len())?;
+                    self.stack.push(Value::Struct {
+                        name,
+                        fields: fields.into_iter().zip(values).collect(),
+                    });
+                }
+                Instruction::FieldAccess(name) => {
+                    let value = self.stack.pop().ok_or("stack underflow")?;
+                    if let Value::Struct { fields, .. } = value {
+                        let field = fields
+                            .into_iter()
+                            .find(|(field, _)| field == &name)
+                            .map(|(_, value)| value)
+                            .ok_or(format!("field not found: {}", name))?;
+                        self.stack.push(field);
+                    } else {
+                        return Err(format!("field access on non-struct: {}", name));
+                    }
+                }
                 Instruction::Jump(label) => {
                     let target = label_map
                         .get(label.as_str())
@@ -351,5 +371,29 @@ mod tests {
         let mut vm = BytecodeVM::new(module);
         let result = vm.run().unwrap();
         assert_eq!(result, Value::Int(10));
+    }
+
+    #[test]
+    fn vm_struct_field_access() {
+        let mut module = BytecodeModule::new("main".to_string());
+        let func = BytecodeFunction {
+            name: "main".to_string(),
+            instructions: vec![
+                Instruction::LoadInt(2),
+                Instruction::LoadInt(5),
+                Instruction::StructInit(
+                    "Point".to_string(),
+                    vec!["x".to_string(), "y".to_string()],
+                ),
+                Instruction::FieldAccess("y".to_string()),
+                Instruction::Return,
+            ],
+            local_count: 0,
+        };
+        module.add_function(func);
+
+        let mut vm = BytecodeVM::new(module);
+        let result = vm.run().unwrap();
+        assert_eq!(result, Value::Int(5));
     }
 }

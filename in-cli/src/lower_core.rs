@@ -53,6 +53,27 @@ fn lower_expr(e: &Expr, env: &HashMap<String, usize>, ssa: &mut usize, out: &mut
             ));
             id
         }
+        Expr::StructInit { name, fields } => {
+            let mut rendered_fields = Vec::new();
+            for (field, expr) in fields {
+                let value_id = lower_expr(expr, env, ssa, out);
+                rendered_fields.push(format!("{field}:%{value_id}"));
+            }
+            let id = *ssa;
+            *ssa += 1;
+            out.push_str(&format!(
+                "%{id} = struct_init {name} {}\n",
+                rendered_fields.join(", ")
+            ));
+            id
+        }
+        Expr::Field { base, name } => {
+            let base_id = lower_expr(base, env, ssa, out);
+            let id = *ssa;
+            *ssa += 1;
+            out.push_str(&format!("%{id} = field_access %{base_id} {name}\n"));
+            id
+        }
         Expr::Call { callee, args } => {
             let mut arg_ids = Vec::new();
             if let Expr::Ident(name) = callee.as_ref() {

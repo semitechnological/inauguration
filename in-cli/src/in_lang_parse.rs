@@ -418,6 +418,35 @@ fn parse_expr(s: &str) -> Expr {
     if s.len() >= 2 && s.starts_with('"') && s.ends_with('"') {
         return Expr::StringLit(s[1..s.len() - 1].to_string());
     }
+    if let Some(dot) = find_top_level_field_dot(s) {
+        let base = trim(&s[..dot]);
+        let name = trim(&s[dot + 1..]);
+        if !base.is_empty() && !name.is_empty() {
+            return Expr::Field {
+                base: Box::new(parse_expr(base)),
+                name: name.to_string(),
+            };
+        }
+    }
+    if let Some(open) = find_struct_init_open_brace(s)
+        && s.ends_with('}')
+    {
+        let name = trim(&s[..open]);
+        if !name.is_empty() {
+            let inner = &s[open + 1..s.len() - 1];
+            let fields = split_struct_init_fields(inner)
+                .into_iter()
+                .filter_map(|field| {
+                    let (name, expr) = field.split_once(':')?;
+                    Some((trim(name).to_string(), parse_expr(trim(expr))))
+                })
+                .collect();
+            return Expr::StructInit {
+                name: name.to_string(),
+                fields,
+            };
+        }
+    }
     if let Some(open) = find_call_open_paren(s)
         && s.ends_with(')')
     {
@@ -459,6 +488,8 @@ fn find_top_level_binary_op<'a>(s: &str, ops: &[&'a str]) -> Option<(&'a str, us
             '"' => in_string = true,
             '(' => depth += 1,
             ')' => depth -= 1,
+            '{' => depth += 1,
+            '}' => depth -= 1,
             _ if depth == 0 => {
                 for op in ops {
                     if s[i..].starts_with(op) {
@@ -470,6 +501,63 @@ fn find_top_level_binary_op<'a>(s: &str, ops: &[&'a str]) -> Option<(&'a str, us
         }
     }
     matches.into_iter().last()
+}
+
+fn find_top_level_field_dot(s: &str) -> Option<usize> {
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escape = false;
+    let mut found = None;
+    for (i, c) in s.char_indices() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        if in_string {
+            if c == '\\' {
+                escape = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => in_string = true,
+            '(' | '{' => depth += 1,
+            ')' | '}' => depth -= 1,
+            '.' if depth == 0 => found = Some(i),
+            _ => {}
+        }
+    }
+    found
+}
+
+fn find_struct_init_open_brace(s: &str) -> Option<usize> {
+    let mut paren = 0i32;
+    let mut in_string = false;
+    let mut escape = false;
+    for (i, c) in s.char_indices() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        if in_string {
+            if c == '\\' {
+                escape = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => in_string = true,
+            '(' => paren += 1,
+            ')' => paren -= 1,
+            '{' if paren == 0 => return Some(i),
+            _ => {}
+        }
+    }
+    None
 }
 
 fn find_call_open_paren(s: &str) -> Option<usize> {
@@ -520,6 +608,8 @@ fn split_call_args(inner: &str) -> Vec<String> {
             '"' => in_string = true,
             '(' => depth += 1,
             ')' => depth -= 1,
+            '{' => depth += 1,
+            '}' => depth -= 1,
             ',' if depth == 0 => {
                 let arg = trim(&inner[start..i]);
                 if !arg.is_empty() {
@@ -535,6 +625,10 @@ fn split_call_args(inner: &str) -> Vec<String> {
         out.push(tail.to_string());
     }
     out
+}
+
+fn split_struct_init_fields(inner: &str) -> Vec<String> {
+    split_call_args(inner)
 }
 
 fn split_function_statements(body: &str) -> Vec<String> {
@@ -1365,6 +1459,33 @@ fn main() -> void
         assert_eq!(fields.len(), 2);
         assert_eq!(fields[0].0, "rank");
         assert_eq!(fields[1].0, "suit");
+    }
+
+    #[test]
+    fn struct_initializer_and_field_access_parse_in_body() {
+        let module = parse_in_source(
+            "struct Point { Int x; Int y }\nfn main() -> Int { let p: Point = Point { x: 2, y: 5 }; return p.y; }\n",
+        )
+        .expect("ok");
+        let Decl::Function { body, .. } = &module.decls[1] else {
+            panic!("fn");
+        };
+        assert!(matches!(
+            &body[0],
+            Stmt::Let(
+                name,
+                Some(Typ::Named(ty)),
+                Expr::StructInit { name: init, fields }
+            ) if name == "p"
+                && ty == "Point"
+                && init == "Point"
+                && matches!(fields.as_slice(), [(x, Expr::IntLit(2)), (y, Expr::IntLit(5))] if x == "x" && y == "y")
+        ));
+        assert!(matches!(
+            &body[1],
+            Stmt::Return(Some(Expr::Field { base, name }))
+                if name == "y" && matches!(base.as_ref(), Expr::Ident(ident) if ident == "p")
+        ));
     }
 
     #[test]

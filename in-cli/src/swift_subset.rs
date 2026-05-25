@@ -27,6 +27,14 @@ pub enum Expr {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
+    StructInit {
+        name: String,
+        fields: Vec<(String, Expr)>,
+    },
+    Field {
+        base: Box<Expr>,
+        name: String,
+    },
     Call {
         callee: Box<Expr>,
         args: Vec<Expr>,

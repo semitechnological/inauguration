@@ -145,6 +145,21 @@ fn parse_quoted_op_and_args(rest: &str) -> (String, Vec<&str>) {
     (op, args)
 }
 
+fn parse_struct_init_payload(rest: &str) -> (String, Vec<(String, String)>) {
+    let mut parts = rest.splitn(2, char::is_whitespace);
+    let name = parts.next().unwrap_or("").to_string();
+    let fields = parts
+        .next()
+        .unwrap_or("")
+        .split(',')
+        .filter_map(|part| {
+            let (field, source) = part.trim().split_once(':')?;
+            Some((field.trim().to_string(), source.trim().to_string()))
+        })
+        .collect();
+    (name, fields)
+}
+
 fn is_builtin_function(name: &str) -> bool {
     matches!(
         name,
@@ -213,6 +228,31 @@ fn parse_sil_instruction_to_bytecode(
                 out.push(Instruction::Load(*slot));
             }
             out.push(Instruction::UnOp(op));
+            store_register(reg, local_counter, value_map, &mut out);
+            return Ok(out);
+        }
+        if let Some(rest) = rhs.strip_prefix("struct_init ").map(str::trim) {
+            let (name, fields) = parse_struct_init_payload(rest);
+            for (_, source_reg) in &fields {
+                if let Some(slot) = value_map.get(source_reg.as_str()) {
+                    out.push(Instruction::Load(*slot));
+                }
+            }
+            out.push(Instruction::StructInit(
+                name,
+                fields.into_iter().map(|(field, _)| field).collect(),
+            ));
+            store_register(reg, local_counter, value_map, &mut out);
+            return Ok(out);
+        }
+        if let Some(rest) = rhs.strip_prefix("field_access ").map(str::trim) {
+            let mut parts = rest.split_whitespace();
+            let source_reg = parts.next().ok_or("parse error")?;
+            let field_name = parts.next().ok_or("parse error")?;
+            if let Some(slot) = value_map.get(source_reg) {
+                out.push(Instruction::Load(*slot));
+            }
+            out.push(Instruction::FieldAccess(field_name.to_string()));
             store_register(reg, local_counter, value_map, &mut out);
             return Ok(out);
         }

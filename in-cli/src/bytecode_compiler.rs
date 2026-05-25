@@ -198,6 +198,21 @@ mod tests {
     }
 
     #[test]
+    fn struct_field_access_returns_scalar() {
+        let path = temp_file("struct-field.in");
+        fs::write(
+            &path,
+            "struct Point { Int x; Int y }\nfn main() -> Int { let p: Point = Point { x: 2, y: 5 }; return p.y; }\n",
+        )
+        .unwrap();
+
+        let output = compile_source_path(&path, "App", ParserCli::Auto).unwrap();
+        assert_eq!(run_bytecode_module(output.module).unwrap(), Value::Int(5));
+
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn runs_string_bool_and_if_return_bytecode() {
         let path = temp_file("agent.in");
         fs::write(
