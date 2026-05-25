@@ -9,7 +9,7 @@
 - **Hot reload** for SwiftUI: Unix-socket daemon in **`in`**, metrics, **`runtime/swift-preview-host`**, wire format under **`shared/protocol`**.
 - **Ecosystem glue**: **`plugins/registry`**, **`docs-site`**, **`scripts`** and **`docs/benchmarks`** harnesses.
 
-The published **`in`** binary bundles the hybrid compile wave (native default for **`in build`**), hotreload daemon, and socket-based dev preview. **`in dev`** uses a lightweight client by default; pass **`--preview-client swift`** when you want the SwiftPM preview host. Use **`in build --swiftpm`** only when you need SwiftPM **`swift build`** plus staging as a fallback alongside the native pipeline.
+The published **`in`** binary bundles the default hybrid compile wave for **`in build`**, hotreload daemon, and socket-based dev preview. **`in dev`** uses a lightweight client by default; pass **`--preview-client swift`** when you want the SwiftPM preview host. Use **`in build --swiftpm`** only when you need SwiftPM **`swift build`** plus staging as a fallback alongside the in-tree pipeline.
 
 Hotreload wire formats live under **`shared/protocol`**; regenerators and benchmark helpers live in **`in-cli`** and **`scripts`** (see **`scripts/check-protocol-models.sh`** and **`./scripts/bench-swift.sh`**).
 
@@ -32,7 +32,7 @@ Hotreload wire formats live under **`shared/protocol`**; regenerators and benchm
 
 ## `in build` and SwiftPM staging (macOS/Linux)
 
-Default **`in build`** runs the native hybrid pipeline: it gathers Swift sources (single file; under **`Package.swift`**, the **`Sources/<target>/`** tree that contains the entry file so unrelated targets are not merged; plus **`Generated/`** when present), emits **textual SIL**, then applies inauguration SIL passes. By default SIL comes from **`swiftc -emit-sil`** (toolchain on **`PATH`**, or override with **`IN_SWIFTC`**). **`swiftc`** rejects duplicate **basenames** across primaries; the driver splits those emits and concatenates SIL fragments.
+Default **`in build`** runs the in-tree hybrid/SIL pipeline: it gathers Swift sources (single file; under **`Package.swift`**, the **`Sources/<target>/`** tree that contains the entry file so unrelated targets are not merged; plus **`Generated/`** when present), emits **textual SIL**, then applies inauguration SIL passes. By default SIL comes from **`swiftc -emit-sil`** (toolchain on **`PATH`**, or override with **`IN_SWIFTC`**). **`swiftc`** rejects duplicate **basenames** across primaries; the driver splits those emits and concatenates SIL fragments.
 
 **Core IR fronts (no `swiftc`):** **`.in`** — **`in build --path apps/in-sample/hello.in --module-id App`**; default **`--parser auto`** uses the extension; **`--parser in`** or **`IN_PARSER=in`** force that front. `.in` also accepts explicit `import`, `capability`, and `extern <language> fn ...;` surface declarations; local relative `.in` imports merge declarations into Core IR, `std.io` / `std.fs` synthesize bounded stdlib declarations, and `in agent` reports imports/externs/capabilities as machine-readable facts while extern calls still lower through Core IR graph facts. **`.icore` (JSON)** — **[`docs/architecture/general-compiler.md`](docs/architecture/general-compiler.md)**; **`in build --path apps/icore-sample/min.icore --module-id App`** or **`--parser icore`** / **`IN_PARSER=icore`**. `icoreVersion: 1` keeps declaration + empty-body compatibility; `icoreVersion: 2` accepts bounded body JSON for `let`, assignment, return, call expressions, identifiers, and int/string/bool literals. Dedicated fronts now exist for **Rust** (`.rs`, `syn` + `rustc` validation), **Go** (`.go`), **V** (`.v` / `vlang` magic token), and **OCaml** (`.ml` / `.mli`), each lowering real top-level declarations plus a bounded statement subset (declarations/assignments/returns and control-flow or application markers), not full language semantics yet. Tree-sitter fronts now include bounded Java/Groovy body lowering; other tracked polyglot extensions still route through declaration extraction; ids without a wired grammar return an `.icore` hint. For a single file, **`#!in parser=in`**, **`#!in parser=icore`**, or **`#!in parser=<slug>`** selects the front. See **[`docs/architecture/parser-surface.md`](docs/architecture/parser-surface.md)** and **[`docs/architecture/general-compiler.md`](docs/architecture/general-compiler.md)** for the exact matrix and roadmap.
 
@@ -98,7 +98,7 @@ Publishing: **`inauguration`** crate ships from **`in-cli`**; sources stay align
 in build
 in build --parser in --path apps/in-sample/hello.in --module-id App
 in build --parser in --path apps/in-sample/agent-native.in --module-id App
-in build --swiftpm --path ../aurorality/examples   # native pipeline + SwiftPM emit + staging
+in build --swiftpm --path ../aurorality/examples   # hybrid pipeline + SwiftPM emit + staging
 in agent --path apps/in-sample/agent-native.in --parser in
 in languages
 in languages --json
@@ -108,6 +108,8 @@ in dev
 in dev --preview-client swift       # Swift preview host + SwiftUI path
 in run
 in ocaml path/to/File.swift         # experimental Swift subset check → JSON
+in backend --path apps/in-sample/agent-native.in --target bytecode --json
+in backend --target native --json   # status-only; no native object backend yet
 in test
 in doctor
 in bench
@@ -156,7 +158,7 @@ Writes:
 - `docs/benchmarks/swift-vs-in.md`
 - `docs/benchmarks/swift-vs-in.json`
 
-The markdown report records host/tool versions and tables where each cell is **median wall ms** over `BENCH_RUNS` timed iterations, with **min–max** in parentheses. **`in build`** timings use the **native** pipeline only (default CLI); **SwiftPM `swift build`** is a separate baseline column until native codegen fully replaces the Apple driver. **`swiftc`** uses a single-file probe only when there is no enclosing **`Package.swift`**; otherwise see **`swiftc-bench-typecheck.sh`** above. Details: [`docs/benchmarks/swift-vs-in.md`](docs/benchmarks/swift-vs-in.md) (+ [`swift-vs-in.json`](docs/benchmarks/swift-vs-in.json)).
+The markdown report records host/tool versions and tables where each cell is **median wall ms** over `BENCH_RUNS` timed iterations, with **min–max** in parentheses. **`in build`** timings use the default hybrid/SIL pipeline only; **SwiftPM `swift build`** is a separate baseline column until owned native codegen replaces the Apple driver for that scope. **`swiftc`** uses a single-file probe only when there is no enclosing **`Package.swift`**; otherwise see **`swiftc-bench-typecheck.sh`** above. Details: [`docs/benchmarks/swift-vs-in.md`](docs/benchmarks/swift-vs-in.md) (+ [`swift-vs-in.json`](docs/benchmarks/swift-vs-in.json)).
 
 ### Latest Benchmark Snapshot
 
@@ -166,7 +168,7 @@ Median over `BENCH_RUNS` timed iterations (default 3); parentheses = min–max o
 
 Generated (UTC): `2026-05-09T14:19:19Z` · macOS · Apple M5 Pro · Swift 6.3 · rustc 1.94.1 · V 0.5.0
 
-| Example | SwiftPM swift build median (min–max ms) | in native median (min–max ms) |
+| Example | SwiftPM swift build median (min–max ms) | in hybrid median (min–max ms) |
 |---|---:|---:|
 | `aurorality/examples/counter` | 984.37 (952.47–1004.23) | 548.29 (540.68–578.89) |
 | `aurorality/examples/basic` | 943.56 (936.91–1000.56) | 559.43 (541.97–608.84) |
@@ -174,7 +176,7 @@ Generated (UTC): `2026-05-09T14:19:19Z` · macOS · Apple M5 Pro · Swift 6.3 ·
 
 Second SwiftPM package (in-tree preview host; replaces vendor-only Swift compiler sources, which need a full Ninja Swift build and are not a portable **`in build`** probe):
 
-| Example | SwiftPM swift build median (min–max ms) | in native median (min–max ms) |
+| Example | SwiftPM swift build median (min–max ms) | in hybrid median (min–max ms) |
 |---|---:|---:|
 | `runtime/swift-preview-host` | 681.30 (647.08–781.19) | 771.99 (725.52–774.55) |
 

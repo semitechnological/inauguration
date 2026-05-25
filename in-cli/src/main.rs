@@ -40,6 +40,12 @@ enum PreviewClientKind {
     Rust,
 }
 
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum BackendTargetCli {
+    Bytecode,
+    Native,
+}
+
 #[derive(Subcommand, Debug)]
 enum Commands {
     #[command(about = "Run hybrid compiler pipeline")]
@@ -61,7 +67,7 @@ enum Commands {
         #[arg(
             long,
             action = clap::ArgAction::SetTrue,
-            help = "After the native pipeline, run SwiftPM swift build and stage products (toolchain fallback)"
+            help = "After the in-tree hybrid pipeline, run SwiftPM swift build and stage products (toolchain fallback)"
         )]
         swiftpm: bool,
         #[arg(
@@ -202,6 +208,19 @@ enum Commands {
         #[arg(long, default_value_t = false)]
         verbose: bool,
     },
+    #[command(about = "Report owned backend status and compile-path facts")]
+    Backend {
+        #[arg(long, default_value = ".")]
+        path: String,
+        #[arg(long, default_value = "App")]
+        module_id: String,
+        #[arg(long, value_enum, default_value_t = ParserCli::Auto)]
+        parser: ParserCli,
+        #[arg(long, value_enum, default_value_t = BackendTargetCli::Bytecode)]
+        target: BackendTargetCli,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
     #[command(about = "Run self-hosted compiler test suites")]
     Test {
         #[arg(long, default_value_t = false)]
@@ -336,6 +355,13 @@ fn run() -> Result<()> {
         Commands::RunBytecode { path, verbose } => {
             cmd_run_bytecode(&invocation_cwd, &path, verbose)
         }
+        Commands::Backend {
+            path,
+            module_id,
+            parser,
+            target,
+            json,
+        } => cmd_backend(&invocation_cwd, &path, &module_id, parser, target, json),
         Commands::Test {
             self_host,
             toolchain,
@@ -1260,6 +1286,103 @@ fn cmd_execute_bytecode(cwd: &Path, path: &str, module_id: &str, verbose: bool) 
     Ok(())
 }
 
+fn cmd_backend(
+    cwd: &Path,
+    path: &str,
+    module_id: &str,
+    parser: ParserCli,
+    target: BackendTargetCli,
+    json: bool,
+) -> Result<()> {
+    let start = Instant::now();
+    let source_path = resolve_invocation_path(cwd, path);
+    let selected = match target {
+        BackendTargetCli::Bytecode => inauguration::native_backend::bytecode_backend_status(),
+        BackendTargetCli::Native => inauguration::native_backend::native_backend_status(),
+    };
+    let mut request_supported = matches!(target, BackendTargetCli::Bytecode);
+    let mut request_reason_code = if selected.implemented {
+        None
+    } else {
+        Some(selected.reason_code)
+    };
+    let mut request_error: Option<String> = None;
+    let artifact = if matches!(target, BackendTargetCli::Bytecode) {
+        match inauguration::bytecode_compiler::compile_source_path(&source_path, module_id, parser)
+        {
+            Ok(output) => {
+                let instruction_count: usize = output
+                    .module
+                    .functions
+                    .iter()
+                    .map(|function| function.instructions.len())
+                    .sum();
+                Some(serde_json::json!({
+                    "entry_point": output.module.entry_point,
+                    "function_count": output.module.functions.len(),
+                    "instruction_count": instruction_count,
+                    "artifact_kind": selected.artifact_kind,
+                }))
+            }
+            Err(e) => {
+                if !json {
+                    return Err(InError::Message(format!("bytecode backend: {e}")));
+                }
+                request_supported = false;
+                request_reason_code = Some("bytecode-backend-unsupported-input");
+                request_error = Some(e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+    if json {
+        let report = serde_json::json!({
+            "schema_version": 1,
+            "path": source_path.display().to_string(),
+            "module_id": module_id,
+            "request": {
+                "path": source_path.display().to_string(),
+                "module_id": module_id,
+                "parser": format!("{parser:?}"),
+                "target": match target {
+                    BackendTargetCli::Bytecode => "bytecode",
+                    BackendTargetCli::Native => "native",
+                },
+                "supported": request_supported,
+                "reason_code": request_reason_code,
+                "error": request_error,
+            },
+            "selected": selected,
+            "available": inauguration::native_backend::backend_statuses(),
+            "artifact": artifact,
+            "timing": {
+                "total_micros": start.elapsed().as_micros(),
+            },
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report)
+                .map_err(|e| InError::Message(format!("backend json: {e}")))?
+        );
+    } else {
+        println!("backend: {}", selected.name);
+        println!("implemented: {}", selected.implemented);
+        println!("stage: {}", selected.stage);
+        println!("reason_code: {}", selected.reason_code);
+        println!("input_stage: {}", selected.input_stage);
+        println!("artifact_kind: {}", selected.artifact_kind);
+        if let Some(artifact) = artifact {
+            println!("artifact: {artifact}");
+        }
+        println!("timing.total_ms={elapsed_ms:.3}");
+    }
+    Ok(())
+}
+
 #[derive(Clone, Copy, Debug)]
 struct TestOptions {
     self_host: bool,
@@ -2150,6 +2273,89 @@ mod tests {
                 assert!(verbose);
             }
             _ => panic!("expected run-bytecode command"),
+        }
+    }
+
+    #[test]
+    fn parse_execute_bytecode_subcommand() {
+        let cli = Cli::try_parse_from([
+            "in",
+            "execute-bytecode",
+            "apps/in-sample/hello.in",
+            "--module-id",
+            "Hello",
+            "--verbose",
+        ])
+        .expect("cli parse");
+        match cli.command {
+            Commands::ExecuteBytecode {
+                path,
+                module_id,
+                verbose,
+            } => {
+                assert_eq!(path, "apps/in-sample/hello.in");
+                assert_eq!(module_id, "Hello");
+                assert!(verbose);
+            }
+            _ => panic!("expected execute-bytecode command"),
+        }
+    }
+
+    #[test]
+    fn parse_backend_report_subcommand() {
+        let cli = Cli::try_parse_from([
+            "in",
+            "backend",
+            "--path",
+            "apps/in-sample/hello.in",
+            "--target",
+            "bytecode",
+            "--json",
+        ])
+        .expect("cli parse");
+        match cli.command {
+            Commands::Backend {
+                path, target, json, ..
+            } => {
+                assert_eq!(path, "apps/in-sample/hello.in");
+                assert!(matches!(target, BackendTargetCli::Bytecode));
+                assert!(json);
+            }
+            _ => panic!("expected backend command"),
+        }
+    }
+
+    #[test]
+    fn parse_backend_native_status_subcommand() {
+        let cli = Cli::try_parse_from([
+            "in",
+            "backend",
+            "--path",
+            "apps/in-sample/hello.in",
+            "--module-id",
+            "Hello",
+            "--parser",
+            "in",
+            "--target",
+            "native",
+            "--json",
+        ])
+        .expect("cli parse");
+        match cli.command {
+            Commands::Backend {
+                path,
+                module_id,
+                parser,
+                target,
+                json,
+            } => {
+                assert_eq!(path, "apps/in-sample/hello.in");
+                assert_eq!(module_id, "Hello");
+                assert!(matches!(parser, ParserCli::In));
+                assert!(matches!(target, BackendTargetCli::Native));
+                assert!(json);
+            }
+            _ => panic!("expected backend command"),
         }
     }
 

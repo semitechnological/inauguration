@@ -161,6 +161,62 @@ echo "check bytecode execution examples"
 "${in_cmd[@]}" execute-bytecode apps/in-sample/agent-native.in > "$tmp_dir/agent-native-bytecode.txt"
 "${in_cmd[@]}" execute-bytecode apps/in-sample/orchestration.in > "$tmp_dir/orchestration-bytecode.txt"
 
+echo "check owned backend report"
+backend_json="$tmp_dir/backend.json"
+"${in_cmd[@]}" backend --path apps/in-sample/agent-native.in --target bytecode --json > "$backend_json"
+python3 - "$backend_json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+data = json.loads(Path(sys.argv[1]).read_text())
+
+def require(condition, message):
+    if not condition:
+        raise SystemExit(message)
+
+selected = data.get("selected") or {}
+require(data.get("schema_version") == 1, "backend schema version was not 1")
+require(selected.get("name") == "bytecode", "backend selected name was not bytecode")
+require(selected.get("implemented") is True, "bytecode backend was not implemented")
+require(selected.get("reason_code") == "bytecode-vm-subset", "backend reason code was not bytecode-vm-subset")
+require(selected.get("artifact_kind") == "bytecode-assembly", "backend artifact kind was not bytecode-assembly")
+request = data.get("request") or {}
+require(request.get("supported") is True, "bytecode backend request was not supported")
+artifact = data.get("artifact") or {}
+require(artifact.get("entry_point") == "main", "backend artifact entry point was not main")
+require((artifact.get("function_count") or 0) >= 1, "backend artifact function count was empty")
+available = {
+    (backend.get("name"), backend.get("implemented"), backend.get("reason_code"))
+    for backend in data.get("available") or []
+}
+require(("native", False, "native-backend-not-implemented") in available, "native backend status was not explicit")
+PY
+
+native_backend_json="$tmp_dir/native-backend.json"
+"${in_cmd[@]}" backend --path apps/in-sample/agent-native.in --target native --json > "$native_backend_json"
+python3 - "$native_backend_json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+data = json.loads(Path(sys.argv[1]).read_text())
+
+def require(condition, message):
+    if not condition:
+        raise SystemExit(message)
+
+selected = data.get("selected") or {}
+require(data.get("schema_version") == 1, "native backend schema version was not 1")
+require(selected.get("name") == "native", "native backend selected name was not native")
+require(selected.get("implemented") is False, "native backend must remain status-only")
+require(selected.get("reason_code") == "native-backend-not-implemented", "native backend reason code mismatch")
+request = data.get("request") or {}
+require(request.get("supported") is False, "native backend request unexpectedly reported supported")
+require(request.get("reason_code") == "native-backend-not-implemented", "native backend request reason code mismatch")
+require(data.get("artifact") is None, "native backend unexpectedly reported an artifact")
+PY
+
 echo "check package json"
 package_json="$tmp_dir/package.json"
 "${in_cmd[@]}" package --path apps/package-sample --json > "$package_json"

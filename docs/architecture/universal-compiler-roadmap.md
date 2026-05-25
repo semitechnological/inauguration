@@ -49,6 +49,7 @@ Phase work should route through the strict v0.4 orchestration surfaces before cl
 | Graph command | Compiler graph facts are visible as stable JSON: parser decision, declarations, functions, call edges, effects, capabilities, orchestration facts, entrypoint, reason codes, and timing. |
 | Package manifest report | Package-level identity, targets, dependencies, capabilities, extensions, package graph nodes, target selection, capability policy, runtime boundaries, and parser-front decisions are reportable without installing or executing external systems. |
 | Orchestration facts | Metadata such as `enable`, `@pure`, `@gpu`, `@parallel_safe`, `distributed fn`, and `parallel` is reported with local plan steps and local distributed job facts before remote runtime execution is claimed. |
+| Backend report | `in backend` distinguishes the implemented bytecode VM subset from native machine-code status-only contracts. |
 
 These are visibility and local-planning surfaces. They do not imply GPU kernels, remote workers, native binaries, package installation, or language runtime execution.
 
