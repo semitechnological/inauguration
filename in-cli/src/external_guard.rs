@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::path::Path;
+use std::process::Command;
 
 thread_local! {
     static GUARD_STATE: RefCell<GuardState> = const { RefCell::new(GuardState::inactive()) };
@@ -70,6 +71,11 @@ pub const FORBIDDEN_OWNED_TOOLS: &[&str] = &[
     "python3", "python", "node", "zig", "v", "nim", "odin", "hare", "dart", "groovy", "ruby",
     "gcc", "g++", "ld", "link", "swift", "xcrun",
 ];
+
+pub fn guard_command(program: &str) -> Command {
+    ExternalInvocationGuard::record(program);
+    Command::new(program)
+}
 
 pub fn is_forbidden_owned_tool(program: &str) -> bool {
     let basename = Path::new(program)

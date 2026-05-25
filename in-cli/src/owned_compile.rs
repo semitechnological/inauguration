@@ -1,6 +1,7 @@
 use crate::bytecode_compiler;
 use crate::compile_cache;
 use crate::core_ir::{Decl, UnifiedModule};
+use crate::core_ir_verifier;
 use crate::core_typecheck;
 use crate::external_guard::{self, ExternalInvocationGuard};
 use crate::native_backend;
@@ -91,6 +92,19 @@ fn jobs_for_request(request: &OwnedCompileRequest) -> usize {
 fn timing_waves_for_jobs(jobs: usize, total_micros: u128) -> Vec<u128> {
     if jobs <= 1 {
         return vec![total_micros];
+    }
+    if crate::v_native::v_native_available() {
+        let boundaries = crate::v_native::parallel::wave_plan(jobs, jobs, jobs);
+        let mut waves = Vec::with_capacity(boundaries.len());
+        for &boundary in &boundaries {
+            let share = (total_micros * boundary as u128) / jobs as u128;
+            waves.push(share);
+        }
+        if let Some((last, rest)) = waves.split_last_mut() {
+            let sum: u128 = rest.iter().sum();
+            *last = total_micros.saturating_sub(sum);
+        }
+        return waves;
     }
     let per = total_micros / jobs as u128;
     let mut waves = vec![per; jobs];
@@ -226,6 +240,25 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
     report.frontend_level = "core-ir-direct";
     report.parsed_function_count = count_functions(&module);
 
+    let verify_opts = core_ir_verifier::VerifyOptions {
+        entry: request.entry.clone(),
+        require_entry: request.entry.as_deref() == Some("main"),
+    };
+    let verify_report = core_ir_verifier::verify_module(&module, &verify_opts);
+    if !verify_report.ok {
+        report.reason_code = Some(format!(
+            "verify-{}",
+            verify_report
+                .reason_code
+                .as_deref()
+                .unwrap_or("failed")
+        ));
+        report.reason = verify_report.reason.clone();
+        report.error = verify_report.reason;
+        report.call_edge_count = verify_report.call_edges.len();
+        return finalize_report(&mut report, started, &cwd, &frontend_hash);
+    }
+
     if let Err(err) = core_typecheck::typecheck_executable(&module) {
         report.semantic_level = "failed";
         report.reason_code = Some("semantic-typecheck-failed".to_string());
@@ -315,11 +348,44 @@ fn compile_native(
     Ok((out_path.display().to_string(), eval_exit))
 }
 
+fn try_const_answer_entry(module: &UnifiedModule, entry: &str) -> Option<u8> {
+    use crate::swift_subset::{Expr, Stmt};
+    for decl in &module.decls {
+        if let Decl::Function {
+            name,
+            body,
+            ret,
+            ..
+        } = decl
+        {
+            if name != entry {
+                continue;
+            }
+            if *ret != crate::swift_subset::Typ::Int {
+                return None;
+            }
+            if body.len() != 1 {
+                return None;
+            }
+            if let Stmt::Return(Some(Expr::IntLit(val))) = &body[0] {
+                let code = crate::v_native::inrt::eval_answer(*val);
+                return Some(code);
+            }
+        }
+    }
+    None
+}
+
 fn const_eval_entry_exit_code(
     module: &UnifiedModule,
     module_id: &str,
     entry: &str,
 ) -> Result<u8, String> {
+    if crate::v_native::v_native_available() {
+        if let Some(code) = try_const_answer_entry(module, entry) {
+            return Ok(code);
+        }
+    }
     let sil = crate::compiler::driver::lower_unified_module(module, module_id);
     let artifact = crate::hybrid_sil::parse_textual_sil(&sil);
     let mut bytecode_module = sil_to_bytecode::lower_sil_to_bytecode(&artifact)?;

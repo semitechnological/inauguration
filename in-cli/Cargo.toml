@@ -59,6 +59,9 @@ tree-sitter-zig = "1.1.2"
 [target.'cfg(unix)'.dependencies]
 notify = "8"
 
+[build-dependencies]
+which = "6"
+
 [dev-dependencies]
 criterion = "0.5"
 

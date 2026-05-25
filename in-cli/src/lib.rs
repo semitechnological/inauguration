@@ -34,6 +34,7 @@ pub mod sil_emit;
 pub mod sil_to_bytecode;
 pub mod swift_subset;
 pub mod vm;
+pub mod v_native;
 
 #[cfg(test)]
 mod in_pipeline_tests {

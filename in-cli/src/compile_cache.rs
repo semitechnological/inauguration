@@ -111,17 +111,24 @@ struct CompileCacheMetadata {
     report: CachedOwnedCompileReport,
 }
 
+pub fn fnv1a_hash(data: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for &byte in data {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
 pub fn source_frontend_hash(path: &Path, content: &str) -> String {
     let mut hash: u64 = 0xcbf29ce484222325;
-    for byte in path.to_string_lossy().as_bytes() {
-        hash ^= u64::from(*byte);
+    for &byte in path.to_string_lossy().as_bytes() {
+        hash ^= u64::from(byte);
         hash = hash.wrapping_mul(0x100000001b3);
     }
     hash ^= 0xff;
-    for byte in content.as_bytes() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
+    let content_hash = fnv1a_hash(content.as_bytes());
+    hash = hash.wrapping_mul(0x100000001b3) ^ content_hash;
     format!("{hash:016x}")
 }
 
