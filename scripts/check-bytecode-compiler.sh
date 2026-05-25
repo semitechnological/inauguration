@@ -11,3 +11,4 @@ OUT="target/in/polyglot-sample.bca"
 grep -q 'call helper 1' "$OUT"
 "${IN_CMD[@]}" run-bytecode "$OUT"
 "${IN_CMD[@]}" execute-bytecode apps/polyglot-sample/sample.in --module-id App
+"${IN_CMD[@]}" execute-bytecode apps/polyglot-sample/sample.ml --module-id App

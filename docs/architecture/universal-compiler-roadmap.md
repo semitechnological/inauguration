@@ -68,7 +68,7 @@ The first owned runtime is the existing bytecode VM subset fed by Core IR/SIL. T
 
 ## Current slice
 
-This roadmap starts by landing Phase 0: a CLI/library language support matrix plus parser ids for OCaml, Odin, and Hare. Those three are tracked at level 0 until a grammar or dedicated front exists.
+The current implementation has moved past the first matrix-only slice. OCaml now has a dedicated bounded front for top-level `let` functions and simple application expressions; Odin and Hare remain tracked level-0 `.icore` redirects until their own fronts land.
 
 ## See also
 

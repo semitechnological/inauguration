@@ -52,7 +52,7 @@ run_ok apps/polyglot-sample/sample.py
 run_ok apps/polyglot-sample/sample.rb
 run_ok apps/polyglot-sample/sample.zig
 run_ok apps/polyglot-sample/sample.dart
+run_ok apps/polyglot-sample/sample.ml
 run_icore_redirect apps/polyglot-sample/sample.nim
-run_icore_redirect apps/polyglot-sample/sample.ml
 run_icore_redirect apps/polyglot-sample/sample.odin
 run_icore_redirect apps/polyglot-sample/sample.ha

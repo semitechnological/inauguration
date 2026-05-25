@@ -18,12 +18,12 @@ pub fn parse_polyglot_file(id: ParserId, path: &Path) -> Result<UnifiedModule, S
             id.as_str()
         )),
         ParserId::Go
+        | ParserId::OCaml
         | ParserId::Clojure
         | ParserId::Nim
         | ParserId::D
         | ParserId::Crystal
         | ParserId::VbNet
-        | ParserId::OCaml
         | ParserId::Odin
         | ParserId::Hare
         | ParserId::V => Err(format!(

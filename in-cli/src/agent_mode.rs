@@ -676,7 +676,8 @@ fn language_level(resolved: ResolvedBuildParser) -> LanguageLevel {
             | ParserId::Cpp
             | ParserId::ObjCpp
             | ParserId::JavaScript
-            | ParserId::TypeScript,
+            | ParserId::TypeScript
+            | ParserId::OCaml,
         ) => LanguageLevel {
             level: 2,
             label: "bounded body lowering".to_string(),
@@ -687,7 +688,6 @@ fn language_level(resolved: ResolvedBuildParser) -> LanguageLevel {
             | ParserId::D
             | ParserId::Crystal
             | ParserId::VbNet
-            | ParserId::OCaml
             | ParserId::Odin
             | ParserId::Hare,
         ) => LanguageLevel {
