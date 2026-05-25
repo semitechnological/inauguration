@@ -16,8 +16,12 @@ pub fn typecheck_module(module: &UnifiedModule, kind: ModuleKind) -> Result<(), 
     }
 
     for decl in &module.decls {
-        if let Decl::Function { name, body, .. } = decl {
-            check_stmts(name, body, &facts, &mut HashMap::new())?;
+        if let Decl::Function {
+            name, params, body, ..
+        } = decl
+        {
+            let mut env = params.iter().cloned().collect();
+            check_stmts(name, body, &facts, &mut env)?;
         }
     }
 
@@ -87,6 +91,9 @@ fn check_stmt(
             Ok(())
         }
         Stmt::Assign(name, expr) => {
+            if !env.contains_key(name) {
+                return Err(format!("unresolved assignment `{name}` in `{fn_name}`"));
+            }
             check_expr(fn_name, expr, facts, env)?;
             if let Some(expr_typ) = expr_type(expr, facts, env)? {
                 env.insert(name.clone(), expr_typ);
@@ -128,7 +135,14 @@ fn check_expr(
     env: &HashMap<String, Typ>,
 ) -> Result<(), String> {
     match expr {
-        Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Ident(_) => Ok(()),
+        Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => Ok(()),
+        Expr::Ident(name) => {
+            if env.contains_key(name) {
+                Ok(())
+            } else {
+                Err(format!("unresolved identifier `{name}` in `{fn_name}`"))
+            }
+        }
         Expr::Unary { expr, .. } => check_expr(fn_name, expr, facts, env),
         Expr::Binary { lhs, rhs, .. } => {
             check_expr(fn_name, lhs, facts, env)?;
@@ -167,13 +181,14 @@ fn check_expr(
             Ok(())
         }
         Expr::Call { callee, args } => {
-            if let Expr::Ident(name) = callee.as_ref()
-                && !facts.functions.contains(name.as_str())
-            {
-                return Err(format!("unresolved function call `{name}` in `{fn_name}`"));
+            if let Expr::Ident(name) = callee.as_ref() {
+                if !facts.functions.contains(name.as_str()) {
+                    return Err(format!("unresolved function call `{name}` in `{fn_name}`"));
+                }
+            } else {
+                check_expr(fn_name, callee, facts, env)?;
             }
 
-            check_expr(fn_name, callee, facts, env)?;
             for arg in args {
                 check_expr(fn_name, arg, facts, env)?;
             }
@@ -224,6 +239,15 @@ mod tests {
 
     fn module(decls: Vec<Decl>) -> UnifiedModule {
         UnifiedModule { decls }
+    }
+
+    fn function_with_params(name: &str, params: Vec<(String, Typ)>, body: Vec<Stmt>) -> Decl {
+        Decl::Function {
+            name: name.to_string(),
+            params,
+            ret: Typ::Void,
+            body,
+        }
     }
 
     fn point_struct() -> Decl {
@@ -302,6 +326,53 @@ mod tests {
             err.contains("unresolved function call `missing` in `main`"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn rejects_unresolved_identifiers_in_value_position() {
+        let err = typecheck_executable(&module(vec![function(
+            "main",
+            vec![Stmt::Return(Some(Expr::Ident("missing".to_string())))],
+        )]))
+        .expect_err("unresolved identifiers should fail");
+
+        assert!(
+            err.contains("unresolved identifier `missing` in `main`"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_assignment_to_unresolved_identifier() {
+        let err = typecheck_executable(&module(vec![function(
+            "main",
+            vec![Stmt::Assign("missing".to_string(), Expr::IntLit(1))],
+        )]))
+        .expect_err("assignments require existing bindings");
+
+        assert!(
+            err.contains("unresolved assignment `missing` in `main`"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn accepts_function_params_as_bound_identifiers() {
+        typecheck_executable(&module(vec![
+            function_with_params(
+                "helper",
+                vec![("value".to_string(), Typ::Int)],
+                vec![Stmt::Return(Some(Expr::Ident("value".to_string())))],
+            ),
+            function(
+                "main",
+                vec![Stmt::Return(Some(Expr::Call {
+                    callee: Box::new(Expr::Ident("helper".to_string())),
+                    args: vec![Expr::IntLit(7)],
+                }))],
+            ),
+        ]))
+        .expect("function parameters should be in scope");
     }
 
     #[test]

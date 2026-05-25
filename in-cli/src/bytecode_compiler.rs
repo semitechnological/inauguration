@@ -93,6 +93,21 @@ mod tests {
     }
 
     #[test]
+    fn rejects_unresolved_identifier_before_lowering() {
+        let path = temp_file("unresolved-ident.in");
+        fs::write(&path, "fn main() -> Int { return missing; }\n").unwrap();
+
+        let err = compile_source_path(&path, "App", ParserCli::Auto)
+            .expect_err("unresolved identifiers should fail before bytecode lowering");
+        assert!(
+            err.contains("unresolved identifier `missing` in `main`"),
+            "unexpected error: {err}"
+        );
+
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn writes_and_reads_bytecode_artifact() {
         let source_path = temp_file("artifact.in");
         let bytecode_path = temp_file("artifact.bca");
