@@ -7,12 +7,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-cargo run --manifest-path in-cli/Cargo.toml --bin in -- build \
+"${IN_BIN:-in}" build \
   --path apps/icore-sample/min-v1.icore \
   --module-id App \
   --parser auto
 
-exec cargo run --manifest-path in-cli/Cargo.toml --bin in -- build \
+exec "${IN_BIN:-in}" build \
   --path apps/icore-sample/min.icore \
   --module-id App \
   --parser auto

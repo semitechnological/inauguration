@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-IN_CMD=(cargo run --quiet --manifest-path in-cli/Cargo.toml --bin in --)
+IN_CMD=("${IN_BIN:-in}")
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/in-external-parity.XXXXXX")"
 trap 'rm -rf "$TMP_DIR"' EXIT
 

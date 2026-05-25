@@ -63,7 +63,7 @@ The first owned runtime is the existing bytecode VM subset fed by Core IR/SIL. T
 1. Keep `in languages` and `docs/architecture/parser-surface.md` synchronized.
 2. Promote one level at a time per language family.
 3. Add examples before widening claims.
-4. Run `in test` before push.
+4. Run `in test` before push for the self-hosted compiler gates; run `in test --toolchain --external-parity` when implementation crates, protocol generation, Swift runtime integration, or reference compiler parity are in scope.
 5. Benchmark only after correctness gates pass.
 
 ## Current slice

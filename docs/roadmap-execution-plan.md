@@ -64,7 +64,7 @@ Suggested **program order**: **B0** (CI unblocks everyone) → **C0** (parity gu
 
 ### Current state
 
-- **`in test`** (`in-cli/src/main.rs`): protocol script → rust-driver `cargo test --all` → `in-cli` → SwiftPM clean/test → `hotreload-daemon`. Requires **workspace root** (see `workspace_root`).
+- **`in test`** (`in-cli/src/main.rs`): self-hosted compiler gates by default: polyglot samples, bytecode compiler, and orchestration/package checks through the installed `in` binary. `--toolchain` adds protocol generation, rust-driver, in-cli, SwiftPM, and hotreload-daemon implementation checks; `--external-parity` adds installed reference compiler comparisons; `--all` runs every group. Independent groups run in parallel unless `--serial` is set. Requires **workspace root** (see `workspace_root`).
 - **`IN_TEST_SKIP_SWIFT`**: skips SwiftPM steps; documented in `AGENTS.md`.
 - **`in update`**: checkout path **`cargo install --path in-cli --locked`**; Unix fallback **`curl | bash`** on raw `install.sh` with validated **`IN_REPO`** slug.
 - **GitHub Actions** (`.github/workflows/ci.yml`): **`cargo test`** in `in-cli` only; **`cargo test -p hybrid-cli`** in rust-driver; sample scripts—**does not** run full **`in test`** today.
@@ -73,7 +73,7 @@ Suggested **program order**: **B0** (CI unblocks everyone) → **C0** (parity gu
 
 | Phase | Scope |
 |-------|--------|
-| **B0** | **Done in CI:** jobs **`in-test-linux`** (`IN_TEST_SKIP_SWIFT=1`) + **`in-test-macos`** (full), build `in` then `in test`. |
+| **B0** | **Done in CI:** jobs **`in-test-linux`** (`IN_TEST_SKIP_SWIFT=1`) + **`in-test-macos`** build `in` then run the configured `in test` gate; use `--toolchain` / `--external-parity` where CI wants broader implementation coverage. |
 | **B1** | **`in doctor`**: check `bash`, `curl`, `swift`, `cargo` versions; print whether remote **`in update`** would work. |
 | **B2** | Optional **`IN_TEST_SKIP_PROTOCOL=1`** / staged modes if script deps are heavy for sandboxes. |
 | **B3** | Document “airgapped” path: no network → use checkout **`in update`** only. |

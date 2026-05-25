@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-IN_CMD=(cargo run --quiet --manifest-path in-cli/Cargo.toml --bin in --)
+IN_CMD=("${IN_BIN:-in}")
 OUT="target/in/polyglot-sample.bca"
 
 "${IN_CMD[@]}" compile-bytecode apps/polyglot-sample/sample.in --module-id App --out "$OUT"

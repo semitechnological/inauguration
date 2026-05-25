@@ -9,6 +9,7 @@ use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::thread;
 use std::time::Instant;
 use thiserror::Error;
 
@@ -201,8 +202,19 @@ enum Commands {
         #[arg(long, default_value_t = false)]
         verbose: bool,
     },
-    #[command(about = "Run test suites")]
-    Test,
+    #[command(about = "Run self-hosted compiler test suites")]
+    Test {
+        #[arg(long, default_value_t = false)]
+        self_host: bool,
+        #[arg(long, default_value_t = false)]
+        toolchain: bool,
+        #[arg(long, default_value_t = false)]
+        external_parity: bool,
+        #[arg(long, default_value_t = false)]
+        all: bool,
+        #[arg(long, default_value_t = false)]
+        serial: bool,
+    },
     /// Reinstall the `in` CLI from the enclosing inauguration checkout (`cargo install --path in-cli`).
     #[command(visible_alias = "self-update")]
     Update,
@@ -324,7 +336,22 @@ fn run() -> Result<()> {
         Commands::RunBytecode { path, verbose } => {
             cmd_run_bytecode(&invocation_cwd, &path, verbose)
         }
-        Commands::Test => cmd_test(&workspace_root(invocation_cwd.clone())?),
+        Commands::Test {
+            self_host,
+            toolchain,
+            external_parity,
+            all,
+            serial,
+        } => cmd_test(
+            &workspace_root(invocation_cwd.clone())?,
+            TestOptions {
+                self_host,
+                toolchain,
+                external_parity,
+                all,
+                serial,
+            },
+        ),
         Commands::Update => match workspace_root(invocation_cwd.clone()) {
             Ok(root) => cmd_update(&root),
             Err(_) => cmd_update_remote(),
@@ -1233,90 +1260,276 @@ fn cmd_execute_bytecode(cwd: &Path, path: &str, module_id: &str, verbose: bool) 
     Ok(())
 }
 
-fn cmd_test(root: &Path) -> Result<()> {
-    let steps = test_step_names();
-    run_test_step(
-        steps[0],
-        Command::new("bash")
-            .arg("scripts/check-protocol-models.sh")
-            .current_dir(root),
-    )?;
-    run_test_step(
-        steps[1],
-        Command::new("cargo")
-            .arg("test")
-            .arg("--all")
-            .current_dir(root.join("compiler").join("rust-driver")),
-    )?;
-    run_test_step(
-        steps[2],
-        Command::new("cargo")
-            .arg("test")
-            .current_dir(root.join("in-cli")),
-    )?;
-    run_test_step(
-        steps[3],
-        Command::new("bash")
-            .arg("scripts/check-polyglot-sample.sh")
-            .current_dir(root),
-    )?;
-    run_test_step(
-        steps[4],
-        Command::new("bash")
-            .arg("scripts/check-bytecode-compiler.sh")
-            .current_dir(root),
-    )?;
-    run_test_step(
-        steps[5],
-        Command::new("bash")
-            .arg("scripts/check-external-compiler-parity.sh")
-            .current_dir(root),
-    )?;
-    run_test_step(
-        steps[6],
-        Command::new("bash")
-            .arg("scripts/check-orchestration-compiler.sh")
-            .current_dir(root),
-    )?;
-    if skip_swift_tests() {
-        eprintln!("Skipping runtime/swift-preview-host steps (IN_TEST_SKIP_SWIFT set).");
-    } else {
-        run_test_step(
-            steps[7],
-            Command::new("swift")
-                .arg("package")
-                .arg("clean")
-                .current_dir(root.join("runtime").join("swift-preview-host")),
-        )?;
-        run_test_step(
-            steps[8],
-            Command::new("swift")
-                .arg("test")
-                .current_dir(root.join("runtime").join("swift-preview-host")),
-        )?;
-    }
-    run_test_step(
-        steps[9],
-        Command::new("cargo")
-            .arg("test")
-            .current_dir(root.join("runtime").join("hotreload-daemon")),
-    )?;
-    Ok(())
+#[derive(Clone, Copy, Debug)]
+struct TestOptions {
+    self_host: bool,
+    toolchain: bool,
+    external_parity: bool,
+    all: bool,
+    serial: bool,
 }
 
-fn test_step_names() -> [&'static str; 10] {
+#[derive(Clone, Debug)]
+struct TestCommand {
+    program: String,
+    args: Vec<String>,
+    cwd: PathBuf,
+}
+
+#[derive(Clone, Debug)]
+struct TestGroup {
+    name: &'static str,
+    commands: Vec<TestCommand>,
+}
+
+#[derive(Debug)]
+struct TestGroupResult {
+    name: &'static str,
+    elapsed_ms: f64,
+    output: String,
+    error: Option<String>,
+}
+
+fn cmd_test(root: &Path, options: TestOptions) -> Result<()> {
+    let mut groups = self_host_test_groups(root);
+    let include_toolchain = options.all || options.toolchain;
+    let include_external = options.all || options.external_parity;
+    if options.self_host && !include_toolchain && !include_external {
+        eprintln!("running self-hosted compiler gates");
+    }
+    if include_external {
+        groups.extend(external_parity_test_groups(root));
+    }
+    if include_toolchain {
+        groups.extend(toolchain_test_groups(root));
+    }
+    run_test_groups(groups, options.serial)
+}
+
+fn test_step_names() -> [&'static str; 3] {
+    [
+        "polyglot samples (scripts/check-polyglot-sample.sh)",
+        "bytecode compiler (scripts/check-bytecode-compiler.sh)",
+        "orchestration compiler (scripts/check-orchestration-compiler.sh)",
+    ]
+}
+
+fn toolchain_test_step_names() -> [&'static str; 5] {
     [
         "protocol models (scripts/check-protocol-models.sh)",
         "compiler/rust-driver (cargo test --all)",
         "in-cli (cargo test)",
-        "polyglot samples (scripts/check-polyglot-sample.sh)",
-        "bytecode compiler (scripts/check-bytecode-compiler.sh)",
-        "external compiler parity (scripts/check-external-compiler-parity.sh)",
-        "orchestration compiler (scripts/check-orchestration-compiler.sh)",
-        "runtime/swift-preview-host (swift package clean)",
-        "runtime/swift-preview-host (swift test)",
+        "runtime/swift-preview-host (swift package clean && swift test)",
         "runtime/hotreload-daemon (cargo test)",
     ]
+}
+
+fn external_parity_test_step_names() -> [&'static str; 1] {
+    ["external compiler parity (scripts/check-external-compiler-parity.sh)"]
+}
+
+fn self_host_test_groups(root: &Path) -> Vec<TestGroup> {
+    test_step_names()
+        .into_iter()
+        .map(|name| {
+            let script = if name.contains("polyglot") {
+                "scripts/check-polyglot-sample.sh"
+            } else if name.contains("bytecode") {
+                "scripts/check-bytecode-compiler.sh"
+            } else {
+                "scripts/check-orchestration-compiler.sh"
+            };
+            TestGroup {
+                name,
+                commands: vec![bash_command(root, script)],
+            }
+        })
+        .collect()
+}
+
+fn external_parity_test_groups(root: &Path) -> Vec<TestGroup> {
+    vec![TestGroup {
+        name: external_parity_test_step_names()[0],
+        commands: vec![bash_command(
+            root,
+            "scripts/check-external-compiler-parity.sh",
+        )],
+    }]
+}
+
+fn toolchain_test_groups(root: &Path) -> Vec<TestGroup> {
+    let mut groups = vec![
+        TestGroup {
+            name: toolchain_test_step_names()[0],
+            commands: vec![bash_command(root, "scripts/check-protocol-models.sh")],
+        },
+        TestGroup {
+            name: toolchain_test_step_names()[1],
+            commands: vec![TestCommand {
+                program: "cargo".to_string(),
+                args: vec!["test".to_string(), "--all".to_string()],
+                cwd: root.join("compiler").join("rust-driver"),
+            }],
+        },
+        TestGroup {
+            name: toolchain_test_step_names()[2],
+            commands: vec![TestCommand {
+                program: "cargo".to_string(),
+                args: vec!["test".to_string()],
+                cwd: root.join("in-cli"),
+            }],
+        },
+        TestGroup {
+            name: toolchain_test_step_names()[4],
+            commands: vec![TestCommand {
+                program: "cargo".to_string(),
+                args: vec!["test".to_string()],
+                cwd: root.join("runtime").join("hotreload-daemon"),
+            }],
+        },
+    ];
+    if skip_swift_tests() {
+        eprintln!("Skipping runtime/swift-preview-host steps (IN_TEST_SKIP_SWIFT set).");
+    } else {
+        groups.push(TestGroup {
+            name: toolchain_test_step_names()[3],
+            commands: vec![
+                TestCommand {
+                    program: "swift".to_string(),
+                    args: vec!["package".to_string(), "clean".to_string()],
+                    cwd: root.join("runtime").join("swift-preview-host"),
+                },
+                TestCommand {
+                    program: "swift".to_string(),
+                    args: vec!["test".to_string()],
+                    cwd: root.join("runtime").join("swift-preview-host"),
+                },
+            ],
+        });
+    }
+    groups
+}
+
+fn bash_command(root: &Path, script: &str) -> TestCommand {
+    TestCommand {
+        program: "bash".to_string(),
+        args: vec![script.to_string()],
+        cwd: root.to_path_buf(),
+    }
+}
+
+fn run_test_groups(groups: Vec<TestGroup>, serial: bool) -> Result<()> {
+    if serial {
+        for group in groups {
+            let result = run_test_group(group);
+            print_test_group_result(&result);
+            if let Some(error) = result.error {
+                return Err(InError::Message(error));
+            }
+        }
+        return Ok(());
+    }
+
+    let handles = groups
+        .into_iter()
+        .map(|group| thread::spawn(|| run_test_group(group)));
+    let mut failures = Vec::new();
+    for handle in handles {
+        let result = handle
+            .join()
+            .map_err(|_| InError::Message("test worker panicked".to_string()))?;
+        print_test_group_result(&result);
+        if let Some(error) = result.error {
+            failures.push(error);
+        }
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(InError::Message(failures.join("\n")))
+    }
+}
+
+fn run_test_group(group: TestGroup) -> TestGroupResult {
+    let start = Instant::now();
+    let mut output = String::new();
+    for command in group.commands {
+        let rendered = render_test_command(&command);
+        output.push_str(&format!("$ {rendered}\n"));
+        match Command::new(&command.program)
+            .args(&command.args)
+            .current_dir(&command.cwd)
+            .stdin(Stdio::null())
+            .output()
+        {
+            Ok(cmd_output) => {
+                output.push_str(&String::from_utf8_lossy(&cmd_output.stdout));
+                output.push_str(&String::from_utf8_lossy(&cmd_output.stderr));
+                if !cmd_output.status.success() {
+                    let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+                    return TestGroupResult {
+                        name: group.name,
+                        elapsed_ms,
+                        output,
+                        error: Some(format!(
+                            "{}: `{}` exited with {}",
+                            group.name, command.program, cmd_output.status
+                        )),
+                    };
+                }
+            }
+            Err(e) => {
+                let mut msg = format!(
+                    "{}: failed to start `{}` (cwd={}): {e}",
+                    group.name,
+                    command.program,
+                    command.cwd.display()
+                );
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    msg.push_str(
+                        " — from an inauguration checkout run `in update` (or `cargo install --path in-cli --force`).",
+                    );
+                }
+                let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+                return TestGroupResult {
+                    name: group.name,
+                    elapsed_ms,
+                    output,
+                    error: Some(msg),
+                };
+            }
+        }
+    }
+    TestGroupResult {
+        name: group.name,
+        elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,
+        output,
+        error: None,
+    }
+}
+
+fn render_test_command(command: &TestCommand) -> String {
+    let mut parts = vec![command.program.clone()];
+    parts.extend(command.args.clone());
+    format!("{} (cwd={})", parts.join(" "), command.cwd.display())
+}
+
+fn print_test_group_result(result: &TestGroupResult) {
+    print!("{}", result.output);
+    if result.error.is_some() {
+        eprintln!("test failed: {} in {:.3}ms", result.name, result.elapsed_ms);
+    } else {
+        eprintln!("test ok: {} in {:.3}ms", result.name, result.elapsed_ms);
+    }
+}
+
+#[cfg(test)]
+fn all_test_step_names() -> Vec<&'static str> {
+    let mut names = Vec::new();
+    names.extend(test_step_names());
+    names.extend(external_parity_test_step_names());
+    names.extend(toolchain_test_step_names());
+    names
 }
 
 fn cmd_update(root: &Path) -> Result<()> {
@@ -1403,36 +1616,6 @@ fn skip_swift_tests() -> bool {
     std::env::var("IN_TEST_SKIP_SWIFT")
         .ok()
         .is_some_and(|value| parse_env_bool(&value))
-}
-
-fn run_test_step(step: &'static str, cmd: &mut Command) -> Result<()> {
-    let prog = cmd.get_program().to_string_lossy().into_owned();
-    let cwd = cmd
-        .get_current_dir()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "(default)".to_string());
-    let status = cmd
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .status()
-        .map_err(|e| {
-            let mut msg =
-                format!("{step}: failed to start `{prog}` (cwd={cwd}): {e}");
-            if e.kind() == std::io::ErrorKind::NotFound {
-                msg.push_str(
-                    " — from an inauguration checkout run `in update` (or `cargo install --path in-cli --force`).",
-                );
-            }
-            InError::Message(msg)
-        })?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(InError::Message(format!(
-            "{step}: `{prog}` exited with {status}"
-        )))
-    }
 }
 
 fn find_tool_path(tool: &str) -> Option<String> {
@@ -1993,13 +2176,56 @@ mod tests {
         assert!(
             super::test_step_names()
                 .iter()
-                .any(|step| step.contains("check-external-compiler-parity.sh"))
+                .any(|step| step.contains("check-orchestration-compiler.sh"))
+        );
+    }
+
+    #[test]
+    fn in_test_defaults_to_self_hosted_compiler_gates() {
+        let steps = super::test_step_names();
+        assert!(
+            steps
+                .iter()
+                .any(|step| step.contains("check-polyglot-sample.sh"))
         );
         assert!(
-            super::test_step_names()
+            steps
+                .iter()
+                .any(|step| step.contains("check-bytecode-compiler.sh"))
+        );
+        assert!(
+            steps
                 .iter()
                 .any(|step| step.contains("check-orchestration-compiler.sh"))
         );
+        assert!(!steps.iter().any(|step| step.contains("cargo")));
+        assert!(!steps.iter().any(|step| step.contains("swift")));
+        assert!(!steps.iter().any(|step| step.contains("external compiler")));
+    }
+
+    #[test]
+    fn all_test_step_names_keep_toolchain_and_external_gates_available() {
+        let steps = super::all_test_step_names();
+        assert!(steps.iter().any(|step| step.contains("cargo test")));
+        assert!(steps.iter().any(|step| step.contains("swift test")));
+        assert!(
+            steps
+                .iter()
+                .any(|step| step.contains("external compiler parity"))
+        );
+    }
+
+    #[test]
+    fn parse_test_scope_flags() {
+        for argv in [
+            ["in", "test", "--self-host"],
+            ["in", "test", "--toolchain"],
+            ["in", "test", "--external-parity"],
+            ["in", "test", "--all"],
+            ["in", "test", "--serial"],
+        ] {
+            assert!(Cli::try_parse_from(argv).is_ok(), "{argv:?}");
+        }
     }
 
     #[test]

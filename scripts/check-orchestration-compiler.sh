@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-in_cmd=(cargo run --quiet --manifest-path in-cli/Cargo.toml --bin in --)
+in_cmd=("${IN_BIN:-in}")
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
