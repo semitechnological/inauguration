@@ -1,9 +1,7 @@
 package main
 
-helper :: proc(value: int) -> int {
-    return value
+answer :: proc() -> int {
+	return 42
 }
 
-main :: proc() {
-    helper(1)
-}
+main :: proc() {}

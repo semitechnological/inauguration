@@ -1,7 +1,5 @@
-fun helper(value: Int): Int {
-    return value
+fun answer(): Int {
+    return 42
 }
 
-fun main() {
-    helper(1)
-}
+fun main() {}

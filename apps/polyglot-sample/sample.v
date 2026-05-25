@@ -1,14 +1,7 @@
 module main
 
-struct Sample {
-    value int
+fn answer() int {
+	return 42
 }
 
-fn helper(value int) int {
-    return value
-}
-
-fn main() {
-    helper(1)
-    return
-}
+fn main() {}

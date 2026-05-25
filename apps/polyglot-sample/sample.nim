@@ -1,5 +1,3 @@
-proc helper(value: int): int =
-  value
+proc answer(): int = 42
 
-proc main() =
-  discard helper(1)
+proc main() = discard

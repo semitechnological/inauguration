@@ -1,0 +1,243 @@
+use crate::owned_compile::OwnedCompileReport;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+const CACHE_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct CachedOwnedCompileReport {
+    schema_version: u32,
+    owned: bool,
+    path: String,
+    module_id: String,
+    target: String,
+    entry: Option<String>,
+    frontend_level: String,
+    semantic_level: String,
+    backend_level: String,
+    runtime_level: String,
+    external_invocations: Vec<String>,
+    reason_code: Option<String>,
+    reason: Option<String>,
+    success: bool,
+    artifact_path: Option<String>,
+    executable_path: Option<String>,
+    parsed_function_count: usize,
+    typed_function_count: usize,
+    call_edge_count: usize,
+    jobs: usize,
+    timing_micros: u128,
+    timing_waves_us: Option<Vec<u128>>,
+    cache_hit: bool,
+    frontend_hash: Option<String>,
+    eval_exit_code: Option<u8>,
+    error: Option<String>,
+}
+
+impl From<&OwnedCompileReport> for CachedOwnedCompileReport {
+    fn from(report: &OwnedCompileReport) -> Self {
+        Self {
+            schema_version: report.schema_version,
+            owned: report.owned,
+            path: report.path.clone(),
+            module_id: report.module_id.clone(),
+            target: report.target.clone(),
+            entry: report.entry.clone(),
+            frontend_level: report.frontend_level.to_string(),
+            semantic_level: report.semantic_level.to_string(),
+            backend_level: report.backend_level.to_string(),
+            runtime_level: report.runtime_level.to_string(),
+            external_invocations: report.external_invocations.clone(),
+            reason_code: report.reason_code.clone(),
+            reason: report.reason.clone(),
+            success: report.success,
+            artifact_path: report.artifact_path.clone(),
+            executable_path: report.executable_path.clone(),
+            parsed_function_count: report.parsed_function_count,
+            typed_function_count: report.typed_function_count,
+            call_edge_count: report.call_edge_count,
+            jobs: report.jobs,
+            timing_micros: report.timing_micros,
+            timing_waves_us: report.timing_waves_us.clone(),
+            cache_hit: report.cache_hit,
+            frontend_hash: report.frontend_hash.clone(),
+            eval_exit_code: report.eval_exit_code,
+            error: report.error.clone(),
+        }
+    }
+}
+
+impl From<CachedOwnedCompileReport> for OwnedCompileReport {
+    fn from(cached: CachedOwnedCompileReport) -> Self {
+        Self {
+            schema_version: cached.schema_version,
+            owned: cached.owned,
+            path: cached.path,
+            module_id: cached.module_id,
+            target: cached.target,
+            entry: cached.entry,
+            frontend_level: leak_static(cached.frontend_level),
+            semantic_level: leak_static(cached.semantic_level),
+            backend_level: leak_static(cached.backend_level),
+            runtime_level: leak_static(cached.runtime_level),
+            external_invocations: cached.external_invocations,
+            reason_code: cached.reason_code,
+            reason: cached.reason,
+            success: cached.success,
+            artifact_path: cached.artifact_path,
+            executable_path: cached.executable_path,
+            parsed_function_count: cached.parsed_function_count,
+            typed_function_count: cached.typed_function_count,
+            call_edge_count: cached.call_edge_count,
+            jobs: cached.jobs,
+            timing_micros: cached.timing_micros,
+            timing_waves_us: cached.timing_waves_us,
+            cache_hit: cached.cache_hit,
+            frontend_hash: cached.frontend_hash,
+            eval_exit_code: cached.eval_exit_code,
+            error: cached.error,
+        }
+    }
+}
+
+fn leak_static(value: String) -> &'static str {
+    Box::leak(value.into_boxed_str())
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct CompileCacheMetadata {
+    schema_version: u32,
+    frontend_hash: String,
+    report: CachedOwnedCompileReport,
+}
+
+pub fn source_frontend_hash(path: &Path, content: &str) -> String {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in path.to_string_lossy().as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash ^= 0xff;
+    for byte in content.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
+}
+
+pub fn cache_root(cwd: &Path) -> PathBuf {
+    cwd.join("target").join("in").join("cache")
+}
+
+pub fn cache_dir_for_hash(cwd: &Path, frontend_hash: &str) -> PathBuf {
+    cache_root(cwd).join(frontend_hash)
+}
+
+pub fn read_cached_report(cwd: &Path, frontend_hash: &str) -> Option<OwnedCompileReport> {
+    let path = cache_dir_for_hash(cwd, frontend_hash).join("metadata.json");
+    let raw = fs::read_to_string(&path).ok()?;
+    let metadata: CompileCacheMetadata = serde_json::from_str(&raw).ok()?;
+    if metadata.schema_version != CACHE_SCHEMA_VERSION {
+        return None;
+    }
+    if metadata.frontend_hash != frontend_hash {
+        return None;
+    }
+    Some(metadata.report.into())
+}
+
+pub fn write_cached_report(
+    cwd: &Path,
+    frontend_hash: &str,
+    report: &OwnedCompileReport,
+) -> Result<(), String> {
+    let dir = cache_dir_for_hash(cwd, frontend_hash);
+    fs::create_dir_all(&dir).map_err(|err| format!("create compile cache dir: {err}"))?;
+    let metadata = CompileCacheMetadata {
+        schema_version: CACHE_SCHEMA_VERSION,
+        frontend_hash: frontend_hash.to_string(),
+        report: report.into(),
+    };
+    let raw =
+        serde_json::to_string_pretty(&metadata).map_err(|err| format!("serialize cache: {err}"))?;
+    fs::write(dir.join("metadata.json"), raw)
+        .map_err(|err| format!("write compile cache metadata: {err}"))
+}
+
+pub fn workspace_cwd_for_path(source_path: &Path) -> PathBuf {
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).canonicalize().ok()
+        .filter(|cwd| source_path.starts_with(cwd))
+        .unwrap_or_else(|| {
+            source_path
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| PathBuf::from("."))
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::owned_compile::OwnedCompileReport;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "inauguration-compile-cache-{}-{}-{name}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ))
+    }
+
+    #[test]
+    fn hash_is_stable_for_same_path_and_content() {
+        let path = Path::new("apps/sample.in");
+        let a = source_frontend_hash(path, "fn main() -> void { return; }\n");
+        let b = source_frontend_hash(path, "fn main() -> void { return; }\n");
+        assert_eq!(a, b);
+        assert_ne!(a, source_frontend_hash(path, "fn main() -> void { return; }"));
+    }
+
+    #[test]
+    fn roundtrip_cache_metadata() {
+        let cwd = temp_dir("cwd");
+        fs::create_dir_all(&cwd).unwrap();
+        let hash = "abc123deadbeef00";
+        let report = OwnedCompileReport {
+            schema_version: 1,
+            owned: true,
+            path: "sample.in".to_string(),
+            module_id: "App".to_string(),
+            target: "bytecode".to_string(),
+            entry: None,
+            frontend_level: "core-ir-direct",
+            semantic_level: "typed-subset",
+            backend_level: "bytecode-vm-subset",
+            runtime_level: "inrt-bytecode",
+            external_invocations: Vec::new(),
+            reason_code: None,
+            reason: None,
+            success: true,
+            artifact_path: None,
+            executable_path: None,
+            parsed_function_count: 1,
+            typed_function_count: 1,
+            call_edge_count: 0,
+            jobs: 1,
+            timing_micros: 10,
+            timing_waves_us: None,
+            cache_hit: false,
+            frontend_hash: Some(hash.to_string()),
+            eval_exit_code: None,
+            error: None,
+        };
+        write_cached_report(&cwd, hash, &report).unwrap();
+        let loaded = read_cached_report(&cwd, hash).expect("cached report");
+        assert!(loaded.success);
+        assert_eq!(loaded.frontend_hash.as_deref(), Some(hash));
+        let _ = fs::remove_dir_all(cwd);
+    }
+}

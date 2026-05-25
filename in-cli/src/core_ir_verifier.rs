@@ -1,0 +1,650 @@
+use crate::core_ir::{Decl, UnifiedModule};
+use crate::swift_subset::{Expr, Stmt, Typ};
+use std::collections::{HashMap, HashSet};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifyOptions {
+    pub entry: Option<String>,
+    pub require_entry: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifyReport {
+    pub ok: bool,
+    pub reason_code: Option<String>,
+    pub reason: Option<String>,
+    pub parsed_function_count: usize,
+    pub call_edges: Vec<(String, String)>,
+}
+
+pub fn verify_for_entry(module: &UnifiedModule, entry: &str) -> VerifyReport {
+    verify_module(
+        module,
+        &VerifyOptions {
+            entry: Some(entry.to_string()),
+            require_entry: true,
+        },
+    )
+}
+
+pub fn verify_module(module: &UnifiedModule, options: &VerifyOptions) -> VerifyReport {
+    let parsed_function_count = module
+        .decls
+        .iter()
+        .filter(|decl| matches!(decl, Decl::Function { .. }))
+        .count();
+
+    let mut call_edges = Vec::new();
+
+    let facts = match collect_module_facts(module) {
+        Ok(facts) => facts,
+        Err((code, reason)) => {
+            return fail_report(parsed_function_count, call_edges, &code, reason);
+        }
+    };
+
+    if options.require_entry || options.entry.is_some() {
+        let entry_name = options
+            .entry
+            .as_deref()
+            .unwrap_or("main");
+        if !facts.functions.contains(entry_name) {
+            return fail_report(
+                parsed_function_count,
+                call_edges,
+                "missing-entry-symbol",
+                format!("missing entry function `{entry_name}`"),
+            );
+        }
+    }
+
+    for decl in &module.decls {
+        if let Decl::Function {
+            name,
+            params,
+            ret,
+            body,
+        } = decl
+        {
+            if let Err((code, reason)) = check_duplicate_param_names(name, params) {
+                return fail_report(parsed_function_count, call_edges, &code, reason);
+            }
+
+            if *ret != Typ::Void && body.is_empty() {
+                return fail_report(
+                    parsed_function_count,
+                    call_edges,
+                    "unsupported-empty-body",
+                    format!("function `{name}` has empty body with non-void return"),
+                );
+            }
+
+            let mut env: HashMap<String, Typ> = params.iter().cloned().collect();
+            if let Err((code, reason)) = check_stmts(name, body, &facts, ret, &mut env, &mut call_edges)
+            {
+                return fail_report(parsed_function_count, call_edges, &code, reason);
+            }
+        }
+    }
+
+    VerifyReport {
+        ok: true,
+        reason_code: None,
+        reason: None,
+        parsed_function_count,
+        call_edges,
+    }
+}
+
+fn fail_report(
+    parsed_function_count: usize,
+    call_edges: Vec<(String, String)>,
+    reason_code: &str,
+    reason: String,
+) -> VerifyReport {
+    VerifyReport {
+        ok: false,
+        reason_code: Some(reason_code.to_string()),
+        reason: Some(reason),
+        parsed_function_count,
+        call_edges,
+    }
+}
+
+struct ModuleFacts<'a> {
+    functions: HashSet<&'a str>,
+    function_params: HashMap<&'a str, usize>,
+    structs: HashMap<&'a str, &'a [(String, Typ)]>,
+}
+
+fn collect_module_facts(module: &UnifiedModule) -> Result<ModuleFacts<'_>, (String, String)> {
+    let mut top_level = HashSet::new();
+    let mut functions = HashSet::new();
+    let mut function_params = HashMap::new();
+    let mut structs = HashMap::new();
+
+    for decl in &module.decls {
+        match decl {
+            Decl::Struct { name, fields } => {
+                if !top_level.insert(name.as_str()) {
+                    return Err((
+                        "duplicate-top-level-name".to_string(),
+                        format!("duplicate top-level name `{name}`"),
+                    ));
+                }
+                structs.insert(name.as_str(), fields.as_slice());
+            }
+            Decl::Function { name, params, .. } => {
+                if !top_level.insert(name.as_str()) {
+                    return Err((
+                        "duplicate-top-level-name".to_string(),
+                        format!("duplicate top-level name `{name}`"),
+                    ));
+                }
+                functions.insert(name.as_str());
+                function_params.insert(name.as_str(), params.len());
+            }
+        }
+    }
+
+    Ok(ModuleFacts {
+        functions,
+        function_params,
+        structs,
+    })
+}
+
+fn check_duplicate_param_names(
+    fn_name: &str,
+    params: &[(String, Typ)],
+) -> Result<(), (String, String)> {
+    let mut seen = HashSet::new();
+    for (name, _) in params {
+        if !seen.insert(name.as_str()) {
+            return Err((
+                "duplicate-param-name".to_string(),
+                format!("duplicate parameter name `{name}` in `{fn_name}`"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn check_stmts(
+    fn_name: &str,
+    stmts: &[Stmt],
+    facts: &ModuleFacts<'_>,
+    ret: &Typ,
+    env: &mut HashMap<String, Typ>,
+    call_edges: &mut Vec<(String, String)>,
+) -> Result<(), (String, String)> {
+    for stmt in stmts {
+        check_stmt(fn_name, stmt, facts, ret, env, call_edges)?;
+    }
+    Ok(())
+}
+
+fn check_stmt(
+    fn_name: &str,
+    stmt: &Stmt,
+    facts: &ModuleFacts<'_>,
+    ret: &Typ,
+    env: &mut HashMap<String, Typ>,
+    call_edges: &mut Vec<(String, String)>,
+) -> Result<(), (String, String)> {
+    match stmt {
+        Stmt::Let(name, typ, expr) => {
+            if env.contains_key(name) {
+                return Err((
+                    "duplicate-local-name".to_string(),
+                    format!("duplicate local name `{name}` in `{fn_name}`"),
+                ));
+            }
+            check_expr(fn_name, expr, facts, env, call_edges)?;
+            if let Some(typ) = typ {
+                env.insert(name.clone(), typ.clone());
+            } else if let Some(expr_typ) = expr_type(expr, facts, env) {
+                env.insert(name.clone(), expr_typ);
+            } else {
+                env.insert(name.clone(), Typ::Void);
+            }
+            Ok(())
+        }
+        Stmt::Assign(name, expr) => {
+            if !env.contains_key(name) {
+                return Err((
+                    "unresolved-symbol".to_string(),
+                    format!("unresolved assignment `{name}` in `{fn_name}`"),
+                ));
+            }
+            check_expr(fn_name, expr, facts, env, call_edges)
+        }
+        Stmt::Expr(expr) => check_expr(fn_name, expr, facts, env, call_edges),
+        Stmt::Return(Some(expr)) => {
+            check_expr(fn_name, expr, facts, env, call_edges)?;
+            if *ret == Typ::Int {
+                if let Some(expr_typ) = expr_type(expr, facts, env) {
+                    if expr_typ != Typ::Int {
+                        return Err((
+                            "return-type-mismatch".to_string(),
+                            format!(
+                                "return type mismatch in `{fn_name}`: expected Int, got {expr_typ:?}"
+                            ),
+                        ));
+                    }
+                }
+            }
+            Ok(())
+        }
+        Stmt::Return(None) => Ok(()),
+        Stmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            check_expr(fn_name, cond, facts, env, call_edges)?;
+            check_stmts(fn_name, then_body, facts, ret, &mut env.clone(), call_edges)?;
+            check_stmts(fn_name, else_body, facts, ret, &mut env.clone(), call_edges)
+        }
+        Stmt::Loop { cond, body, .. } => {
+            if let Some(cond) = cond {
+                check_expr(fn_name, cond, facts, env, call_edges)?;
+            }
+            check_stmts(fn_name, body, facts, ret, &mut env.clone(), call_edges)
+        }
+        Stmt::Match { scrutinee, arms } => {
+            check_expr(fn_name, scrutinee, facts, env, call_edges)?;
+            for arm in arms {
+                check_stmts(fn_name, &arm.body, facts, ret, &mut env.clone(), call_edges)?;
+            }
+            Ok(())
+        }
+    }
+}
+
+fn check_expr(
+    fn_name: &str,
+    expr: &Expr,
+    facts: &ModuleFacts<'_>,
+    env: &HashMap<String, Typ>,
+    call_edges: &mut Vec<(String, String)>,
+) -> Result<(), (String, String)> {
+    match expr {
+        Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => Ok(()),
+        Expr::Ident(name) => {
+            if env.contains_key(name) {
+                Ok(())
+            } else {
+                Err((
+                    "unresolved-symbol".to_string(),
+                    format!("unresolved identifier `{name}` in `{fn_name}`"),
+                ))
+            }
+        }
+        Expr::Unary { expr, .. } => check_expr(fn_name, expr, facts, env, call_edges),
+        Expr::Binary { lhs, rhs, .. } => {
+            check_expr(fn_name, lhs, facts, env, call_edges)?;
+            check_expr(fn_name, rhs, facts, env, call_edges)
+        }
+        Expr::StructInit { name, fields } => check_struct_init(fn_name, name, fields, facts, env, call_edges),
+        Expr::Field { base, name } => {
+            check_expr(fn_name, base, facts, env, call_edges)?;
+            if let Some(Typ::Named(struct_name)) = expr_type(base, facts, env) {
+                if let Some(schema) = facts.structs.get(struct_name.as_str()) {
+                    if !schema.iter().any(|(field, _)| field == name) {
+                        return Err((
+                            "unknown-struct-field".to_string(),
+                            format!("unknown field `{name}` for struct `{struct_name}`"),
+                        ));
+                    }
+                }
+            }
+            Ok(())
+        }
+        Expr::Call { callee, args } => {
+            if let Expr::Ident(name) = callee.as_ref() {
+                if !facts.functions.contains(name.as_str()) {
+                    return Err((
+                        "unresolved-symbol".to_string(),
+                        format!("unresolved function call `{name}` in `{fn_name}`"),
+                    ));
+                }
+                call_edges.push((fn_name.to_string(), name.clone()));
+                if let Some(expected) = facts.function_params.get(name.as_str()) {
+                    if args.len() != *expected {
+                        return Err((
+                            "call-arity-mismatch".to_string(),
+                            format!(
+                                "call to `{name}` in `{fn_name}` expects {expected} args, got {}",
+                                args.len()
+                            ),
+                        ));
+                    }
+                }
+            } else {
+                check_expr(fn_name, callee, facts, env, call_edges)?;
+            }
+
+            for arg in args {
+                check_expr(fn_name, arg, facts, env, call_edges)?;
+            }
+            Ok(())
+        }
+    }
+}
+
+fn check_struct_init(
+    fn_name: &str,
+    struct_name: &str,
+    fields: &[(String, Expr)],
+    facts: &ModuleFacts<'_>,
+    env: &HashMap<String, Typ>,
+    call_edges: &mut Vec<(String, String)>,
+) -> Result<(), (String, String)> {
+    let schema = facts.structs.get(struct_name).ok_or((
+        "unknown-struct".to_string(),
+        format!("unknown struct `{struct_name}` in `{fn_name}`"),
+    ))?;
+    let mut seen = HashSet::new();
+    for (field, expr) in fields {
+        if !seen.insert(field.as_str()) {
+            return Err((
+                "duplicate-struct-field".to_string(),
+                format!("duplicate field `{field}` for struct `{struct_name}`"),
+            ));
+        }
+        if !schema.iter().any(|(schema_field, _)| schema_field == field) {
+            return Err((
+                "unknown-struct-field".to_string(),
+                format!("unknown field `{field}` for struct `{struct_name}`"),
+            ));
+        }
+        check_expr(fn_name, expr, facts, env, call_edges)?;
+    }
+    for (field, _) in *schema {
+        if !seen.contains(field.as_str()) {
+            return Err((
+                "missing-struct-field".to_string(),
+                format!("missing field `{field}` for struct `{struct_name}`"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn expr_type(expr: &Expr, facts: &ModuleFacts<'_>, env: &HashMap<String, Typ>) -> Option<Typ> {
+    match expr {
+        Expr::IntLit(_) => Some(Typ::Int),
+        Expr::StringLit(_) => Some(Typ::String),
+        Expr::BoolLit(_) => Some(Typ::Bool),
+        Expr::Ident(name) => env.get(name).cloned(),
+        Expr::StructInit { name, .. } => Some(Typ::Named(name.clone())),
+        Expr::Field { base, name } => {
+            if let Some(Typ::Named(struct_name)) = expr_type(base, facts, env) {
+                if let Some(schema) = facts.structs.get(struct_name.as_str()) {
+                    if let Some((_, typ)) = schema.iter().find(|(field, _)| field == name) {
+                        return Some(typ.clone());
+                    }
+                }
+            }
+            None
+        }
+        Expr::Unary { expr, .. } => expr_type(expr, facts, env),
+        Expr::Binary { .. } | Expr::Call { .. } => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core_ir::{Decl, UnifiedModule};
+    use crate::swift_subset::{Expr, Stmt};
+
+    fn function(name: &str, body: Vec<Stmt>) -> Decl {
+        Decl::Function {
+            name: name.to_string(),
+            params: Vec::new(),
+            ret: Typ::Void,
+            body,
+        }
+    }
+
+    fn function_with_ret(name: &str, ret: Typ, body: Vec<Stmt>) -> Decl {
+        Decl::Function {
+            name: name.to_string(),
+            params: Vec::new(),
+            ret,
+            body,
+        }
+    }
+
+    fn function_with_params(
+        name: &str,
+        params: Vec<(String, Typ)>,
+        ret: Typ,
+        body: Vec<Stmt>,
+    ) -> Decl {
+        Decl::Function {
+            name: name.to_string(),
+            params,
+            ret,
+            body,
+        }
+    }
+
+    fn module(decls: Vec<Decl>) -> UnifiedModule {
+        UnifiedModule { decls }
+    }
+
+    fn point_struct() -> Decl {
+        Decl::Struct {
+            name: "Point".to_string(),
+            fields: vec![("x".to_string(), Typ::Int), ("y".to_string(), Typ::Int)],
+        }
+    }
+
+    fn default_options() -> VerifyOptions {
+        VerifyOptions {
+            entry: None,
+            require_entry: false,
+        }
+    }
+
+    #[test]
+    fn accepts_valid_module_with_calls_and_entry() {
+        let report = verify_for_entry(
+            &module(vec![
+                function_with_params(
+                    "helper",
+                    vec![("value".to_string(), Typ::Int)],
+                    Typ::Int,
+                    vec![Stmt::Return(Some(Expr::Ident("value".to_string())))],
+                ),
+                function(
+                    "main",
+                    vec![Stmt::Expr(Expr::Call {
+                        callee: Box::new(Expr::Ident("helper".to_string())),
+                        args: vec![Expr::IntLit(1)],
+                    })],
+                ),
+            ]),
+            "main",
+        );
+
+        assert!(report.ok, "{:?}", report);
+        assert_eq!(report.parsed_function_count, 2);
+        assert_eq!(
+            report.call_edges,
+            vec![("main".to_string(), "helper".to_string())]
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_top_level_names() {
+        let report = verify_module(
+            &module(vec![function("main", Vec::new()), function("main", Vec::new())]),
+            &default_options(),
+        );
+
+        assert!(!report.ok);
+        assert_eq!(
+            report.reason_code.as_deref(),
+            Some("duplicate-top-level-name")
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_parameter_names() {
+        let report = verify_module(
+            &module(vec![function_with_params(
+                "main",
+                vec![
+                    ("value".to_string(), Typ::Int),
+                    ("value".to_string(), Typ::Int),
+                ],
+                Typ::Void,
+                Vec::new(),
+            )]),
+            &default_options(),
+        );
+
+        assert!(!report.ok);
+        assert_eq!(report.reason_code.as_deref(), Some("duplicate-param-name"));
+    }
+
+    #[test]
+    fn rejects_duplicate_local_names() {
+        let report = verify_module(
+            &module(vec![function(
+                "main",
+                vec![
+                    Stmt::Let("x".to_string(), None, Expr::IntLit(1)),
+                    Stmt::Let("x".to_string(), None, Expr::IntLit(2)),
+                ],
+            )]),
+            &default_options(),
+        );
+
+        assert!(!report.ok);
+        assert_eq!(report.reason_code.as_deref(), Some("duplicate-local-name"));
+    }
+
+    #[test]
+    fn rejects_call_arity_mismatch() {
+        let report = verify_module(
+            &module(vec![
+                function_with_params(
+                    "helper",
+                    vec![("value".to_string(), Typ::Int)],
+                    Typ::Void,
+                    Vec::new(),
+                ),
+                function(
+                    "main",
+                    vec![Stmt::Expr(Expr::Call {
+                        callee: Box::new(Expr::Ident("helper".to_string())),
+                        args: Vec::new(),
+                    })],
+                ),
+            ]),
+            &default_options(),
+        );
+
+        assert!(!report.ok);
+        assert_eq!(report.reason_code.as_deref(), Some("call-arity-mismatch"));
+    }
+
+    #[test]
+    fn rejects_return_type_mismatch_for_int_functions() {
+        let report = verify_module(
+            &module(vec![function_with_ret(
+                "main",
+                Typ::Int,
+                vec![Stmt::Return(Some(Expr::StringLit("nope".to_string())))],
+            )]),
+            &default_options(),
+        );
+
+        assert!(!report.ok);
+        assert_eq!(report.reason_code.as_deref(), Some("return-type-mismatch"));
+    }
+
+    #[test]
+    fn rejects_missing_entry_symbol() {
+        let report = verify_for_entry(
+            &module(vec![function("helper", Vec::new())]),
+            "main",
+        );
+
+        assert!(!report.ok);
+        assert_eq!(report.reason_code.as_deref(), Some("missing-entry-symbol"));
+    }
+
+    #[test]
+    fn rejects_unknown_and_missing_struct_fields() {
+        let unknown = verify_module(
+            &module(vec![
+                point_struct(),
+                function_with_ret(
+                    "main",
+                    Typ::Named("Point".to_string()),
+                    vec![Stmt::Return(Some(Expr::StructInit {
+                        name: "Point".to_string(),
+                        fields: vec![
+                            ("x".to_string(), Expr::IntLit(1)),
+                            ("z".to_string(), Expr::IntLit(2)),
+                        ],
+                    }))],
+                ),
+            ]),
+            &default_options(),
+        );
+        assert!(!unknown.ok);
+        assert_eq!(unknown.reason_code.as_deref(), Some("unknown-struct-field"));
+
+        let missing = verify_module(
+            &module(vec![
+                point_struct(),
+                function_with_ret(
+                    "main",
+                    Typ::Named("Point".to_string()),
+                    vec![Stmt::Return(Some(Expr::StructInit {
+                        name: "Point".to_string(),
+                        fields: vec![("x".to_string(), Expr::IntLit(1))],
+                    }))],
+                ),
+            ]),
+            &default_options(),
+        );
+        assert!(!missing.ok);
+        assert_eq!(missing.reason_code.as_deref(), Some("missing-struct-field"));
+    }
+
+    #[test]
+    fn rejects_empty_body_for_non_void_return() {
+        let report = verify_module(
+            &module(vec![function_with_ret("main", Typ::Int, Vec::new())]),
+            &default_options(),
+        );
+
+        assert!(!report.ok);
+        assert_eq!(
+            report.reason_code.as_deref(),
+            Some("unsupported-empty-body")
+        );
+    }
+
+    #[test]
+    fn rejects_unresolved_identifiers() {
+        let report = verify_module(
+            &module(vec![function(
+                "main",
+                vec![Stmt::Return(Some(Expr::Ident("missing".to_string())))],
+            )]),
+            &default_options(),
+        );
+
+        assert!(!report.ok);
+        assert_eq!(report.reason_code.as_deref(), Some("unresolved-symbol"));
+    }
+}

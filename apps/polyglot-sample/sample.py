@@ -1,5 +1,5 @@
-def helper(value: int) -> int:
-    return value
+def answer() -> int:
+    return 42
 
 def main() -> None:
-    helper(1)
+    pass

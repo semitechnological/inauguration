@@ -1,3 +1,3 @@
-let helper value = value
+let answer () = 42
 
-let main () = ignore (helper 1)
+let main () = ()

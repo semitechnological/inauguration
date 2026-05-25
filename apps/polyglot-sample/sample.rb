@@ -1,7 +1,6 @@
-def helper(value)
-  value
+def answer
+  42
 end
 
 def main
-  helper(1)
 end

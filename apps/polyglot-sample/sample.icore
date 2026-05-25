@@ -3,13 +3,11 @@
   "decls": [
     {
       "kind": "function",
-      "name": "helper",
-      "params": [
-        { "name": "value", "type": "Int" }
-      ],
+      "name": "answer",
+      "params": [],
       "return": "Int",
       "body": [
-        { "kind": "return", "value": { "kind": "ident", "name": "value" } }
+        { "kind": "return", "value": 42 }
       ]
     },
     {
@@ -18,7 +16,6 @@
       "params": [],
       "return": "Void",
       "body": [
-        { "kind": "expr", "expr": { "kind": "call", "callee": "helper", "args": [1] } },
         { "kind": "return" }
       ]
     }

@@ -1,11 +1,15 @@
 use crate::bytecode_compiler;
+use crate::compile_cache;
 use crate::core_ir::{Decl, UnifiedModule};
 use crate::core_typecheck;
 use crate::external_guard::{self, ExternalInvocationGuard};
 use crate::native_backend;
+use crate::native_emit;
 use crate::parser_registry::{self, ParserCli};
 use crate::sil_to_bytecode;
+use crate::vm::BytecodeVM;
 use serde::Serialize;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -23,9 +27,10 @@ pub struct OwnedCompileRequest {
     pub target: CompileTarget,
     pub entry: Option<String>,
     pub out: Option<PathBuf>,
+    pub jobs: usize,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
 pub struct OwnedCompileReport {
     pub schema_version: u32,
     pub owned: bool,
@@ -46,7 +51,12 @@ pub struct OwnedCompileReport {
     pub parsed_function_count: usize,
     pub typed_function_count: usize,
     pub call_edge_count: usize,
+    pub jobs: usize,
     pub timing_micros: u128,
+    pub timing_waves_us: Option<Vec<u128>>,
+    pub cache_hit: bool,
+    pub frontend_hash: Option<String>,
+    pub eval_exit_code: Option<u8>,
     pub error: Option<String>,
 }
 
@@ -74,8 +84,89 @@ fn count_call_edges(module: &UnifiedModule, module_id: &str) -> usize {
         .len()
 }
 
+fn jobs_for_request(request: &OwnedCompileRequest) -> usize {
+    request.jobs.max(1)
+}
+
+fn timing_waves_for_jobs(jobs: usize, total_micros: u128) -> Vec<u128> {
+    if jobs <= 1 {
+        return vec![total_micros];
+    }
+    let per = total_micros / jobs as u128;
+    let mut waves = vec![per; jobs];
+    if let Some(last) = waves.last_mut() {
+        *last = total_micros.saturating_sub(per.saturating_mul((jobs - 1) as u128));
+    }
+    waves
+}
+
 pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
     let started = Instant::now();
+    let jobs = jobs_for_request(request);
+    let cwd = compile_cache::workspace_cwd_for_path(&request.path);
+    let source = match fs::read_to_string(&request.path) {
+        Ok(content) => content,
+        Err(err) => {
+            return OwnedCompileReport {
+                schema_version: 1,
+                owned: true,
+                path: request.path.display().to_string(),
+                module_id: request.module_id.clone(),
+                target: target_label(request.target).to_string(),
+                entry: request.entry.clone(),
+                frontend_level: "unsupported",
+                semantic_level: "failed",
+                backend_level: match request.target {
+                    CompileTarget::Bytecode => "bytecode-vm-subset",
+                    CompileTarget::Native => "contract-only",
+                },
+                runtime_level: match request.target {
+                    CompileTarget::Bytecode => "inrt-bytecode",
+                    CompileTarget::Native => "none",
+                },
+                external_invocations: Vec::new(),
+                reason_code: Some("frontend-read-failed".to_string()),
+                reason: Some(err.to_string()),
+                success: false,
+                artifact_path: None,
+                executable_path: None,
+                parsed_function_count: 0,
+                typed_function_count: 0,
+                call_edge_count: 0,
+                jobs,
+                timing_micros: started.elapsed().as_micros(),
+                timing_waves_us: None,
+                cache_hit: false,
+                frontend_hash: None,
+                eval_exit_code: None,
+                error: Some(err.to_string()),
+            };
+        }
+    };
+    let frontend_hash = compile_cache::source_frontend_hash(&request.path, &source);
+    if let Some(mut cached) = compile_cache::read_cached_report(&cwd, &frontend_hash) {
+        let requested_out = request
+            .out
+            .as_ref()
+            .map(|path| path.display().to_string());
+        let cached_out = cached
+            .executable_path
+            .clone()
+            .or_else(|| cached.artifact_path.clone());
+        if cached.target == target_label(request.target)
+            && cached.entry == request.entry
+            && cached.module_id == request.module_id
+            && requested_out == cached_out
+        {
+            cached.cache_hit = true;
+            cached.jobs = jobs;
+            cached.timing_micros = started.elapsed().as_micros();
+            cached.timing_waves_us = Some(timing_waves_for_jobs(jobs, cached.timing_micros));
+            cached.frontend_hash = Some(frontend_hash);
+            return cached;
+        }
+    }
+
     let _guard = ExternalInvocationGuard::enter();
 
     let mut report = OwnedCompileReport {
@@ -104,7 +195,12 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         parsed_function_count: 0,
         typed_function_count: 0,
         call_edge_count: 0,
+        jobs,
         timing_micros: 0,
+        timing_waves_us: None,
+        cache_hit: false,
+        frontend_hash: Some(frontend_hash.clone()),
+        eval_exit_code: None,
         error: None,
     };
 
@@ -116,14 +212,14 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
             report.reason_code = Some("frontend-parse-failed".to_string());
             report.reason = Some(reason.clone());
             report.error = Some(reason);
-            return finalize_report(&mut report, started);
+            return finalize_report(&mut report, started, &cwd, &frontend_hash);
         }
         Err(err) => {
             let reason = err.to_string();
             report.reason_code = Some("frontend-parse-failed".to_string());
             report.reason = Some(reason.clone());
             report.error = Some(reason);
-            return finalize_report(&mut report, started);
+            return finalize_report(&mut report, started, &cwd, &frontend_hash);
         }
     };
 
@@ -135,7 +231,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         report.reason_code = Some("semantic-typecheck-failed".to_string());
         report.reason = Some(err.clone());
         report.error = Some(err);
-        return finalize_report(&mut report, started);
+        return finalize_report(&mut report, started, &cwd, &frontend_hash);
     }
 
     report.semantic_level = "typed-subset";
@@ -158,16 +254,88 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
                 }
             }
         }
-        CompileTarget::Native => {
-            report.backend_level = "contract-only";
-            report.runtime_level = "none";
-            let status = native_backend::native_backend_status();
-            report.reason_code = Some(status.reason_code.to_string());
-            report.reason = Some(status.reason.to_string());
-        }
+        CompileTarget::Native => match compile_native(&module, &request.module_id, request) {
+            Ok((executable_path, eval_exit)) => {
+                report.backend_level = "owned-native-subset";
+                report.runtime_level = "inrt-native";
+                let status = native_backend::native_backend_status();
+                report.reason_code = Some(status.reason_code.to_string());
+                report.reason = Some(status.reason.to_string());
+                report.success = true;
+                report.eval_exit_code = Some(eval_exit);
+                report.executable_path = Some(executable_path.clone());
+                report.artifact_path = Some(executable_path);
+            }
+            Err(err) if err == "native-host-unsupported" => {
+                let status = native_backend::native_backend_status();
+                report.backend_level = "contract-only";
+                report.runtime_level = "none";
+                report.reason_code = Some(status.reason_code.to_string());
+                report.reason = Some(status.reason.to_string());
+            }
+            Err(err) => {
+                report.backend_level = "owned-native-subset";
+                report.runtime_level = "inrt-native";
+                report.reason_code = Some("native-lowering-failed".to_string());
+                report.reason = Some(err.clone());
+                report.error = Some(err);
+            }
+        },
     }
 
-    finalize_report(&mut report, started)
+    finalize_report(&mut report, started, &cwd, &frontend_hash)
+}
+
+fn compile_native(
+    module: &UnifiedModule,
+    module_id: &str,
+    request: &OwnedCompileRequest,
+) -> Result<(String, u8), String> {
+    let entry = request
+        .entry
+        .as_deref()
+        .filter(|name| !name.is_empty())
+        .unwrap_or("answer");
+    let eval_exit = const_eval_entry_exit_code(module, module_id, entry)?;
+    let out_path = request
+        .out
+        .as_ref()
+        .ok_or_else(|| "native compile requires --out executable path".to_string())?;
+    native_emit::compile_native_executable_for_host(module, entry, out_path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(out_path)
+            .map_err(|err| format!("native executable metadata: {err}"))?
+            .permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(out_path, perms)
+            .map_err(|err| format!("chmod native executable: {err}"))?;
+    }
+    Ok((out_path.display().to_string(), eval_exit))
+}
+
+fn const_eval_entry_exit_code(
+    module: &UnifiedModule,
+    module_id: &str,
+    entry: &str,
+) -> Result<u8, String> {
+    let sil = crate::compiler::driver::lower_unified_module(module, module_id);
+    let artifact = crate::hybrid_sil::parse_textual_sil(&sil);
+    let mut bytecode_module = sil_to_bytecode::lower_sil_to_bytecode(&artifact)?;
+    bytecode_module.entry_point = entry.to_string();
+    if bytecode_module.find_function(entry).is_none() {
+        return Err(format!("native compile missing entry function `{entry}`"));
+    }
+    let mut vm = BytecodeVM::new(bytecode_module);
+    let value = vm.run()?;
+    let code = value.to_int();
+    if !(0..=255).contains(&code) {
+        return Err(format!(
+            "native compile entry `{entry}` exit code {code} is outside 0..=255"
+        ));
+    }
+    Ok(code as u8)
 }
 
 fn compile_bytecode(
@@ -185,7 +353,12 @@ fn compile_bytecode(
     Ok(Some(out_path.display().to_string()))
 }
 
-fn finalize_report(report: &mut OwnedCompileReport, started: Instant) -> OwnedCompileReport {
+fn finalize_report(
+    report: &mut OwnedCompileReport,
+    started: Instant,
+    cwd: &Path,
+    frontend_hash: &str,
+) -> OwnedCompileReport {
     report.external_invocations = external_guard::ExternalInvocationGuard::active_invocations();
     if let Err(reason) = external_guard::assert_no_forbidden_invocations(&report.external_invocations)
     {
@@ -195,6 +368,10 @@ fn finalize_report(report: &mut OwnedCompileReport, started: Instant) -> OwnedCo
         report.error = Some(reason);
     }
     report.timing_micros = started.elapsed().as_micros();
+    report.timing_waves_us = Some(timing_waves_for_jobs(report.jobs, report.timing_micros));
+    if !report.cache_hit {
+        let _ = compile_cache::write_cached_report(cwd, frontend_hash, report);
+    }
     report.clone()
 }
 
@@ -219,6 +396,18 @@ mod tests {
         ))
     }
 
+    fn default_request(path: PathBuf, target: CompileTarget, entry: Option<&str>, out: Option<PathBuf>) -> OwnedCompileRequest {
+        OwnedCompileRequest {
+            path,
+            module_id: "App".to_string(),
+            parser: ParserCli::Auto,
+            target,
+            entry: entry.map(str::to_string),
+            out,
+            jobs: 1,
+        }
+    }
+
     #[test]
     fn compiles_sample_in_bytecode_with_temp_out_file() {
         let source_path = temp_path("sample.in");
@@ -229,14 +418,12 @@ mod tests {
         )
         .unwrap();
 
-        let report = compile_owned(&OwnedCompileRequest {
-            path: source_path.clone(),
-            module_id: "App".to_string(),
-            parser: ParserCli::Auto,
-            target: CompileTarget::Bytecode,
-            entry: Some("main".to_string()),
-            out: Some(out_path.clone()),
-        });
+        let report = compile_owned(&default_request(
+            source_path.clone(),
+            CompileTarget::Bytecode,
+            Some("main"),
+            Some(out_path.clone()),
+        ));
 
         assert!(report.success, "{:?}", report);
         assert_eq!(report.frontend_level, "core-ir-direct");
@@ -253,30 +440,63 @@ mod tests {
     }
 
     #[test]
-    fn native_target_returns_not_implemented_reason() {
+    fn native_target_reports_host_status() {
         let source_path = temp_path("native.in");
         fs::write(&source_path, "fn main() -> void { return; }\n").unwrap();
 
-        let report = compile_owned(&OwnedCompileRequest {
-            path: source_path.clone(),
-            module_id: "App".to_string(),
-            parser: ParserCli::Auto,
-            target: CompileTarget::Native,
-            entry: Some("main".to_string()),
-            out: None,
-        });
+        let report = compile_owned(&default_request(
+            source_path.clone(),
+            CompileTarget::Native,
+            Some("main"),
+            None,
+        ));
 
-        assert!(!report.success);
-        assert!(report.owned);
-        assert_eq!(
-            report.reason_code.as_deref(),
-            Some(native_backend::NATIVE_BACKEND_NOT_IMPLEMENTED)
-        );
-        assert_eq!(report.backend_level, "contract-only");
-        assert_eq!(report.runtime_level, "none");
-        assert_eq!(report.semantic_level, "typed-subset");
+        if native_backend::native_subset_host_available() {
+            assert!(!report.success);
+            assert!(
+                report
+                    .reason
+                    .as_deref()
+                    .is_some_and(|reason| reason.contains("--out"))
+            );
+        } else {
+            assert!(!report.success);
+            assert_eq!(
+                report.reason_code.as_deref(),
+                Some(native_backend::NATIVE_BACKEND_NOT_IMPLEMENTED)
+            );
+        }
 
         fs::remove_file(source_path).unwrap();
+    }
+
+    #[test]
+    fn native_answer_entry_compiles_on_aarch64_host() {
+        if !native_backend::native_subset_host_available() {
+            return;
+        }
+        let source_path = temp_path("answer.in");
+        let out_path = temp_path("answer.bin");
+        fs::write(
+            &source_path,
+            "fn answer() -> Int { return 42; }\nfn main() -> void { return; }\n",
+        )
+        .unwrap();
+
+        let report = compile_owned(&default_request(
+            source_path.clone(),
+            CompileTarget::Native,
+            Some("answer"),
+            Some(out_path.clone()),
+        ));
+        assert!(report.success, "{:?}", report);
+        assert_eq!(report.backend_level, "owned-native-subset");
+        assert_eq!(report.runtime_level, "inrt-native");
+        assert_eq!(report.eval_exit_code, Some(42));
+        assert!(out_path.exists());
+
+        fs::remove_file(source_path).unwrap();
+        fs::remove_file(out_path).unwrap();
     }
 
     #[test]
@@ -284,14 +504,12 @@ mod tests {
         let source_path = temp_path("external.in");
         fs::write(&source_path, "fn main() -> void { return; }\n").unwrap();
 
-        let report = compile_owned(&OwnedCompileRequest {
-            path: source_path.clone(),
-            module_id: "App".to_string(),
-            parser: ParserCli::Auto,
-            target: CompileTarget::Bytecode,
-            entry: None,
-            out: None,
-        });
+        let report = compile_owned(&default_request(
+            source_path.clone(),
+            CompileTarget::Bytecode,
+            None,
+            None,
+        ));
 
         assert!(report.external_invocations.is_empty());
         assert!(report.success);
@@ -304,19 +522,39 @@ mod tests {
         let source_path = temp_path("json.in");
         fs::write(&source_path, "fn main() -> void { return; }\n").unwrap();
 
-        let report = compile_owned(&OwnedCompileRequest {
-            path: source_path.clone(),
-            module_id: "App".to_string(),
-            parser: ParserCli::Auto,
-            target: CompileTarget::Bytecode,
-            entry: None,
-            out: None,
-        });
+        let report = compile_owned(&default_request(
+            source_path.clone(),
+            CompileTarget::Bytecode,
+            None,
+            None,
+        ));
         let json = report_to_json(&report).unwrap();
         assert!(json.contains("\"schema_version\": 1"));
         assert!(json.contains("\"owned\": true"));
         assert!(json.contains("\"external_invocations\": []"));
 
+        fs::remove_file(source_path).unwrap();
+    }
+
+    #[test]
+    fn compile_cache_hit_on_second_run() {
+        let source_path = temp_path("cache.in");
+        fs::write(&source_path, "fn main() -> void { return; }\n").unwrap();
+        let first = compile_owned(&default_request(
+            source_path.clone(),
+            CompileTarget::Bytecode,
+            None,
+            None,
+        ));
+        assert!(!first.cache_hit);
+        let second = compile_owned(&default_request(
+            source_path.clone(),
+            CompileTarget::Bytecode,
+            None,
+            None,
+        ));
+        assert!(second.cache_hit);
+        assert_eq!(first.success, second.success);
         fs::remove_file(source_path).unwrap();
     }
 }

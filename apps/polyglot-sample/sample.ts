@@ -1,7 +1,5 @@
-function helper(value: number): number {
-  return value;
+function answer(): number {
+  return 42;
 }
 
-function main(): void {
-  helper(1);
-}
+function main(): void {}

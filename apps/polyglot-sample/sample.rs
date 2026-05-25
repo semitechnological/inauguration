@@ -1,12 +1,5 @@
-struct Sample {
-    value: i64,
+fn answer() -> i64 {
+    42
 }
 
-fn helper(value: i64) -> i64 {
-    return value;
-}
-
-fn main() {
-    helper(1);
-    return;
-}
+fn main() {}

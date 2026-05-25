@@ -1,9 +1,7 @@
 class Sample {
-  static int helper(int value) {
-    return value
+  static int answer() {
+    return 42
   }
 
-  static void main(String[] args) {
-    helper(1)
-  }
+  static void main(String[] args) {}
 }

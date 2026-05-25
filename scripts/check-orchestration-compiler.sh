@@ -190,17 +190,28 @@ available = {
     (backend.get("name"), backend.get("implemented"), backend.get("reason_code"))
     for backend in data.get("available") or []
 }
-require(("native", False, "native-backend-not-implemented") in available, "native backend status was not explicit")
+native_contract = ("native", False, "native-backend-not-implemented")
+native_aarch64 = ("native", True, "native-aarch64-subset")
+require(
+    native_contract in available or native_aarch64 in available,
+    "native backend status was not explicit",
+)
 PY
 
 native_backend_json="$tmp_dir/native-backend.json"
 "${in_cmd[@]}" backend --path apps/in-sample/agent-native.in --target native --json > "$native_backend_json"
-python3 - "$native_backend_json" <<'PY'
+if [[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "arm64" ]]; then
+  NATIVE_BACKEND_MODE="aarch64"
+else
+  NATIVE_BACKEND_MODE="contract"
+fi
+python3 - "$native_backend_json" "$NATIVE_BACKEND_MODE" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 data = json.loads(Path(sys.argv[1]).read_text())
+mode = sys.argv[2]
 
 def require(condition, message):
     if not condition:
@@ -209,12 +220,26 @@ def require(condition, message):
 selected = data.get("selected") or {}
 require(data.get("schema_version") == 1, "native backend schema version was not 1")
 require(selected.get("name") == "native", "native backend selected name was not native")
-require(selected.get("implemented") is False, "native backend must remain status-only")
-require(selected.get("reason_code") == "native-backend-not-implemented", "native backend reason code mismatch")
 request = data.get("request") or {}
-require(request.get("supported") is False, "native backend request unexpectedly reported supported")
-require(request.get("reason_code") == "native-backend-not-implemented", "native backend request reason code mismatch")
 require(data.get("artifact") is None, "native backend unexpectedly reported an artifact")
+if mode == "aarch64":
+    require(selected.get("implemented") is True, "native backend should be implemented on macOS aarch64")
+    require(
+        selected.get("reason_code") == "native-aarch64-subset",
+        "native backend reason code mismatch",
+    )
+    require(request.get("supported") is False, "native backend request should not claim artifact without compile path")
+else:
+    require(selected.get("implemented") is False, "native backend must remain status-only")
+    require(
+        selected.get("reason_code") == "native-backend-not-implemented",
+        "native backend reason code mismatch",
+    )
+    require(request.get("supported") is False, "native backend request unexpectedly reported supported")
+    require(
+        request.get("reason_code") == "native-backend-not-implemented",
+        "native backend request reason code mismatch",
+    )
 PY
 
 echo "check package json"

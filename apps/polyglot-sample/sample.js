@@ -1,7 +1,5 @@
-function helper(value) {
-  return value;
+function answer() {
+  return 42;
 }
 
-function main() {
-  helper(1);
-}
+function main() {}

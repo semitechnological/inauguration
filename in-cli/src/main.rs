@@ -80,6 +80,12 @@ enum Commands {
         swiftpm: bool,
         #[arg(
             long,
+            action = clap::ArgAction::SetTrue,
+            help = "Allow external Swift/swiftc toolchain fallback on build paths that would otherwise stay owned-only"
+        )]
+        allow_external_toolchain: bool,
+        #[arg(
+            long,
             value_enum,
             default_value_t = ParserCli::Auto,
             help = "`auto`: extension + `IN_PARSER` pick Core IR vs Swift; `in` / `icore` force `.in` or JSON icore"
@@ -223,6 +229,8 @@ enum Commands {
         parser: ParserCli,
         #[arg(long)]
         entry: Option<String>,
+        #[arg(long, default_value = "1")]
+        jobs: usize,
         #[arg(long, default_value_t = false)]
         json: bool,
     },
@@ -308,8 +316,17 @@ fn run() -> Result<()> {
             module_id,
             verbose,
             swiftpm,
+            allow_external_toolchain,
             parser,
-        } => cmd_build(&invocation_cwd, &path, &module_id, verbose, swiftpm, parser),
+        } => cmd_build(
+            &invocation_cwd,
+            &path,
+            &module_id,
+            verbose,
+            swiftpm,
+            allow_external_toolchain,
+            parser,
+        ),
         Commands::Agent {
             path,
             module_id,
@@ -386,6 +403,7 @@ fn run() -> Result<()> {
             module_id,
             parser,
             entry,
+            jobs,
             json,
         } => cmd_compile(
             &invocation_cwd,
@@ -395,6 +413,7 @@ fn run() -> Result<()> {
             &module_id,
             parser,
             entry.as_deref(),
+            jobs,
             json,
         ),
         Commands::RunBytecode { path, verbose } => {
@@ -443,6 +462,7 @@ fn cmd_build(
     module_id: &str,
     verbose: bool,
     swiftpm: bool,
+    allow_external_toolchain: bool,
     parser: ParserCli,
 ) -> Result<()> {
     let start = Instant::now();
@@ -452,6 +472,13 @@ fn cmd_build(
         invocation_cwd.join(path)
     };
     let display_target = resolved.display();
+    if !allow_external_toolchain
+        && resolved.extension().is_some_and(|ext| ext == "swift" || ext == "swiftpm")
+    {
+        eprintln!(
+            "in: owned build path for Swift sources should use `in compile`; pass --allow-external-toolchain to permit swiftc/SwiftPM fallback on `in build`"
+        );
+    }
     let result = run_pipeline_for_path(&resolved, module_id, verbose, parser);
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
     let wall = format!("{elapsed_ms:.3}ms");
@@ -1195,6 +1222,7 @@ fn cmd_compile(
     module_id: &str,
     parser: ParserCli,
     entry: Option<&str>,
+    jobs: usize,
     json: bool,
 ) -> Result<()> {
     let source_path = resolve_invocation_path(cwd, path);
@@ -1213,6 +1241,7 @@ fn cmd_compile(
         target: compile_target_cli_to_owned(target),
         entry: entry.map(str::to_string),
         out: Some(out_path),
+        jobs: jobs.max(1),
     };
     let report = compile_owned(&request);
 
@@ -1254,7 +1283,17 @@ fn cmd_compile(
         println!("parsed_function_count: {}", report.parsed_function_count);
         println!("typed_function_count: {}", report.typed_function_count);
         println!("call_edge_count: {}", report.call_edge_count);
+        println!("jobs: {}", report.jobs);
         println!("timing.total_us={}", report.timing_micros);
+        if let Some(waves) = &report.timing_waves_us {
+            println!("timing.waves_us={waves:?}");
+        }
+        if report.cache_hit {
+            println!("cache_hit: true");
+        }
+        if let Some(hash) = &report.frontend_hash {
+            println!("frontend_hash: {hash}");
+        }
     }
 
     if !report.success && !json {
@@ -1626,9 +1665,10 @@ fn cmd_test(root: &Path, options: TestOptions) -> Result<()> {
     run_test_groups(groups, options.serial)
 }
 
-fn owned_native_test_step_names() -> [&'static str; 2] {
+fn owned_native_test_step_names() -> [&'static str; 3] {
     [
         "owned native compiler (scripts/check-owned-native-compiler.sh)",
+        "native answer sample (scripts/check-native-answer-sample.sh)",
         "owned polyglot samples (scripts/check-polyglot-sample.sh)",
     ]
 }
@@ -1639,6 +1679,8 @@ fn owned_native_test_groups(root: &Path) -> Vec<TestGroup> {
         .map(|name| {
             let script = if name.contains("owned-native-compiler") {
                 "scripts/check-owned-native-compiler.sh"
+            } else if name.contains("native-answer") {
+                "scripts/check-native-answer-sample.sh"
             } else {
                 "scripts/check-polyglot-sample.sh"
             };
@@ -2254,12 +2296,14 @@ mod tests {
                 module_id,
                 verbose,
                 swiftpm,
+                allow_external_toolchain,
                 parser,
             } => {
                 assert_eq!(path, "Foo.swift");
                 assert_eq!(module_id, "Foo");
                 assert!(!verbose);
                 assert!(!swiftpm);
+                assert!(!allow_external_toolchain);
                 assert!(matches!(parser, ParserCli::Auto));
             }
             _ => panic!("expected build command"),
@@ -2481,6 +2525,7 @@ mod tests {
                 module_id,
                 parser,
                 entry,
+                jobs,
                 json,
             } => {
                 assert_eq!(path, "apps/in-sample/hello.in");
@@ -2489,6 +2534,7 @@ mod tests {
                 assert_eq!(module_id, "Hello");
                 assert!(matches!(parser, ParserCli::In));
                 assert_eq!(entry.as_deref(), Some("main"));
+                assert_eq!(jobs, 1);
                 assert!(json);
             }
             _ => panic!("expected compile command"),

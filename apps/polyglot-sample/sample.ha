@@ -1,7 +1,5 @@
-fn helper(value: int) int = {
-    return value;
+fn answer() int = {
+	return 42;
 };
 
-export fn main() void = {
-    helper(1);
-};
+export fn main() void = {};

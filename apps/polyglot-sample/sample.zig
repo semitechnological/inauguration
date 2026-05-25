@@ -1,7 +1,5 @@
-fn helper(value: i32) i32 {
-    return value;
+fn answer() i32 {
+    return 42;
 }
 
-pub fn main() void {
-    _ = helper(1);
-}
+pub fn main() void {}

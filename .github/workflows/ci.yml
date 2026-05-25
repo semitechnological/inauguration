@@ -96,6 +96,10 @@ jobs:
         working-directory: in-cli
       - name: Run in test
         run: in test
+      - name: Run in test owned-native
+        env:
+          IN_TEST_SKIP_SWIFT: "1"
+        run: in test --owned-native
 
   hybrid-libs:
     name: Hybrid library crates

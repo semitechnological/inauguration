@@ -1,9 +1,7 @@
 class Program {
-    static int helper(int value) {
-        return value;
+    static int answer() {
+        return 42;
     }
 
-    static void Main(string[] args) {
-        helper(1);
-    }
+    static void Main(string[] args) {}
 }

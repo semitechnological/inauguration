@@ -10,6 +10,10 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 
 mkdir -p target/in
 
+is_macos_aarch64() {
+  [[ "$(uname -s)" == "Darwin" ]] && [[ "$(uname -m)" == "arm64" ]]
+}
+
 BYTECODE_OUT="target/in/owned-sample.bca"
 NATIVE_OUT="target/in/owned-sample-native"
 
@@ -48,12 +52,19 @@ native_json="$TMP_DIR/native-compile.json"
   --entry main \
   --out "$NATIVE_OUT" \
   --json >"$native_json"
-python3 - "$native_json" <<'PY'
+if is_macos_aarch64; then
+  MACOS_AARCH64_FLAG=yes
+else
+  MACOS_AARCH64_FLAG=no
+fi
+python3 - "$native_json" "$NATIVE_OUT" "$MACOS_AARCH64_FLAG" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 data = json.loads(Path(sys.argv[1]).read_text())
+native_out = Path(sys.argv[2])
+macos_aarch64 = sys.argv[3] == "yes"
 
 def require(condition, message):
     if not condition:
@@ -65,13 +76,17 @@ require(
 )
 success = data.get("success")
 reason_code = data.get("reason_code")
-if success is False:
-    require(
-        reason_code == "native-backend-not-implemented",
-        "native compile failure reason_code was not native-backend-not-implemented",
-    )
-elif success is not True:
-    raise SystemExit("native compile report missing success true/false")
+if macos_aarch64:
+    require(success is True, f"native compile expected success on macOS aarch64: {reason_code} {data.get('reason')}")
+    require(native_out.exists(), f"missing native executable: {native_out}")
+else:
+    if success is False:
+        require(
+            reason_code in {"native-backend-not-implemented", "native-host-unsupported"},
+            "native compile failure reason_code was unexpected",
+        )
+    elif success is not True:
+        raise SystemExit("native compile report missing success true/false")
 PY
 echo "owned-native ok: native compile owned report with empty external_invocations"
 

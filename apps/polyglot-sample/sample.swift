@@ -1,10 +1,7 @@
-struct Sample
-
-func helper(value: Int) -> Int {
-  return value
+func answer() -> Int {
+  return 42
 }
 
 func main() -> Void {
-  helper(value: 1)
   return
 }

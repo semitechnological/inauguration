@@ -1,7 +1,5 @@
-int helper(int value) {
-  return value;
+int answer() {
+  return 42;
 }
 
-void main() {
-  helper(1);
-}
+void main() {}

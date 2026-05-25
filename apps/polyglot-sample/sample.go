@@ -1,14 +1,7 @@
 package main
 
-type Sample struct {
-    Value int
+func answer() int {
+	return 42
 }
 
-func helper(value int) int {
-    return value
-}
-
-func main() {
-    helper(1)
-    return
-}
+func main() {}

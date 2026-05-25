@@ -8,7 +8,8 @@ IN_CMD=("${IN_BIN:-in}")
 OUT="target/in/polyglot-sample.bca"
 
 "${IN_CMD[@]}" compile-bytecode apps/polyglot-sample/sample.in --module-id App --out "$OUT"
-grep -q 'call helper 1' "$OUT"
+grep -q 'function @answer' "$OUT"
+grep -q 'load_int 42' "$OUT"
 "${IN_CMD[@]}" run-bytecode "$OUT"
 "${IN_CMD[@]}" execute-bytecode apps/polyglot-sample/sample.in --module-id App
 "${IN_CMD[@]}" execute-bytecode apps/polyglot-sample/sample.ml --module-id App
