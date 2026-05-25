@@ -175,10 +175,20 @@ fn lower_stmts_with_env(
                 out.push_str(&format!("label {end_label}\n"));
             }
             Stmt::Loop { cond, body, .. } => {
+                let label_id = *ssa;
+                *ssa += 1;
+                let head_label = format!("bb_loop_head_{label_id}");
+                let body_label = format!("bb_loop_body_{label_id}");
+                let end_label = format!("bb_loop_end_{label_id}");
+                out.push_str(&format!("br {head_label}\n"));
+                out.push_str(&format!("label {head_label}\n"));
                 if let Some(c) = cond {
-                    let _ = lower_expr(c, env, ssa, &mut out);
+                    let cond_id = lower_expr(c, env, ssa, &mut out);
+                    out.push_str(&format!("cond_br %{cond_id}, {body_label}, {end_label}\n"));
+                } else {
+                    out.push_str(&format!("br {body_label}\n"));
                 }
-                out.push_str("// loop.body\n");
+                out.push_str(&format!("label {body_label}\n"));
                 let mut loop_env = env.clone();
                 out.push_str(&lower_stmts_with_env(
                     body,
@@ -187,6 +197,8 @@ fn lower_stmts_with_env(
                     false,
                     &mut loop_env,
                 ));
+                out.push_str(&format!("br {head_label}\n"));
+                out.push_str(&format!("label {end_label}\n"));
             }
             Stmt::Match { scrutinee, arms } => {
                 let _ = lower_expr(scrutinee, env, ssa, &mut out);

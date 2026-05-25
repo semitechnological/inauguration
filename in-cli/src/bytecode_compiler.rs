@@ -150,6 +150,36 @@ mod tests {
     }
 
     #[test]
+    fn while_loop_updates_variable_until_condition_is_false() {
+        let path = temp_file("while-loop.in");
+        fs::write(
+            &path,
+            "fn main() -> Int { let x: Int = 0; while x < 3 { x = x + 1; } return x; }\n",
+        )
+        .unwrap();
+
+        let output = compile_source_path(&path, "App", ParserCli::Auto).unwrap();
+        assert_eq!(run_bytecode_module(output.module).unwrap(), Value::Int(3));
+
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn while_loop_skips_body_when_condition_is_false() {
+        let path = temp_file("while-skip.in");
+        fs::write(
+            &path,
+            "fn main() -> Int { let x: Int = 5; while x < 3 { x = x + 1; } return x; }\n",
+        )
+        .unwrap();
+
+        let output = compile_source_path(&path, "App", ParserCli::Auto).unwrap();
+        assert_eq!(run_bytecode_module(output.module).unwrap(), Value::Int(5));
+
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn string_equality_compares_string_values() {
         let path = temp_file("string-eq.in");
         fs::write(
