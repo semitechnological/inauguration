@@ -238,6 +238,10 @@ pub fn text_to_module(text: &str) -> Result<BytecodeModule, String> {
 }
 
 fn parse_instruction(line: &str) -> Result<Instruction, String> {
+    if let Some(raw) = line.strip_prefix("load_string").map(str::trim) {
+        return Ok(Instruction::LoadString(parse_quoted_payload(raw)?));
+    }
+
     let parts: Vec<&str> = line.split_whitespace().collect();
     if parts.is_empty() {
         return Err("empty instruction".to_string());
@@ -250,13 +254,6 @@ fn parse_instruction(line: &str) -> Result<Instruction, String> {
                 .and_then(|s| s.parse::<i64>().ok())
                 .ok_or("parse error")?;
             Ok(Instruction::LoadInt(n))
-        }
-        "load_string" => {
-            let s = parts
-                .get(1)
-                .map(|s| s.trim_matches('"').to_string())
-                .ok_or("parse error")?;
-            Ok(Instruction::LoadString(s))
         }
         "load_bool" => {
             let b = parts
@@ -325,6 +322,34 @@ fn parse_instruction(line: &str) -> Result<Instruction, String> {
         }
         _ => Err(format!("unknown instruction: {}", parts[0])),
     }
+}
+
+fn parse_quoted_payload(raw: &str) -> Result<String, String> {
+    let payload = raw.trim();
+    if !payload.starts_with('"') || !payload.ends_with('"') || payload.len() < 2 {
+        return Err("parse error".to_string());
+    }
+    let mut out = String::new();
+    let mut chars = payload[1..payload.len() - 1].chars();
+    while let Some(ch) = chars.next() {
+        if ch != '\\' {
+            out.push(ch);
+            continue;
+        }
+        let escaped = chars.next().ok_or("parse error")?;
+        match escaped {
+            '"' => out.push('"'),
+            '\\' => out.push('\\'),
+            'n' => out.push('\n'),
+            'r' => out.push('\r'),
+            't' => out.push('\t'),
+            other => {
+                out.push('\\');
+                out.push(other);
+            }
+        }
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

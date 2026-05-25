@@ -235,6 +235,13 @@ impl BytecodeVM {
 
     /// Apply a binary operator.
     fn apply_binop(&self, op: &str, lhs: Value, rhs: Value) -> Result<Value, String> {
+        match op {
+            "==" => return Ok(Value::Bool(lhs == rhs)),
+            "!=" => return Ok(Value::Bool(lhs != rhs)),
+            "&&" => return Ok(Value::Bool(lhs.to_bool() && rhs.to_bool())),
+            "||" => return Ok(Value::Bool(lhs.to_bool() || rhs.to_bool())),
+            _ => {}
+        }
         let l = lhs.to_int();
         let r = rhs.to_int();
         match op {
@@ -255,14 +262,10 @@ impl BytecodeVM {
                     Ok(Value::Int(l % r))
                 }
             }
-            "==" => Ok(Value::Bool(l == r)),
-            "!=" => Ok(Value::Bool(l != r)),
             "<" => Ok(Value::Bool(l < r)),
             ">" => Ok(Value::Bool(l > r)),
             "<=" => Ok(Value::Bool(l <= r)),
             ">=" => Ok(Value::Bool(l >= r)),
-            "&&" => Ok(Value::Bool(lhs.to_bool() && rhs.to_bool())),
-            "||" => Ok(Value::Bool(lhs.to_bool() || rhs.to_bool())),
             _ => Err(format!("unknown binop: {}", op)),
         }
     }

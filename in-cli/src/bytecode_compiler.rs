@@ -109,6 +109,65 @@ mod tests {
     }
 
     #[test]
+    fn bytecode_artifact_preserves_string_literals_with_spaces() {
+        let source_path = temp_file("string-space.in");
+        let bytecode_path = temp_file("string-space.bca");
+        fs::write(
+            &source_path,
+            "fn main() -> String { return \"hello world\"; }\n",
+        )
+        .unwrap();
+
+        let output = compile_source_path(&source_path, "App", ParserCli::Auto).unwrap();
+        assert_eq!(
+            run_bytecode_module(output.module.clone()).unwrap(),
+            Value::String("hello world".to_string())
+        );
+        write_bytecode_module(&output.module, &bytecode_path).unwrap();
+        let roundtrip = read_bytecode_module(&bytecode_path).unwrap();
+        assert_eq!(
+            run_bytecode_module(roundtrip).unwrap(),
+            Value::String("hello world".to_string())
+        );
+
+        fs::remove_file(source_path).unwrap();
+        fs::remove_file(bytecode_path).unwrap();
+    }
+
+    #[test]
+    fn branch_assignment_updates_variable_value() {
+        let path = temp_file("branch-assign.in");
+        fs::write(
+            &path,
+            "fn main() -> Int { let x: Int = 0; if true { x = 9; } return x; }\n",
+        )
+        .unwrap();
+
+        let output = compile_source_path(&path, "App", ParserCli::Auto).unwrap();
+        assert_eq!(run_bytecode_module(output.module).unwrap(), Value::Int(9));
+
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn string_equality_compares_string_values() {
+        let path = temp_file("string-eq.in");
+        fs::write(
+            &path,
+            "fn main() -> Bool { return \"left\" == \"right\"; }\n",
+        )
+        .unwrap();
+
+        let output = compile_source_path(&path, "App", ParserCli::Auto).unwrap();
+        assert_eq!(
+            run_bytecode_module(output.module).unwrap(),
+            Value::Bool(false)
+        );
+
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn runs_string_bool_and_if_return_bytecode() {
         let path = temp_file("agent.in");
         fs::write(

@@ -25,7 +25,10 @@ fn lower_expr(e: &Expr, env: &HashMap<String, usize>, ssa: &mut usize, out: &mut
             id
         }
         Expr::Ident(name) => {
-            if let Some(&id) = env.get(name) {
+            if env.contains_key(name) {
+                let id = *ssa;
+                *ssa += 1;
+                out.push_str(&format!("%{id} = load_var {name}\n"));
                 return id;
             }
             let id = *ssa;
@@ -100,6 +103,7 @@ fn lower_stmts_into(
         *ssa += 1;
         out.push_str(&format!("%{id} = argument {idx} : $Builtin.Int64\n"));
         env.insert(pname.clone(), id);
+        out.push_str(&format!("store_var {pname} %{id}\n"));
     }
     out.push_str(&lower_stmts_with_env(
         body,
@@ -124,10 +128,12 @@ fn lower_stmts_with_env(
             Stmt::Let(name, _, e) => {
                 let id = lower_expr(e, env, ssa, &mut out);
                 env.insert(name.clone(), id);
+                out.push_str(&format!("store_var {name} %{id}\n"));
             }
             Stmt::Assign(name, e) => {
                 let id = lower_expr(e, env, ssa, &mut out);
                 env.insert(name.clone(), id);
+                out.push_str(&format!("store_var {name} %{id}\n"));
             }
             Stmt::Expr(e) => {
                 let _ = lower_expr(e, env, ssa, &mut out);

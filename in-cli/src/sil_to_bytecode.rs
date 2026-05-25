@@ -43,6 +43,7 @@ fn lower_function(name: &str, instructions: &[String]) -> Result<BytecodeFunctio
     let mut bytecode = Vec::new();
     let mut local_counter = 0;
     let mut value_map: HashMap<String, usize> = HashMap::new();
+    let mut var_slots: HashMap<String, usize> = HashMap::new();
     let mut function_refs: HashMap<String, String> = HashMap::new();
     let mut _label_counter = 0;
 
@@ -57,6 +58,7 @@ fn lower_function(name: &str, instructions: &[String]) -> Result<BytecodeFunctio
             line,
             &mut local_counter,
             &mut value_map,
+            &mut var_slots,
             &mut function_refs,
             &mut _label_counter,
         ) {
@@ -96,6 +98,21 @@ fn store_register(
     *local_counter += 1;
     value_map.insert(reg.to_string(), slot);
     out.push(Instruction::Store(slot));
+}
+
+fn variable_slot(
+    name: &str,
+    local_counter: &mut usize,
+    var_slots: &mut HashMap<String, usize>,
+) -> usize {
+    if let Some(slot) = var_slots.get(name) {
+        *slot
+    } else {
+        let slot = *local_counter;
+        *local_counter += 1;
+        var_slots.insert(name.to_string(), slot);
+        slot
+    }
 }
 
 fn parse_string_payload(raw: &str) -> String {
@@ -140,6 +157,7 @@ fn parse_sil_instruction_to_bytecode(
     line: &str,
     local_counter: &mut usize,
     value_map: &mut HashMap<String, usize>,
+    var_slots: &mut HashMap<String, usize>,
     function_refs: &mut HashMap<String, String>,
     _label_counter: &mut usize,
 ) -> Result<Vec<Instruction>, String> {
@@ -157,6 +175,15 @@ fn parse_sil_instruction_to_bytecode(
     }
 
     if let Some((reg, rhs)) = assignment(line) {
+        if let Some(name) = rhs.strip_prefix("load_var ").map(str::trim) {
+            if let Some(slot) = var_slots.get(name) {
+                out.push(Instruction::Load(*slot));
+            } else {
+                out.push(Instruction::LoadNil);
+            }
+            store_register(reg, local_counter, value_map, &mut out);
+            return Ok(out);
+        }
         if let Some(s) = rhs.strip_prefix("string_literal ").map(str::trim) {
             out.push(Instruction::LoadString(parse_string_payload(s)));
             store_register(reg, local_counter, value_map, &mut out);
@@ -189,6 +216,17 @@ fn parse_sil_instruction_to_bytecode(
             store_register(reg, local_counter, value_map, &mut out);
             return Ok(out);
         }
+    }
+
+    if let Some(rest) = line.strip_prefix("store_var ").map(str::trim) {
+        let mut parts = rest.split_whitespace();
+        let name = parts.next().ok_or("parse error")?;
+        let reg = parts.next().ok_or("parse error")?;
+        let source = value_map.get(reg).ok_or("parse error")?;
+        out.push(Instruction::Load(*source));
+        let slot = variable_slot(name, local_counter, var_slots);
+        out.push(Instruction::Store(slot));
+        return Ok(out);
     }
 
     // %0 = integer_literal $Builtin.Int64, 42
@@ -393,6 +431,7 @@ mod tests {
     fn lower_simple_integer_literal() {
         let mut local_counter = 0;
         let mut value_map = HashMap::new();
+        let mut var_slots = HashMap::new();
         let mut function_refs = HashMap::new();
         let mut label_counter = 0;
 
@@ -400,6 +439,7 @@ mod tests {
             "integer_literal $Builtin.Int64, 42",
             &mut local_counter,
             &mut value_map,
+            &mut var_slots,
             &mut function_refs,
             &mut label_counter,
         )
@@ -413,6 +453,7 @@ mod tests {
     fn lower_return() {
         let mut local_counter = 0;
         let mut value_map = HashMap::new();
+        let mut var_slots = HashMap::new();
         let mut function_refs = HashMap::new();
         let mut label_counter = 0;
 
@@ -420,6 +461,7 @@ mod tests {
             "return",
             &mut local_counter,
             &mut value_map,
+            &mut var_slots,
             &mut function_refs,
             &mut label_counter,
         )
