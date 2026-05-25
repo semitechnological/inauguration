@@ -1,7 +1,9 @@
 use clap::{Parser, Subcommand, ValueEnum};
+use inauguration::external_guard::ExternalInvocationGuard;
 use inauguration::hybrid_core::ChangeEvent;
 use inauguration::hybrid_pipeline::{StageTimings, run_wave_with_timings};
 use inauguration::hybrid_scheduler::BuildScheduler;
+use inauguration::owned_compile::{CompileTarget, OwnedCompileRequest, compile_owned, report_to_json};
 use inauguration::parser_registry::{self, ParserCli};
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -42,6 +44,12 @@ enum PreviewClientKind {
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum BackendTargetCli {
+    Bytecode,
+    Native,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum CompileTargetCli {
     Bytecode,
     Native,
 }
@@ -201,6 +209,23 @@ enum Commands {
         #[arg(long, default_value_t = false)]
         verbose: bool,
     },
+    #[command(about = "Compile source through owned inauguration pipeline")]
+    Compile {
+        #[arg(long)]
+        path: String,
+        #[arg(long, value_enum, default_value_t = CompileTargetCli::Bytecode)]
+        target: CompileTargetCli,
+        #[arg(long)]
+        out: String,
+        #[arg(long, default_value = "App")]
+        module_id: String,
+        #[arg(long, value_enum, default_value_t = ParserCli::Auto)]
+        parser: ParserCli,
+        #[arg(long)]
+        entry: Option<String>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
     #[command(about = "Run bytecode assembly")]
     RunBytecode {
         #[arg(help = "Bytecode assembly path (.bca)")]
@@ -229,6 +254,8 @@ enum Commands {
         toolchain: bool,
         #[arg(long, default_value_t = false)]
         external_parity: bool,
+        #[arg(long, default_value_t = false)]
+        owned_native: bool,
         #[arg(long, default_value_t = false)]
         all: bool,
         #[arg(long, default_value_t = false)]
@@ -352,6 +379,24 @@ fn run() -> Result<()> {
             out,
             verbose,
         } => cmd_compile_bytecode(&invocation_cwd, &path, &module_id, parser, &out, verbose),
+        Commands::Compile {
+            path,
+            target,
+            out,
+            module_id,
+            parser,
+            entry,
+            json,
+        } => cmd_compile(
+            &invocation_cwd,
+            &path,
+            target,
+            &out,
+            &module_id,
+            parser,
+            entry.as_deref(),
+            json,
+        ),
         Commands::RunBytecode { path, verbose } => {
             cmd_run_bytecode(&invocation_cwd, &path, verbose)
         }
@@ -366,6 +411,7 @@ fn run() -> Result<()> {
             self_host,
             toolchain,
             external_parity,
+            owned_native,
             all,
             serial,
         } => cmd_test(
@@ -374,6 +420,7 @@ fn run() -> Result<()> {
                 self_host,
                 toolchain,
                 external_parity,
+                owned_native,
                 all,
                 serial,
             },
@@ -1133,6 +1180,93 @@ fn resolve_invocation_path(cwd: &Path, path: &str) -> PathBuf {
     }
 }
 
+fn compile_target_cli_to_owned(target: CompileTargetCli) -> CompileTarget {
+    match target {
+        CompileTargetCli::Bytecode => CompileTarget::Bytecode,
+        CompileTargetCli::Native => CompileTarget::Native,
+    }
+}
+
+fn cmd_compile(
+    cwd: &Path,
+    path: &str,
+    target: CompileTargetCli,
+    out: &str,
+    module_id: &str,
+    parser: ParserCli,
+    entry: Option<&str>,
+    json: bool,
+) -> Result<()> {
+    let source_path = resolve_invocation_path(cwd, path);
+    let out_path = resolve_invocation_path(cwd, out);
+    if !source_path.exists() {
+        return Err(InError::Message(format!(
+            "file not found: {}",
+            source_path.display()
+        )));
+    }
+
+    let request = OwnedCompileRequest {
+        path: source_path,
+        module_id: module_id.to_string(),
+        parser,
+        target: compile_target_cli_to_owned(target),
+        entry: entry.map(str::to_string),
+        out: Some(out_path),
+    };
+    let report = compile_owned(&request);
+
+    if json {
+        let raw = report_to_json(&report)
+            .map_err(|err| InError::Message(format!("owned compile json: {err}")))?;
+        println!("{raw}");
+    } else {
+        println!("owned: {}", report.owned);
+        println!("success: {}", report.success);
+        if let Some(code) = &report.reason_code {
+            println!("reason_code: {code}");
+        }
+        if let Some(reason) = &report.reason {
+            println!("reason: {reason}");
+        }
+        println!("path: {}", report.path);
+        println!("module_id: {}", report.module_id);
+        println!("target: {}", report.target);
+        if let Some(entry) = &report.entry {
+            println!("entry: {entry}");
+        }
+        println!("frontend_level: {}", report.frontend_level);
+        println!("semantic_level: {}", report.semantic_level);
+        println!("backend_level: {}", report.backend_level);
+        println!("runtime_level: {}", report.runtime_level);
+        if !report.external_invocations.is_empty() {
+            println!(
+                "external_invocations: {}",
+                report.external_invocations.join(", ")
+            );
+        }
+        if let Some(path) = &report.artifact_path {
+            println!("artifact_path: {path}");
+        }
+        if let Some(path) = &report.executable_path {
+            println!("executable_path: {path}");
+        }
+        println!("parsed_function_count: {}", report.parsed_function_count);
+        println!("typed_function_count: {}", report.typed_function_count);
+        println!("call_edge_count: {}", report.call_edge_count);
+        println!("timing.total_us={}", report.timing_micros);
+    }
+
+    if !report.success && !json {
+        return Err(InError::Message(
+            report
+                .reason
+                .unwrap_or_else(|| "owned compile failed".to_string()),
+        ));
+    }
+    Ok(())
+}
+
 fn cmd_compile_bytecode(
     cwd: &Path,
     path: &str,
@@ -1286,6 +1420,38 @@ fn cmd_execute_bytecode(cwd: &Path, path: &str, module_id: &str, verbose: bool) 
     Ok(())
 }
 
+fn backend_owned_levels(
+    artifact: &Option<serde_json::Value>,
+    request_error: &Option<String>,
+    target: BackendTargetCli,
+) -> (&'static str, &'static str, &'static str, &'static str) {
+    match target {
+        BackendTargetCli::Native => (
+            inauguration::native_backend::native_backend_status().input_stage,
+            "failed",
+            "contract-only",
+            "none",
+        ),
+        BackendTargetCli::Bytecode => {
+            if artifact.is_some() {
+                (
+                    "core-ir-direct",
+                    "typed-subset",
+                    "bytecode-vm-subset",
+                    "inrt-bytecode",
+                )
+            } else if request_error
+                .as_ref()
+                .is_some_and(|err| err.contains("typecheck") || err.contains("type check"))
+            {
+                ("core-ir-direct", "failed", "bytecode-vm-subset", "none")
+            } else {
+                ("unsupported", "failed", "bytecode-vm-subset", "none")
+            }
+        }
+    }
+}
+
 fn cmd_backend(
     cwd: &Path,
     path: &str,
@@ -1307,9 +1473,13 @@ fn cmd_backend(
         Some(selected.reason_code)
     };
     let mut request_error: Option<String> = None;
+    let mut external_invocations: Vec<String> = Vec::new();
     let artifact = if matches!(target, BackendTargetCli::Bytecode) {
-        match inauguration::bytecode_compiler::compile_source_path(&source_path, module_id, parser)
-        {
+        let _guard = ExternalInvocationGuard::enter();
+        let compile_result =
+            inauguration::bytecode_compiler::compile_source_path(&source_path, module_id, parser);
+        external_invocations = ExternalInvocationGuard::active_invocations();
+        match compile_result {
             Ok(output) => {
                 let instruction_count: usize = output
                     .module
@@ -1337,6 +1507,8 @@ fn cmd_backend(
     } else {
         None
     };
+    let (frontend_level, semantic_level, backend_level, runtime_level) =
+        backend_owned_levels(&artifact, &request_error, target);
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
 
     if json {
@@ -1344,6 +1516,12 @@ fn cmd_backend(
             "schema_version": 1,
             "path": source_path.display().to_string(),
             "module_id": module_id,
+            "owned": true,
+            "external_invocations": external_invocations,
+            "frontend_level": frontend_level,
+            "semantic_level": semantic_level,
+            "backend_level": backend_level,
+            "runtime_level": runtime_level,
             "request": {
                 "path": source_path.display().to_string(),
                 "module_id": module_id,
@@ -1388,6 +1566,7 @@ struct TestOptions {
     self_host: bool,
     toolchain: bool,
     external_parity: bool,
+    owned_native: bool,
     all: bool,
     serial: bool,
 }
@@ -1414,12 +1593,30 @@ struct TestGroupResult {
 }
 
 fn cmd_test(root: &Path, options: TestOptions) -> Result<()> {
-    let mut groups = self_host_test_groups(root);
     let include_toolchain = options.all || options.toolchain;
     let include_external = options.all || options.external_parity;
-    if options.self_host && !include_toolchain && !include_external {
-        eprintln!("running self-hosted compiler gates");
+    let include_owned_native = options.all || options.owned_native;
+    let owned_native_only = options.owned_native && !options.all;
+    let mut groups = Vec::new();
+
+    if include_owned_native {
+        if owned_native_only {
+            eprintln!("running owned-native compiler gates");
+        }
+        groups.extend(owned_native_test_groups(root));
     }
+
+    if !owned_native_only
+        && (options.all
+            || options.self_host
+            || (!options.toolchain && !options.external_parity))
+    {
+        if options.self_host && !options.all && !include_toolchain && !include_external {
+            eprintln!("running self-hosted compiler gates");
+        }
+        groups.extend(self_host_test_groups(root));
+    }
+
     if include_external {
         groups.extend(external_parity_test_groups(root));
     }
@@ -1427,6 +1624,30 @@ fn cmd_test(root: &Path, options: TestOptions) -> Result<()> {
         groups.extend(toolchain_test_groups(root));
     }
     run_test_groups(groups, options.serial)
+}
+
+fn owned_native_test_step_names() -> [&'static str; 2] {
+    [
+        "owned native compiler (scripts/check-owned-native-compiler.sh)",
+        "owned polyglot samples (scripts/check-polyglot-sample.sh)",
+    ]
+}
+
+fn owned_native_test_groups(root: &Path) -> Vec<TestGroup> {
+    owned_native_test_step_names()
+        .into_iter()
+        .map(|name| {
+            let script = if name.contains("owned-native-compiler") {
+                "scripts/check-owned-native-compiler.sh"
+            } else {
+                "scripts/check-polyglot-sample.sh"
+            };
+            TestGroup {
+                name,
+                commands: vec![bash_command(root, script)],
+            }
+        })
+        .collect()
 }
 
 fn test_step_names() -> [&'static str; 3] {
@@ -1649,6 +1870,7 @@ fn print_test_group_result(result: &TestGroupResult) {
 #[cfg(test)]
 fn all_test_step_names() -> Vec<&'static str> {
     let mut names = Vec::new();
+    names.extend(owned_native_test_step_names());
     names.extend(test_step_names());
     names.extend(external_parity_test_step_names());
     names.extend(toolchain_test_step_names());
@@ -2232,6 +2454,69 @@ mod tests {
     }
 
     #[test]
+    fn parse_compile_subcommand() {
+        let cli = Cli::try_parse_from([
+            "in",
+            "compile",
+            "--path",
+            "apps/in-sample/hello.in",
+            "--target",
+            "bytecode",
+            "--out",
+            "target/hello.bca",
+            "--module-id",
+            "Hello",
+            "--parser",
+            "in",
+            "--entry",
+            "main",
+            "--json",
+        ])
+        .expect("cli parse");
+        match cli.command {
+            Commands::Compile {
+                path,
+                target,
+                out,
+                module_id,
+                parser,
+                entry,
+                json,
+            } => {
+                assert_eq!(path, "apps/in-sample/hello.in");
+                assert!(matches!(target, CompileTargetCli::Bytecode));
+                assert_eq!(out, "target/hello.bca");
+                assert_eq!(module_id, "Hello");
+                assert!(matches!(parser, ParserCli::In));
+                assert_eq!(entry.as_deref(), Some("main"));
+                assert!(json);
+            }
+            _ => panic!("expected compile command"),
+        }
+    }
+
+    #[test]
+    fn parse_compile_native_target_subcommand() {
+        let cli = Cli::try_parse_from([
+            "in",
+            "compile",
+            "--path",
+            "apps/in-sample/hello.in",
+            "--target",
+            "native",
+            "--out",
+            "target/hello",
+        ])
+        .expect("cli parse");
+        match cli.command {
+            Commands::Compile { target, .. } => {
+                assert!(matches!(target, CompileTargetCli::Native));
+            }
+            _ => panic!("expected compile command"),
+        }
+    }
+
+    #[test]
     fn parse_compile_bytecode_subcommand() {
         let cli = Cli::try_parse_from([
             "in",
@@ -2368,6 +2653,21 @@ mod tests {
     }
 
     #[test]
+    fn in_test_owned_native_gate_steps_exist() {
+        let steps = super::owned_native_test_step_names();
+        assert!(
+            steps
+                .iter()
+                .any(|step| step.contains("check-owned-native-compiler.sh"))
+        );
+        assert!(
+            steps
+                .iter()
+                .any(|step| step.contains("check-polyglot-sample.sh"))
+        );
+    }
+
+    #[test]
     fn in_test_includes_polyglot_sample_gate() {
         assert!(
             super::test_step_names()
@@ -2412,6 +2712,11 @@ mod tests {
     #[test]
     fn all_test_step_names_keep_toolchain_and_external_gates_available() {
         let steps = super::all_test_step_names();
+        assert!(
+            steps
+                .iter()
+                .any(|step| step.contains("check-owned-native-compiler.sh"))
+        );
         assert!(steps.iter().any(|step| step.contains("cargo test")));
         assert!(steps.iter().any(|step| step.contains("swift test")));
         assert!(
@@ -2427,10 +2732,23 @@ mod tests {
             ["in", "test", "--self-host"],
             ["in", "test", "--toolchain"],
             ["in", "test", "--external-parity"],
+            ["in", "test", "--owned-native"],
             ["in", "test", "--all"],
             ["in", "test", "--serial"],
         ] {
             assert!(Cli::try_parse_from(argv).is_ok(), "{argv:?}");
+        }
+    }
+
+    #[test]
+    fn parse_test_owned_native_flag() {
+        let cli = Cli::try_parse_from(["in", "test", "--owned-native"]).expect("cli parse");
+        match cli.command {
+            Commands::Test { owned_native, all, .. } => {
+                assert!(owned_native);
+                assert!(!all);
+            }
+            _ => panic!("expected test command"),
         }
     }
 

@@ -21,6 +21,8 @@ pub mod in_lang_parse;
 pub mod language_support;
 pub mod lower_core;
 pub mod native_backend;
+pub mod external_guard;
+pub mod owned_compile;
 pub mod native_swift_sil;
 pub mod package_manifest;
 pub mod parser_registry;
