@@ -794,6 +794,9 @@ fn java_stmt(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
     match stmt.kind() {
         "return_statement" => java_return_expr(src, stmt).map(Stmt::Return),
         "expression_statement" => java_expr_statement(src, stmt),
+        "local_variable_declaration" => java_local_variable(src, stmt),
+        "if_statement" => java_if_statement(src, stmt),
+        "while_statement" => java_while_statement(src, stmt),
         _ => None,
     }
 }
@@ -815,6 +818,27 @@ fn java_expr_statement(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
     }
 }
 
+fn java_local_variable(src: &[u8], decl: Node<'_>) -> Option<Stmt> {
+    let var = first_named(decl, "variable_declarator")?;
+    let name_node = var
+        .child_by_field_name("name")
+        .or_else(|| first_named(var, "identifier"))?;
+    let value = var
+        .child_by_field_name("value")
+        .or_else(|| last_named(var))?;
+    let ty = decl
+        .child_by_field_name("type")
+        .or_else(|| first_named(decl, "integral_type"))
+        .or_else(|| first_named(decl, "boolean_type"))
+        .or_else(|| first_named(decl, "type_identifier"))
+        .map(|t| Typ::Named(node_txt(src, t).trim().to_string()));
+    Some(Stmt::Let(
+        node_txt(src, name_node).trim().to_string(),
+        ty,
+        java_expr(src, value)?,
+    ))
+}
+
 fn java_assignment(src: &[u8], expr: Node<'_>) -> Option<Stmt> {
     let left = expr
         .child_by_field_name("left")
@@ -824,6 +848,54 @@ fn java_assignment(src: &[u8], expr: Node<'_>) -> Option<Stmt> {
         .or_else(|| expr.named_child(expr.named_child_count().saturating_sub(1) as u32))?;
     let name = java_assignee_name(src, left)?;
     Some(Stmt::Assign(name, java_expr(src, right)?))
+}
+
+fn java_if_statement(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
+    let cond = stmt
+        .child_by_field_name("condition")
+        .and_then(|n| java_expr(src, n))
+        .or_else(|| {
+            first_named(stmt, "parenthesized_expression").and_then(|n| java_expr(src, n))
+        })?;
+    let then_body = stmt
+        .child_by_field_name("consequence")
+        .map(|n| java_stmt_or_body(src, n))
+        .unwrap_or_default();
+    let else_body = stmt
+        .child_by_field_name("alternative")
+        .map(|n| java_stmt_or_body(src, n))
+        .unwrap_or_default();
+    Some(Stmt::If {
+        cond,
+        then_body,
+        else_body,
+    })
+}
+
+fn java_while_statement(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
+    let cond = stmt
+        .child_by_field_name("condition")
+        .and_then(|n| java_expr(src, n))
+        .or_else(|| {
+            first_named(stmt, "parenthesized_expression").and_then(|n| java_expr(src, n))
+        })?;
+    let body = stmt
+        .child_by_field_name("body")
+        .map(|n| java_stmt_or_body(src, n))
+        .unwrap_or_default();
+    Some(Stmt::Loop {
+        kind: crate::swift_subset::LoopKind::While,
+        cond: Some(cond),
+        body,
+    })
+}
+
+fn java_stmt_or_body(src: &[u8], n: Node<'_>) -> Vec<Stmt> {
+    if n.kind() == "block" {
+        java_body(src, n)
+    } else {
+        java_stmt(src, n).into_iter().collect()
+    }
 }
 
 fn java_assignee_name(src: &[u8], n: Node<'_>) -> Option<String> {
@@ -848,8 +920,40 @@ fn java_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
         )),
         "method_invocation" => java_call_expr(src, expr),
         "parenthesized_expression" => expr.named_child(0).and_then(|n| java_expr(src, n)),
+        "binary_expression" => java_binary_expr(src, expr),
+        "unary_expression" => java_unary_expr(src, expr),
         _ => None,
     }
+}
+
+fn java_binary_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
+    let lhs = expr
+        .child_by_field_name("left")
+        .or_else(|| expr.named_child(0))?;
+    let rhs = expr
+        .child_by_field_name("right")
+        .or_else(|| expr.named_child(expr.named_child_count().saturating_sub(1) as u32))?;
+    let op = std::str::from_utf8(src.get(lhs.end_byte()..rhs.start_byte())?)
+        .ok()?
+        .trim()
+        .to_string();
+    Some(Expr::Binary {
+        op,
+        lhs: Box::new(java_expr(src, lhs)?),
+        rhs: Box::new(java_expr(src, rhs)?),
+    })
+}
+
+fn java_unary_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
+    let inner = last_named(expr)?;
+    let op = std::str::from_utf8(src.get(expr.start_byte()..inner.start_byte())?)
+        .ok()?
+        .trim()
+        .to_string();
+    Some(Expr::Unary {
+        op,
+        expr: Box::new(java_expr(src, inner)?),
+    })
 }
 
 fn java_call_expr(src: &[u8], call: Node<'_>) -> Option<Expr> {
@@ -2183,6 +2287,19 @@ class X {
                             callee: Box::new(Expr::Ident("helper".into())),
                             args: vec![Expr::Ident("value".into())],
                         }),
+                        Stmt::Let(
+                            "local".into(),
+                            Some(Typ::Named("int".into())),
+                            Expr::IntLit(9)
+                        ),
+                        Stmt::Return(Some(Expr::Binary {
+                            op: "+".into(),
+                            lhs: Box::new(Expr::Call {
+                                callee: Box::new(Expr::Ident("helper".into())),
+                                args: vec![Expr::IntLit(3)],
+                            }),
+                            rhs: Box::new(Expr::IntLit(4)),
+                        })),
                     ]
                 );
             }
@@ -2222,6 +2339,68 @@ class X {
             )),
             "{m:?}"
         );
+    }
+
+    #[test]
+    fn java_lowers_scalar_body_shapes() {
+        let src = r#"
+class X {
+  static int helper(int value) { return value; }
+  static int main() {
+    int value = 1;
+    value = value + 2;
+    helper(value);
+    if (value > 2) { value = value - 1; } else { value = 0; }
+    while (value < 4) { value = value + 1; }
+    return value;
+  }
+}
+"#;
+        let m = parse_lang(
+            tree_sitter_java::LANGUAGE.into(),
+            src,
+            extract_java_style_methods,
+        )
+        .expect("ok");
+        let main = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+            .expect("main");
+        match main {
+            Decl::Function { body, .. } => {
+                assert!(matches!(
+                    &body[0],
+                    Stmt::Let(name, Some(Typ::Named(ty)), Expr::IntLit(1))
+                        if name == "value" && ty == "int"
+                ));
+                assert!(matches!(
+                    &body[1],
+                    Stmt::Assign(name, Expr::Binary { op, .. }) if name == "value" && op == "+"
+                ));
+                assert!(matches!(
+                    &body[2],
+                    Stmt::Expr(Expr::Call { callee, args })
+                        if matches!(callee.as_ref(), Expr::Ident(name) if name == "helper")
+                            && args == &vec![Expr::Ident("value".into())]
+                ));
+                assert!(matches!(
+                    &body[3],
+                    Stmt::If { cond: Expr::Binary { op, .. }, then_body, else_body }
+                        if op == ">" && then_body.len() == 1 && else_body.len() == 1
+                ));
+                assert!(matches!(
+                    &body[4],
+                    Stmt::Loop { cond: Some(Expr::Binary { op, .. }), body, .. }
+                        if op == "<" && body.len() == 1
+                ));
+                assert!(matches!(
+                    &body[5],
+                    Stmt::Return(Some(Expr::Ident(name))) if name == "value"
+                ));
+            }
+            _ => panic!("expected function"),
+        }
     }
 
     #[test]
