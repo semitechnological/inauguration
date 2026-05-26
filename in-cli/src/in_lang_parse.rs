@@ -389,6 +389,9 @@ fn parse_struct_block(block: &str) -> Result<(String, Vec<(String, Typ)>), Strin
 
 fn parse_expr(s: &str) -> Expr {
     let s = trim(s);
+    if let Some(inner) = strip_enclosing_parens(s) {
+        return parse_expr(inner);
+    }
     for ops in [
         &["==", "!=", ">=", "<=", ">", "<"][..],
         &["+", "-"][..],
@@ -405,6 +408,23 @@ fn parse_expr(s: &str) -> Expr {
                 };
             }
         }
+    }
+    if let Some(rest) = s.strip_prefix('!')
+        && !trim(rest).is_empty()
+    {
+        return Expr::Unary {
+            op: "!".into(),
+            expr: Box::new(parse_expr(rest)),
+        };
+    }
+    if let Some(rest) = s.strip_prefix('-')
+        && !trim(rest).is_empty()
+        && rest.parse::<i64>().is_err()
+    {
+        return Expr::Unary {
+            op: "-".into(),
+            expr: Box::new(parse_expr(rest)),
+        };
     }
     if s == "true" {
         return Expr::BoolLit(true);
@@ -464,6 +484,46 @@ fn parse_expr(s: &str) -> Expr {
         }
     }
     Expr::Ident(s.to_string())
+}
+
+fn strip_enclosing_parens(s: &str) -> Option<&str> {
+    let s = trim(s);
+    if !(s.starts_with('(') && s.ends_with(')')) {
+        return None;
+    }
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escape = false;
+    for (i, c) in s.char_indices() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        if in_string {
+            if c == '\\' {
+                escape = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => in_string = true,
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 && i + c.len_utf8() < s.len() {
+                    return None;
+                }
+            }
+            _ => {}
+        }
+    }
+    if depth == 0 {
+        Some(&s[1..s.len() - 1])
+    } else {
+        None
+    }
 }
 
 fn find_top_level_binary_op<'a>(s: &str, ops: &[&'a str]) -> Option<(&'a str, usize)> {
@@ -2029,6 +2089,43 @@ fn main() -> void {
         assert!(matches!(
             &body[0],
             Stmt::Return(Some(Expr::Binary { op, .. })) if op == "+"
+        ));
+    }
+
+    #[test]
+    fn fn_body_parses_unary_and_parenthesized_expression() {
+        use crate::swift_subset::Expr;
+        let src = r#"
+fn negate(flag: Bool, value: Int) -> Int {
+  if !flag == false {
+    return -(value + 1);
+  }
+  return (value);
+}
+fn main() -> void
+"#;
+        let m = parse_in_source(src).expect("ok");
+        let body = match m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "negate"))
+        {
+            Some(Decl::Function { body, .. }) => body,
+            _ => panic!("negate"),
+        };
+        assert!(matches!(
+            &body[0],
+            Stmt::If {
+                cond: Expr::Binary { lhs, op, .. },
+                then_body,
+                ..
+            } if op == "=="
+                && matches!(lhs.as_ref(), Expr::Unary { op, .. } if op == "!")
+                && matches!(then_body.as_slice(), [Stmt::Return(Some(Expr::Unary { op, expr }))] if op == "-" && matches!(expr.as_ref(), Expr::Binary { op, .. } if op == "+"))
+        ));
+        assert!(matches!(
+            &body[1],
+            Stmt::Return(Some(Expr::Ident(name))) if name == "value"
         ));
     }
 
