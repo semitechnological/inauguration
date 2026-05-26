@@ -109,6 +109,29 @@ fn lower_expr(
             out.push_str(&format!("%{id} = field_access %{base_id} {name}\n"));
             id
         }
+        Expr::ArrayLit(items) => {
+            let mut item_ids = Vec::new();
+            for item in items {
+                item_ids.push(lower_expr(item, env, direct_env, ssa, out));
+            }
+            let id = *ssa;
+            *ssa += 1;
+            let rendered_items = item_ids
+                .iter()
+                .map(|id| format!("%{id}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            out.push_str(&format!("%{id} = array_init {rendered_items}\n"));
+            id
+        }
+        Expr::Index { base, index } => {
+            let base_id = lower_expr(base, env, direct_env, ssa, out);
+            let index_id = lower_expr(index, env, direct_env, ssa, out);
+            let id = *ssa;
+            *ssa += 1;
+            out.push_str(&format!("%{id} = index_access %{base_id}, %{index_id}\n"));
+            id
+        }
         Expr::Call { callee, args } => {
             let mut arg_ids = Vec::new();
             if let Expr::Ident(name) = callee.as_ref() {
@@ -230,6 +253,15 @@ fn collect_expr_reads(e: &Expr, reads: &mut HashSet<String>) {
             }
         }
         Expr::Field { base, .. } => collect_expr_reads(base, reads),
+        Expr::ArrayLit(items) => {
+            for item in items {
+                collect_expr_reads(item, reads);
+            }
+        }
+        Expr::Index { base, index } => {
+            collect_expr_reads(base, reads);
+            collect_expr_reads(index, reads);
+        }
         Expr::Call { callee, args } => {
             collect_expr_reads(callee, reads);
             for arg in args {

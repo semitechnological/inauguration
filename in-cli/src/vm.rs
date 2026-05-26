@@ -140,6 +140,26 @@ impl BytecodeVM {
                         return Err(format!("field access on non-struct: {}", name));
                     }
                 }
+                Instruction::ArrayInit(len) => {
+                    let values = self.pop_n(len)?;
+                    self.stack.push(Value::Array(values));
+                }
+                Instruction::IndexAccess => {
+                    let index = self.stack.pop().ok_or("stack underflow")?.to_int();
+                    let value = self.stack.pop().ok_or("stack underflow")?;
+                    if index < 0 {
+                        return Err(format!("array index out of bounds: {}", index));
+                    }
+                    if let Value::Array(values) = value {
+                        let item = values
+                            .get(index as usize)
+                            .cloned()
+                            .ok_or(format!("array index out of bounds: {}", index))?;
+                        self.stack.push(item);
+                    } else {
+                        return Err("index access on non-array".to_string());
+                    }
+                }
                 Instruction::Jump(label) => {
                     let target = label_map
                         .get(label.as_str())

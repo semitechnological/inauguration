@@ -268,6 +268,39 @@ fn check_expr(
             }
             Ok(())
         }
+        Expr::ArrayLit(items) => {
+            let mut expected = None;
+            for item in items {
+                check_expr(fn_name, item, facts, env)?;
+                if let Some(item_typ) = expr_type(item, facts, env)? {
+                    if let Some(expected_typ) = &expected {
+                        if expected_typ != &item_typ {
+                            return Err(format!(
+                                "array literal type mismatch in `{fn_name}`: expected {}, got {}",
+                                type_name(expected_typ),
+                                type_name(&item_typ)
+                            ));
+                        }
+                    } else {
+                        expected = Some(item_typ);
+                    }
+                }
+            }
+            Ok(())
+        }
+        Expr::Index { base, index } => {
+            check_expr(fn_name, base, facts, env)?;
+            check_expr(fn_name, index, facts, env)?;
+            require_type(fn_name, "array index", &Typ::Int, index, facts, env)?;
+            match expr_type(base, facts, env)? {
+                Some(Typ::Array(_)) => Ok(()),
+                Some(other) => Err(format!(
+                    "index base in `{fn_name}` expected array, got {}",
+                    type_name(&other)
+                )),
+                None => Ok(()),
+            }
+        }
         Expr::Call { callee, args } => {
             if let Expr::Ident(name) = callee.as_ref() {
                 let Some(sig) = facts.functions.get(name.as_str()) else {
@@ -325,6 +358,23 @@ fn expr_type(
             }
             Ok(None)
         }
+        Expr::ArrayLit(items) => {
+            let mut item_typ = None;
+            for item in items {
+                if let Some(next) = expr_type(item, facts, env)? {
+                    item_typ = Some(next);
+                    break;
+                }
+            }
+            Ok(Some(Typ::Array(Box::new(item_typ.unwrap_or(Typ::Void)))))
+        }
+        Expr::Index { base, .. } => {
+            if let Some(Typ::Array(item)) = expr_type(base, facts, env)? {
+                Ok(Some(*item))
+            } else {
+                Ok(None)
+            }
+        }
         Expr::Unary { op, expr } => match op.as_str() {
             "!" => Ok(Some(Typ::Bool)),
             "-" => Ok(Some(Typ::Int)),
@@ -366,13 +416,14 @@ fn require_type(
     Ok(())
 }
 
-fn type_name(typ: &Typ) -> &str {
+fn type_name(typ: &Typ) -> String {
     match typ {
-        Typ::Int => "Int",
-        Typ::String => "String",
-        Typ::Bool => "Bool",
-        Typ::Void => "Void",
-        Typ::Named(name) => name.as_str(),
+        Typ::Int => "Int".to_string(),
+        Typ::String => "String".to_string(),
+        Typ::Bool => "Bool".to_string(),
+        Typ::Void => "Void".to_string(),
+        Typ::Array(item) => format!("[{}]", type_name(item)),
+        Typ::Named(name) => name.clone(),
     }
 }
 

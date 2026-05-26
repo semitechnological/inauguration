@@ -1148,6 +1148,7 @@ fn typ_label(typ: &Typ) -> String {
         Typ::String => "String".to_string(),
         Typ::Bool => "Bool".to_string(),
         Typ::Void => "Void".to_string(),
+        Typ::Array(item) => format!("[{}]", typ_label(item)),
         Typ::Named(name) => name.clone(),
     }
 }

@@ -395,6 +395,33 @@ fn parse_sil_instruction_to_bytecode(
             clear_value_constants(reg, value_ints, value_bools);
             return Ok(out);
         }
+        if let Some(rest) = rhs.strip_prefix("array_init").map(str::trim) {
+            let args = rest
+                .split(',')
+                .map(str::trim)
+                .filter(|arg| !arg.is_empty())
+                .collect::<Vec<_>>();
+            for arg in &args {
+                if let Some(slot) = value_map.get(*arg) {
+                    out.push(Instruction::Load(*slot));
+                }
+            }
+            out.push(Instruction::ArrayInit(args.len()));
+            store_register(reg, local_counter, value_map, &mut out);
+            clear_value_constants(reg, value_ints, value_bools);
+            return Ok(out);
+        }
+        if let Some(rest) = rhs.strip_prefix("index_access ").map(str::trim) {
+            for arg in rest.split(',').map(str::trim).filter(|arg| !arg.is_empty()) {
+                if let Some(slot) = value_map.get(arg) {
+                    out.push(Instruction::Load(*slot));
+                }
+            }
+            out.push(Instruction::IndexAccess);
+            store_register(reg, local_counter, value_map, &mut out);
+            clear_value_constants(reg, value_ints, value_bools);
+            return Ok(out);
+        }
     }
 
     if let Some(rest) = line.strip_prefix("store_var ").map(str::trim) {

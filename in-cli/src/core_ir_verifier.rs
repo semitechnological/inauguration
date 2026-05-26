@@ -371,6 +371,46 @@ fn check_expr(
             }
             Ok(())
         }
+        Expr::ArrayLit(items) => {
+            let mut expected = None;
+            for item in items {
+                check_expr(fn_name, item, facts, env, call_edges)?;
+                if let Some(item_typ) = expr_type(item, facts, env) {
+                    if let Some(expected_typ) = &expected {
+                        if expected_typ != &item_typ {
+                            return Err((
+                                "array-element-type-mismatch".to_string(),
+                                format!(
+                                    "array literal in `{fn_name}` expected {}, got {}",
+                                    type_name(expected_typ),
+                                    type_name(&item_typ)
+                                ),
+                            ));
+                        }
+                    } else {
+                        expected = Some(item_typ);
+                    }
+                }
+            }
+            Ok(())
+        }
+        Expr::Index { base, index } => {
+            check_expr(fn_name, base, facts, env, call_edges)?;
+            check_expr(fn_name, index, facts, env, call_edges)?;
+            require_type(fn_name, "array index", &Typ::Int, index, facts, env)?;
+            if let Some(base_typ) = expr_type(base, facts, env)
+                && !matches!(base_typ, Typ::Array(_))
+            {
+                return Err((
+                    "type-mismatch".to_string(),
+                    format!(
+                        "index base in `{fn_name}` expected array, got {}",
+                        type_name(&base_typ)
+                    ),
+                ));
+            }
+            Ok(())
+        }
         Expr::Call { callee, args } => {
             if let Expr::Ident(name) = callee.as_ref() {
                 let Some(sig) = facts.functions.get(name.as_str()) else {
@@ -489,6 +529,20 @@ fn expr_type(expr: &Expr, facts: &ModuleFacts<'_>, env: &HashMap<String, Typ>) -
             }
             None
         }
+        Expr::ArrayLit(items) => {
+            let item_typ = items
+                .iter()
+                .find_map(|item| expr_type(item, facts, env))
+                .unwrap_or(Typ::Void);
+            Some(Typ::Array(Box::new(item_typ)))
+        }
+        Expr::Index { base, .. } => {
+            if let Some(Typ::Array(item)) = expr_type(base, facts, env) {
+                Some(*item)
+            } else {
+                None
+            }
+        }
         Expr::Unary { op, expr } => match op.as_str() {
             "!" => Some(Typ::Bool),
             "-" => Some(Typ::Int),
@@ -533,13 +587,14 @@ fn require_type(
     Ok(())
 }
 
-fn type_name(typ: &Typ) -> &str {
+fn type_name(typ: &Typ) -> String {
     match typ {
-        Typ::Int => "Int",
-        Typ::String => "String",
-        Typ::Bool => "Bool",
-        Typ::Void => "Void",
-        Typ::Named(name) => name.as_str(),
+        Typ::Int => "Int".to_string(),
+        Typ::String => "String".to_string(),
+        Typ::Bool => "Bool".to_string(),
+        Typ::Void => "Void".to_string(),
+        Typ::Array(item) => format!("[{}]", type_name(item)),
+        Typ::Named(name) => name.clone(),
     }
 }
 

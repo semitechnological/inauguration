@@ -15,6 +15,7 @@ pub enum Value {
         name: String,
         fields: Vec<(String, Value)>,
     },
+    Array(Vec<Value>),
     Nil,
 }
 
@@ -31,6 +32,7 @@ impl Value {
             }
             Value::String(_) => 0,
             Value::Struct { .. } => 0,
+            Value::Array(_) => 0,
             Value::Nil => 0,
         }
     }
@@ -41,6 +43,7 @@ impl Value {
             Value::Bool(b) => *b,
             Value::String(s) => !s.is_empty(),
             Value::Struct { .. } => true,
+            Value::Array(values) => !values.is_empty(),
             Value::Nil => false,
         }
     }
@@ -51,6 +54,7 @@ impl Value {
             Value::Bool(b) => b.to_string(),
             Value::String(s) => s.clone(),
             Value::Struct { name, .. } => name.clone(),
+            Value::Array(values) => format!("[{}]", values.len()),
             Value::Nil => "nil".to_string(),
         }
     }
@@ -79,6 +83,8 @@ pub enum Instruction {
     UnOp(String),
     StructInit(String, Vec<String>),
     FieldAccess(String),
+    ArrayInit(usize),
+    IndexAccess,
     /// Jump to label
     Jump(String),
     /// Jump if top of stack is false (pop value)
@@ -165,6 +171,8 @@ fn instruction_to_text(inst: &Instruction) -> String {
             format!("struct_init {} {}", name, fields.join(","))
         }
         Instruction::FieldAccess(name) => format!("field {}", name),
+        Instruction::ArrayInit(len) => format!("array_init {}", len),
+        Instruction::IndexAccess => "index".to_string(),
         Instruction::Jump(label) => format!("jmp {}", label),
         Instruction::JumpIfFalse(label) => format!("jmpf {}", label),
         Instruction::JumpIfTrue(label) => format!("jmpt {}", label),
@@ -318,6 +326,14 @@ fn parse_instruction(line: &str) -> Result<Instruction, String> {
             let name = parts.get(1).ok_or("parse error")?.to_string();
             Ok(Instruction::FieldAccess(name))
         }
+        "array_init" => {
+            let len = parts
+                .get(1)
+                .and_then(|s| s.parse::<usize>().ok())
+                .ok_or("parse error")?;
+            Ok(Instruction::ArrayInit(len))
+        }
+        "index" => Ok(Instruction::IndexAccess),
         "jmp" => {
             let label = parts.get(1).ok_or("parse error")?.to_string();
             Ok(Instruction::Jump(label))

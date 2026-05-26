@@ -9,6 +9,7 @@ pub enum Typ {
     String,
     Bool,
     Void,
+    Array(Box<Typ>),
     Named(String),
 }
 
@@ -34,6 +35,11 @@ pub enum Expr {
     Field {
         base: Box<Expr>,
         name: String,
+    },
+    ArrayLit(Vec<Expr>),
+    Index {
+        base: Box<Expr>,
+        index: Box<Expr>,
     },
     Call {
         callee: Box<Expr>,
@@ -684,6 +690,7 @@ fn builtin_type(t: &Typ) -> bool {
 fn type_known(known: &HashSet<&str>, t: &Typ) -> bool {
     match t {
         Typ::Named(n) => known.contains(n.as_str()),
+        Typ::Array(item) => type_known(known, item),
         t => builtin_type(t),
     }
 }
@@ -823,6 +830,7 @@ fn string_of_type(t: &Typ) -> String {
         Typ::String => "String".into(),
         Typ::Bool => "Bool".into(),
         Typ::Void => "Void".into(),
+        Typ::Array(item) => format!("[{}]", string_of_type(item)),
         Typ::Named(n) => n.clone(),
     }
 }

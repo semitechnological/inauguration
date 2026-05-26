@@ -170,6 +170,9 @@ fn parse_in_type(s: &str) -> Typ {
     if s.eq_ignore_ascii_case("void") {
         return Typ::Void;
     }
+    if s.starts_with('[') && s.ends_with(']') {
+        return Typ::Array(Box::new(parse_in_type(&s[1..s.len() - 1])));
+    }
     match s {
         "Int" => Typ::Int,
         "String" => Typ::String,
@@ -440,6 +443,27 @@ fn parse_expr(s: &str) -> Expr {
     if s.len() >= 2 && s.starts_with('"') && s.ends_with('"') {
         return Expr::StringLit(s[1..s.len() - 1].to_string());
     }
+    if s.starts_with('[') && s.ends_with(']') {
+        let inner = &s[1..s.len() - 1];
+        return Expr::ArrayLit(
+            split_call_args(inner)
+                .into_iter()
+                .map(|arg| parse_expr(&arg))
+                .collect(),
+        );
+    }
+    if let Some(open) = find_top_level_index_open(s)
+        && s.ends_with(']')
+    {
+        let base = trim(&s[..open]);
+        let index = trim(&s[open + 1..s.len() - 1]);
+        if !base.is_empty() && !index.is_empty() {
+            return Expr::Index {
+                base: Box::new(parse_expr(base)),
+                index: Box::new(parse_expr(index)),
+            };
+        }
+    }
     if let Some(dot) = find_top_level_field_dot(s) {
         let base = trim(&s[..dot]);
         let name = trim(&s[dot + 1..]);
@@ -518,6 +542,8 @@ fn strip_enclosing_parens(s: &str) -> Option<&str> {
                     return None;
                 }
             }
+            '[' => depth += 1,
+            ']' => depth -= 1,
             _ => {}
         }
     }
@@ -552,6 +578,8 @@ fn find_top_level_binary_op<'a>(s: &str, ops: &[&'a str]) -> Option<(&'a str, us
             ')' => depth -= 1,
             '{' => depth += 1,
             '}' => depth -= 1,
+            '[' => depth += 1,
+            ']' => depth -= 1,
             _ if depth == 0 => {
                 for op in ops {
                     if s[i..].starts_with(op) {
@@ -585,9 +613,40 @@ fn find_top_level_field_dot(s: &str) -> Option<usize> {
         }
         match c {
             '"' => in_string = true,
+            '(' | '{' | '[' => depth += 1,
+            ')' | '}' | ']' => depth -= 1,
+            '.' if depth == 0 => found = Some(i),
+            _ => {}
+        }
+    }
+    found
+}
+
+fn find_top_level_index_open(s: &str) -> Option<usize> {
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escape = false;
+    let mut found = None;
+    for (i, c) in s.char_indices() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        if in_string {
+            if c == '\\' {
+                escape = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => in_string = true,
             '(' | '{' => depth += 1,
             ')' | '}' => depth -= 1,
-            '.' if depth == 0 => found = Some(i),
+            '[' if depth == 0 => found = Some(i),
+            '[' => depth += 1,
+            ']' => depth -= 1,
             _ => {}
         }
     }
@@ -615,6 +674,8 @@ fn find_struct_init_open_brace(s: &str) -> Option<usize> {
             '"' => in_string = true,
             '(' => paren += 1,
             ')' => paren -= 1,
+            '[' => paren += 1,
+            ']' => paren -= 1,
             '{' if paren == 0 => return Some(i),
             _ => {}
         }
@@ -672,6 +733,8 @@ fn split_call_args(inner: &str) -> Vec<String> {
             ')' => depth -= 1,
             '{' => depth += 1,
             '}' => depth -= 1,
+            '[' => depth += 1,
+            ']' => depth -= 1,
             ',' if depth == 0 => {
                 let arg = trim(&inner[start..i]);
                 if !arg.is_empty() {
@@ -1336,6 +1399,7 @@ fn duplicate_top_level_names(module: &UnifiedModule) -> Vec<String> {
 fn type_known(structs: &HashSet<&str>, t: &Typ) -> bool {
     match t {
         Typ::Named(n) => structs.contains(n.as_str()),
+        Typ::Array(item) => type_known(structs, item),
         Typ::Int | Typ::String | Typ::Bool | Typ::Void => true,
     }
 }
@@ -1351,6 +1415,16 @@ fn validate_expr_shapes(
         Expr::Binary { lhs, rhs, .. } => {
             validate_expr_shapes(fn_name, structs, lhs)?;
             validate_expr_shapes(fn_name, structs, rhs)
+        }
+        Expr::ArrayLit(items) => {
+            for item in items {
+                validate_expr_shapes(fn_name, structs, item)?;
+            }
+            Ok(())
+        }
+        Expr::Index { base, index } => {
+            validate_expr_shapes(fn_name, structs, base)?;
+            validate_expr_shapes(fn_name, structs, index)
         }
         Expr::Call { callee, args } => {
             validate_expr_shapes(fn_name, structs, callee)?;

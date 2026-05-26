@@ -265,6 +265,9 @@ impl<'a> LowerCtx<'a> {
                     .insert(name.to_string(), LocalSlot::Scalar(offset));
                 Ok(())
             }
+            Some(Typ::Array(_)) => Err(format!(
+                "native-lower: unsupported let binding type in `{fn_name}` (arrays are not native yet)"
+            )),
             Some(Typ::Named(struct_name)) => {
                 let fields = self.structs.get(struct_name).ok_or_else(|| {
                     format!("native-lower: unsupported let binding type in `{fn_name}`")
@@ -624,9 +627,11 @@ fn lower_expr_into(
             pending_calls,
             fn_name,
         ),
-        Expr::StringLit(_) | Expr::StructInit { .. } => Err(format!(
-            "native-lower: unsupported expression in `{fn_name}`"
-        )),
+        Expr::StringLit(_) | Expr::StructInit { .. } | Expr::ArrayLit(_) | Expr::Index { .. } => {
+            Err(format!(
+                "native-lower: unsupported expression in `{fn_name}`"
+            ))
+        }
     }
 }
 
@@ -885,6 +890,9 @@ fn expr_type(expr: &Expr) -> Option<Typ> {
         Expr::IntLit(_) => Some(Typ::Int),
         Expr::BoolLit(_) => Some(Typ::Bool),
         Expr::StringLit(_) => Some(Typ::String),
+        Expr::ArrayLit(items) => Some(Typ::Array(Box::new(
+            items.iter().find_map(expr_type).unwrap_or(Typ::Void),
+        ))),
         _ => None,
     }
 }

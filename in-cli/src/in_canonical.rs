@@ -67,6 +67,7 @@ fn format_type(typ: &Typ) -> String {
         Typ::String => "String".into(),
         Typ::Bool => "Bool".into(),
         Typ::Void => "void".into(),
+        Typ::Array(item) => format!("[{}]", format_type(item)),
         Typ::Named(name) => name.clone(),
     }
 }
@@ -199,6 +200,13 @@ fn format_expr(expr: &Expr) -> String {
         }
         Expr::Field { base, name } => {
             format!("{}.{}", format_expr(base), name)
+        }
+        Expr::ArrayLit(items) => {
+            let rendered = items.iter().map(format_expr).collect::<Vec<_>>().join(", ");
+            format!("[{rendered}]")
+        }
+        Expr::Index { base, index } => {
+            format!("{}[{}]", format_expr(base), format_expr(index))
         }
         Expr::Call { callee, args } => {
             let mut out = format_expr(callee);

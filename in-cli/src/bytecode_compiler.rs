@@ -150,6 +150,21 @@ mod tests {
     }
 
     #[test]
+    fn compiles_array_literal_and_index_access() {
+        let path = temp_file("array-index.in");
+        fs::write(
+            &path,
+            "fn main() -> Int { let xs: [Int] = [2, 5, 8]; return xs[1]; }\n",
+        )
+        .unwrap();
+
+        let output = compile_source_path(&path, "App", ParserCli::Auto).unwrap();
+        assert_eq!(run_bytecode_module(output.module).unwrap(), Value::Int(5));
+
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn branch_assignment_updates_variable_value() {
         let path = temp_file("branch-assign.in");
         fs::write(

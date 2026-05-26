@@ -67,6 +67,7 @@ fn parse_typ(s: &str) -> Typ {
 fn type_known(structs: &HashSet<&str>, t: &Typ) -> bool {
     match t {
         Typ::Named(n) => structs.contains(n.as_str()),
+        Typ::Array(item) => type_known(structs, item),
         Typ::Int | Typ::String | Typ::Bool | Typ::Void => true,
     }
 }
