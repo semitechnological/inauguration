@@ -45,6 +45,14 @@ pub fn mul64(rd: u8, rn: u8, rm: u8) -> u32 {
     0x9B00_7C00 | ((rm as u32) << 16) | ((rn as u32) << 5) | (rd as u32)
 }
 
+pub fn and_reg64(rd: u8, rn: u8, rm: u8) -> u32 {
+    0x8A00_0000 | ((rm as u32) << 16) | ((rn as u32) << 5) | (rd as u32)
+}
+
+pub fn orr_reg64(rd: u8, rn: u8, rm: u8) -> u32 {
+    0xAA00_0000 | ((rm as u32) << 16) | ((rn as u32) << 5) | (rd as u32)
+}
+
 pub fn bl(offset_bytes: i32) -> u32 {
     let imm26 = ((offset_bytes >> 2) as u32) & 0x03FF_FFFF;
     0x9400_0000 | imm26

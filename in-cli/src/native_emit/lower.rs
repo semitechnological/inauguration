@@ -570,6 +570,15 @@ fn lower_binary(
         "+" => aarch64::add_reg64(rd, lhs_reg, rhs_reg),
         "-" => aarch64::sub_reg64(rd, lhs_reg, rhs_reg),
         "*" => aarch64::mul64(rd, lhs_reg, rhs_reg),
+        "&&" | "||" => {
+            lower_truthy_result(emitter, lhs_reg);
+            lower_truthy_result(emitter, rhs_reg);
+            match op {
+                "&&" => aarch64::and_reg64(rd, lhs_reg, rhs_reg),
+                "||" => aarch64::orr_reg64(rd, lhs_reg, rhs_reg),
+                _ => unreachable!(),
+            }
+        }
         "==" | "!=" | "<" | ">" | "<=" | ">=" => {
             emitter.emit_u32(aarch64::cmp_reg64(lhs_reg, rhs_reg));
             return lower_comparison_result(emitter, rd, op);
@@ -582,6 +591,18 @@ fn lower_binary(
     };
     emitter.emit_u32(insn);
     Ok(())
+}
+
+fn lower_truthy_result(emitter: &mut CodeEmitter, rd: u8) {
+    emitter.emit_u32(aarch64::cmp_reg64(rd, aarch64::REG_XZR));
+    let true_branch = emitter.emit_insn(aarch64::b_cond(1, 0));
+    emitter.emit_insns(&aarch64::load_i64(rd, 0));
+    let end_branch = emitter.emit_insn(aarch64::b(0));
+    let true_offset = emitter.len() as i32 - true_branch as i32;
+    emitter.patch_u32(true_branch, aarch64::b_cond(1, true_offset));
+    emitter.emit_insns(&aarch64::load_i64(rd, 1));
+    let end_offset = emitter.len() as i32 - end_branch as i32;
+    emitter.patch_u32(end_branch, aarch64::b(end_offset));
 }
 
 fn lower_comparison_result(emitter: &mut CodeEmitter, rd: u8, op: &str) -> Result<(), String> {
@@ -829,6 +850,24 @@ mod tests {
     }
 
     #[test]
+    fn lowers_in_logical_binary_expressions() {
+        let module = crate::in_lang_parse::parse_in_source(
+            r#"
+fn main() -> Int {
+  let n: Int = 2;
+  if n == 2 && true || false {
+    return 7;
+  }
+  return 0;
+}
+"#,
+        )
+        .expect("parse");
+
+        lower_module(&module, "main").expect("lower");
+    }
+
+    #[test]
     fn lowers_local_reassignment() {
         let module = UnifiedModule {
             decls: vec![Decl::Function {
@@ -995,11 +1034,21 @@ mod tests {
                             callee: Box::new(Expr::Ident("side".into())),
                             args: vec![Expr::IntLit(5)],
                         }),
+                        Stmt::Let("gate".into(), Some(Typ::Int), Expr::IntLit(2)),
                         Stmt::Let("x".into(), Some(Typ::Int), Expr::IntLit(1)),
                         Stmt::If {
-                            cond: Expr::Unary {
-                                op: "!".into(),
-                                expr: Box::new(Expr::BoolLit(false)),
+                            cond: Expr::Binary {
+                                op: "||".into(),
+                                lhs: Box::new(Expr::Binary {
+                                    op: "&&".into(),
+                                    lhs: Box::new(Expr::Binary {
+                                        op: "==".into(),
+                                        lhs: Box::new(Expr::Ident("gate".into())),
+                                        rhs: Box::new(Expr::IntLit(2)),
+                                    }),
+                                    rhs: Box::new(Expr::BoolLit(true)),
+                                }),
+                                rhs: Box::new(Expr::BoolLit(false)),
                             },
                             then_body: vec![Stmt::Assign(
                                 "x".into(),
