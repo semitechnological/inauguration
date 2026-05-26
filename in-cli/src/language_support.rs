@@ -85,22 +85,22 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         parser_id: Some("c"),
         extensions: &["c", "h"],
         level: 2,
-        level_label: "Tree-sitter trivial return lowering",
+        level_label: "Tree-sitter bounded scalar body lowering",
         front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL; libc/runtime ABI is not bundled",
         example: "apps/polyglot-sample/sample.c",
-        next_step: "Add locals, calls, pointer types, and ABI boundaries",
+        next_step: "Add pointer types, declarator metadata, and ABI boundaries",
     },
     LanguageSupport {
         language: "C++",
         parser_id: Some("cpp"),
         extensions: &["cc", "cpp", "cxx", "hpp", "hxx", "hh", "h++", "ipp"],
         level: 2,
-        level_label: "Tree-sitter trivial return lowering",
+        level_label: "Tree-sitter bounded scalar body lowering",
         front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL; standard library/runtime ABI is not bundled",
         example: "apps/polyglot-sample/sample.cpp",
-        next_step: "Add namespaces, methods, calls, templates-as-metadata, and ABI boundaries",
+        next_step: "Add namespaces, methods, templates-as-metadata, and ABI boundaries",
     },
     LanguageSupport {
         language: "Java",
@@ -144,40 +144,40 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL; TS checker/runtime is not bundled",
         example: "apps/polyglot-sample/sample.ts",
-        next_step: "Add typed parameters, richer statements, and a checker boundary",
+        next_step: "Add module imports, richer statements, and a checker boundary",
     },
     LanguageSupport {
         language: "Kotlin",
         parser_id: Some("kotlin"),
         extensions: &["kt", "kts"],
-        level: 1,
-        level_label: "Tree-sitter declaration extraction",
+        level: 2,
+        level_label: "Tree-sitter bounded scalar body lowering",
         front: "compiler::tree_front",
-        runtime_boundary: "Core IR declarations only; JVM runtime is not bundled",
+        runtime_boundary: "Core IR and textual SIL; JVM runtime is not bundled",
         example: "apps/polyglot-sample/Sample.kt",
-        next_step: "Lift Java/Groovy body lowering into Kotlin",
+        next_step: "Share JVM-family class metadata, constructors, and runtime strategy",
     },
     LanguageSupport {
         language: "C#",
         parser_id: Some("csharp"),
         extensions: &["cs"],
-        level: 1,
-        level_label: "Tree-sitter declaration extraction",
+        level: 2,
+        level_label: "Tree-sitter bounded scalar body lowering",
         front: "compiler::tree_front",
-        runtime_boundary: "Core IR declarations only; CLR runtime is not bundled",
+        runtime_boundary: "Core IR and textual SIL; CLR runtime is not bundled",
         example: "apps/polyglot-sample/Program.cs",
-        next_step: "Add method bodies, properties, generics metadata, and CLR runtime strategy",
+        next_step: "Add properties, generics metadata, and CLR runtime strategy",
     },
     LanguageSupport {
         language: "Python",
         parser_id: Some("python"),
         extensions: &["py", "pyi", "pyw"],
-        level: 1,
-        level_label: "Tree-sitter declaration extraction",
+        level: 2,
+        level_label: "Tree-sitter bounded scalar body lowering",
         front: "compiler::tree_front",
-        runtime_boundary: "Core IR declarations only; Python runtime is not bundled",
+        runtime_boundary: "Core IR and textual SIL; Python runtime is not bundled",
         example: "apps/polyglot-sample/sample.py",
-        next_step: "Add def bodies, imports, dynamic object model, and runtime strategy",
+        next_step: "Add imports, dynamic object model, and runtime strategy",
     },
     LanguageSupport {
         language: "Ruby",
@@ -194,12 +194,12 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Zig",
         parser_id: Some("zig"),
         extensions: &["zig"],
-        level: 1,
-        level_label: "Tree-sitter declaration extraction",
+        level: 2,
+        level_label: "Tree-sitter bounded scalar body lowering",
         front: "compiler::tree_front",
-        runtime_boundary: "Core IR declarations only; Zig runtime/ABI is not bundled",
+        runtime_boundary: "Core IR and textual SIL; Zig runtime/ABI is not bundled",
         example: "apps/polyglot-sample/sample.zig",
-        next_step: "Add comptime-aware boundaries and bounded function bodies",
+        next_step: "Add comptime-aware boundaries and ABI metadata",
     },
     LanguageSupport {
         language: "Dart",
@@ -311,6 +311,29 @@ mod tests {
         for entry in LANGUAGE_SUPPORT.iter().filter(|entry| entry.level == 0) {
             assert!(entry.front.contains("icore"));
             assert!(entry.runtime_boundary.contains(".icore"));
+        }
+    }
+
+    #[test]
+    fn scalar_body_fronts_are_reported_as_level_two() {
+        for language in [
+            "C",
+            "C++",
+            "Java",
+            "JavaScript",
+            "TypeScript",
+            "Kotlin",
+            "C#",
+            "Python",
+            "Zig",
+        ] {
+            let entry = LANGUAGE_SUPPORT
+                .iter()
+                .find(|entry| entry.language == language)
+                .expect(language);
+            assert_eq!(entry.level, 2, "{language}");
+            assert!(entry.level_label.contains("body"), "{language}");
+            assert!(entry.runtime_boundary.contains("Core IR"), "{language}");
         }
     }
 
