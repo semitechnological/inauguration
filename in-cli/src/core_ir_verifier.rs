@@ -44,11 +44,8 @@ pub fn verify_module(module: &UnifiedModule, options: &VerifyOptions) -> VerifyR
     };
 
     if options.require_entry || options.entry.is_some() {
-        let entry_name = options
-            .entry
-            .as_deref()
-            .unwrap_or("main");
-        if !facts.functions.contains(entry_name) {
+        let entry_name = options.entry.as_deref().unwrap_or("main");
+        if !facts.functions.contains_key(entry_name) {
             return fail_report(
                 parsed_function_count,
                 call_edges,
@@ -80,7 +77,8 @@ pub fn verify_module(module: &UnifiedModule, options: &VerifyOptions) -> VerifyR
             }
 
             let mut env: HashMap<String, Typ> = params.iter().cloned().collect();
-            if let Err((code, reason)) = check_stmts(name, body, &facts, ret, &mut env, &mut call_edges)
+            if let Err((code, reason)) =
+                check_stmts(name, body, &facts, ret, &mut env, &mut call_edges)
             {
                 return fail_report(parsed_function_count, call_edges, &code, reason);
             }
@@ -112,15 +110,19 @@ fn fail_report(
 }
 
 struct ModuleFacts<'a> {
-    functions: HashSet<&'a str>,
-    function_params: HashMap<&'a str, usize>,
+    functions: HashMap<&'a str, FunctionSig<'a>>,
     structs: HashMap<&'a str, &'a [(String, Typ)]>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct FunctionSig<'a> {
+    params: &'a [(String, Typ)],
+    ret: &'a Typ,
 }
 
 fn collect_module_facts(module: &UnifiedModule) -> Result<ModuleFacts<'_>, (String, String)> {
     let mut top_level = HashSet::new();
-    let mut functions = HashSet::new();
-    let mut function_params = HashMap::new();
+    let mut functions = HashMap::new();
     let mut structs = HashMap::new();
 
     for decl in &module.decls {
@@ -134,24 +136,21 @@ fn collect_module_facts(module: &UnifiedModule) -> Result<ModuleFacts<'_>, (Stri
                 }
                 structs.insert(name.as_str(), fields.as_slice());
             }
-            Decl::Function { name, params, .. } => {
+            Decl::Function {
+                name, params, ret, ..
+            } => {
                 if !top_level.insert(name.as_str()) {
                     return Err((
                         "duplicate-top-level-name".to_string(),
                         format!("duplicate top-level name `{name}`"),
                     ));
                 }
-                functions.insert(name.as_str());
-                function_params.insert(name.as_str(), params.len());
+                functions.insert(name.as_str(), FunctionSig { params, ret });
             }
         }
     }
 
-    Ok(ModuleFacts {
-        functions,
-        function_params,
-        structs,
-    })
+    Ok(ModuleFacts { functions, structs })
 }
 
 fn check_duplicate_param_names(
@@ -201,9 +200,22 @@ fn check_stmt(
                 ));
             }
             check_expr(fn_name, expr, facts, env, call_edges)?;
+            let expr_typ = expr_type(expr, facts, env);
+            if let (Some(expected), Some(actual)) = (typ, expr_typ.as_ref())
+                && expected != actual
+            {
+                return Err((
+                    "type-mismatch".to_string(),
+                    format!(
+                        "type mismatch for `{name}` in `{fn_name}`: expected {}, got {}",
+                        type_name(expected),
+                        type_name(actual)
+                    ),
+                ));
+            }
             if let Some(typ) = typ {
                 env.insert(name.clone(), typ.clone());
-            } else if let Some(expr_typ) = expr_type(expr, facts, env) {
+            } else if let Some(expr_typ) = expr_typ {
                 env.insert(name.clone(), expr_typ);
             } else {
                 env.insert(name.clone(), Typ::Void);
@@ -211,44 +223,73 @@ fn check_stmt(
             Ok(())
         }
         Stmt::Assign(name, expr) => {
-            if !env.contains_key(name) {
+            let Some(existing_typ) = env.get(name).cloned() else {
                 return Err((
                     "unresolved-symbol".to_string(),
                     format!("unresolved assignment `{name}` in `{fn_name}`"),
                 ));
+            };
+            check_expr(fn_name, expr, facts, env, call_edges)?;
+            if let Some(expr_typ) = expr_type(expr, facts, env)
+                && existing_typ != expr_typ
+            {
+                return Err((
+                    "type-mismatch".to_string(),
+                    format!(
+                        "type mismatch for assignment `{name}` in `{fn_name}`: expected {}, got {}",
+                        type_name(&existing_typ),
+                        type_name(&expr_typ)
+                    ),
+                ));
             }
-            check_expr(fn_name, expr, facts, env, call_edges)
+            Ok(())
         }
         Stmt::Expr(expr) => check_expr(fn_name, expr, facts, env, call_edges),
         Stmt::Return(Some(expr)) => {
             check_expr(fn_name, expr, facts, env, call_edges)?;
-            if *ret == Typ::Int {
-                if let Some(expr_typ) = expr_type(expr, facts, env) {
-                    if expr_typ != Typ::Int {
-                        return Err((
-                            "return-type-mismatch".to_string(),
-                            format!(
-                                "return type mismatch in `{fn_name}`: expected Int, got {expr_typ:?}"
-                            ),
-                        ));
-                    }
-                }
+            if *ret == Typ::Void {
+                return Err((
+                    "return-type-mismatch".to_string(),
+                    format!("return value in void function `{fn_name}`"),
+                ));
+            }
+            if let Some(expr_typ) = expr_type(expr, facts, env)
+                && &expr_typ != ret
+            {
+                return Err((
+                    "return-type-mismatch".to_string(),
+                    format!(
+                        "return type mismatch in `{fn_name}`: expected {}, got {}",
+                        type_name(ret),
+                        type_name(&expr_typ)
+                    ),
+                ));
             }
             Ok(())
         }
-        Stmt::Return(None) => Ok(()),
+        Stmt::Return(None) => {
+            if *ret != Typ::Void {
+                return Err((
+                    "return-type-mismatch".to_string(),
+                    format!("missing return value in `{fn_name}`"),
+                ));
+            }
+            Ok(())
+        }
         Stmt::If {
             cond,
             then_body,
             else_body,
         } => {
             check_expr(fn_name, cond, facts, env, call_edges)?;
+            require_type(fn_name, "if condition", &Typ::Bool, cond, facts, env)?;
             check_stmts(fn_name, then_body, facts, ret, &mut env.clone(), call_edges)?;
             check_stmts(fn_name, else_body, facts, ret, &mut env.clone(), call_edges)
         }
         Stmt::Loop { cond, body, .. } => {
             if let Some(cond) = cond {
                 check_expr(fn_name, cond, facts, env, call_edges)?;
+                require_type(fn_name, "loop condition", &Typ::Bool, cond, facts, env)?;
             }
             check_stmts(fn_name, body, facts, ret, &mut env.clone(), call_edges)
         }
@@ -282,11 +323,40 @@ fn check_expr(
             }
         }
         Expr::Unary { expr, .. } => check_expr(fn_name, expr, facts, env, call_edges),
-        Expr::Binary { lhs, rhs, .. } => {
+        Expr::Binary { op, lhs, rhs } => {
             check_expr(fn_name, lhs, facts, env, call_edges)?;
-            check_expr(fn_name, rhs, facts, env, call_edges)
+            check_expr(fn_name, rhs, facts, env, call_edges)?;
+            match op.as_str() {
+                "+" | "-" | "*" | "/" | "%" | "<" | ">" | "<=" | ">=" => {
+                    require_type(fn_name, "binary operand", &Typ::Int, lhs, facts, env)?;
+                    require_type(fn_name, "binary operand", &Typ::Int, rhs, facts, env)
+                }
+                "==" | "!=" => {
+                    if let (Some(lhs_typ), Some(rhs_typ)) =
+                        (expr_type(lhs, facts, env), expr_type(rhs, facts, env))
+                        && lhs_typ != rhs_typ
+                    {
+                        return Err((
+                            "type-mismatch".to_string(),
+                            format!(
+                                "type mismatch for binary `{op}` in `{fn_name}`: left {}, right {}",
+                                type_name(&lhs_typ),
+                                type_name(&rhs_typ)
+                            ),
+                        ));
+                    }
+                    Ok(())
+                }
+                "&&" | "||" => {
+                    require_type(fn_name, "binary operand", &Typ::Bool, lhs, facts, env)?;
+                    require_type(fn_name, "binary operand", &Typ::Bool, rhs, facts, env)
+                }
+                _ => Ok(()),
+            }
         }
-        Expr::StructInit { name, fields } => check_struct_init(fn_name, name, fields, facts, env, call_edges),
+        Expr::StructInit { name, fields } => {
+            check_struct_init(fn_name, name, fields, facts, env, call_edges)
+        }
         Expr::Field { base, name } => {
             check_expr(fn_name, base, facts, env, call_edges)?;
             if let Some(Typ::Named(struct_name)) = expr_type(base, facts, env) {
@@ -303,24 +373,39 @@ fn check_expr(
         }
         Expr::Call { callee, args } => {
             if let Expr::Ident(name) = callee.as_ref() {
-                if !facts.functions.contains(name.as_str()) {
+                let Some(sig) = facts.functions.get(name.as_str()) else {
                     return Err((
                         "unresolved-symbol".to_string(),
                         format!("unresolved function call `{name}` in `{fn_name}`"),
                     ));
-                }
+                };
                 call_edges.push((fn_name.to_string(), name.clone()));
-                if let Some(expected) = facts.function_params.get(name.as_str()) {
-                    if args.len() != *expected {
+                if args.len() != sig.params.len() {
+                    return Err((
+                        "call-arity-mismatch".to_string(),
+                        format!(
+                            "call to `{name}` in `{fn_name}` expects {} args, got {}",
+                            sig.params.len(),
+                            args.len()
+                        ),
+                    ));
+                }
+                for ((param_name, param_typ), arg) in sig.params.iter().zip(args) {
+                    check_expr(fn_name, arg, facts, env, call_edges)?;
+                    if let Some(arg_typ) = expr_type(arg, facts, env)
+                        && param_typ != &arg_typ
+                    {
                         return Err((
-                            "call-arity-mismatch".to_string(),
+                            "type-mismatch".to_string(),
                             format!(
-                                "call to `{name}` in `{fn_name}` expects {expected} args, got {}",
-                                args.len()
+                                "argument `{param_name}` for `{name}` in `{fn_name}` expected {}, got {}",
+                                type_name(param_typ),
+                                type_name(&arg_typ)
                             ),
                         ));
                     }
                 }
+                return Ok(());
             } else {
                 check_expr(fn_name, callee, facts, env, call_edges)?;
             }
@@ -360,6 +445,21 @@ fn check_struct_init(
             ));
         }
         check_expr(fn_name, expr, facts, env, call_edges)?;
+        if let Some((_, expected)) = schema
+            .iter()
+            .find(|(schema_field, _)| schema_field == field)
+            && let Some(actual) = expr_type(expr, facts, env)
+            && expected != &actual
+        {
+            return Err((
+                "type-mismatch".to_string(),
+                format!(
+                    "type mismatch for field `{field}` in struct `{struct_name}`: expected {}, got {}",
+                    type_name(expected),
+                    type_name(&actual)
+                ),
+            ));
+        }
     }
     for (field, _) in *schema {
         if !seen.contains(field.as_str()) {
@@ -389,8 +489,57 @@ fn expr_type(expr: &Expr, facts: &ModuleFacts<'_>, env: &HashMap<String, Typ>) -
             }
             None
         }
-        Expr::Unary { expr, .. } => expr_type(expr, facts, env),
-        Expr::Binary { .. } | Expr::Call { .. } => None,
+        Expr::Unary { op, expr } => match op.as_str() {
+            "!" => Some(Typ::Bool),
+            "-" => Some(Typ::Int),
+            _ => expr_type(expr, facts, env),
+        },
+        Expr::Binary { op, .. } => match op.as_str() {
+            "+" | "-" | "*" | "/" | "%" => Some(Typ::Int),
+            "==" | "!=" | "<" | ">" | "<=" | ">=" | "&&" | "||" => Some(Typ::Bool),
+            _ => None,
+        },
+        Expr::Call { callee, .. } => {
+            if let Expr::Ident(name) = callee.as_ref()
+                && let Some(sig) = facts.functions.get(name.as_str())
+            {
+                return Some(sig.ret.clone());
+            }
+            None
+        }
+    }
+}
+
+fn require_type(
+    fn_name: &str,
+    context: &str,
+    expected: &Typ,
+    expr: &Expr,
+    facts: &ModuleFacts<'_>,
+    env: &HashMap<String, Typ>,
+) -> Result<(), (String, String)> {
+    if let Some(actual) = expr_type(expr, facts, env)
+        && &actual != expected
+    {
+        return Err((
+            "type-mismatch".to_string(),
+            format!(
+                "{context} in `{fn_name}` expected {}, got {}",
+                type_name(expected),
+                type_name(&actual)
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn type_name(typ: &Typ) -> &str {
+    match typ {
+        Typ::Int => "Int",
+        Typ::String => "String",
+        Typ::Bool => "Bool",
+        Typ::Void => "Void",
+        Typ::Named(name) => name.as_str(),
     }
 }
 
@@ -482,7 +631,10 @@ mod tests {
     #[test]
     fn rejects_duplicate_top_level_names() {
         let report = verify_module(
-            &module(vec![function("main", Vec::new()), function("main", Vec::new())]),
+            &module(vec![
+                function("main", Vec::new()),
+                function("main", Vec::new()),
+            ]),
             &default_options(),
         );
 
@@ -555,6 +707,31 @@ mod tests {
     }
 
     #[test]
+    fn rejects_call_argument_type_mismatch() {
+        let report = verify_module(
+            &module(vec![
+                function_with_params(
+                    "helper",
+                    vec![("value".to_string(), Typ::Int)],
+                    Typ::Void,
+                    Vec::new(),
+                ),
+                function(
+                    "main",
+                    vec![Stmt::Expr(Expr::Call {
+                        callee: Box::new(Expr::Ident("helper".to_string())),
+                        args: vec![Expr::StringLit("bad".to_string())],
+                    })],
+                ),
+            ]),
+            &default_options(),
+        );
+
+        assert!(!report.ok);
+        assert_eq!(report.reason_code.as_deref(), Some("type-mismatch"));
+    }
+
+    #[test]
     fn rejects_return_type_mismatch_for_int_functions() {
         let report = verify_module(
             &module(vec![function_with_ret(
@@ -570,11 +747,52 @@ mod tests {
     }
 
     #[test]
-    fn rejects_missing_entry_symbol() {
-        let report = verify_for_entry(
-            &module(vec![function("helper", Vec::new())]),
-            "main",
+    fn rejects_return_type_mismatch_for_string_functions() {
+        let report = verify_module(
+            &module(vec![function_with_ret(
+                "main",
+                Typ::String,
+                vec![Stmt::Return(Some(Expr::IntLit(1)))],
+            )]),
+            &default_options(),
         );
+
+        assert!(!report.ok);
+        assert_eq!(report.reason_code.as_deref(), Some("return-type-mismatch"));
+    }
+
+    #[test]
+    fn rejects_missing_return_value() {
+        let report = verify_module(
+            &module(vec![function_with_ret(
+                "main",
+                Typ::Int,
+                vec![Stmt::Return(None)],
+            )]),
+            &default_options(),
+        );
+
+        assert!(!report.ok);
+        assert_eq!(report.reason_code.as_deref(), Some("return-type-mismatch"));
+    }
+
+    #[test]
+    fn rejects_return_value_in_void_function() {
+        let report = verify_module(
+            &module(vec![function(
+                "main",
+                vec![Stmt::Return(Some(Expr::IntLit(1)))],
+            )]),
+            &default_options(),
+        );
+
+        assert!(!report.ok);
+        assert_eq!(report.reason_code.as_deref(), Some("return-type-mismatch"));
+    }
+
+    #[test]
+    fn rejects_missing_entry_symbol() {
+        let report = verify_for_entry(&module(vec![function("helper", Vec::new())]), "main");
 
         assert!(!report.ok);
         assert_eq!(report.reason_code.as_deref(), Some("missing-entry-symbol"));
@@ -618,6 +836,100 @@ mod tests {
         );
         assert!(!missing.ok);
         assert_eq!(missing.reason_code.as_deref(), Some("missing-struct-field"));
+    }
+
+    #[test]
+    fn rejects_struct_field_type_mismatch() {
+        let report = verify_module(
+            &module(vec![
+                point_struct(),
+                function(
+                    "main",
+                    vec![Stmt::Expr(Expr::StructInit {
+                        name: "Point".to_string(),
+                        fields: vec![
+                            ("x".to_string(), Expr::StringLit("bad".to_string())),
+                            ("y".to_string(), Expr::IntLit(2)),
+                        ],
+                    })],
+                ),
+            ]),
+            &default_options(),
+        );
+
+        assert!(!report.ok);
+        assert_eq!(report.reason_code.as_deref(), Some("type-mismatch"));
+    }
+
+    #[test]
+    fn rejects_non_bool_if_condition() {
+        let report = verify_module(
+            &module(vec![function(
+                "main",
+                vec![Stmt::If {
+                    cond: Expr::IntLit(1),
+                    then_body: Vec::new(),
+                    else_body: Vec::new(),
+                }],
+            )]),
+            &default_options(),
+        );
+
+        assert!(!report.ok);
+        assert_eq!(report.reason_code.as_deref(), Some("type-mismatch"));
+    }
+
+    #[test]
+    fn rejects_non_bool_loop_condition() {
+        let report = verify_module(
+            &module(vec![function(
+                "main",
+                vec![Stmt::Loop {
+                    kind: crate::swift_subset::LoopKind::While,
+                    cond: Some(Expr::IntLit(1)),
+                    body: Vec::new(),
+                }],
+            )]),
+            &default_options(),
+        );
+
+        assert!(!report.ok);
+        assert_eq!(report.reason_code.as_deref(), Some("type-mismatch"));
+    }
+
+    #[test]
+    fn rejects_let_annotation_type_mismatch() {
+        let report = verify_module(
+            &module(vec![function(
+                "main",
+                vec![Stmt::Let(
+                    "value".to_string(),
+                    Some(Typ::Int),
+                    Expr::StringLit("bad".to_string()),
+                )],
+            )]),
+            &default_options(),
+        );
+
+        assert!(!report.ok);
+        assert_eq!(report.reason_code.as_deref(), Some("type-mismatch"));
+    }
+
+    #[test]
+    fn rejects_assignment_type_mismatch() {
+        let report = verify_module(
+            &module(vec![function(
+                "main",
+                vec![
+                    Stmt::Let("value".to_string(), Some(Typ::Int), Expr::IntLit(1)),
+                    Stmt::Assign("value".to_string(), Expr::StringLit("bad".to_string())),
+                ],
+            )]),
+            &default_options(),
+        );
+
+        assert!(!report.ok);
+        assert_eq!(report.reason_code.as_deref(), Some("type-mismatch"));
     }
 
     #[test]
