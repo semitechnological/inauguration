@@ -1476,19 +1476,22 @@ fn simple_param_names<'a>(src: &[u8], plist: Node<'a>) -> Vec<(String, Typ)> {
 
 fn python_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
     let mut out = Vec::new();
+    let mut locals = HashSet::new();
     let mut w = body.walk();
     for ch in body.named_children(&mut w) {
-        if let Some(stmt) = python_stmt(src, ch) {
+        if let Some(stmt) = python_stmt(src, ch, &mut locals) {
             out.push(stmt);
         }
     }
     out
 }
 
-fn python_stmt(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
+fn python_stmt(src: &[u8], stmt: Node<'_>, locals: &mut HashSet<String>) -> Option<Stmt> {
     match stmt.kind() {
         "return_statement" => python_return_expr(src, stmt).map(Stmt::Return),
-        "expression_statement" => python_expr_statement(src, stmt),
+        "expression_statement" => python_expr_statement(src, stmt, locals),
+        "if_statement" => python_if_statement(src, stmt, locals),
+        "while_statement" => python_while_statement(src, stmt, locals),
         _ => None,
     }
 }
@@ -1501,25 +1504,85 @@ fn python_return_expr(src: &[u8], ret: Node<'_>) -> Option<Option<Expr>> {
     Some(None)
 }
 
-fn python_expr_statement(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
+fn python_expr_statement(src: &[u8], stmt: Node<'_>, locals: &mut HashSet<String>) -> Option<Stmt> {
     let mut w = stmt.walk();
     let expr = stmt.named_children(&mut w).next()?;
     match expr.kind() {
-        "assignment" => python_assignment(src, expr),
+        "assignment" => python_assignment(src, expr, locals),
         _ => python_expr(src, expr).map(Stmt::Expr),
     }
 }
 
-fn python_assignment(src: &[u8], expr: Node<'_>) -> Option<Stmt> {
+fn python_assignment(src: &[u8], expr: Node<'_>, locals: &mut HashSet<String>) -> Option<Stmt> {
     let left = expr.named_child(0)?;
     let right = last_named(expr)?;
     if left == right || left.kind() != "identifier" {
         return None;
     }
-    Some(Stmt::Assign(
-        node_txt(src, left).trim().to_string(),
-        python_expr(src, right)?,
-    ))
+    let name = node_txt(src, left).trim().to_string();
+    let value = python_expr(src, right)?;
+    if locals.insert(name.clone()) {
+        Some(Stmt::Let(name, None, value))
+    } else {
+        Some(Stmt::Assign(name, value))
+    }
+}
+
+fn python_if_statement(src: &[u8], stmt: Node<'_>, locals: &HashSet<String>) -> Option<Stmt> {
+    let cond = stmt
+        .child_by_field_name("condition")
+        .and_then(|n| python_expr(src, n))
+        .or_else(|| first_named(stmt, "comparison_operator").and_then(|n| python_expr(src, n)))
+        .or_else(|| first_named(stmt, "binary_operator").and_then(|n| python_expr(src, n)))?;
+    let then_body = stmt
+        .child_by_field_name("consequence")
+        .or_else(|| first_named(stmt, "block"))
+        .map(|n| python_body_with_locals(src, n, locals))
+        .unwrap_or_default();
+    let else_body = stmt
+        .child_by_field_name("alternative")
+        .map(|n| python_else_body(src, n, locals))
+        .unwrap_or_default();
+    Some(Stmt::If {
+        cond,
+        then_body,
+        else_body,
+    })
+}
+
+fn python_while_statement(src: &[u8], stmt: Node<'_>, locals: &HashSet<String>) -> Option<Stmt> {
+    let cond = stmt
+        .child_by_field_name("condition")
+        .and_then(|n| python_expr(src, n))
+        .or_else(|| first_named(stmt, "comparison_operator").and_then(|n| python_expr(src, n)))
+        .or_else(|| first_named(stmt, "binary_operator").and_then(|n| python_expr(src, n)))?;
+    let body = stmt
+        .child_by_field_name("body")
+        .or_else(|| first_named(stmt, "block"))
+        .map(|n| python_body_with_locals(src, n, locals))
+        .unwrap_or_default();
+    Some(Stmt::Loop {
+        kind: crate::swift_subset::LoopKind::While,
+        cond: Some(cond),
+        body,
+    })
+}
+
+fn python_else_body(src: &[u8], n: Node<'_>, locals: &HashSet<String>) -> Vec<Stmt> {
+    let body = first_named(n, "block").unwrap_or(n);
+    python_body_with_locals(src, body, locals)
+}
+
+fn python_body_with_locals(src: &[u8], body: Node<'_>, locals: &HashSet<String>) -> Vec<Stmt> {
+    let mut scoped = locals.clone();
+    let mut out = Vec::new();
+    let mut w = body.walk();
+    for ch in body.named_children(&mut w) {
+        if let Some(stmt) = python_stmt(src, ch, &mut scoped) {
+            out.push(stmt);
+        }
+    }
+    out
 }
 
 fn python_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
@@ -1540,12 +1603,45 @@ fn python_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
         "false" => Some(Expr::BoolLit(false)),
         "call" => python_call_expr(src, expr),
         "argument_list" => expr.named_child(0).and_then(|n| python_expr(src, n)),
+        "parenthesized_expression" => expr.named_child(0).and_then(|n| python_expr(src, n)),
+        "binary_operator" | "comparison_operator" => python_binary_expr(src, expr),
+        "unary_operator" => python_unary_expr(src, expr),
         _ => match node_txt(src, expr).trim() {
             "True" => Some(Expr::BoolLit(true)),
             "False" => Some(Expr::BoolLit(false)),
             _ => None,
         },
     }
+}
+
+fn python_binary_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
+    let lhs = expr
+        .child_by_field_name("left")
+        .or_else(|| expr.named_child(0))?;
+    let rhs = expr
+        .child_by_field_name("right")
+        .or_else(|| expr.named_child(expr.named_child_count().saturating_sub(1) as u32))?;
+    let op = std::str::from_utf8(src.get(lhs.end_byte()..rhs.start_byte())?)
+        .ok()?
+        .trim()
+        .to_string();
+    Some(Expr::Binary {
+        op,
+        lhs: Box::new(python_expr(src, lhs)?),
+        rhs: Box::new(python_expr(src, rhs)?),
+    })
+}
+
+fn python_unary_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
+    let inner = last_named(expr)?;
+    let op = std::str::from_utf8(src.get(expr.start_byte()..inner.start_byte())?)
+        .ok()?
+        .trim()
+        .to_string();
+    Some(Expr::Unary {
+        op,
+        expr: Box::new(python_expr(src, inner)?),
+    })
 }
 
 fn python_call_expr(src: &[u8], call: Node<'_>) -> Option<Expr> {
@@ -2489,11 +2585,14 @@ class X {
                         if matches!(callee.as_ref(), Expr::Ident(name) if name == "helper")
                             && args == &vec![Expr::Ident("value".into())]
                 ));
-                assert!(matches!(
-                    &body[3],
-                    Stmt::If { cond: Expr::Binary { op, .. }, then_body, else_body }
-                        if op == ">" && then_body.len() == 1 && else_body.len() == 1
-                ));
+                assert!(
+                    matches!(
+                        &body[3],
+                        Stmt::If { cond: Expr::Binary { op, .. }, then_body, else_body }
+                            if op == ">" && then_body.len() == 1 && else_body.len() == 1
+                    ),
+                    "{body:?}"
+                );
                 assert!(matches!(
                     &body[4],
                     Stmt::Loop { cond: Some(Expr::Binary { op, .. }), body, .. }
@@ -2825,11 +2924,14 @@ class X {
                         if matches!(callee.as_ref(), Expr::Ident(name) if name == "Helper")
                             && args == &vec![Expr::Ident("value".into())]
                 ));
-                assert!(matches!(
-                    &body[3],
-                    Stmt::If { cond: Expr::Binary { op, .. }, then_body, else_body }
-                        if op == ">" && then_body.len() == 1 && else_body.len() == 1
-                ));
+                assert!(
+                    matches!(
+                        &body[3],
+                        Stmt::If { cond: Expr::Binary { op, .. }, then_body, else_body }
+                            if op == ">" && then_body.len() == 1 && else_body.len() == 1
+                    ),
+                    "{body:?}"
+                );
                 assert!(matches!(
                     &body[4],
                     Stmt::Loop { cond: Some(Expr::Binary { op, .. }), body, .. }
@@ -2877,8 +2979,9 @@ def main():
                 assert_eq!(
                     body,
                     &vec![
-                        Stmt::Assign(
+                        Stmt::Let(
                             "value".into(),
+                            None,
                             Expr::Call {
                                 callee: Box::new(Expr::Ident("helper".into())),
                                 args: vec![Expr::IntLit(2)],
@@ -2891,6 +2994,68 @@ def main():
                         Stmt::Return(None),
                     ]
                 );
+            }
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn python_lowers_scalar_body_shapes() {
+        let src = r#"
+def helper(value: int) -> int:
+    return value
+
+def main():
+    value = 1
+    value = value + 2
+    helper(value)
+    if value > 2:
+        value = value - 1
+    else:
+        value = 0
+    while value < 4:
+        value = value + 1
+    return value
+"#;
+        let m = parse_lang(tree_sitter_python::LANGUAGE.into(), src, extract_python).expect("ok");
+        let main = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+            .expect("main");
+        match main {
+            Decl::Function { body, .. } => {
+                assert!(matches!(
+                    &body[0],
+                    Stmt::Let(name, None, Expr::IntLit(1)) if name == "value"
+                ));
+                assert!(matches!(
+                    &body[1],
+                    Stmt::Assign(name, Expr::Binary { op, .. }) if name == "value" && op == "+"
+                ));
+                assert!(matches!(
+                    &body[2],
+                    Stmt::Expr(Expr::Call { callee, args })
+                        if matches!(callee.as_ref(), Expr::Ident(name) if name == "helper")
+                            && args == &vec![Expr::Ident("value".into())]
+                ));
+                assert!(
+                    matches!(
+                        &body[3],
+                        Stmt::If { cond: Expr::Binary { op, .. }, then_body, else_body }
+                            if op == ">" && then_body.len() == 1 && else_body.len() == 1
+                    ),
+                    "{body:?}"
+                );
+                assert!(matches!(
+                    &body[4],
+                    Stmt::Loop { cond: Some(Expr::Binary { op, .. }), body, .. }
+                        if op == "<" && body.len() == 1
+                ));
+                assert!(matches!(
+                    &body[5],
+                    Stmt::Return(Some(Expr::Ident(name))) if name == "value"
+                ));
             }
             _ => panic!("expected function"),
         }
