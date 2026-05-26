@@ -383,4 +383,22 @@ fn main() -> void {
         let result = vm.run().expect("bytecode execution");
         assert_eq!(result.to_int(), -5);
     }
+
+    #[test]
+    fn bytecode_logical_expression_from_in_source() {
+        let src =
+            "fn main() -> Int { let x: Int = 2; if false || true && x == 2 { return 7; } return 0; }";
+        let module = in_lang_parse::parse_in_source(src).expect("parse .in");
+        let sil = lower_core::lower_to_textual_sil(&module, "App");
+        assert!(sil.contains("builtin_binop \"||\""));
+        assert!(sil.contains("builtin_binop \"&&\""));
+
+        let artifact = hybrid_sil::parse_textual_sil(&sil);
+        let bytecode_module = crate::sil_to_bytecode::lower_sil_to_bytecode(&artifact)
+            .expect("lower SIL to bytecode");
+
+        let mut vm = crate::vm::BytecodeVM::new(bytecode_module);
+        let result = vm.run().expect("bytecode execution");
+        assert_eq!(result.to_int(), 7);
+    }
 }

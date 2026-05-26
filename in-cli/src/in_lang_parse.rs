@@ -393,6 +393,8 @@ fn parse_expr(s: &str) -> Expr {
         return parse_expr(inner);
     }
     for ops in [
+        &["||"][..],
+        &["&&"][..],
         &["==", "!=", ">=", "<=", ">", "<"][..],
         &["+", "-"][..],
         &["*", "/"][..],
@@ -2126,6 +2128,38 @@ fn main() -> void
         assert!(matches!(
             &body[1],
             Stmt::Return(Some(Expr::Ident(name))) if name == "value"
+        ));
+    }
+
+    #[test]
+    fn fn_body_parses_logical_binary_precedence() {
+        use crate::swift_subset::Expr;
+        let src = r#"
+fn choose(a: Bool, b: Bool, n: Int) -> Int {
+  if a || b && n == 1 {
+    return 1;
+  }
+  return 0;
+}
+fn main() -> void
+"#;
+        let m = parse_in_source(src).expect("ok");
+        let body = match m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "choose"))
+        {
+            Some(Decl::Function { body, .. }) => body,
+            _ => panic!("choose"),
+        };
+        assert!(matches!(
+            &body[0],
+            Stmt::If {
+                cond: Expr::Binary { op, lhs, rhs },
+                ..
+            } if op == "||"
+                && matches!(lhs.as_ref(), Expr::Ident(name) if name == "a")
+                && matches!(rhs.as_ref(), Expr::Binary { op, rhs, .. } if op == "&&" && matches!(rhs.as_ref(), Expr::Binary { op, .. } if op == "=="))
         ));
     }
 
