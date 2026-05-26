@@ -1231,6 +1231,9 @@ fn csharp_stmt(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
     match stmt.kind() {
         "return_statement" => csharp_return_expr(src, stmt).map(Stmt::Return),
         "expression_statement" => csharp_expr_statement(src, stmt),
+        "local_declaration_statement" => csharp_local_declaration(src, stmt),
+        "if_statement" => csharp_if_statement(src, stmt),
+        "while_statement" => csharp_while_statement(src, stmt),
         _ => None,
     }
 }
@@ -1264,6 +1267,73 @@ fn csharp_assignment(src: &[u8], expr: Node<'_>) -> Option<Stmt> {
     ))
 }
 
+fn csharp_local_declaration(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
+    let var = named_descendant(stmt, "variable_declarator")?;
+    let name_node = var
+        .child_by_field_name("name")
+        .or_else(|| first_named(var, "identifier"))?;
+    let value = var
+        .child_by_field_name("value")
+        .or_else(|| last_named(var))?;
+    let ty = stmt
+        .child_by_field_name("type")
+        .or_else(|| named_descendant(stmt, "predefined_type"))
+        .map(|t| Typ::Named(node_txt(src, t).trim().to_string()));
+    Some(Stmt::Let(
+        node_txt(src, name_node).trim().to_string(),
+        ty,
+        csharp_expr(src, value)?,
+    ))
+}
+
+fn csharp_if_statement(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
+    let cond = stmt
+        .child_by_field_name("condition")
+        .and_then(|n| csharp_expr(src, n))
+        .or_else(|| {
+            first_named(stmt, "parenthesized_expression").and_then(|n| csharp_expr(src, n))
+        })?;
+    let then_body = stmt
+        .child_by_field_name("consequence")
+        .map(|n| csharp_stmt_or_body(src, n))
+        .unwrap_or_default();
+    let else_body = stmt
+        .child_by_field_name("alternative")
+        .map(|n| csharp_stmt_or_body(src, n))
+        .unwrap_or_default();
+    Some(Stmt::If {
+        cond,
+        then_body,
+        else_body,
+    })
+}
+
+fn csharp_while_statement(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
+    let cond = stmt
+        .child_by_field_name("condition")
+        .and_then(|n| csharp_expr(src, n))
+        .or_else(|| {
+            first_named(stmt, "parenthesized_expression").and_then(|n| csharp_expr(src, n))
+        })?;
+    let body = stmt
+        .child_by_field_name("body")
+        .map(|n| csharp_stmt_or_body(src, n))
+        .unwrap_or_default();
+    Some(Stmt::Loop {
+        kind: crate::swift_subset::LoopKind::While,
+        cond: Some(cond),
+        body,
+    })
+}
+
+fn csharp_stmt_or_body(src: &[u8], n: Node<'_>) -> Vec<Stmt> {
+    if n.kind() == "block" {
+        csharp_body(src, n)
+    } else {
+        csharp_stmt(src, n).into_iter().collect()
+    }
+}
+
 fn csharp_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
     match expr.kind() {
         "identifier" => Some(Expr::Ident(node_txt(src, expr).trim().to_string())),
@@ -1276,8 +1346,40 @@ fn csharp_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
         "invocation_expression" => csharp_call_expr(src, expr),
         "parenthesized_expression" => expr.named_child(0).and_then(|n| csharp_expr(src, n)),
         "argument" => expr.named_child(0).and_then(|n| csharp_expr(src, n)),
+        "binary_expression" => csharp_binary_expr(src, expr),
+        "unary_expression" | "prefix_unary_expression" => csharp_unary_expr(src, expr),
         _ => None,
     }
+}
+
+fn csharp_binary_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
+    let lhs = expr
+        .child_by_field_name("left")
+        .or_else(|| expr.named_child(0))?;
+    let rhs = expr
+        .child_by_field_name("right")
+        .or_else(|| expr.named_child(expr.named_child_count().saturating_sub(1) as u32))?;
+    let op = std::str::from_utf8(src.get(lhs.end_byte()..rhs.start_byte())?)
+        .ok()?
+        .trim()
+        .to_string();
+    Some(Expr::Binary {
+        op,
+        lhs: Box::new(csharp_expr(src, lhs)?),
+        rhs: Box::new(csharp_expr(src, rhs)?),
+    })
+}
+
+fn csharp_unary_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
+    let inner = last_named(expr)?;
+    let op = std::str::from_utf8(src.get(expr.start_byte()..inner.start_byte())?)
+        .ok()?
+        .trim()
+        .to_string();
+    Some(Expr::Unary {
+        op,
+        expr: Box::new(csharp_expr(src, inner)?),
+    })
 }
 
 fn csharp_call_expr(src: &[u8], call: Node<'_>) -> Option<Expr> {
@@ -2369,11 +2471,14 @@ class X {
             .expect("main");
         match main {
             Decl::Function { body, .. } => {
-                assert!(matches!(
-                    &body[0],
-                    Stmt::Let(name, Some(Typ::Named(ty)), Expr::IntLit(1))
-                        if name == "value" && ty == "int"
-                ));
+                assert!(
+                    matches!(
+                        &body[0],
+                        Stmt::Let(name, Some(Typ::Named(ty)), Expr::IntLit(1))
+                            if name == "value" && ty == "int"
+                    ),
+                    "{body:?}"
+                );
                 assert!(matches!(
                     &body[1],
                     Stmt::Assign(name, Expr::Binary { op, .. }) if name == "value" && op == "+"
@@ -2674,6 +2779,66 @@ class X {
                         Stmt::Return(None),
                     ]
                 );
+            }
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn csharp_lowers_scalar_body_shapes() {
+        let src = r#"
+class X {
+  int Helper(int value) { return value; }
+  int Main() {
+    int value = 1;
+    value = value + 2;
+    Helper(value);
+    if (value > 2) { value = value - 1; } else { value = 0; }
+    while (value < 4) { value = value + 1; }
+    return value;
+  }
+}
+"#;
+        let m = parse_lang(tree_sitter_c_sharp::LANGUAGE.into(), src, extract_csharp).expect("ok");
+        let main = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+            .expect("Main");
+        match main {
+            Decl::Function { body, .. } => {
+                assert!(
+                    matches!(
+                        &body[0],
+                        Stmt::Let(name, Some(Typ::Named(ty)), Expr::IntLit(1))
+                            if name == "value" && ty == "int"
+                    ),
+                    "{body:?}"
+                );
+                assert!(matches!(
+                    &body[1],
+                    Stmt::Assign(name, Expr::Binary { op, .. }) if name == "value" && op == "+"
+                ));
+                assert!(matches!(
+                    &body[2],
+                    Stmt::Expr(Expr::Call { callee, args })
+                        if matches!(callee.as_ref(), Expr::Ident(name) if name == "Helper")
+                            && args == &vec![Expr::Ident("value".into())]
+                ));
+                assert!(matches!(
+                    &body[3],
+                    Stmt::If { cond: Expr::Binary { op, .. }, then_body, else_body }
+                        if op == ">" && then_body.len() == 1 && else_body.len() == 1
+                ));
+                assert!(matches!(
+                    &body[4],
+                    Stmt::Loop { cond: Some(Expr::Binary { op, .. }), body, .. }
+                        if op == "<" && body.len() == 1
+                ));
+                assert!(matches!(
+                    &body[5],
+                    Stmt::Return(Some(Expr::Ident(name))) if name == "value"
+                ));
             }
             _ => panic!("expected function"),
         }
