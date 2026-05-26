@@ -48,6 +48,18 @@ fn lower_expr(
             id
         }
         Expr::Unary { op, expr } => {
+            if let Some(n) = fold_unary_int(op, expr) {
+                let id = *ssa;
+                *ssa += 1;
+                out.push_str(&format!("%{id} = integer_literal $Builtin.Int64, {n}\n"));
+                return id;
+            }
+            if let Some(b) = fold_unary_bool(op, expr) {
+                let id = *ssa;
+                *ssa += 1;
+                out.push_str(&format!("%{id} = bool_literal {b}\n"));
+                return id;
+            }
             let arg = lower_expr(expr, env, direct_env, ssa, out);
             let id = *ssa;
             *ssa += 1;
@@ -59,6 +71,12 @@ fn lower_expr(
                 let id = *ssa;
                 *ssa += 1;
                 out.push_str(&format!("%{id} = integer_literal $Builtin.Int64, {n}\n"));
+                return id;
+            }
+            if let Some(b) = fold_bool_binop(op, lhs, rhs) {
+                let id = *ssa;
+                *ssa += 1;
+                out.push_str(&format!("%{id} = bool_literal {b}\n"));
                 return id;
             }
             let lhs_id = lower_expr(lhs, env, direct_env, ssa, out);
@@ -130,8 +148,31 @@ fn lower_expr(
 fn const_int(e: &Expr) -> Option<i64> {
     match e {
         Expr::IntLit(n) => Some(*n),
-        Expr::Unary { op, expr } if op == "-" => const_int(expr).map(|n| -n),
+        Expr::Unary { op, expr } => fold_unary_int(op, expr),
         Expr::Binary { op, lhs, rhs } => fold_int_binop(op, lhs, rhs),
+        _ => None,
+    }
+}
+
+fn const_bool(e: &Expr) -> Option<bool> {
+    match e {
+        Expr::BoolLit(b) => Some(*b),
+        Expr::Unary { op, expr } => fold_unary_bool(op, expr),
+        Expr::Binary { op, lhs, rhs } => fold_bool_binop(op, lhs, rhs),
+        _ => None,
+    }
+}
+
+fn fold_unary_int(op: &str, expr: &Expr) -> Option<i64> {
+    match op {
+        "-" => const_int(expr).and_then(i64::checked_neg),
+        _ => None,
+    }
+}
+
+fn fold_unary_bool(op: &str, expr: &Expr) -> Option<bool> {
+    match op {
+        "!" => const_bool(expr).map(|b| !b),
         _ => None,
     }
 }
@@ -145,6 +186,30 @@ fn fold_int_binop(op: &str, lhs: &Expr, rhs: &Expr) -> Option<i64> {
         "*" => lhs.checked_mul(rhs),
         "/" if rhs != 0 => lhs.checked_div(rhs),
         "%" if rhs != 0 => lhs.checked_rem(rhs),
+        _ => None,
+    }
+}
+
+fn fold_bool_binop(op: &str, lhs: &Expr, rhs: &Expr) -> Option<bool> {
+    match op {
+        "&&" => Some(const_bool(lhs)? && const_bool(rhs)?),
+        "||" => Some(const_bool(lhs)? || const_bool(rhs)?),
+        "==" => {
+            if let (Some(lhs), Some(rhs)) = (const_bool(lhs), const_bool(rhs)) {
+                return Some(lhs == rhs);
+            }
+            Some(const_int(lhs)? == const_int(rhs)?)
+        }
+        "!=" => {
+            if let (Some(lhs), Some(rhs)) = (const_bool(lhs), const_bool(rhs)) {
+                return Some(lhs != rhs);
+            }
+            Some(const_int(lhs)? != const_int(rhs)?)
+        }
+        "<" => Some(const_int(lhs)? < const_int(rhs)?),
+        ">" => Some(const_int(lhs)? > const_int(rhs)?),
+        "<=" => Some(const_int(lhs)? <= const_int(rhs)?),
+        ">=" => Some(const_int(lhs)? >= const_int(rhs)?),
         _ => None,
     }
 }
@@ -682,6 +747,46 @@ mod tests {
         let sil = lower_to_textual_sil(&module, "App");
 
         assert!(sil.contains("integer_literal $Builtin.Int64, 5"));
+        assert!(!sil.contains("builtin_binop"));
+    }
+
+    #[test]
+    fn lower_folds_constant_unary_and_bool_binop() {
+        let module = UnifiedModule {
+            decls: vec![Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Bool,
+                body: vec![
+                    Stmt::Let(
+                        "n".into(),
+                        Some(Typ::Int),
+                        Expr::Unary {
+                            op: "-".into(),
+                            expr: Box::new(Expr::IntLit(3)),
+                        },
+                    ),
+                    Stmt::Return(Some(Expr::Binary {
+                        op: "&&".into(),
+                        lhs: Box::new(Expr::Unary {
+                            op: "!".into(),
+                            expr: Box::new(Expr::BoolLit(false)),
+                        }),
+                        rhs: Box::new(Expr::Binary {
+                            op: "==".into(),
+                            lhs: Box::new(Expr::IntLit(2)),
+                            rhs: Box::new(Expr::IntLit(2)),
+                        }),
+                    })),
+                ],
+            }],
+        };
+
+        let sil = lower_to_textual_sil(&module, "App");
+
+        assert!(sil.contains("integer_literal $Builtin.Int64, -3"));
+        assert!(sil.contains("bool_literal true"));
+        assert!(!sil.contains("builtin_unop"));
         assert!(!sil.contains("builtin_binop"));
     }
 
