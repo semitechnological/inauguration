@@ -248,7 +248,7 @@ fn c_like_function_decl<'a>(src: &[u8], func_def: Node<'a>) -> Option<Decl> {
     let params = c_parameter_list(src, func_def);
     let body = func_def
         .child_by_field_name("body")
-        .and_then(|b| c_trivial_return_body(src, b, &params))
+        .map(|b| c_body(src, b))
         .unwrap_or_default();
     Some(Decl::Function {
         name,
@@ -363,6 +363,213 @@ fn c_one_parameter(src: &[u8], pd: Node<'_>, idx: usize) -> Option<(String, Typ)
     Some((name, ty))
 }
 
+fn c_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
+    let block = c_peel_statement_shell(body).unwrap_or(body);
+    let mut out = Vec::new();
+    let mut w = block.walk();
+    for ch in block.named_children(&mut w) {
+        if let Some(stmt) = c_stmt(src, ch) {
+            out.push(stmt);
+        }
+    }
+    out
+}
+
+fn c_stmt(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
+    let stmt = c_peel_statement_shell(stmt)?;
+    match stmt.kind() {
+        "return_statement" => c_return_expr(src, stmt).map(Stmt::Return),
+        "declaration" => c_declaration(src, stmt),
+        "expression_statement" => c_expr_statement(src, stmt),
+        "if_statement" => c_if_statement(src, stmt),
+        "while_statement" => c_while_statement(src, stmt),
+        _ => None,
+    }
+}
+
+fn c_return_expr(src: &[u8], ret: Node<'_>) -> Option<Option<Expr>> {
+    let mut w = ret.walk();
+    for ch in ret.named_children(&mut w) {
+        if let Some(expr) = c_expr(src, ch) {
+            return Some(Some(expr));
+        }
+    }
+    Some(None)
+}
+
+fn c_declaration(src: &[u8], decl: Node<'_>) -> Option<Stmt> {
+    let init = first_named(decl, "init_declarator")?;
+    let name_node = named_descendant(init, "identifier")?;
+    let name = node_txt(src, name_node).trim().to_string();
+    let ty_src = src.get(decl.start_byte()..name_node.start_byte())?;
+    let ty = c_typ_from_decl_specifier_text(std::str::from_utf8(ty_src).ok()?);
+    let value = init
+        .child_by_field_name("value")
+        .or_else(|| last_named(init))
+        .and_then(|n| c_expr(src, n))?;
+    Some(Stmt::Let(name, Some(ty), value))
+}
+
+fn c_expr_statement(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
+    let mut w = stmt.walk();
+    let expr = stmt.named_children(&mut w).next()?;
+    match expr.kind() {
+        "assignment_expression" => c_assignment(src, expr),
+        _ => c_expr(src, expr).map(Stmt::Expr),
+    }
+}
+
+fn c_assignment(src: &[u8], expr: Node<'_>) -> Option<Stmt> {
+    let left = expr
+        .child_by_field_name("left")
+        .or_else(|| expr.named_child(0))?;
+    let right = expr
+        .child_by_field_name("right")
+        .or_else(|| expr.named_child(expr.named_child_count().saturating_sub(1) as u32))?;
+    let name = c_assignee_name(src, left)?;
+    Some(Stmt::Assign(name, c_expr(src, right)?))
+}
+
+fn c_assignee_name(src: &[u8], n: Node<'_>) -> Option<String> {
+    if n.kind() == "identifier" {
+        return Some(node_txt(src, n).trim().to_string());
+    }
+    None
+}
+
+fn c_if_statement(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
+    let cond = stmt
+        .child_by_field_name("condition")
+        .and_then(|n| c_expr(src, n))
+        .or_else(|| first_named(stmt, "parenthesized_expression").and_then(|n| c_expr(src, n)))?;
+    let then_body = stmt
+        .child_by_field_name("consequence")
+        .map(|n| c_stmt_or_body(src, n))
+        .unwrap_or_default();
+    let else_body = stmt
+        .child_by_field_name("alternative")
+        .or_else(|| first_named(stmt, "else_clause"))
+        .map(|n| c_else_body(src, n))
+        .unwrap_or_default();
+    Some(Stmt::If {
+        cond,
+        then_body,
+        else_body,
+    })
+}
+
+fn c_while_statement(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
+    let cond = stmt
+        .child_by_field_name("condition")
+        .and_then(|n| c_expr(src, n))
+        .or_else(|| first_named(stmt, "parenthesized_expression").and_then(|n| c_expr(src, n)))?;
+    let body = stmt
+        .child_by_field_name("body")
+        .map(|n| c_stmt_or_body(src, n))
+        .unwrap_or_default();
+    Some(Stmt::Loop {
+        kind: crate::swift_subset::LoopKind::While,
+        cond: Some(cond),
+        body,
+    })
+}
+
+fn c_stmt_or_body(src: &[u8], n: Node<'_>) -> Vec<Stmt> {
+    let n = c_peel_statement_shell(n).unwrap_or(n);
+    if n.kind() == "compound_statement" {
+        c_body(src, n)
+    } else {
+        c_stmt(src, n).into_iter().collect()
+    }
+}
+
+fn c_else_body(src: &[u8], n: Node<'_>) -> Vec<Stmt> {
+    let n = c_peel_statement_shell(n).unwrap_or(n);
+    let n = if n.kind() == "else_clause" {
+        last_named(n).unwrap_or(n)
+    } else {
+        n
+    };
+    if n.kind() == "if_statement" {
+        c_stmt(src, n).into_iter().collect()
+    } else {
+        c_stmt_or_body(src, n)
+    }
+}
+
+fn c_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
+    match expr.kind() {
+        "identifier" => Some(Expr::Ident(node_txt(src, expr).trim().to_string())),
+        "number_literal" => parse_c_integer_literal(node_txt(src, expr)).map(Expr::IntLit),
+        "string_literal" => Some(Expr::StringLit(
+            node_txt(src, expr).trim().trim_matches('"').to_string(),
+        )),
+        "true" => Some(Expr::BoolLit(true)),
+        "false" => Some(Expr::BoolLit(false)),
+        "parenthesized_expression" | "expression" => {
+            expr.named_child(0).and_then(|n| c_expr(src, n))
+        }
+        "binary_expression" => c_binary_expr(src, expr),
+        "unary_expression" => c_unary_expr(src, expr),
+        "call_expression" => c_call_expr(src, expr),
+        _ => None,
+    }
+}
+
+fn c_binary_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
+    let lhs = expr
+        .child_by_field_name("left")
+        .or_else(|| expr.named_child(0))?;
+    let rhs = expr
+        .child_by_field_name("right")
+        .or_else(|| expr.named_child(expr.named_child_count().saturating_sub(1) as u32))?;
+    let op = std::str::from_utf8(src.get(lhs.end_byte()..rhs.start_byte())?)
+        .ok()?
+        .trim()
+        .to_string();
+    Some(Expr::Binary {
+        op,
+        lhs: Box::new(c_expr(src, lhs)?),
+        rhs: Box::new(c_expr(src, rhs)?),
+    })
+}
+
+fn c_unary_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
+    let inner = last_named(expr)?;
+    let op = std::str::from_utf8(src.get(expr.start_byte()..inner.start_byte())?)
+        .ok()?
+        .trim()
+        .to_string();
+    Some(Expr::Unary {
+        op,
+        expr: Box::new(c_expr(src, inner)?),
+    })
+}
+
+fn c_call_expr(src: &[u8], call: Node<'_>) -> Option<Expr> {
+    let func = call
+        .child_by_field_name("function")
+        .or_else(|| first_named(call, "identifier"))?;
+    let args = match call.child_by_field_name("arguments") {
+        Some(args) => c_args(src, args)?,
+        None => Vec::new(),
+    };
+    Some(Expr::Call {
+        callee: Box::new(Expr::Ident(node_txt(src, func).trim().to_string())),
+        args,
+    })
+}
+
+fn c_args(src: &[u8], args: Node<'_>) -> Option<Vec<Expr>> {
+    let mut out = Vec::new();
+    let mut w = args.walk();
+    for ch in args.named_children(&mut w) {
+        out.push(c_expr(src, ch)?);
+    }
+    Some(out)
+}
+
+#[allow(dead_code)]
 fn c_trivial_return_body(
     src: &[u8],
     body: Node<'_>,
@@ -406,6 +613,7 @@ fn c_peel_statement_shell<'a>(n: Node<'a>) -> Option<Node<'a>> {
 }
 
 /// `Ok(Some(expr))` = `return <expr>;`, `Ok(None)` = `return;`, `Err` = non-trivial return.
+#[allow(dead_code)]
 fn c_try_return_expr(
     src: &[u8],
     ret: Node<'_>,
@@ -450,6 +658,7 @@ fn c_try_return_expr(
 
 /// `return x` / `return (x)` where the value is a lone parameter name (no calls, subscripts, or
 /// binary operators in the return expression).
+#[allow(dead_code)]
 fn c_try_param_ident_expr(src: &[u8], expr: Node<'_>, params: &[(String, Typ)]) -> Option<Expr> {
     if named_descendant(expr, "binary_expression").is_some()
         || named_descendant(expr, "call_expression").is_some()
@@ -2217,7 +2426,7 @@ def main():
     }
 
     #[test]
-    fn c_non_trivial_return_drops_function_body() {
+    fn c_binary_return_lowers_function_body() {
         let src = "int f(void) { return 1 + 2; }\nint main(void) { return 0; }\n";
         let m = parse_lang(tree_sitter_c::LANGUAGE.into(), src, |b, r| {
             extract_fn_nodes(b, r, &["function_definition"], c_like_function_decl)
@@ -2229,10 +2438,90 @@ def main():
             .find(|d| matches!(d, Decl::Function { name, .. } if name == "f"))
             .expect("f");
         match f {
-            Decl::Function { body, .. } => assert!(
-                body.is_empty(),
-                "binary return should not become a trivial body; got {body:?}"
-            ),
+            Decl::Function { body, .. } => assert!(matches!(
+                body.as_slice(),
+                [Stmt::Return(Some(Expr::Binary { op, .. }))] if op == "+"
+            )),
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn c_lowers_locals_assignments_calls_if_and_while() {
+        let src = r#"
+int helper(int value) { return value; }
+int main(void) {
+  int value = 1;
+  value = value + 2;
+  helper(value);
+  if (value > 2) { value = value - 1; } else { value = 0; }
+  while (value < 4) { value = value + 1; }
+  return value;
+}
+"#;
+        let m = parse_lang(tree_sitter_c::LANGUAGE.into(), src, |b, r| {
+            extract_fn_nodes(b, r, &["function_definition"], c_like_function_decl)
+        })
+        .expect("parse");
+        let main = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+            .expect("main");
+        match main {
+            Decl::Function { body, .. } => {
+                assert!(matches!(
+                    &body[0],
+                    Stmt::Let(name, Some(Typ::Int), Expr::IntLit(1)) if name == "value"
+                ));
+                assert!(matches!(
+                    &body[1],
+                    Stmt::Assign(name, Expr::Binary { op, .. }) if name == "value" && op == "+"
+                ));
+                assert!(matches!(
+                    &body[2],
+                    Stmt::Expr(Expr::Call { callee, args })
+                        if matches!(callee.as_ref(), Expr::Ident(name) if name == "helper")
+                            && args == &vec![Expr::Ident("value".into())]
+                ));
+                assert!(
+                    matches!(
+                        &body[3],
+                        Stmt::If { cond: Expr::Binary { op, .. }, then_body, else_body }
+                            if op == ">" && then_body.len() == 1 && else_body.len() == 1
+                    ),
+                    "{body:?}"
+                );
+                assert!(matches!(
+                    &body[4],
+                    Stmt::Loop { cond: Some(Expr::Binary { op, .. }), body, .. }
+                        if op == "<" && body.len() == 1
+                ));
+                assert!(matches!(
+                    &body[5],
+                    Stmt::Return(Some(Expr::Ident(name))) if name == "value"
+                ));
+            }
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn cpp_uses_c_like_body_lowering() {
+        let src = "int main() { int value = 1; value = value + 1; return value; }\n";
+        let m = parse_lang(tree_sitter_cpp::LANGUAGE.into(), src, |b, r| {
+            extract_fn_nodes(b, r, &["function_definition"], c_like_function_decl)
+        })
+        .expect("parse");
+        match &m.decls[0] {
+            Decl::Function { body, .. } => assert!(matches!(
+                body.as_slice(),
+                [
+                    Stmt::Let(name, Some(Typ::Int), Expr::IntLit(1)),
+                    Stmt::Assign(assign_name, Expr::Binary { op, .. }),
+                    Stmt::Return(Some(Expr::Ident(ret_name))),
+                ] if name == "value" && assign_name == "value" && op == "+" && ret_name == "value"
+            )),
             _ => panic!("expected function"),
         }
     }
