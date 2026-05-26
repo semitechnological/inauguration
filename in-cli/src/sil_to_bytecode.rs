@@ -44,6 +44,7 @@ fn lower_function(name: &str, instructions: &[String]) -> Result<BytecodeFunctio
     let mut local_counter = 0;
     let mut value_map: HashMap<String, usize> = HashMap::new();
     let mut value_ints: HashMap<String, i64> = HashMap::new();
+    let mut value_bools: HashMap<String, bool> = HashMap::new();
     let mut var_slots: HashMap<String, usize> = HashMap::new();
     let mut function_refs: HashMap<String, String> = HashMap::new();
     let mut _label_counter = 0;
@@ -60,6 +61,7 @@ fn lower_function(name: &str, instructions: &[String]) -> Result<BytecodeFunctio
             &mut local_counter,
             &mut value_map,
             &mut value_ints,
+            &mut value_bools,
             &mut var_slots,
             &mut function_refs,
             &mut _label_counter,
@@ -182,6 +184,45 @@ fn fold_int_binop(op: &str, lhs: i64, rhs: i64) -> Option<i64> {
     }
 }
 
+fn fold_bool_binop(
+    op: &str,
+    lhs_i: Option<i64>,
+    rhs_i: Option<i64>,
+    lhs_b: Option<bool>,
+    rhs_b: Option<bool>,
+) -> Option<bool> {
+    match op {
+        "&&" => Some(lhs_b? && rhs_b?),
+        "||" => Some(lhs_b? || rhs_b?),
+        "==" => {
+            if let (Some(lhs), Some(rhs)) = (lhs_b, rhs_b) {
+                return Some(lhs == rhs);
+            }
+            Some(lhs_i? == rhs_i?)
+        }
+        "!=" => {
+            if let (Some(lhs), Some(rhs)) = (lhs_b, rhs_b) {
+                return Some(lhs != rhs);
+            }
+            Some(lhs_i? != rhs_i?)
+        }
+        "<" => Some(lhs_i? < rhs_i?),
+        ">" => Some(lhs_i? > rhs_i?),
+        "<=" => Some(lhs_i? <= rhs_i?),
+        ">=" => Some(lhs_i? >= rhs_i?),
+        _ => None,
+    }
+}
+
+fn clear_value_constants(
+    reg: &str,
+    value_ints: &mut HashMap<String, i64>,
+    value_bools: &mut HashMap<String, bool>,
+) {
+    value_ints.remove(reg);
+    value_bools.remove(reg);
+}
+
 fn optimize_bytecode(bytecode: &mut Vec<Instruction>) {
     let mut optimized = Vec::with_capacity(bytecode.len());
     let mut idx = 0;
@@ -215,6 +256,7 @@ fn parse_sil_instruction_to_bytecode(
     local_counter: &mut usize,
     value_map: &mut HashMap<String, usize>,
     value_ints: &mut HashMap<String, i64>,
+    value_bools: &mut HashMap<String, bool>,
     var_slots: &mut HashMap<String, usize>,
     function_refs: &mut HashMap<String, String>,
     _label_counter: &mut usize,
@@ -240,19 +282,21 @@ fn parse_sil_instruction_to_bytecode(
                 out.push(Instruction::LoadNil);
             }
             store_register(reg, local_counter, value_map, &mut out);
-            value_ints.remove(reg);
+            clear_value_constants(reg, value_ints, value_bools);
             return Ok(out);
         }
         if let Some(s) = rhs.strip_prefix("string_literal ").map(str::trim) {
             out.push(Instruction::LoadString(parse_string_payload(s)));
             store_register(reg, local_counter, value_map, &mut out);
-            value_ints.remove(reg);
+            clear_value_constants(reg, value_ints, value_bools);
             return Ok(out);
         }
         if let Some(b) = rhs.strip_prefix("bool_literal ").map(str::trim) {
-            out.push(Instruction::LoadBool(b == "true"));
+            let b = b == "true";
+            out.push(Instruction::LoadBool(b));
             store_register(reg, local_counter, value_map, &mut out);
             value_ints.remove(reg);
+            value_bools.insert(reg.to_string(), b);
             return Ok(out);
         }
         if let Some(rest) = rhs.strip_prefix("builtin_binop ").map(str::trim) {
@@ -264,28 +308,64 @@ fn parse_sil_instruction_to_bytecode(
                 out.push(Instruction::LoadInt(n));
                 store_register(reg, local_counter, value_map, &mut out);
                 value_ints.insert(reg.to_string(), n);
+                value_bools.remove(reg);
                 return Ok(out);
             }
-            for reg in args {
-                if let Some(slot) = value_map.get(reg) {
+            if args.len() == 2 {
+                let lhs = args[0];
+                let rhs = args[1];
+                if let Some(b) = fold_bool_binop(
+                    &op,
+                    value_ints.get(lhs).copied(),
+                    value_ints.get(rhs).copied(),
+                    value_bools.get(lhs).copied(),
+                    value_bools.get(rhs).copied(),
+                ) {
+                    out.push(Instruction::LoadBool(b));
+                    store_register(reg, local_counter, value_map, &mut out);
+                    value_ints.remove(reg);
+                    value_bools.insert(reg.to_string(), b);
+                    return Ok(out);
+                }
+            }
+            for arg in args {
+                if let Some(slot) = value_map.get(arg) {
                     out.push(Instruction::Load(*slot));
                 }
             }
             out.push(Instruction::BinOp(op));
             store_register(reg, local_counter, value_map, &mut out);
-            value_ints.remove(reg);
+            clear_value_constants(reg, value_ints, value_bools);
             return Ok(out);
         }
         if let Some(rest) = rhs.strip_prefix("builtin_unop ").map(str::trim) {
             let (op, args) = parse_quoted_op_and_args(rest);
-            if let Some(reg) = args.first()
-                && let Some(slot) = value_map.get(*reg)
-            {
-                out.push(Instruction::Load(*slot));
+            if let Some(arg) = args.first() {
+                if op == "-"
+                    && let Some(n) = value_ints.get(*arg).and_then(|n| n.checked_neg())
+                {
+                    out.push(Instruction::LoadInt(n));
+                    store_register(reg, local_counter, value_map, &mut out);
+                    value_ints.insert(reg.to_string(), n);
+                    value_bools.remove(reg);
+                    return Ok(out);
+                }
+                if op == "!"
+                    && let Some(b) = value_bools.get(*arg)
+                {
+                    out.push(Instruction::LoadBool(!b));
+                    store_register(reg, local_counter, value_map, &mut out);
+                    value_ints.remove(reg);
+                    value_bools.insert(reg.to_string(), !b);
+                    return Ok(out);
+                }
+                if let Some(slot) = value_map.get(*arg) {
+                    out.push(Instruction::Load(*slot));
+                }
             }
             out.push(Instruction::UnOp(op));
             store_register(reg, local_counter, value_map, &mut out);
-            value_ints.remove(reg);
+            clear_value_constants(reg, value_ints, value_bools);
             return Ok(out);
         }
         if let Some(rest) = rhs.strip_prefix("struct_init ").map(str::trim) {
@@ -300,7 +380,7 @@ fn parse_sil_instruction_to_bytecode(
                 fields.into_iter().map(|(field, _)| field).collect(),
             ));
             store_register(reg, local_counter, value_map, &mut out);
-            value_ints.remove(reg);
+            clear_value_constants(reg, value_ints, value_bools);
             return Ok(out);
         }
         if let Some(rest) = rhs.strip_prefix("field_access ").map(str::trim) {
@@ -312,7 +392,7 @@ fn parse_sil_instruction_to_bytecode(
             }
             out.push(Instruction::FieldAccess(field_name.to_string()));
             store_register(reg, local_counter, value_map, &mut out);
-            value_ints.remove(reg);
+            clear_value_constants(reg, value_ints, value_bools);
             return Ok(out);
         }
     }
@@ -367,7 +447,7 @@ fn parse_sil_instruction_to_bytecode(
                 let slot = *local_counter;
                 *local_counter += 1;
                 value_map.insert(reg.to_string(), slot);
-                value_ints.remove(reg);
+                clear_value_constants(reg, value_ints, value_bools);
                 return Ok(out);
             }
         }
@@ -412,7 +492,7 @@ fn parse_sil_instruction_to_bytecode(
                             let res_reg = before_eq.trim();
                             if res_reg.starts_with('%') {
                                 store_register(res_reg, local_counter, value_map, &mut out);
-                                value_ints.remove(res_reg);
+                                clear_value_constants(res_reg, value_ints, value_bools);
                             }
                         }
                     }
@@ -436,7 +516,7 @@ fn parse_sil_instruction_to_bytecode(
                     let slot = *local_counter;
                     *local_counter += 1;
                     value_map.insert(reg.to_string(), slot);
-                    value_ints.remove(reg);
+                    clear_value_constants(reg, value_ints, value_bools);
                     out.push(Instruction::LoadString(func_name.to_string()));
                     out.push(Instruction::Store(slot));
                     return Ok(out);
@@ -518,7 +598,7 @@ fn parse_sil_instruction_to_bytecode(
                 let slot = *local_counter;
                 *local_counter += 1;
                 value_map.insert(reg.to_string(), slot);
-                value_ints.remove(reg);
+                clear_value_constants(reg, value_ints, value_bools);
                 out.push(Instruction::Store(slot));
             }
         }
@@ -536,6 +616,7 @@ mod tests {
         let mut local_counter = 0;
         let mut value_map = HashMap::new();
         let mut value_ints = HashMap::new();
+        let mut value_bools = HashMap::new();
         let mut var_slots = HashMap::new();
         let mut function_refs = HashMap::new();
         let mut label_counter = 0;
@@ -545,6 +626,7 @@ mod tests {
             &mut local_counter,
             &mut value_map,
             &mut value_ints,
+            &mut value_bools,
             &mut var_slots,
             &mut function_refs,
             &mut label_counter,
@@ -560,6 +642,7 @@ mod tests {
         let mut local_counter = 0;
         let mut value_map = HashMap::new();
         let mut value_ints = HashMap::new();
+        let mut value_bools = HashMap::new();
         let mut var_slots = HashMap::new();
         let mut function_refs = HashMap::new();
         let mut label_counter = 0;
@@ -569,6 +652,7 @@ mod tests {
             &mut local_counter,
             &mut value_map,
             &mut value_ints,
+            &mut value_bools,
             &mut var_slots,
             &mut function_refs,
             &mut label_counter,
@@ -700,6 +784,42 @@ mod tests {
                 .instructions
                 .iter()
                 .any(|inst| matches!(inst, Instruction::BinOp(op) if op == "+"))
+        );
+    }
+
+    #[test]
+    fn folds_literal_unary_and_bool_bytecode() {
+        let artifact = SilArtifact {
+            function_id: "main".to_string(),
+            cfg_blocks: vec!["entry".to_string()],
+            instructions: vec![
+                "%0 = bool_literal false".to_string(),
+                "%1 = builtin_unop \"!\" %0".to_string(),
+                "%2 = integer_literal $Builtin.Int64, 2".to_string(),
+                "%3 = integer_literal $Builtin.Int64, 2".to_string(),
+                "%4 = builtin_binop \"==\" %2, %3".to_string(),
+                "%5 = builtin_binop \"&&\" %1, %4".to_string(),
+                "return %5 : $Builtin.Int1".to_string(),
+            ],
+            instruction_callers: vec![],
+            functions: vec![],
+        };
+
+        let module = lower_sil_to_bytecode(&artifact).unwrap();
+        let main = module.find_function("main").unwrap();
+
+        assert!(main.instructions.contains(&Instruction::LoadBool(true)));
+        assert!(
+            !main
+                .instructions
+                .iter()
+                .any(|inst| matches!(inst, Instruction::UnOp(op) if op == "!"))
+        );
+        assert!(
+            !main
+                .instructions
+                .iter()
+                .any(|inst| matches!(inst, Instruction::BinOp(op) if op == "&&" || op == "=="))
         );
     }
 
