@@ -54,6 +54,7 @@ pub fn host_supports_native_subset() -> bool {
 
 fn lower_module(module: &UnifiedModule, entry: &str) -> Result<LoweredModule, String> {
     let functions = collect_functions(module)?;
+    let structs = collect_structs(module);
     if !functions.contains_key(entry) {
         return Err(format!("native-lower: missing entry function `{entry}`"));
     }
@@ -69,7 +70,7 @@ fn lower_module(module: &UnifiedModule, entry: &str) -> Result<LoweredModule, St
         let func = &functions[name];
         let offset = emitter.len();
         function_offsets.insert(name.clone(), offset);
-        lower_function(&mut emitter, func, &functions, &mut pending_calls)?;
+        lower_function(&mut emitter, func, &functions, &structs, &mut pending_calls)?;
     }
 
     for call in pending_calls {
@@ -124,6 +125,17 @@ fn collect_functions(module: &UnifiedModule) -> Result<HashMap<String, FunctionI
     Ok(functions)
 }
 
+fn collect_structs(module: &UnifiedModule) -> HashMap<String, Vec<(String, Typ)>> {
+    module
+        .decls
+        .iter()
+        .filter_map(|decl| match decl {
+            Decl::Struct { name, fields } => Some((name.clone(), fields.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone)]
 struct FunctionInfo {
     name: String,
@@ -136,6 +148,7 @@ fn lower_function(
     emitter: &mut CodeEmitter,
     func: &FunctionInfo,
     functions: &HashMap<String, FunctionInfo>,
+    structs: &HashMap<String, Vec<(String, Typ)>>,
     pending_calls: &mut Vec<PendingCall>,
 ) -> Result<(), String> {
     ensure_return_type(&func.ret, &func.name)?;
@@ -144,10 +157,8 @@ fn lower_function(
     emitter.emit_u32(0xA9BF_7BFD);
     emitter.emit_u32(aarch64::mov_reg64(REG_FP, aarch64::REG_SP));
 
-    let mut ctx = LowerCtx::new(&func.params);
-    for name in collect_local_names(&func.body) {
-        ctx.alloc_local(&name);
-    }
+    let mut ctx = LowerCtx::new(&func.params, structs);
+    alloc_declared_locals(&mut ctx, &func.body, &func.name)?;
     if ctx.stack_size > 0 {
         emitter.emit_u32(aarch64::sub_imm64(
             aarch64::REG_SP,
@@ -176,41 +187,57 @@ fn lower_function(
     Ok(())
 }
 
-fn collect_local_names(body: &[Stmt]) -> Vec<String> {
-    let mut names = Vec::new();
+fn alloc_declared_locals(
+    ctx: &mut LowerCtx<'_>,
+    body: &[Stmt],
+    fn_name: &str,
+) -> Result<(), String> {
     for stmt in body {
         match stmt {
-            Stmt::Let(name, _, _) => names.push(name.clone()),
+            Stmt::Let(name, typ, expr) => {
+                let resolved = typ.clone().or_else(|| expr_type(expr));
+                ctx.alloc_local(name, resolved.as_ref(), fn_name)?;
+            }
             Stmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                names.extend(collect_local_names(then_body));
-                names.extend(collect_local_names(else_body));
+                alloc_declared_locals(ctx, then_body, fn_name)?;
+                alloc_declared_locals(ctx, else_body, fn_name)?;
             }
-            Stmt::Loop { body, .. } => names.extend(collect_local_names(body)),
+            Stmt::Loop { body, .. } => alloc_declared_locals(ctx, body, fn_name)?,
             Stmt::Match { arms, .. } => {
                 for arm in arms {
-                    names.extend(collect_local_names(&arm.body));
+                    alloc_declared_locals(ctx, &arm.body, fn_name)?;
                 }
             }
             Stmt::Return(_) | Stmt::Assign(_, _) | Stmt::Expr(_) => {}
         }
     }
-    names
+    Ok(())
+}
+
+#[derive(Debug, Clone)]
+enum LocalSlot {
+    Scalar(u32),
+    Struct {
+        typ: String,
+        fields: HashMap<String, u32>,
+    },
 }
 
 struct LowerCtx<'a> {
     params: HashMap<String, u8>,
-    locals: HashMap<String, u32>,
+    locals: HashMap<String, LocalSlot>,
+    structs: &'a HashMap<String, Vec<(String, Typ)>>,
     stack_size: u32,
     emitted_return: bool,
     _params_src: &'a [(String, Typ)],
 }
 
 impl<'a> LowerCtx<'a> {
-    fn new(params: &'a [(String, Typ)]) -> Self {
+    fn new(params: &'a [(String, Typ)], structs: &'a HashMap<String, Vec<(String, Typ)>>) -> Self {
         let mut param_map = HashMap::new();
         for (idx, (name, _)) in params.iter().enumerate() {
             if idx < 8 {
@@ -220,19 +247,55 @@ impl<'a> LowerCtx<'a> {
         Self {
             params: param_map,
             locals: HashMap::new(),
+            structs,
             stack_size: 0,
             emitted_return: false,
             _params_src: params,
         }
     }
 
-    fn alloc_local(&mut self, name: &str) -> u32 {
-        if let Some(offset) = self.locals.get(name) {
-            return *offset;
+    fn alloc_local(&mut self, name: &str, typ: Option<&Typ>, fn_name: &str) -> Result<(), String> {
+        if self.locals.contains_key(name) {
+            return Ok(());
         }
+        match typ {
+            Some(Typ::Int | Typ::Bool) => {
+                let offset = self.alloc_slot();
+                self.locals
+                    .insert(name.to_string(), LocalSlot::Scalar(offset));
+                Ok(())
+            }
+            Some(Typ::Named(struct_name)) => {
+                let fields = self.structs.get(struct_name).ok_or_else(|| {
+                    format!("native-lower: unsupported let binding type in `{fn_name}`")
+                })?;
+                let mut slots = HashMap::new();
+                for (field, field_ty) in fields.clone() {
+                    if !matches!(field_ty, Typ::Int | Typ::Bool) {
+                        return Err(format!(
+                            "native-lower: unsupported struct field type in `{fn_name}` (only Int/Bool fields)"
+                        ));
+                    }
+                    slots.insert(field, self.alloc_slot());
+                }
+                self.locals.insert(
+                    name.to_string(),
+                    LocalSlot::Struct {
+                        typ: struct_name.clone(),
+                        fields: slots,
+                    },
+                );
+                Ok(())
+            }
+            _ => Err(format!(
+                "native-lower: unsupported let binding type in `{fn_name}` (only Int/Bool locals and scalar structs)"
+            )),
+        }
+    }
+
+    fn alloc_slot(&mut self) -> u32 {
         let offset = self.stack_size;
         self.stack_size += 8;
-        self.locals.insert(name.to_string(), offset);
         offset
     }
 
@@ -262,15 +325,8 @@ fn lower_stmt(
         }
         Stmt::Let(name, typ, expr) => {
             let resolved = typ.clone().or_else(|| expr_type(expr));
-            if resolved.as_ref() != Some(&Typ::Int) {
-                return Err(format!(
-                    "native-lower: unsupported let binding type in `{fn_name}` (only Int locals)"
-                ));
-            }
-            lower_expr_into(emitter, ctx, expr, 0, functions, pending_calls, fn_name)?;
-            let offset = ctx.alloc_local(name);
-            emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, offset));
-            Ok(())
+            ctx.alloc_local(name, resolved.as_ref(), fn_name)?;
+            lower_store_local(emitter, ctx, name, expr, functions, pending_calls, fn_name)
         }
         Stmt::If {
             cond,
@@ -287,14 +343,12 @@ fn lower_stmt(
             fn_name,
         ),
         Stmt::Assign(name, expr) => {
-            let Some(offset) = ctx.locals.get(name).copied() else {
+            if !ctx.locals.contains_key(name) {
                 return Err(format!(
                     "native-lower: assignment to unknown local `{name}` in `{fn_name}`"
                 ));
-            };
-            lower_expr_into(emitter, ctx, expr, 0, functions, pending_calls, fn_name)?;
-            emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, offset));
-            Ok(())
+            }
+            lower_store_local(emitter, ctx, name, expr, functions, pending_calls, fn_name)
         }
         Stmt::Expr(expr) => {
             lower_expr_into(emitter, ctx, expr, 0, functions, pending_calls, fn_name)?;
@@ -318,6 +372,51 @@ fn lower_stmt(
             pending_calls,
             fn_name,
         ),
+    }
+}
+
+fn lower_store_local(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    name: &str,
+    expr: &Expr,
+    functions: &HashMap<String, FunctionInfo>,
+    pending_calls: &mut Vec<PendingCall>,
+    fn_name: &str,
+) -> Result<(), String> {
+    let slot = ctx.locals.get(name).cloned().ok_or_else(|| {
+        format!("native-lower: assignment to unknown local `{name}` in `{fn_name}`")
+    })?;
+    match slot {
+        LocalSlot::Scalar(offset) => {
+            lower_expr_into(emitter, ctx, expr, 0, functions, pending_calls, fn_name)?;
+            emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, offset));
+            Ok(())
+        }
+        LocalSlot::Struct { typ, fields } => {
+            let Expr::StructInit {
+                name: init,
+                fields: values,
+            } = expr
+            else {
+                return Err(format!(
+                    "native-lower: unsupported struct assignment in `{fn_name}`"
+                ));
+            };
+            if init != &typ {
+                return Err(format!(
+                    "native-lower: struct assignment type mismatch in `{fn_name}`"
+                ));
+            }
+            for (field, value) in values {
+                let offset = fields.get(field).ok_or_else(|| {
+                    format!("native-lower: unknown struct field `{typ}.{field}` in `{fn_name}`")
+                })?;
+                lower_expr_into(emitter, ctx, value, 0, functions, pending_calls, fn_name)?;
+                emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, *offset));
+            }
+            Ok(())
+        }
     }
 }
 
@@ -466,8 +565,17 @@ fn lower_expr_into(
                 if rd != *reg {
                     emitter.emit_u32(aarch64::mov_reg64(rd, *reg));
                 }
-            } else if let Some(offset) = ctx.locals.get(name) {
-                emitter.emit_u32(aarch64::ldr64(rd, aarch64::REG_SP, *offset));
+            } else if let Some(slot) = ctx.locals.get(name) {
+                match slot {
+                    LocalSlot::Scalar(offset) => {
+                        emitter.emit_u32(aarch64::ldr64(rd, aarch64::REG_SP, *offset));
+                    }
+                    LocalSlot::Struct { .. } => {
+                        return Err(format!(
+                            "native-lower: unsupported whole-struct value `{name}` in `{fn_name}`"
+                        ));
+                    }
+                }
             } else {
                 return Err(format!(
                     "native-lower: unresolved identifier `{name}` in `{fn_name}`"
@@ -506,8 +614,60 @@ fn lower_expr_into(
             pending_calls,
             fn_name,
         ),
-        Expr::StringLit(_) | Expr::StructInit { .. } | Expr::Field { .. } => Err(format!(
+        Expr::Field { base, name } => lower_field(
+            emitter,
+            ctx,
+            base,
+            name,
+            rd,
+            functions,
+            pending_calls,
+            fn_name,
+        ),
+        Expr::StringLit(_) | Expr::StructInit { .. } => Err(format!(
             "native-lower: unsupported expression in `{fn_name}`"
+        )),
+    }
+}
+
+fn lower_field(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    base: &Expr,
+    name: &str,
+    rd: u8,
+    functions: &HashMap<String, FunctionInfo>,
+    pending_calls: &mut Vec<PendingCall>,
+    fn_name: &str,
+) -> Result<(), String> {
+    match base {
+        Expr::Ident(local) => {
+            let Some(LocalSlot::Struct { typ, fields }) = ctx.locals.get(local) else {
+                return Err(format!(
+                    "native-lower: unsupported field base in `{fn_name}`"
+                ));
+            };
+            let offset = fields.get(name).ok_or_else(|| {
+                format!("native-lower: unknown struct field `{typ}.{name}` in `{fn_name}`")
+            })?;
+            emitter.emit_u32(aarch64::ldr64(rd, aarch64::REG_SP, *offset));
+            Ok(())
+        }
+        Expr::StructInit { fields, .. } => {
+            let value = fields.iter().find_map(
+                |(field, expr)| {
+                    if field == name { Some(expr) } else { None }
+                },
+            );
+            let Some(value) = value else {
+                return Err(format!(
+                    "native-lower: unknown struct field `{name}` in `{fn_name}`"
+                ));
+            };
+            lower_expr_into(emitter, ctx, value, rd, functions, pending_calls, fn_name)
+        }
+        _ => Err(format!(
+            "native-lower: unsupported field base in `{fn_name}`"
         )),
     }
 }
@@ -868,6 +1028,26 @@ fn main() -> Int {
     }
 
     #[test]
+    fn lowers_in_struct_local_field_access() {
+        let module = crate::in_lang_parse::parse_in_source(
+            r#"
+struct Point {
+  Int x
+  Int y
+}
+
+fn main() -> Int {
+  let p: Point = Point { x: 2, y: 5 };
+  return p.y;
+}
+"#,
+        )
+        .expect("parse");
+
+        lower_module(&module, "main").expect("lower");
+    }
+
+    #[test]
     fn lowers_local_reassignment() {
         let module = UnifiedModule {
             decls: vec![Decl::Function {
@@ -1101,6 +1281,63 @@ fn main() -> Int {
                         && dump.contains("str\tx0, [sp]")
                         && dump.contains("add\tx0, x0, x1"),
                     "expected scalar subset instructions in __text; otool:\n{dump}"
+                );
+            }
+            other => panic!(
+                "unexpected native exit {:?}; stdout={:?} stderr={:?}",
+                other, output.stdout, output.stderr
+            ),
+        }
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    #[test]
+    fn struct_field_executable_exits_with_field_value() {
+        let module = crate::in_lang_parse::parse_in_source(
+            r#"
+struct Point {
+  Int x
+  Int y
+}
+
+fn main() -> Int {
+  let p: Point = Point { x: 2, y: 5 };
+  return p.y;
+}
+"#,
+        )
+        .expect("parse");
+        let path = temp_executable("struct-field-exe");
+        let _ = std::fs::remove_file(&path);
+        compile_native_executable(&module, "main", &path).expect("compile");
+
+        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::process::ExitStatusExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let sign = std::process::Command::new("codesign")
+            .args(["-s", "-", "-f", path.to_str().unwrap()])
+            .status()
+            .expect("codesign spawn");
+        assert!(sign.success(), "codesign failed for native executable");
+
+        let output = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(path.to_str().unwrap())
+            .output()
+            .expect("run executable");
+        match output.status.code() {
+            Some(5) => {}
+            None if output.status.signal() == Some(9) => {
+                let otool = std::process::Command::new("otool")
+                    .args(["-tV", path.to_str().unwrap()])
+                    .output()
+                    .expect("otool");
+                let dump = String::from_utf8_lossy(&otool.stdout);
+                assert!(
+                    dump.contains("str\tx0, [sp]") && dump.contains("ldr\tx0, [sp, #0x8]"),
+                    "expected struct field load/store instructions in __text; otool:\n{dump}"
                 );
             }
             other => panic!(
