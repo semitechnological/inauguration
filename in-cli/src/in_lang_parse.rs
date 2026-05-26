@@ -833,6 +833,59 @@ fn parse_while_stmt(s: &str) -> Result<Stmt, String> {
     })
 }
 
+fn parse_match_stmt(s: &str) -> Result<Stmt, String> {
+    let rest = trim(s)
+        .strip_prefix("match ")
+        .ok_or_else(|| ".in: internal match parse".to_string())?;
+    let open = rest
+        .find('{')
+        .ok_or_else(|| ".in: `match` needs `{` body".to_string())?;
+    let scrutinee = parse_expr(trim(&rest[..open]));
+    let (inner, _) = brace_content_bounds_after_open(rest, open)
+        .ok_or_else(|| ".in: unclosed `match` body".to_string())?;
+    let arms = parse_match_arms(inner)?;
+    Ok(Stmt::Match { scrutinee, arms })
+}
+
+fn parse_match_arms(inner: &str) -> Result<Vec<crate::swift_subset::MatchArm>, String> {
+    let mut arms = Vec::new();
+    let mut pos = 0usize;
+    while pos < inner.len() {
+        let rest = inner[pos..].trim_start();
+        if rest.is_empty() {
+            break;
+        }
+        let skipped = inner[pos..].len() - rest.len();
+        pos += skipped;
+        let rel_open = inner[pos..]
+            .find('{')
+            .ok_or_else(|| ".in: match arm needs `{` body".to_string())?;
+        let open = pos + rel_open;
+        let pattern = trim(&inner[pos..open]).trim_end_matches(':').trim();
+        if pattern.is_empty() {
+            return Err(".in: match arm pattern missing".into());
+        }
+        let (body_inner, close) = brace_content_bounds_after_open(inner, open)
+            .ok_or_else(|| ".in: unclosed match arm body".to_string())?;
+        arms.push(crate::swift_subset::MatchArm {
+            pattern: pattern.to_string(),
+            body: parse_function_body(body_inner)?,
+        });
+        pos = close + 1;
+        while pos < inner.len() {
+            let Some(ch) = inner[pos..].chars().next() else {
+                break;
+            };
+            if ch.is_whitespace() || ch == ';' || ch == ',' || ch == '}' {
+                pos += ch.len_utf8();
+            } else {
+                break;
+            }
+        }
+    }
+    Ok(arms)
+}
+
 fn parse_stmt_line(line: &str) -> Result<Stmt, String> {
     let s = trim(line);
     if s.is_empty() {
@@ -846,6 +899,9 @@ fn parse_stmt_line(line: &str) -> Result<Stmt, String> {
     }
     if s.starts_with("while ") {
         return parse_while_stmt(s);
+    }
+    if s.starts_with("match ") {
+        return parse_match_stmt(s);
     }
     if s.starts_with("return")
         && (s.len() == 6 || s.chars().nth(6).is_some_and(|c| c.is_whitespace()))
@@ -2035,6 +2091,42 @@ fn main() -> void
                 kind: LoopKind::While,
                 ..
             }
+        ));
+    }
+
+    #[test]
+    fn fn_body_parses_match_statement() {
+        let src = r#"
+fn choose(tag: Int) -> Int {
+  let out = 0;
+  match tag {
+    1 {
+      out = 10;
+    }
+    _ {
+      out = 20;
+    }
+  }
+  return out;
+}
+fn main() -> void
+"#;
+        let m = parse_in_source(src).expect("ok");
+        let body = match m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "choose"))
+        {
+            Some(Decl::Function { body, .. }) => body,
+            _ => panic!("choose"),
+        };
+        assert!(matches!(
+            &body[1],
+            Stmt::Match { scrutinee, arms }
+                if matches!(scrutinee, Expr::Ident(name) if name == "tag")
+                    && arms.len() == 2
+                    && arms[0].pattern == "1"
+                    && arms[1].pattern == "_"
         ));
     }
 }

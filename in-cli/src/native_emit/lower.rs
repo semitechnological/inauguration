@@ -190,7 +190,12 @@ fn collect_local_names(body: &[Stmt]) -> Vec<String> {
                 names.extend(collect_local_names(else_body));
             }
             Stmt::Loop { body, .. } => names.extend(collect_local_names(body)),
-            Stmt::Return(_) | Stmt::Assign(_, _) | Stmt::Match { .. } | Stmt::Expr(_) => {}
+            Stmt::Match { arms, .. } => {
+                for arm in arms {
+                    names.extend(collect_local_names(&arm.body));
+                }
+            }
+            Stmt::Return(_) | Stmt::Assign(_, _) | Stmt::Expr(_) => {}
         }
     }
     names
@@ -295,9 +300,24 @@ fn lower_stmt(
             lower_expr_into(emitter, ctx, expr, 0, functions, pending_calls, fn_name)?;
             Ok(())
         }
-        Stmt::Loop { .. } | Stmt::Match { .. } => Err(format!(
-            "native-lower: unsupported statement in `{fn_name}`"
-        )),
+        Stmt::Loop { cond, body, .. } => lower_loop(
+            emitter,
+            ctx,
+            cond.as_ref(),
+            body,
+            functions,
+            pending_calls,
+            fn_name,
+        ),
+        Stmt::Match { scrutinee, arms } => lower_match(
+            emitter,
+            ctx,
+            scrutinee,
+            arms,
+            functions,
+            pending_calls,
+            fn_name,
+        ),
     }
 }
 
@@ -326,6 +346,101 @@ fn lower_if(
     let end_offset = emitter.len() as i32 - end_branch as i32;
     emitter.patch_u32(end_branch, aarch64::b(end_offset));
     Ok(())
+}
+
+fn lower_loop(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    cond: Option<&Expr>,
+    body: &[Stmt],
+    functions: &HashMap<String, FunctionInfo>,
+    pending_calls: &mut Vec<PendingCall>,
+    fn_name: &str,
+) -> Result<(), String> {
+    let head = emitter.len();
+    let end_branch = if let Some(cond) = cond {
+        lower_expr_into(emitter, ctx, cond, 0, functions, pending_calls, fn_name)?;
+        emitter.emit_u32(aarch64::cmp_reg64(0, aarch64::REG_XZR));
+        Some(emitter.emit_insn(aarch64::b_cond(0, 0)))
+    } else {
+        None
+    };
+    for stmt in body {
+        lower_stmt(emitter, ctx, stmt, functions, pending_calls, fn_name)?;
+    }
+    let back_offset = head as i32 - emitter.len() as i32;
+    emitter.emit_u32(aarch64::b(back_offset));
+    if let Some(end_branch) = end_branch {
+        let end_offset = emitter.len() as i32 - end_branch as i32;
+        emitter.patch_u32(end_branch, aarch64::b_cond(0, end_offset));
+    }
+    Ok(())
+}
+
+fn lower_match(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    scrutinee: &Expr,
+    arms: &[crate::swift_subset::MatchArm],
+    functions: &HashMap<String, FunctionInfo>,
+    pending_calls: &mut Vec<PendingCall>,
+    fn_name: &str,
+) -> Result<(), String> {
+    lower_expr_into(
+        emitter,
+        ctx,
+        scrutinee,
+        2,
+        functions,
+        pending_calls,
+        fn_name,
+    )?;
+    let mut end_branches = Vec::new();
+    let mut default_body = None;
+    for arm in arms {
+        if is_default_match_pattern(&arm.pattern) {
+            default_body = Some(arm.body.as_slice());
+            continue;
+        }
+        let value = parse_int_match_pattern(&arm.pattern).ok_or_else(|| {
+            format!(
+                "native-lower: unsupported match pattern `{}` in `{fn_name}`",
+                arm.pattern
+            )
+        })?;
+        emitter.emit_insns(&aarch64::load_i64(1, value));
+        emitter.emit_u32(aarch64::cmp_reg64(2, 1));
+        let next_branch = emitter.emit_insn(aarch64::b_cond(1, 0));
+        for stmt in &arm.body {
+            lower_stmt(emitter, ctx, stmt, functions, pending_calls, fn_name)?;
+        }
+        end_branches.push(emitter.emit_insn(aarch64::b(0)));
+        let next_offset = emitter.len() as i32 - next_branch as i32;
+        emitter.patch_u32(next_branch, aarch64::b_cond(1, next_offset));
+    }
+    if let Some(body) = default_body {
+        for stmt in body {
+            lower_stmt(emitter, ctx, stmt, functions, pending_calls, fn_name)?;
+        }
+    }
+    for branch in end_branches {
+        let offset = emitter.len() as i32 - branch as i32;
+        emitter.patch_u32(branch, aarch64::b(offset));
+    }
+    Ok(())
+}
+
+fn is_default_match_pattern(pattern: &str) -> bool {
+    matches!(
+        pattern.trim().trim_end_matches(':'),
+        "_" | "else" | "default" | "case else" | "case default"
+    )
+}
+
+fn parse_int_match_pattern(pattern: &str) -> Option<i64> {
+    let trimmed = pattern.trim().trim_end_matches(':').trim();
+    let trimmed = trimmed.strip_prefix("case ").unwrap_or(trimmed).trim();
+    trimmed.parse::<i64>().ok()
 }
 
 fn lower_expr_into(
@@ -455,6 +570,10 @@ fn lower_binary(
         "+" => aarch64::add_reg64(rd, lhs_reg, rhs_reg),
         "-" => aarch64::sub_reg64(rd, lhs_reg, rhs_reg),
         "*" => aarch64::mul64(rd, lhs_reg, rhs_reg),
+        "==" | "!=" | "<" | ">" | "<=" | ">=" => {
+            emitter.emit_u32(aarch64::cmp_reg64(lhs_reg, rhs_reg));
+            return lower_comparison_result(emitter, rd, op);
+        }
         _ => {
             return Err(format!(
                 "native-lower: unsupported binary operator `{op}` in `{fn_name}`"
@@ -462,6 +581,31 @@ fn lower_binary(
         }
     };
     emitter.emit_u32(insn);
+    Ok(())
+}
+
+fn lower_comparison_result(emitter: &mut CodeEmitter, rd: u8, op: &str) -> Result<(), String> {
+    let cond = match op {
+        "==" => 0,
+        "!=" => 1,
+        "<" => 11,
+        ">" => 12,
+        "<=" => 13,
+        ">=" => 10,
+        _ => {
+            return Err(format!(
+                "native-lower: unsupported comparison operator `{op}`"
+            ));
+        }
+    };
+    let true_branch = emitter.emit_insn(aarch64::b_cond(cond, 0));
+    emitter.emit_insns(&aarch64::load_i64(rd, 0));
+    let end_branch = emitter.emit_insn(aarch64::b(0));
+    let true_offset = emitter.len() as i32 - true_branch as i32;
+    emitter.patch_u32(true_branch, aarch64::b_cond(cond, true_offset));
+    emitter.emit_insns(&aarch64::load_i64(rd, 1));
+    let end_offset = emitter.len() as i32 - end_branch as i32;
+    emitter.patch_u32(end_branch, aarch64::b(end_offset));
     Ok(())
 }
 
@@ -717,6 +861,69 @@ mod tests {
                         else_body: vec![Stmt::Assign("x".into(), Expr::IntLit(3))],
                     },
                     Stmt::Return(Some(Expr::Ident("x".into()))),
+                ],
+            }],
+        };
+
+        lower_module(&module, "main").expect("lower");
+    }
+
+    #[test]
+    fn lowers_runtime_while_loop_conditions() {
+        let module = UnifiedModule {
+            decls: vec![Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![
+                    Stmt::Let("x".into(), Some(Typ::Int), Expr::IntLit(0)),
+                    Stmt::Loop {
+                        kind: crate::swift_subset::LoopKind::While,
+                        cond: Some(Expr::Binary {
+                            op: "<".into(),
+                            lhs: Box::new(Expr::Ident("x".into())),
+                            rhs: Box::new(Expr::IntLit(3)),
+                        }),
+                        body: vec![Stmt::Assign(
+                            "x".into(),
+                            Expr::Binary {
+                                op: "+".into(),
+                                lhs: Box::new(Expr::Ident("x".into())),
+                                rhs: Box::new(Expr::IntLit(1)),
+                            },
+                        )],
+                    },
+                    Stmt::Return(Some(Expr::Ident("x".into()))),
+                ],
+            }],
+        };
+
+        lower_module(&module, "main").expect("lower");
+    }
+
+    #[test]
+    fn lowers_numeric_match_with_default_arm() {
+        let module = UnifiedModule {
+            decls: vec![Decl::Function {
+                name: "main".into(),
+                params: vec![("tag".into(), Typ::Int)],
+                ret: Typ::Int,
+                body: vec![
+                    Stmt::Let("out".into(), Some(Typ::Int), Expr::IntLit(0)),
+                    Stmt::Match {
+                        scrutinee: Expr::Ident("tag".into()),
+                        arms: vec![
+                            crate::swift_subset::MatchArm {
+                                pattern: "1".into(),
+                                body: vec![Stmt::Assign("out".into(), Expr::IntLit(10))],
+                            },
+                            crate::swift_subset::MatchArm {
+                                pattern: "_".into(),
+                                body: vec![Stmt::Assign("out".into(), Expr::IntLit(20))],
+                            },
+                        ],
+                    },
+                    Stmt::Return(Some(Expr::Ident("out".into()))),
                 ],
             }],
         };

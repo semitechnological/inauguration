@@ -217,6 +217,28 @@ fn future_reads(body: &[Stmt], idx: usize) -> HashSet<String> {
     reads
 }
 
+fn is_default_match_pattern(pattern: &str) -> bool {
+    matches!(
+        pattern.trim().trim_end_matches(':'),
+        "_" | "else" | "default" | "case else" | "case default"
+    )
+}
+
+fn match_pattern_expr(pattern: &str) -> Option<Expr> {
+    let trimmed = pattern.trim().trim_end_matches(':').trim();
+    let trimmed = trimmed.strip_prefix("case ").unwrap_or(trimmed).trim();
+    if trimmed == "true" {
+        return Some(Expr::BoolLit(true));
+    }
+    if trimmed == "false" {
+        return Some(Expr::BoolLit(false));
+    }
+    if trimmed.len() >= 2 && trimmed.starts_with('"') && trimmed.ends_with('"') {
+        return Some(Expr::StringLit(trimmed[1..trimmed.len() - 1].to_string()));
+    }
+    trimmed.parse::<i64>().ok().map(Expr::IntLit)
+}
+
 /// Emit `bb0` instructions (params + statements). If `finish_with_return`, append `bb1` + `return`.
 fn lower_stmts_into(
     params: &[(String, Typ)],
@@ -344,8 +366,44 @@ fn lower_stmts_with_env(
                 out.push_str(&format!("label {end_label}\n"));
             }
             Stmt::Match { scrutinee, arms } => {
-                let _ = lower_expr(scrutinee, env, direct_env, ssa, &mut out);
+                let scrutinee_id = lower_expr(scrutinee, env, direct_env, ssa, &mut out);
+                let label_id = *ssa;
+                *ssa += 1;
+                let end_label = format!("bb_match_end_{label_id}");
+                let mut default_arm = None;
                 for arm in arms {
+                    if is_default_match_pattern(&arm.pattern) {
+                        default_arm = Some(arm);
+                        continue;
+                    }
+                    let Some(pattern_expr) = match_pattern_expr(&arm.pattern) else {
+                        continue;
+                    };
+                    let next_label = format!("bb_match_next_{label_id}_{}", *ssa);
+                    let arm_label = format!("bb_match_arm_{label_id}_{}", *ssa);
+                    let pattern_id = lower_expr(&pattern_expr, env, direct_env, ssa, &mut out);
+                    let cmp_id = *ssa;
+                    *ssa += 1;
+                    out.push_str(&format!(
+                        "%{cmp_id} = builtin_binop \"==\" %{scrutinee_id}, %{pattern_id}\n"
+                    ));
+                    out.push_str(&format!("cond_br %{cmp_id}, {arm_label}, {next_label}\n"));
+                    out.push_str(&format!("label {arm_label}\n"));
+                    out.push_str("// match.arm\n");
+                    let mut arm_env = env.clone();
+                    out.push_str(&lower_stmts_with_env(
+                        &arm.body,
+                        ssa,
+                        finish_with_return,
+                        false,
+                        &mut arm_env,
+                        direct_env,
+                        true,
+                    ));
+                    out.push_str(&format!("br {end_label}\n"));
+                    out.push_str(&format!("label {next_label}\n"));
+                }
+                if let Some(arm) = default_arm {
                     out.push_str("// match.arm\n");
                     let mut arm_env = env.clone();
                     out.push_str(&lower_stmts_with_env(
@@ -358,6 +416,7 @@ fn lower_stmts_with_env(
                         true,
                     ));
                 }
+                out.push_str(&format!("label {end_label}\n"));
             }
             Stmt::Return(None) => {
                 let id = *ssa;
@@ -624,5 +683,39 @@ mod tests {
 
         assert!(sil.contains("integer_literal $Builtin.Int64, 5"));
         assert!(!sil.contains("builtin_binop"));
+    }
+
+    #[test]
+    fn lower_match_emits_conditional_arm_branches() {
+        let module = UnifiedModule {
+            decls: vec![Decl::Function {
+                name: "main".into(),
+                params: vec![("tag".into(), Typ::Int)],
+                ret: Typ::Int,
+                body: vec![
+                    Stmt::Let("out".into(), Some(Typ::Int), Expr::IntLit(0)),
+                    Stmt::Match {
+                        scrutinee: Expr::Ident("tag".into()),
+                        arms: vec![
+                            crate::swift_subset::MatchArm {
+                                pattern: "1".into(),
+                                body: vec![Stmt::Assign("out".into(), Expr::IntLit(10))],
+                            },
+                            crate::swift_subset::MatchArm {
+                                pattern: "_".into(),
+                                body: vec![Stmt::Assign("out".into(), Expr::IntLit(20))],
+                            },
+                        ],
+                    },
+                    Stmt::Return(Some(Expr::Ident("out".into()))),
+                ],
+            }],
+        };
+
+        let sil = lower_to_textual_sil(&module, "App");
+
+        assert!(sil.contains("builtin_binop \"==\""));
+        assert!(sil.contains("cond_br"));
+        assert!(sil.contains("bb_match_end_"));
     }
 }

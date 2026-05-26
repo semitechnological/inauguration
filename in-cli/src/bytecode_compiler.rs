@@ -195,6 +195,31 @@ mod tests {
     }
 
     #[test]
+    fn match_statement_selects_single_arm() {
+        let path = temp_file("match.in");
+        fs::write(
+            &path,
+            r#"
+fn choose(tag: Int) -> Int {
+  let out: Int = 0;
+  match tag {
+    1 { out = 10; }
+    _ { out = 20; }
+  }
+  return out;
+}
+fn main() -> Int { return choose(1); }
+"#,
+        )
+        .unwrap();
+
+        let output = compile_source_path(&path, "App", ParserCli::Auto).unwrap();
+        assert_eq!(run_bytecode_module(output.module).unwrap(), Value::Int(10));
+
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn string_equality_compares_string_values() {
         let path = temp_file("string-eq.in");
         fs::write(
