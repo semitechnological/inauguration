@@ -165,6 +165,35 @@ mod tests {
     }
 
     #[test]
+    fn compiles_struct_method_call() {
+        let path = temp_file("method-call.in");
+        fs::write(
+            &path,
+            r#"
+struct Point {
+  Int x
+  Int y
+
+  fn sum() -> Int {
+    return self.x + self.y;
+  }
+}
+
+fn main() -> Int {
+  let p: Point = Point { x: 2, y: 5 };
+  return p.sum();
+}
+"#,
+        )
+        .unwrap();
+
+        let output = compile_source_path(&path, "App", ParserCli::Auto).unwrap();
+        assert_eq!(run_bytecode_module(output.module).unwrap(), Value::Int(7));
+
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn branch_assignment_updates_variable_value() {
         let path = temp_file("branch-assign.in");
         fs::write(

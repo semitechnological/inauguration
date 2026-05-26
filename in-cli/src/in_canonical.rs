@@ -209,6 +209,13 @@ fn format_expr(expr: &Expr) -> String {
             format!("{}[{}]", format_expr(base), format_expr(index))
         }
         Expr::Call { callee, args } => {
+            if let Expr::Ident(name) = callee.as_ref()
+                && let Some(method) = name.strip_prefix("__method__")
+                && let Some((base, rest)) = args.split_first()
+            {
+                let rendered_args = rest.iter().map(format_expr).collect::<Vec<_>>().join(", ");
+                return format!("{}.{}({rendered_args})", format_expr(base), method);
+            }
             let mut out = format_expr(callee);
             out.push('(');
             for (idx, arg) in args.iter().enumerate() {

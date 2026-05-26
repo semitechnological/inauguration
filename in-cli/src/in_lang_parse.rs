@@ -351,6 +351,45 @@ fn split_struct_field_segments(inner: &str) -> Vec<&str> {
     out
 }
 
+fn extract_struct_method_blocks(inner: &str) -> (String, Vec<String>) {
+    let mut fields = String::new();
+    let mut methods = Vec::new();
+    let mut pos = 0usize;
+    while pos < inner.len() {
+        let rest = &inner[pos..];
+        let Some(rel) = rest.find("fn ") else {
+            fields.push_str(rest);
+            break;
+        };
+        let start = pos + rel;
+        let before = &inner[pos..start];
+        let boundary = start == 0
+            || inner[..start]
+                .chars()
+                .next_back()
+                .is_some_and(|ch| ch.is_whitespace() || ch == ';');
+        if !boundary {
+            fields.push_str(&inner[pos..start + 3]);
+            pos = start + 3;
+            continue;
+        }
+        fields.push_str(before);
+        let Some(open_rel) = inner[start..].find('{') else {
+            fields.push_str(&inner[start..]);
+            break;
+        };
+        let open = start + open_rel;
+        if let Some((_, close)) = brace_content_bounds_after_open(inner, open) {
+            methods.push(inner[start..=close].to_string());
+            pos = close + 1;
+        } else {
+            fields.push_str(&inner[start..]);
+            break;
+        }
+    }
+    (fields, methods)
+}
+
 fn parse_struct_fields_inner(inner: &str) -> Result<Vec<(String, Typ)>, String> {
     let mut fields = Vec::new();
     for raw_seg in split_struct_field_segments(inner) {
@@ -358,11 +397,6 @@ fn parse_struct_fields_inner(inner: &str) -> Result<Vec<(String, Typ)>, String> 
         let seg = trim(seg);
         if seg.is_empty() {
             continue;
-        }
-        if seg.starts_with("fn ") {
-            return Err(format!(
-                ".in: `fn` not allowed inside struct body (got `{seg}`)"
-            ));
         }
         let tokens: Vec<&str> = seg.split_whitespace().collect();
         if tokens.len() < 2 {
@@ -375,7 +409,7 @@ fn parse_struct_fields_inner(inner: &str) -> Result<Vec<(String, Typ)>, String> 
     Ok(fields)
 }
 
-fn parse_struct_block(block: &str) -> Result<(String, Vec<(String, Typ)>), String> {
+fn parse_struct_block(block: &str) -> Result<(String, Vec<(String, Typ)>, Vec<Decl>), String> {
     let t = trim(block);
     let rest = t
         .strip_prefix("struct ")
@@ -386,8 +420,21 @@ fn parse_struct_block(block: &str) -> Result<(String, Vec<(String, Typ)>), Strin
     let name = trim(&rest[..open]).to_string();
     let inner = brace_content_after_open(rest, open)
         .ok_or_else(|| ".in: unclosed `struct { ... }`".to_string())?;
-    let fields = parse_struct_fields_inner(inner)?;
-    Ok((name, fields))
+    let (field_inner, method_blocks) = extract_struct_method_blocks(inner);
+    let fields = parse_struct_fields_inner(&field_inner)?;
+    let mut methods = Vec::new();
+    for method in method_blocks {
+        let (method_name, params, ret, body) = parse_fn_block(&method)?;
+        let mut lowered_params = vec![("self".to_string(), Typ::Named(name.clone()))];
+        lowered_params.extend(params);
+        methods.push(Decl::Function {
+            name: format!("{name}_{method_name}"),
+            params: lowered_params,
+            ret,
+            body,
+        });
+    }
+    Ok((name, fields, methods))
 }
 
 fn parse_expr(s: &str) -> Expr {
@@ -464,16 +511,6 @@ fn parse_expr(s: &str) -> Expr {
             };
         }
     }
-    if let Some(dot) = find_top_level_field_dot(s) {
-        let base = trim(&s[..dot]);
-        let name = trim(&s[dot + 1..]);
-        if !base.is_empty() && !name.is_empty() {
-            return Expr::Field {
-                base: Box::new(parse_expr(base)),
-                name: name.to_string(),
-            };
-        }
-    }
     if let Some(open) = find_struct_init_open_brace(s)
         && s.ends_with('}')
     {
@@ -499,13 +536,34 @@ fn parse_expr(s: &str) -> Expr {
         let callee = trim(&s[..open]);
         if !callee.is_empty() {
             let inner = &s[open + 1..s.len() - 1];
-            let args = split_call_args(inner)
+            let mut args = split_call_args(inner)
                 .into_iter()
                 .map(|arg| parse_expr(&arg))
-                .collect();
+                .collect::<Vec<_>>();
+            if let Some(dot) = find_top_level_field_dot(callee) {
+                let base = trim(&callee[..dot]);
+                let name = trim(&callee[dot + 1..]);
+                if !base.is_empty() && !name.is_empty() {
+                    args.insert(0, parse_expr(base));
+                    return Expr::Call {
+                        callee: Box::new(Expr::Ident(format!("__method__{name}"))),
+                        args,
+                    };
+                }
+            }
             return Expr::Call {
                 callee: Box::new(Expr::Ident(callee.to_string())),
                 args,
+            };
+        }
+    }
+    if let Some(dot) = find_top_level_field_dot(s) {
+        let base = trim(&s[..dot]);
+        let name = trim(&s[dot + 1..]);
+        if !base.is_empty() && !name.is_empty() {
+            return Expr::Field {
+                base: Box::new(parse_expr(base)),
+                name: name.to_string(),
             };
         }
     }
@@ -1239,8 +1297,9 @@ fn parse_module_from_blocks(blocks: &[String]) -> Result<UnifiedModule, String> 
                 body: Vec::new(),
             });
         } else if line.starts_with("struct ") {
-            let (name, fields) = parse_struct_block(block)?;
+            let (name, fields, methods) = parse_struct_block(block)?;
             decls.push(Decl::Struct { name, fields });
+            decls.extend(methods);
         } else {
             return Err(".in: expected top-level `fn` or `struct`".into());
         }
@@ -1520,10 +1579,192 @@ fn validate_stmt_types(
     Ok(())
 }
 
+fn desugar_method_calls(module: &mut UnifiedModule) {
+    let struct_fields: HashMap<String, HashMap<String, Typ>> = module
+        .decls
+        .iter()
+        .filter_map(|decl| match decl {
+            Decl::Struct { name, fields } => Some((
+                name.clone(),
+                fields
+                    .iter()
+                    .map(|(field, typ)| (field.clone(), typ.clone()))
+                    .collect(),
+            )),
+            _ => None,
+        })
+        .collect();
+    let fn_rets: HashMap<String, Typ> = module
+        .decls
+        .iter()
+        .filter_map(|decl| match decl {
+            Decl::Function { name, ret, .. } => Some((name.clone(), ret.clone())),
+            _ => None,
+        })
+        .collect();
+
+    for decl in &mut module.decls {
+        if let Decl::Function { params, body, .. } = decl {
+            let mut env: HashMap<String, Typ> = params.iter().cloned().collect();
+            desugar_method_calls_in_body(body, &mut env, &struct_fields, &fn_rets);
+        }
+    }
+}
+
+fn desugar_method_calls_in_body(
+    body: &mut [Stmt],
+    env: &mut HashMap<String, Typ>,
+    structs: &HashMap<String, HashMap<String, Typ>>,
+    fn_rets: &HashMap<String, Typ>,
+) {
+    for stmt in body {
+        match stmt {
+            Stmt::Let(name, typ, expr) => {
+                desugar_method_calls_in_expr(expr, env, structs, fn_rets);
+                if let Some(typ) = typ
+                    .clone()
+                    .or_else(|| infer_in_expr_type(expr, env, structs, fn_rets))
+                {
+                    env.insert(name.clone(), typ);
+                }
+            }
+            Stmt::Assign(_, expr) | Stmt::Return(Some(expr)) | Stmt::Expr(expr) => {
+                desugar_method_calls_in_expr(expr, env, structs, fn_rets);
+            }
+            Stmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                desugar_method_calls_in_expr(cond, env, structs, fn_rets);
+                let mut then_env = env.clone();
+                desugar_method_calls_in_body(then_body, &mut then_env, structs, fn_rets);
+                let mut else_env = env.clone();
+                desugar_method_calls_in_body(else_body, &mut else_env, structs, fn_rets);
+            }
+            Stmt::Loop { cond, body, .. } => {
+                if let Some(cond) = cond {
+                    desugar_method_calls_in_expr(cond, env, structs, fn_rets);
+                }
+                let mut loop_env = env.clone();
+                desugar_method_calls_in_body(body, &mut loop_env, structs, fn_rets);
+            }
+            Stmt::Match { scrutinee, arms } => {
+                desugar_method_calls_in_expr(scrutinee, env, structs, fn_rets);
+                for arm in arms {
+                    let mut arm_env = env.clone();
+                    desugar_method_calls_in_body(&mut arm.body, &mut arm_env, structs, fn_rets);
+                }
+            }
+            Stmt::Return(None) => {}
+        }
+    }
+}
+
+fn desugar_method_calls_in_expr(
+    expr: &mut Expr,
+    env: &HashMap<String, Typ>,
+    structs: &HashMap<String, HashMap<String, Typ>>,
+    fn_rets: &HashMap<String, Typ>,
+) {
+    match expr {
+        Expr::Unary { expr, .. } => desugar_method_calls_in_expr(expr, env, structs, fn_rets),
+        Expr::Binary { lhs, rhs, .. } => {
+            desugar_method_calls_in_expr(lhs, env, structs, fn_rets);
+            desugar_method_calls_in_expr(rhs, env, structs, fn_rets);
+        }
+        Expr::StructInit { fields, .. } => {
+            for (_, expr) in fields {
+                desugar_method_calls_in_expr(expr, env, structs, fn_rets);
+            }
+        }
+        Expr::Field { base, .. } => desugar_method_calls_in_expr(base, env, structs, fn_rets),
+        Expr::ArrayLit(items) => {
+            for item in items {
+                desugar_method_calls_in_expr(item, env, structs, fn_rets);
+            }
+        }
+        Expr::Index { base, index } => {
+            desugar_method_calls_in_expr(base, env, structs, fn_rets);
+            desugar_method_calls_in_expr(index, env, structs, fn_rets);
+        }
+        Expr::Call { callee, args } => {
+            for arg in args.iter_mut() {
+                desugar_method_calls_in_expr(arg, env, structs, fn_rets);
+            }
+            if let Expr::Ident(name) = callee.as_ref()
+                && let Some(method) = name.strip_prefix("__method__")
+                && let Some(base) = args.first()
+                && let Some(Typ::Named(struct_name)) =
+                    infer_in_expr_type(base, env, structs, fn_rets)
+            {
+                *callee = Box::new(Expr::Ident(format!("{struct_name}_{method}")));
+            }
+        }
+        Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Ident(_) => {}
+    }
+}
+
+fn infer_in_expr_type(
+    expr: &Expr,
+    env: &HashMap<String, Typ>,
+    structs: &HashMap<String, HashMap<String, Typ>>,
+    fn_rets: &HashMap<String, Typ>,
+) -> Option<Typ> {
+    match expr {
+        Expr::IntLit(_) => Some(Typ::Int),
+        Expr::StringLit(_) => Some(Typ::String),
+        Expr::BoolLit(_) => Some(Typ::Bool),
+        Expr::Ident(name) => env.get(name).cloned(),
+        Expr::StructInit { name, .. } => Some(Typ::Named(name.clone())),
+        Expr::Field { base, name } => {
+            if let Some(Typ::Named(struct_name)) = infer_in_expr_type(base, env, structs, fn_rets) {
+                structs
+                    .get(&struct_name)
+                    .and_then(|fields| fields.get(name))
+                    .cloned()
+            } else {
+                None
+            }
+        }
+        Expr::ArrayLit(items) => Some(Typ::Array(Box::new(
+            items
+                .iter()
+                .find_map(|item| infer_in_expr_type(item, env, structs, fn_rets))
+                .unwrap_or(Typ::Void),
+        ))),
+        Expr::Index { base, .. } => {
+            if let Some(Typ::Array(item)) = infer_in_expr_type(base, env, structs, fn_rets) {
+                Some(*item)
+            } else {
+                None
+            }
+        }
+        Expr::Unary { op, expr } => match op.as_str() {
+            "!" => Some(Typ::Bool),
+            "-" => Some(Typ::Int),
+            _ => infer_in_expr_type(expr, env, structs, fn_rets),
+        },
+        Expr::Binary { op, .. } => match op.as_str() {
+            "+" | "-" | "*" | "/" | "%" => Some(Typ::Int),
+            "==" | "!=" | "<" | ">" | "<=" | ">=" | "&&" | "||" => Some(Typ::Bool),
+            _ => None,
+        },
+        Expr::Call { callee, .. } => {
+            if let Expr::Ident(name) = callee.as_ref() {
+                fn_rets.get(name).cloned()
+            } else {
+                None
+            }
+        }
+    }
+}
+
 fn parse_in_module_without_validation(source: &str) -> Result<UnifiedModule, String> {
     let surface = parse_in_surface_info(source)?;
     let blocks = split_top_level_decl_blocks(source);
     let mut module = parse_module_from_blocks(&blocks)?;
+    desugar_method_calls(&mut module);
     let mut std_decls = Vec::new();
     for import in surface.imports {
         std_decls.extend(
