@@ -1079,8 +1079,11 @@ fn kotlin_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
 fn kotlin_stmt(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
     match stmt.kind() {
         "return_expression" => kotlin_return_expr(src, stmt).map(Stmt::Return),
+        "property_declaration" => kotlin_local_declaration(src, stmt),
         "assignment" => kotlin_assignment(src, stmt),
         "call_expression" => kotlin_expr(src, stmt).map(Stmt::Expr),
+        "if_expression" => kotlin_if_expression(src, stmt),
+        "while_statement" | "while_expression" => kotlin_while_statement(src, stmt),
         _ => None,
     }
 }
@@ -1108,6 +1111,95 @@ fn kotlin_assignment(src: &[u8], expr: Node<'_>) -> Option<Stmt> {
     ))
 }
 
+fn kotlin_local_declaration(src: &[u8], decl: Node<'_>) -> Option<Stmt> {
+    let name_node = decl
+        .child_by_field_name("name")
+        .or_else(|| named_descendant(decl, "identifier"))?;
+    let value = decl
+        .child_by_field_name("value")
+        .or_else(|| last_named(decl))?;
+    if name_node == value {
+        return None;
+    }
+    let ty = named_descendant(decl, "user_type")
+        .or_else(|| named_descendant(decl, "type"))
+        .map(|t| Typ::Named(node_txt(src, t).trim().to_string()));
+    Some(Stmt::Let(
+        node_txt(src, name_node).trim().to_string(),
+        ty,
+        kotlin_expr(src, value)?,
+    ))
+}
+
+fn kotlin_if_expression(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
+    let cond = stmt
+        .child_by_field_name("condition")
+        .and_then(|n| kotlin_expr(src, n))
+        .or_else(|| first_named(stmt, "parenthesized_expression").and_then(|n| kotlin_expr(src, n)))
+        .or_else(|| first_named(stmt, "binary_expression").and_then(|n| kotlin_expr(src, n)))?;
+    let then_body = stmt
+        .child_by_field_name("consequence")
+        .or_else(|| first_named(stmt, "control_structure_body"))
+        .or_else(|| first_named(stmt, "block"))
+        .map(|n| kotlin_stmt_or_body(src, n))
+        .unwrap_or_default();
+    let else_body = stmt
+        .child_by_field_name("alternative")
+        .and_then(|n| first_named(n, "control_structure_body").or(Some(n)))
+        .or_else(|| {
+            let mut bodies = Vec::new();
+            collect_kinds(stmt, &["control_structure_body", "block"], &mut bodies);
+            bodies.into_iter().nth(1)
+        })
+        .map(|n| kotlin_stmt_or_body(src, n))
+        .unwrap_or_default();
+    Some(Stmt::If {
+        cond,
+        then_body,
+        else_body,
+    })
+}
+
+fn kotlin_while_statement(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
+    let cond = stmt
+        .child_by_field_name("condition")
+        .and_then(|n| kotlin_expr(src, n))
+        .or_else(|| first_named(stmt, "parenthesized_expression").and_then(|n| kotlin_expr(src, n)))
+        .or_else(|| first_named(stmt, "binary_expression").and_then(|n| kotlin_expr(src, n)))?;
+    let body = stmt
+        .child_by_field_name("body")
+        .or_else(|| first_named(stmt, "control_structure_body"))
+        .or_else(|| first_named(stmt, "block"))
+        .map(|n| kotlin_stmt_or_body(src, n))
+        .unwrap_or_default();
+    Some(Stmt::Loop {
+        kind: crate::swift_subset::LoopKind::While,
+        cond: Some(cond),
+        body,
+    })
+}
+
+fn kotlin_stmt_or_body(src: &[u8], n: Node<'_>) -> Vec<Stmt> {
+    if n.kind() == "control_structure_body" {
+        if let Some(block) = first_named(n, "block") {
+            return kotlin_body(src, block);
+        }
+        let mut out = Vec::new();
+        let mut w = n.walk();
+        for ch in n.named_children(&mut w) {
+            if let Some(stmt) = kotlin_stmt(src, ch) {
+                out.push(stmt);
+            }
+        }
+        return out;
+    }
+    if n.kind() == "block" {
+        kotlin_body(src, n)
+    } else {
+        kotlin_stmt(src, n).into_iter().collect()
+    }
+}
+
 fn kotlin_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
     match expr.kind() {
         "identifier" => Some(Expr::Ident(node_txt(src, expr).trim().to_string())),
@@ -1126,8 +1218,41 @@ fn kotlin_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
         },
         "call_expression" => kotlin_call_expr(src, expr),
         "value_argument" => expr.named_child(0).and_then(|n| kotlin_expr(src, n)),
+        "parenthesized_expression" => expr.named_child(0).and_then(|n| kotlin_expr(src, n)),
+        "binary_expression" => kotlin_binary_expr(src, expr),
+        "unary_expression" => kotlin_unary_expr(src, expr),
         _ => None,
     }
+}
+
+fn kotlin_binary_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
+    let lhs = expr
+        .child_by_field_name("left")
+        .or_else(|| expr.named_child(0))?;
+    let rhs = expr
+        .child_by_field_name("right")
+        .or_else(|| expr.named_child(expr.named_child_count().saturating_sub(1) as u32))?;
+    let op = std::str::from_utf8(src.get(lhs.end_byte()..rhs.start_byte())?)
+        .ok()?
+        .trim()
+        .to_string();
+    Some(Expr::Binary {
+        op,
+        lhs: Box::new(kotlin_expr(src, lhs)?),
+        rhs: Box::new(kotlin_expr(src, rhs)?),
+    })
+}
+
+fn kotlin_unary_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
+    let inner = last_named(expr)?;
+    let op = std::str::from_utf8(src.get(expr.start_byte()..inner.start_byte())?)
+        .ok()?
+        .trim()
+        .to_string();
+    Some(Expr::Unary {
+        op,
+        expr: Box::new(kotlin_expr(src, inner)?),
+    })
 }
 
 fn kotlin_call_expr(src: &[u8], call: Node<'_>) -> Option<Expr> {
@@ -2152,12 +2277,17 @@ fn zig_stmt(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
             let expr = stmt.named_children(&mut w).next()?;
             match expr.kind() {
                 "return_expression" => zig_return_expr(src, expr).map(Stmt::Return),
+                "assign_expression" | "assignment_expression" => zig_assignment_expr(src, expr),
                 _ => zig_expr(src, expr).map(Stmt::Expr),
             }
         }
-        "variable_declaration" => zig_assignment(src, stmt),
+        "variable_declaration" => zig_local_declaration(src, stmt),
         "return_expression" => zig_return_expr(src, stmt).map(Stmt::Return),
+        "assign_expression" | "assignment_expression" => zig_assignment_expr(src, stmt),
         "call_expression" => zig_expr(src, stmt).map(Stmt::Expr),
+        "if_expression" | "if_statement" => zig_if_expression(src, stmt),
+        "while_expression" | "while_statement" => zig_while_expression(src, stmt),
+        "labeled_statement" => last_named(stmt).and_then(|n| zig_stmt(src, n)),
         _ => None,
     }
 }
@@ -2170,16 +2300,111 @@ fn zig_return_expr(src: &[u8], ret: Node<'_>) -> Option<Option<Expr>> {
     Some(None)
 }
 
-fn zig_assignment(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
+fn zig_local_declaration(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
     let left = first_named(stmt, "identifier")?;
     let right = last_named(stmt)?;
     if left == right {
+        return None;
+    }
+    if !matches!(
+        node_txt(src, stmt).trim_start(),
+        s if s.starts_with("var ") || s.starts_with("const ")
+    ) {
+        return Some(Stmt::Assign(
+            node_txt(src, left).trim().to_string(),
+            zig_expr(src, right)?,
+        ));
+    }
+    let ty = stmt
+        .child_by_field_name("type")
+        .or_else(|| {
+            let mut w = stmt.walk();
+            stmt.named_children(&mut w)
+                .find(|n| !matches!(n.kind(), "identifier" | "integer" | "call_expression"))
+        })
+        .filter(|t| *t != left && *t != right)
+        .map(|t| Typ::Named(node_txt(src, t).trim().to_string()));
+    Some(Stmt::Let(
+        node_txt(src, left).trim().to_string(),
+        ty,
+        zig_expr(src, right)?,
+    ))
+}
+
+fn zig_assignment_expr(src: &[u8], expr: Node<'_>) -> Option<Stmt> {
+    let left = expr
+        .child_by_field_name("left")
+        .or_else(|| expr.named_child(0))?;
+    let right = expr
+        .child_by_field_name("right")
+        .or_else(|| expr.named_child(expr.named_child_count().saturating_sub(1) as u32))?;
+    if left.kind() != "identifier" {
         return None;
     }
     Some(Stmt::Assign(
         node_txt(src, left).trim().to_string(),
         zig_expr(src, right)?,
     ))
+}
+
+fn zig_if_expression(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
+    let cond = stmt
+        .child_by_field_name("condition")
+        .and_then(|n| zig_expr(src, n))
+        .or_else(|| first_named(stmt, "binary_expression").and_then(|n| zig_expr(src, n)))?;
+    let then_body = stmt
+        .child_by_field_name("consequence")
+        .or_else(|| stmt.child_by_field_name("body"))
+        .or_else(|| first_named(stmt, "block"))
+        .map(|n| zig_stmt_or_body(src, n))
+        .unwrap_or_default();
+    let else_body = stmt
+        .child_by_field_name("alternative")
+        .or_else(|| {
+            first_named(stmt, "else_clause").and_then(|n| n.child_by_field_name("alternative"))
+        })
+        .map(|n| zig_stmt_or_body(src, n))
+        .unwrap_or_default();
+    Some(Stmt::If {
+        cond,
+        then_body,
+        else_body,
+    })
+}
+
+fn zig_while_expression(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
+    let cond = stmt
+        .child_by_field_name("condition")
+        .and_then(|n| zig_expr(src, n))
+        .or_else(|| first_named(stmt, "binary_expression").and_then(|n| zig_expr(src, n)))?;
+    let body = stmt
+        .child_by_field_name("body")
+        .or_else(|| first_named(stmt, "block"))
+        .map(|n| zig_stmt_or_body(src, n))
+        .unwrap_or_default();
+    Some(Stmt::Loop {
+        kind: crate::swift_subset::LoopKind::While,
+        cond: Some(cond),
+        body,
+    })
+}
+
+fn zig_stmt_or_body(src: &[u8], n: Node<'_>) -> Vec<Stmt> {
+    if n.kind() == "labeled_statement" {
+        return last_named(n)
+            .map(|n| zig_stmt_or_body(src, n))
+            .unwrap_or_default();
+    }
+    if n.kind() == "block_expression" {
+        return named_descendant(n, "block")
+            .map(|n| zig_body(src, n))
+            .unwrap_or_default();
+    }
+    if n.kind() == "block" {
+        zig_body(src, n)
+    } else {
+        zig_stmt(src, n).into_iter().collect()
+    }
 }
 
 fn zig_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
@@ -2196,8 +2421,43 @@ fn zig_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
         "true" => Some(Expr::BoolLit(true)),
         "false" => Some(Expr::BoolLit(false)),
         "call_expression" => zig_call_expr(src, expr),
+        "grouped_expression" | "parenthesized_expression" => {
+            expr.named_child(0).and_then(|n| zig_expr(src, n))
+        }
+        "binary_expression" => zig_binary_expr(src, expr),
+        "unary_expression" => zig_unary_expr(src, expr),
         _ => None,
     }
+}
+
+fn zig_binary_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
+    let lhs = expr
+        .child_by_field_name("left")
+        .or_else(|| expr.named_child(0))?;
+    let rhs = expr
+        .child_by_field_name("right")
+        .or_else(|| expr.named_child(expr.named_child_count().saturating_sub(1) as u32))?;
+    let op = std::str::from_utf8(src.get(lhs.end_byte()..rhs.start_byte())?)
+        .ok()?
+        .trim()
+        .to_string();
+    Some(Expr::Binary {
+        op,
+        lhs: Box::new(zig_expr(src, lhs)?),
+        rhs: Box::new(zig_expr(src, rhs)?),
+    })
+}
+
+fn zig_unary_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
+    let inner = last_named(expr)?;
+    let op = std::str::from_utf8(src.get(expr.start_byte()..inner.start_byte())?)
+        .ok()?
+        .trim()
+        .to_string();
+    Some(Expr::Unary {
+        op,
+        expr: Box::new(zig_expr(src, inner)?),
+    })
 }
 
 fn zig_call_expr(src: &[u8], call: Node<'_>) -> Option<Expr> {
@@ -3111,6 +3371,73 @@ def main():
     }
 
     #[test]
+    fn zig_lowers_scalar_body_shapes() {
+        let src = r#"
+fn helper(value: i32) i32 { return value; }
+pub fn main() void {
+    var value: i32 = 1;
+    value = value + 2;
+    helper(value);
+    if (value > 2) {
+        value = value - 1;
+    } else {
+        value = 0;
+    }
+    while (value < 4) {
+        value = value + 1;
+    }
+    return;
+}
+"#;
+        let m = parse_lang(tree_sitter_zig::LANGUAGE.into(), src, extract_zig).expect("ok");
+        let main = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+            .expect("main");
+        match main {
+            Decl::Function { body, .. } => {
+                assert!(
+                    matches!(
+                        &body[0],
+                        Stmt::Let(name, Some(Typ::Named(ty)), Expr::IntLit(1))
+                            if name == "value" && ty == "i32"
+                    ),
+                    "{body:?}"
+                );
+                assert!(
+                    matches!(
+                        &body[1],
+                        Stmt::Assign(name, Expr::Binary { op, .. }) if name == "value" && op == "+"
+                    ),
+                    "{body:?}"
+                );
+                assert!(matches!(
+                    &body[2],
+                    Stmt::Expr(Expr::Call { callee, args })
+                        if matches!(callee.as_ref(), Expr::Ident(name) if name == "helper")
+                            && args == &vec![Expr::Ident("value".into())]
+                ));
+                assert!(
+                    matches!(
+                        &body[3],
+                        Stmt::If { cond: Expr::Binary { op, .. }, then_body, else_body }
+                            if op == ">" && then_body.len() == 1 && else_body.len() == 1
+                    ),
+                    "{body:?}"
+                );
+                assert!(matches!(
+                    &body[4],
+                    Stmt::Loop { cond: Some(Expr::Binary { op, .. }), body, .. }
+                        if op == "<" && body.len() == 1
+                ));
+                assert!(matches!(&body[5], Stmt::Return(None)));
+            }
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
     fn kotlin_functions_extract_bounded_bodies() {
         let src = "fun helper(value: Int): Int { return value }\nfun main() { value = helper(2); helper(value); return }\n";
         let m =
@@ -3150,6 +3477,74 @@ def main():
                         Stmt::Return(None),
                     ]
                 );
+            }
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn kotlin_lowers_scalar_body_shapes() {
+        let src = r#"
+fun helper(value: Int): Int { return value }
+fun main() {
+    var value: Int = 1
+    value = value + 2
+    helper(value)
+    if (value > 2) {
+        value = value - 1
+    } else {
+        value = 0
+    }
+    while (value < 4) {
+        value = value + 1
+    }
+    return
+}
+"#;
+        let m =
+            parse_lang(tree_sitter_kotlin_ng::LANGUAGE.into(), src, extract_kotlin).expect("ok");
+        let main = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+            .expect("main");
+        match main {
+            Decl::Function { body, .. } => {
+                assert!(
+                    matches!(
+                        &body[0],
+                        Stmt::Let(name, Some(Typ::Named(ty)), Expr::IntLit(1))
+                            if name == "value" && ty == "Int"
+                    ),
+                    "{body:?}"
+                );
+                assert!(
+                    matches!(
+                        &body[1],
+                        Stmt::Assign(name, Expr::Binary { op, .. }) if name == "value" && op == "+"
+                    ),
+                    "{body:?}"
+                );
+                assert!(matches!(
+                    &body[2],
+                    Stmt::Expr(Expr::Call { callee, args })
+                        if matches!(callee.as_ref(), Expr::Ident(name) if name == "helper")
+                            && args == &vec![Expr::Ident("value".into())]
+                ));
+                assert!(
+                    matches!(
+                        &body[3],
+                        Stmt::If { cond: Expr::Binary { op, .. }, then_body, else_body }
+                            if op == ">" && then_body.len() == 1 && else_body.len() == 1
+                    ),
+                    "{body:?}"
+                );
+                assert!(matches!(
+                    &body[4],
+                    Stmt::Loop { cond: Some(Expr::Binary { op, .. }), body, .. }
+                        if op == "<" && body.len() == 1
+                ));
+                assert!(matches!(&body[5], Stmt::Return(None)));
             }
             _ => panic!("expected function"),
         }
