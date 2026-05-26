@@ -366,4 +366,21 @@ fn main() -> void {
         // Should execute successfully
         let _ = result;
     }
+
+    #[test]
+    fn bytecode_unary_expression_from_in_source() {
+        let src =
+            "fn main() -> Int { let x: Int = 1; if !(x == 1) { return 0; } return -(x + 4); }";
+        let module = in_lang_parse::parse_in_source(src).expect("parse .in");
+        let sil = lower_core::lower_to_textual_sil(&module, "App");
+        assert!(sil.contains("builtin_unop"));
+
+        let artifact = hybrid_sil::parse_textual_sil(&sil);
+        let bytecode_module = crate::sil_to_bytecode::lower_sil_to_bytecode(&artifact)
+            .expect("lower SIL to bytecode");
+
+        let mut vm = crate::vm::BytecodeVM::new(bytecode_module);
+        let result = vm.run().expect("bytecode execution");
+        assert_eq!(result.to_int(), -5);
+    }
 }
