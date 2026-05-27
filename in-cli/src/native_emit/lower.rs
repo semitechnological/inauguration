@@ -877,11 +877,17 @@ fn lower_index(
         pending_calls,
         fn_name,
     )?;
+    emitter.emit_u32(aarch64::cmp_reg64(index_reg, aarch64::REG_XZR));
+    let negative_branch = emitter.emit_insn(aarch64::b_cond(11, 0));
+    let len_reg = pick_scratch(&[rd, index_reg]);
+    emitter.emit_insns(&aarch64::load_i64(len_reg, offsets.len() as i64));
+    emitter.emit_u32(aarch64::cmp_reg64(index_reg, len_reg));
+    let oob_branch = emitter.emit_insn(aarch64::b_cond(10, 0));
     let base_offset = offsets[0];
     let base_reg = if base_offset == 0 {
         aarch64::REG_SP
     } else {
-        let scratch = if rd == 2 || index_reg == 2 { 3 } else { 2 };
+        let scratch = pick_scratch(&[rd, index_reg, len_reg]);
         emitter.emit_u32(aarch64::add_imm64(
             scratch,
             aarch64::REG_SP,
@@ -890,7 +896,29 @@ fn lower_index(
         scratch
     };
     emitter.emit_u32(aarch64::ldr64_reg_offset(rd, base_reg, index_reg));
+    let end_branch = emitter.emit_insn(aarch64::b(0));
+    let failure_offset = emitter.len() as i32;
+    emitter.patch_u32(
+        negative_branch,
+        aarch64::b_cond(11, failure_offset - negative_branch as i32),
+    );
+    emitter.patch_u32(
+        oob_branch,
+        aarch64::b_cond(10, failure_offset - oob_branch as i32),
+    );
+    emit_failure_return(emitter, ctx.stack_reserve());
+    let end_offset = emitter.len() as i32 - end_branch as i32;
+    emitter.patch_u32(end_branch, aarch64::b(end_offset));
     Ok(())
+}
+
+fn pick_scratch(exclude: &[u8]) -> u8 {
+    (2..=15).find(|reg| !exclude.contains(reg)).unwrap_or(15)
+}
+
+fn emit_failure_return(emitter: &mut CodeEmitter, stack_reserve: u32) {
+    emitter.emit_insns(&aarch64::load_i64(0, 1));
+    emit_epilogue(emitter, stack_reserve);
 }
 
 fn lower_field(
@@ -1790,6 +1818,112 @@ fn main() -> Int {
                 assert!(
                     dump.contains("ldr\tx0, [sp, x1, lsl #3]"),
                     "expected dynamic array index load in __text; otool:\n{dump}"
+                );
+            }
+            other => panic!(
+                "unexpected native exit {:?}; stdout={:?} stderr={:?}",
+                other, output.stdout, output.stderr
+            ),
+        }
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    #[test]
+    fn local_array_negative_index_executable_exits_with_failure() {
+        let module = crate::in_lang_parse::parse_in_source(
+            r#"
+fn main() -> Int {
+  let xs: [Int] = [2, 5, 8];
+  let i: Int = -1;
+  return xs[i];
+}
+"#,
+        )
+        .expect("parse");
+        let path = temp_executable("array-negative-index-exe");
+        let _ = std::fs::remove_file(&path);
+        compile_native_executable(&module, "main", &path).expect("compile");
+
+        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::process::ExitStatusExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let sign = std::process::Command::new("codesign")
+            .args(["-s", "-", "-f", path.to_str().unwrap()])
+            .status()
+            .expect("codesign spawn");
+        assert!(sign.success(), "codesign failed for native executable");
+
+        let output = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(path.to_str().unwrap())
+            .output()
+            .expect("run executable");
+        match output.status.code() {
+            Some(1) => {}
+            None if output.status.signal() == Some(9) => {
+                let otool = std::process::Command::new("otool")
+                    .args(["-tV", path.to_str().unwrap()])
+                    .output()
+                    .expect("otool");
+                let dump = String::from_utf8_lossy(&otool.stdout);
+                assert!(
+                    dump.contains("b.lt") && dump.contains("mov\tx0, #0x1"),
+                    "expected negative array index failure path in __text; otool:\n{dump}"
+                );
+            }
+            other => panic!(
+                "unexpected native exit {:?}; stdout={:?} stderr={:?}",
+                other, output.stdout, output.stderr
+            ),
+        }
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    #[test]
+    fn local_array_oob_index_executable_exits_with_failure() {
+        let module = crate::in_lang_parse::parse_in_source(
+            r#"
+fn main() -> Int {
+  let xs: [Int] = [2, 5, 8];
+  let i: Int = 3;
+  return xs[i];
+}
+"#,
+        )
+        .expect("parse");
+        let path = temp_executable("array-oob-index-exe");
+        let _ = std::fs::remove_file(&path);
+        compile_native_executable(&module, "main", &path).expect("compile");
+
+        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::process::ExitStatusExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let sign = std::process::Command::new("codesign")
+            .args(["-s", "-", "-f", path.to_str().unwrap()])
+            .status()
+            .expect("codesign spawn");
+        assert!(sign.success(), "codesign failed for native executable");
+
+        let output = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(path.to_str().unwrap())
+            .output()
+            .expect("run executable");
+        match output.status.code() {
+            Some(1) => {}
+            None if output.status.signal() == Some(9) => {
+                let otool = std::process::Command::new("otool")
+                    .args(["-tV", path.to_str().unwrap()])
+                    .output()
+                    .expect("otool");
+                let dump = String::from_utf8_lossy(&otool.stdout);
+                assert!(
+                    dump.contains("b.ge") && dump.contains("mov\tx0, #0x1"),
+                    "expected out-of-bounds array index failure path in __text; otool:\n{dump}"
                 );
             }
             other => panic!(
