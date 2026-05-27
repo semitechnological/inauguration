@@ -264,12 +264,12 @@ fn lower_function(
     pending_calls: &mut Vec<PendingCall>,
 ) -> Result<(), String> {
     ensure_return_type(&func.ret, &func.name)?;
-    reject_unsupported_function(func)?;
+    reject_unsupported_function(func, structs)?;
 
     emitter.emit_u32(0xA9BF_7BFD);
     emitter.emit_u32(aarch64::mov_reg64(REG_FP, aarch64::REG_SP));
 
-    let mut ctx = LowerCtx::new(&func.params, structs, strings);
+    let mut ctx = LowerCtx::new(&func.params, structs, strings, &func.name)?;
     alloc_declared_locals(&mut ctx, &func.body, &func.name)?;
     if ctx.stack_size > 0 {
         emitter.emit_u32(aarch64::sub_imm64(
@@ -277,6 +277,9 @@ fn lower_function(
             aarch64::REG_SP,
             ctx.stack_reserve() as u16,
         ));
+    }
+    for (reg, offset) in &ctx.param_stores {
+        emitter.emit_u32(aarch64::str64(*reg, aarch64::REG_SP, *offset));
     }
     for stmt in &func.body {
         lower_stmt(
@@ -342,6 +345,7 @@ enum LocalSlot {
 
 struct LowerCtx<'a> {
     params: HashMap<String, u8>,
+    param_stores: Vec<(u8, u32)>,
     locals: HashMap<String, LocalSlot>,
     structs: &'a HashMap<String, Vec<(String, Typ)>>,
     strings: &'a HashMap<String, i64>,
@@ -355,22 +359,67 @@ impl<'a> LowerCtx<'a> {
         params: &'a [(String, Typ)],
         structs: &'a HashMap<String, Vec<(String, Typ)>>,
         strings: &'a HashMap<String, i64>,
-    ) -> Self {
-        let mut param_map = HashMap::new();
-        for (idx, (name, _)) in params.iter().enumerate() {
-            if idx < 8 {
-                param_map.insert(name.clone(), idx as u8);
-            }
-        }
-        Self {
-            params: param_map,
+        fn_name: &str,
+    ) -> Result<Self, String> {
+        let mut ctx = Self {
+            params: HashMap::new(),
+            param_stores: Vec::new(),
             locals: HashMap::new(),
             structs,
             strings,
             stack_size: 0,
             emitted_return: false,
             _params_src: params,
+        };
+        let mut abi_idx = 0usize;
+        for (name, typ) in params {
+            match typ {
+                Typ::Int | Typ::Bool | Typ::String => {
+                    if abi_idx >= 8 {
+                        return Err(format!("native-lower: too many parameters in `{fn_name}`"));
+                    }
+                    ctx.params.insert(name.clone(), abi_idx as u8);
+                    abi_idx += 1;
+                }
+                Typ::Named(struct_name) => {
+                    let fields = structs.get(struct_name).ok_or_else(|| {
+                        format!(
+                            "native-lower: unsupported parameter type in `{fn_name}` (unknown struct `{struct_name}`)"
+                        )
+                    })?;
+                    let mut slots = HashMap::new();
+                    for (field, field_ty) in fields.clone() {
+                        if !matches!(field_ty, Typ::Int | Typ::Bool | Typ::String) {
+                            return Err(format!(
+                                "native-lower: unsupported parameter type in `{fn_name}` (only scalar struct fields)"
+                            ));
+                        }
+                        if abi_idx >= 8 {
+                            return Err(format!(
+                                "native-lower: too many parameters in `{fn_name}`"
+                            ));
+                        }
+                        let offset = ctx.alloc_slot();
+                        slots.insert(field, offset);
+                        ctx.param_stores.push((abi_idx as u8, offset));
+                        abi_idx += 1;
+                    }
+                    ctx.locals.insert(
+                        name.clone(),
+                        LocalSlot::Struct {
+                            typ: struct_name.clone(),
+                            fields: slots,
+                        },
+                    );
+                }
+                _ => {
+                    return Err(format!(
+                        "native-lower: unsupported parameter type in `{fn_name}` (only Int/Bool/String/scalar structs)"
+                    ));
+                }
+            }
         }
+        Ok(ctx)
     }
 
     fn alloc_local(&mut self, name: &str, typ: Option<&Typ>, fn_name: &str) -> Result<(), String> {
@@ -1101,18 +1150,29 @@ fn lower_call(
             "native-lower: call to unknown function `{target}` from `{fn_name}`"
         ));
     }
-    if args.len() > 8 {
+    let Some(target_info) = functions.get(target) else {
+        unreachable!();
+    };
+    if args.len() != target_info.params.len() {
+        return Err(format!(
+            "native-lower: call arity mismatch for `{target}` from `{fn_name}`"
+        ));
+    }
+    let abi_arg_count = native_param_abi_slots(&target_info.params, ctx.structs, target)?;
+    if abi_arg_count > 8 {
         return Err(format!(
             "native-lower: too many call arguments in `{fn_name}`"
         ));
     }
 
-    for (idx, arg) in args.iter().enumerate() {
-        lower_expr_into(
+    let mut reg = 0u8;
+    for (arg, (_, typ)) in args.iter().zip(&target_info.params) {
+        reg = lower_call_arg(
             emitter,
             ctx,
             arg,
-            idx as u8,
+            typ,
+            reg,
             functions,
             pending_calls,
             fn_name,
@@ -1130,6 +1190,108 @@ fn lower_call(
         emitter.emit_u32(aarch64::mov_reg64(rd, 0));
     }
     Ok(())
+}
+
+fn lower_call_arg(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    arg: &Expr,
+    typ: &Typ,
+    reg: u8,
+    functions: &HashMap<String, FunctionInfo>,
+    pending_calls: &mut Vec<PendingCall>,
+    fn_name: &str,
+) -> Result<u8, String> {
+    match typ {
+        Typ::Int | Typ::Bool | Typ::String => {
+            lower_expr_into(emitter, ctx, arg, reg, functions, pending_calls, fn_name)?;
+            Ok(reg + 1)
+        }
+        Typ::Named(struct_name) => lower_struct_call_arg(
+            emitter,
+            ctx,
+            arg,
+            struct_name,
+            reg,
+            functions,
+            pending_calls,
+            fn_name,
+        ),
+        _ => Err(format!(
+            "native-lower: unsupported call argument in `{fn_name}`"
+        )),
+    }
+}
+
+fn lower_struct_call_arg(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    arg: &Expr,
+    struct_name: &str,
+    mut reg: u8,
+    functions: &HashMap<String, FunctionInfo>,
+    pending_calls: &mut Vec<PendingCall>,
+    fn_name: &str,
+) -> Result<u8, String> {
+    let fields = ctx
+        .structs
+        .get(struct_name)
+        .ok_or_else(|| format!("native-lower: unsupported call argument in `{fn_name}`"))?;
+    match arg {
+        Expr::Ident(local) => {
+            let Some(LocalSlot::Struct { typ, fields: slots }) = ctx.locals.get(local) else {
+                return Err(format!(
+                    "native-lower: unsupported aggregate argument `{local}` in `{fn_name}`"
+                ));
+            };
+            if typ != struct_name {
+                return Err(format!(
+                    "native-lower: struct argument type mismatch in `{fn_name}`"
+                ));
+            }
+            for (field, field_ty) in fields {
+                if !matches!(field_ty, Typ::Int | Typ::Bool | Typ::String) {
+                    return Err(format!(
+                        "native-lower: unsupported call argument in `{fn_name}`"
+                    ));
+                }
+                let offset = slots.get(field).ok_or_else(|| {
+                    format!("native-lower: unknown struct field `{typ}.{field}` in `{fn_name}`")
+                })?;
+                emitter.emit_u32(aarch64::ldr64(reg, aarch64::REG_SP, *offset));
+                reg += 1;
+            }
+            Ok(reg)
+        }
+        Expr::StructInit {
+            name,
+            fields: values,
+        } => {
+            if name != struct_name {
+                return Err(format!(
+                    "native-lower: struct argument type mismatch in `{fn_name}`"
+                ));
+            }
+            for (field, field_ty) in fields {
+                if !matches!(field_ty, Typ::Int | Typ::Bool | Typ::String) {
+                    return Err(format!(
+                        "native-lower: unsupported call argument in `{fn_name}`"
+                    ));
+                }
+                let Some((_, value)) = values.iter().find(|(name, _)| name == field) else {
+                    return Err(format!(
+                        "native-lower: unknown struct field `{struct_name}.{field}` in `{fn_name}`"
+                    ));
+                };
+                lower_expr_into(emitter, ctx, value, reg, functions, pending_calls, fn_name)?;
+                reg += 1;
+            }
+            Ok(reg)
+        }
+        _ => Err(format!(
+            "native-lower: unsupported aggregate argument in `{fn_name}`"
+        )),
+    }
 }
 
 fn emit_epilogue(emitter: &mut CodeEmitter, stack_reserve: u32) {
@@ -1153,22 +1315,51 @@ fn ensure_return_type(ret: &Typ, fn_name: &str) -> Result<(), String> {
     }
 }
 
-fn reject_unsupported_function(func: &FunctionInfo) -> Result<(), String> {
-    if func.params.len() > 8 {
+fn reject_unsupported_function(
+    func: &FunctionInfo,
+    structs: &HashMap<String, Vec<(String, Typ)>>,
+) -> Result<(), String> {
+    if native_param_abi_slots(&func.params, structs, &func.name)? > 8 {
         return Err(format!(
             "native-lower: too many parameters in `{}`",
             func.name
         ));
     }
-    for (_, typ) in &func.params {
-        if !matches!(typ, Typ::Int | Typ::Bool | Typ::String) {
-            return Err(format!(
-                "native-lower: unsupported parameter type in `{}` (only Int/Bool/String)",
-                func.name
-            ));
+    Ok(())
+}
+
+fn native_param_abi_slots(
+    params: &[(String, Typ)],
+    structs: &HashMap<String, Vec<(String, Typ)>>,
+    fn_name: &str,
+) -> Result<usize, String> {
+    let mut slots = 0usize;
+    for (_, typ) in params {
+        match typ {
+            Typ::Int | Typ::Bool | Typ::String => slots += 1,
+            Typ::Named(struct_name) => {
+                let fields = structs.get(struct_name).ok_or_else(|| {
+                    format!(
+                        "native-lower: unsupported parameter type in `{fn_name}` (unknown struct `{struct_name}`)"
+                    )
+                })?;
+                for (_, field_ty) in fields {
+                    if !matches!(field_ty, Typ::Int | Typ::Bool | Typ::String) {
+                        return Err(format!(
+                            "native-lower: unsupported parameter type in `{fn_name}` (only scalar struct fields)"
+                        ));
+                    }
+                    slots += 1;
+                }
+            }
+            _ => {
+                return Err(format!(
+                    "native-lower: unsupported parameter type in `{fn_name}` (only Int/Bool/String/scalar structs)"
+                ));
+            }
         }
     }
-    Ok(())
+    Ok(slots)
 }
 
 fn is_native_scalar_type(typ: &Typ) -> bool {
@@ -1341,6 +1532,30 @@ struct Point {
 fn main() -> Int {
   let p: Point = Point { x: 2, y: 5 };
   return p.y;
+}
+"#,
+        )
+        .expect("parse");
+
+        lower_module(&module, "main").expect("lower");
+    }
+
+    #[test]
+    fn lowers_struct_parameter_field_access() {
+        let module = crate::in_lang_parse::parse_in_source(
+            r#"
+struct Point {
+  Int x
+  Int y
+}
+
+fn sum(p: Point) -> Int {
+  return p.x + p.y;
+}
+
+fn main() -> Int {
+  let p: Point = Point { x: 2, y: 5 };
+  return sum(p);
 }
 "#,
         )
@@ -1692,6 +1907,69 @@ fn main() -> Int {
                 assert!(
                     dump.contains("str\tx0, [sp]") && dump.contains("ldr\tx0, [sp, #0x8]"),
                     "expected struct field load/store instructions in __text; otool:\n{dump}"
+                );
+            }
+            other => panic!(
+                "unexpected native exit {:?}; stdout={:?} stderr={:?}",
+                other, output.stdout, output.stderr
+            ),
+        }
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    #[test]
+    fn struct_parameter_executable_exits_with_field_sum() {
+        let module = crate::in_lang_parse::parse_in_source(
+            r#"
+struct Point {
+  Int x
+  Int y
+}
+
+fn sum(p: Point) -> Int {
+  return p.x + p.y;
+}
+
+fn main() -> Int {
+  let p: Point = Point { x: 2, y: 5 };
+  return sum(p);
+}
+"#,
+        )
+        .expect("parse");
+        let path = temp_executable("struct-param-exe");
+        let _ = std::fs::remove_file(&path);
+        compile_native_executable(&module, "main", &path).expect("compile");
+
+        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::process::ExitStatusExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let sign = std::process::Command::new("codesign")
+            .args(["-s", "-", "-f", path.to_str().unwrap()])
+            .status()
+            .expect("codesign spawn");
+        assert!(sign.success(), "codesign failed for native executable");
+
+        let output = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(path.to_str().unwrap())
+            .output()
+            .expect("run executable");
+        match output.status.code() {
+            Some(7) => {}
+            None if output.status.signal() == Some(9) => {
+                let otool = std::process::Command::new("otool")
+                    .args(["-tV", path.to_str().unwrap()])
+                    .output()
+                    .expect("otool");
+                let dump = String::from_utf8_lossy(&otool.stdout);
+                assert!(
+                    dump.contains("str\tx0, [sp]")
+                        && dump.contains("str\tx1, [sp, #0x8]")
+                        && dump.contains("add\tx0, x0, x1"),
+                    "expected flattened struct parameter instructions in __text; otool:\n{dump}"
                 );
             }
             other => panic!(
