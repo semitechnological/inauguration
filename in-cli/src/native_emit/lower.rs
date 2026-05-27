@@ -10,10 +10,16 @@ use std::path::Path;
 
 pub const TARGET_TRIPLE: &str = "aarch64-apple-darwin";
 
-const ENTRY_STUB_SIZE: u32 = 12;
+const ENTRY_STUB_SIZE: u32 = 16;
 
 struct LoweredModule {
     code: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum EntryReturn {
+    IntLike,
+    VoidOrReference,
 }
 
 struct PendingCall {
@@ -55,6 +61,11 @@ pub fn host_supports_native_subset() -> bool {
 fn lower_module(module: &UnifiedModule, entry: &str) -> Result<LoweredModule, String> {
     let functions = collect_functions(module)?;
     let structs = collect_structs(module);
+    let strings = collect_strings(module);
+    let entry_return = functions
+        .get(entry)
+        .map(|func| entry_return_kind(&func.ret))
+        .ok_or_else(|| format!("native-lower: missing entry function `{entry}`"))?;
     if !functions.contains_key(entry) {
         return Err(format!("native-lower: missing entry function `{entry}`"));
     }
@@ -70,7 +81,14 @@ fn lower_module(module: &UnifiedModule, entry: &str) -> Result<LoweredModule, St
         let func = &functions[name];
         let offset = emitter.len();
         function_offsets.insert(name.clone(), offset);
-        lower_function(&mut emitter, func, &functions, &structs, &mut pending_calls)?;
+        lower_function(
+            &mut emitter,
+            func,
+            &functions,
+            &structs,
+            &strings,
+            &mut pending_calls,
+        )?;
     }
 
     for call in pending_calls {
@@ -84,7 +102,10 @@ fn lower_module(module: &UnifiedModule, entry: &str) -> Result<LoweredModule, St
     let entry_fn_offset = *function_offsets
         .get(entry)
         .ok_or_else(|| format!("native-lower: missing entry function `{entry}`"))?;
-    let stub = inrt::build_entry_stub(entry_fn_offset);
+    let stub = match entry_return {
+        EntryReturn::IntLike => inrt::build_entry_stub(entry_fn_offset),
+        EntryReturn::VoidOrReference => inrt::build_entry_stub_with_forced_exit(entry_fn_offset, 0),
+    };
     emitter.bytes[..ENTRY_STUB_SIZE as usize].copy_from_slice(&stub);
 
     Ok(LoweredModule {
@@ -125,6 +146,13 @@ fn collect_functions(module: &UnifiedModule) -> Result<HashMap<String, FunctionI
     Ok(functions)
 }
 
+fn entry_return_kind(ret: &Typ) -> EntryReturn {
+    match ret {
+        Typ::Int | Typ::Bool => EntryReturn::IntLike,
+        Typ::String | Typ::Void | Typ::Array(_) | Typ::Named(_) => EntryReturn::VoidOrReference,
+    }
+}
+
 fn collect_structs(module: &UnifiedModule) -> HashMap<String, Vec<(String, Typ)>> {
     module
         .decls
@@ -134,6 +162,89 @@ fn collect_structs(module: &UnifiedModule) -> HashMap<String, Vec<(String, Typ)>
             _ => None,
         })
         .collect()
+}
+
+fn collect_strings(module: &UnifiedModule) -> HashMap<String, i64> {
+    let mut values = Vec::new();
+    for decl in &module.decls {
+        if let Decl::Function { body, .. } = decl {
+            collect_body_strings(body, &mut values);
+        }
+    }
+    values.sort();
+    values.dedup();
+    values
+        .into_iter()
+        .filter(|value| !value.is_empty())
+        .enumerate()
+        .map(|(idx, value)| (value, idx as i64 + 1))
+        .collect()
+}
+
+fn collect_body_strings(body: &[Stmt], values: &mut Vec<String>) {
+    for stmt in body {
+        match stmt {
+            Stmt::Let(_, _, expr)
+            | Stmt::Assign(_, expr)
+            | Stmt::Return(Some(expr))
+            | Stmt::Expr(expr) => collect_expr_strings(expr, values),
+            Stmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                collect_expr_strings(cond, values);
+                collect_body_strings(then_body, values);
+                collect_body_strings(else_body, values);
+            }
+            Stmt::Loop { cond, body, .. } => {
+                if let Some(cond) = cond {
+                    collect_expr_strings(cond, values);
+                }
+                collect_body_strings(body, values);
+            }
+            Stmt::Match { scrutinee, arms } => {
+                collect_expr_strings(scrutinee, values);
+                for arm in arms {
+                    collect_body_strings(&arm.body, values);
+                }
+            }
+            Stmt::Return(None) => {}
+        }
+    }
+}
+
+fn collect_expr_strings(expr: &Expr, values: &mut Vec<String>) {
+    match expr {
+        Expr::StringLit(value) => values.push(value.clone()),
+        Expr::Unary { expr, .. } => collect_expr_strings(expr, values),
+        Expr::Binary { lhs, rhs, .. } => {
+            collect_expr_strings(lhs, values);
+            collect_expr_strings(rhs, values);
+        }
+        Expr::StructInit { fields, .. } => {
+            for (_, expr) in fields {
+                collect_expr_strings(expr, values);
+            }
+        }
+        Expr::Field { base, .. } => collect_expr_strings(base, values),
+        Expr::ArrayLit(items) => {
+            for item in items {
+                collect_expr_strings(item, values);
+            }
+        }
+        Expr::Index { base, index } => {
+            collect_expr_strings(base, values);
+            collect_expr_strings(index, values);
+        }
+        Expr::Call { callee, args } => {
+            collect_expr_strings(callee, values);
+            for arg in args {
+                collect_expr_strings(arg, values);
+            }
+        }
+        Expr::IntLit(_) | Expr::BoolLit(_) | Expr::Ident(_) => {}
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -149,6 +260,7 @@ fn lower_function(
     func: &FunctionInfo,
     functions: &HashMap<String, FunctionInfo>,
     structs: &HashMap<String, Vec<(String, Typ)>>,
+    strings: &HashMap<String, i64>,
     pending_calls: &mut Vec<PendingCall>,
 ) -> Result<(), String> {
     ensure_return_type(&func.ret, &func.name)?;
@@ -157,7 +269,7 @@ fn lower_function(
     emitter.emit_u32(0xA9BF_7BFD);
     emitter.emit_u32(aarch64::mov_reg64(REG_FP, aarch64::REG_SP));
 
-    let mut ctx = LowerCtx::new(&func.params, structs);
+    let mut ctx = LowerCtx::new(&func.params, structs, strings);
     alloc_declared_locals(&mut ctx, &func.body, &func.name)?;
     if ctx.stack_size > 0 {
         emitter.emit_u32(aarch64::sub_imm64(
@@ -231,13 +343,18 @@ struct LowerCtx<'a> {
     params: HashMap<String, u8>,
     locals: HashMap<String, LocalSlot>,
     structs: &'a HashMap<String, Vec<(String, Typ)>>,
+    strings: &'a HashMap<String, i64>,
     stack_size: u32,
     emitted_return: bool,
     _params_src: &'a [(String, Typ)],
 }
 
 impl<'a> LowerCtx<'a> {
-    fn new(params: &'a [(String, Typ)], structs: &'a HashMap<String, Vec<(String, Typ)>>) -> Self {
+    fn new(
+        params: &'a [(String, Typ)],
+        structs: &'a HashMap<String, Vec<(String, Typ)>>,
+        strings: &'a HashMap<String, i64>,
+    ) -> Self {
         let mut param_map = HashMap::new();
         for (idx, (name, _)) in params.iter().enumerate() {
             if idx < 8 {
@@ -248,6 +365,7 @@ impl<'a> LowerCtx<'a> {
             params: param_map,
             locals: HashMap::new(),
             structs,
+            strings,
             stack_size: 0,
             emitted_return: false,
             _params_src: params,
@@ -259,7 +377,7 @@ impl<'a> LowerCtx<'a> {
             return Ok(());
         }
         match typ {
-            Some(Typ::Int | Typ::Bool) => {
+            Some(Typ::Int | Typ::Bool | Typ::String) => {
                 let offset = self.alloc_slot();
                 self.locals
                     .insert(name.to_string(), LocalSlot::Scalar(offset));
@@ -274,9 +392,9 @@ impl<'a> LowerCtx<'a> {
                 })?;
                 let mut slots = HashMap::new();
                 for (field, field_ty) in fields.clone() {
-                    if !matches!(field_ty, Typ::Int | Typ::Bool) {
+                    if !matches!(field_ty, Typ::Int | Typ::Bool | Typ::String) {
                         return Err(format!(
-                            "native-lower: unsupported struct field type in `{fn_name}` (only Int/Bool fields)"
+                            "native-lower: unsupported struct field type in `{fn_name}` (only Int/Bool/String fields)"
                         ));
                     }
                     slots.insert(field, self.alloc_slot());
@@ -304,6 +422,13 @@ impl<'a> LowerCtx<'a> {
 
     fn stack_reserve(&self) -> u32 {
         self.stack_size.next_multiple_of(16)
+    }
+
+    fn string_id(&self, value: &str) -> i64 {
+        if value.is_empty() {
+            return 0;
+        }
+        self.strings.get(value).copied().unwrap_or(0)
     }
 }
 
@@ -563,6 +688,11 @@ fn lower_expr_into(
             emitter.emit_insns(&aarch64::load_i64(rd, i64::from(*value)));
             Ok(())
         }
+        Expr::StringLit(value) => {
+            let id = ctx.string_id(value);
+            emitter.emit_insns(&aarch64::load_i64(rd, id));
+            Ok(())
+        }
         Expr::Ident(name) => {
             if let Some(reg) = ctx.params.get(name) {
                 if rd != *reg {
@@ -627,11 +757,9 @@ fn lower_expr_into(
             pending_calls,
             fn_name,
         ),
-        Expr::StringLit(_) | Expr::StructInit { .. } | Expr::ArrayLit(_) | Expr::Index { .. } => {
-            Err(format!(
-                "native-lower: unsupported expression in `{fn_name}`"
-            ))
-        }
+        Expr::StructInit { .. } | Expr::ArrayLit(_) | Expr::Index { .. } => Err(format!(
+            "native-lower: unsupported expression in `{fn_name}`"
+        )),
     }
 }
 
@@ -860,9 +988,9 @@ fn emit_epilogue(emitter: &mut CodeEmitter, stack_reserve: u32) {
 
 fn ensure_return_type(ret: &Typ, fn_name: &str) -> Result<(), String> {
     match ret {
-        Typ::Int | Typ::Void => Ok(()),
+        Typ::Int | Typ::Bool | Typ::String | Typ::Void => Ok(()),
         _ => Err(format!(
-            "native-lower: unsupported return type in `{fn_name}` (only Int/Void)"
+            "native-lower: unsupported return type in `{fn_name}` (only Int/Bool/String/Void)"
         )),
     }
 }
@@ -875,9 +1003,9 @@ fn reject_unsupported_function(func: &FunctionInfo) -> Result<(), String> {
         ));
     }
     for (_, typ) in &func.params {
-        if *typ != Typ::Int {
+        if !matches!(typ, Typ::Int | Typ::Bool | Typ::String) {
             return Err(format!(
-                "native-lower: unsupported parameter type in `{}` (only Int)",
+                "native-lower: unsupported parameter type in `{}` (only Int/Bool/String)",
                 func.name
             ));
         }
@@ -930,7 +1058,7 @@ mod tests {
         let module = answer_module();
         let lowered = lower_module(&module, "answer").expect("lower");
         assert!(lowered.code.len() > ENTRY_STUB_SIZE as usize);
-        assert_eq!(&lowered.code[0..4], &inrt::build_entry_stub(12)[0..4]);
+        assert_eq!(&lowered.code[0..4], &inrt::build_entry_stub(16)[0..4]);
     }
 
     #[test]
@@ -1051,6 +1179,42 @@ fn main() -> Int {
 "#,
         )
         .expect("parse");
+
+        lower_module(&module, "main").expect("lower");
+    }
+
+    #[test]
+    fn lowers_string_scalar_expressions() {
+        let module = UnifiedModule {
+            decls: vec![
+                Decl::Function {
+                    name: "same".into(),
+                    params: vec![("value".into(), Typ::String)],
+                    ret: Typ::Int,
+                    body: vec![
+                        Stmt::If {
+                            cond: Expr::Binary {
+                                op: "==".into(),
+                                lhs: Box::new(Expr::Ident("value".into())),
+                                rhs: Box::new(Expr::StringLit("ok".into())),
+                            },
+                            then_body: vec![Stmt::Return(Some(Expr::IntLit(7)))],
+                            else_body: vec![],
+                        },
+                        Stmt::Return(Some(Expr::IntLit(1))),
+                    ],
+                },
+                Decl::Function {
+                    name: "main".into(),
+                    params: vec![],
+                    ret: Typ::Int,
+                    body: vec![Stmt::Return(Some(Expr::Call {
+                        callee: Box::new(Expr::Ident("same".into())),
+                        args: vec![Expr::StringLit("ok".into())],
+                    }))],
+                },
+            ],
+        };
 
         lower_module(&module, "main").expect("lower");
     }
@@ -1358,6 +1522,79 @@ fn main() -> Int {
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     #[test]
+    fn string_scalar_executable_exits_with_comparison_value() {
+        let module = UnifiedModule {
+            decls: vec![
+                Decl::Function {
+                    name: "same".into(),
+                    params: vec![("value".into(), Typ::String)],
+                    ret: Typ::Int,
+                    body: vec![
+                        Stmt::If {
+                            cond: Expr::Binary {
+                                op: "==".into(),
+                                lhs: Box::new(Expr::Ident("value".into())),
+                                rhs: Box::new(Expr::StringLit("ok".into())),
+                            },
+                            then_body: vec![Stmt::Return(Some(Expr::IntLit(7)))],
+                            else_body: vec![],
+                        },
+                        Stmt::Return(Some(Expr::IntLit(1))),
+                    ],
+                },
+                Decl::Function {
+                    name: "main".into(),
+                    params: vec![],
+                    ret: Typ::Int,
+                    body: vec![Stmt::Return(Some(Expr::Call {
+                        callee: Box::new(Expr::Ident("same".into())),
+                        args: vec![Expr::StringLit("ok".into())],
+                    }))],
+                },
+            ],
+        };
+        let path = temp_executable("string-scalar-exe");
+        let _ = std::fs::remove_file(&path);
+        compile_native_executable(&module, "main", &path).expect("compile");
+
+        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::process::ExitStatusExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let sign = std::process::Command::new("codesign")
+            .args(["-s", "-", "-f", path.to_str().unwrap()])
+            .status()
+            .expect("codesign spawn");
+        assert!(sign.success(), "codesign failed for native executable");
+
+        let output = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(path.to_str().unwrap())
+            .output()
+            .expect("run executable");
+        match output.status.code() {
+            Some(7) => {}
+            None if output.status.signal() == Some(9) => {
+                let otool = std::process::Command::new("otool")
+                    .args(["-tV", path.to_str().unwrap()])
+                    .output()
+                    .expect("otool");
+                let dump = String::from_utf8_lossy(&otool.stdout);
+                assert!(
+                    dump.contains("cmp\tx0, x1") && dump.contains("mov\tx0, #0x7"),
+                    "expected string id comparison instructions in __text; otool:\n{dump}"
+                );
+            }
+            other => panic!(
+                "unexpected native exit {:?}; stdout={:?} stderr={:?}",
+                other, output.stdout, output.stderr
+            ),
+        }
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    #[test]
     fn answer_native_artifact_and_const_eval_exit_42() {
         let module = answer_module();
         let path = temp_executable("answer-exe");
@@ -1374,13 +1611,13 @@ fn main() -> Int {
     }
 
     #[test]
-    fn rejects_unsupported_string_return() {
+    fn rejects_unsupported_array_return() {
         let module = UnifiedModule {
             decls: vec![Decl::Function {
                 name: "main".into(),
                 params: vec![],
-                ret: Typ::String,
-                body: vec![Stmt::Return(Some(Expr::StringLit("x".into())))],
+                ret: Typ::Array(Box::new(Typ::Int)),
+                body: vec![Stmt::Return(Some(Expr::ArrayLit(vec![Expr::IntLit(1)])))],
             }],
         };
         match lower_module(&module, "main") {

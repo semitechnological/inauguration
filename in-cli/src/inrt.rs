@@ -12,9 +12,19 @@ pub const INRT_ENTRY_SYMBOL: &str = "_inrt_start";
 ///
 /// `answer_offset` is the byte offset from the start of this stub to the entry function.
 pub fn build_entry_stub(answer_offset: u32) -> Vec<u8> {
-    let mut code = Vec::with_capacity(12);
+    let mut code = Vec::with_capacity(16);
     // `bl` offset is PC-relative to the `bl` instruction (stub starts at offset 0).
     code.extend_from_slice(&aarch64::bl(answer_offset as i32).to_le_bytes());
+    code.extend_from_slice(&0xD503_201Fu32.to_le_bytes());
+    code.extend_from_slice(&aarch64::movz64(16, 1, 0).to_le_bytes());
+    code.extend_from_slice(&aarch64::svc(0x80).to_le_bytes());
+    code
+}
+
+pub fn build_entry_stub_with_forced_exit(answer_offset: u32, exit_code: u16) -> Vec<u8> {
+    let mut code = Vec::with_capacity(16);
+    code.extend_from_slice(&aarch64::bl(answer_offset as i32).to_le_bytes());
+    code.extend_from_slice(&aarch64::movz64(0, exit_code, 0).to_le_bytes());
     code.extend_from_slice(&aarch64::movz64(16, 1, 0).to_le_bytes());
     code.extend_from_slice(&aarch64::svc(0x80).to_le_bytes());
     code
@@ -26,6 +36,7 @@ mod tests {
 
     #[test]
     fn entry_stub_has_fixed_size() {
-        assert_eq!(build_entry_stub(16).len(), 12);
+        assert_eq!(build_entry_stub(16).len(), 16);
+        assert_eq!(build_entry_stub_with_forced_exit(16, 0).len(), 16);
     }
 }
