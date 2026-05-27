@@ -96,6 +96,10 @@ pub fn ldr64(rt: u8, rn: u8, offset: u32) -> u32 {
     0xF940_0000 | (imm12 << 10) | ((rn as u32) << 5) | (rt as u32)
 }
 
+pub fn ldr64_reg_offset(rt: u8, rn: u8, rm: u8) -> u32 {
+    0xF860_7800 | ((rm as u32) << 16) | ((rn as u32) << 5) | (rt as u32)
+}
+
 pub fn svc(imm16: u16) -> u32 {
     0xD400_0001 | ((imm16 as u32) << 5)
 }

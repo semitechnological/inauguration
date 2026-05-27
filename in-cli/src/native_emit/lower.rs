@@ -306,10 +306,7 @@ fn alloc_declared_locals(
 ) -> Result<(), String> {
     for stmt in body {
         match stmt {
-            Stmt::Let(name, typ, expr) => {
-                let resolved = typ.clone().or_else(|| expr_type(expr));
-                ctx.alloc_local(name, resolved.as_ref(), fn_name)?;
-            }
+            Stmt::Let(name, typ, expr) => ctx.alloc_let_local(name, typ.as_ref(), expr, fn_name)?,
             Stmt::If {
                 then_body,
                 else_body,
@@ -333,6 +330,10 @@ fn alloc_declared_locals(
 #[derive(Debug, Clone)]
 enum LocalSlot {
     Scalar(u32),
+    Array {
+        elem: Typ,
+        offsets: Vec<u32>,
+    },
     Struct {
         typ: String,
         fields: HashMap<String, u32>,
@@ -384,7 +385,7 @@ impl<'a> LowerCtx<'a> {
                 Ok(())
             }
             Some(Typ::Array(_)) => Err(format!(
-                "native-lower: unsupported let binding type in `{fn_name}` (arrays are not native yet)"
+                "native-lower: unsupported let binding type in `{fn_name}` (array locals require literal initializers)"
             )),
             Some(Typ::Named(struct_name)) => {
                 let fields = self.structs.get(struct_name).ok_or_else(|| {
@@ -409,9 +410,54 @@ impl<'a> LowerCtx<'a> {
                 Ok(())
             }
             _ => Err(format!(
-                "native-lower: unsupported let binding type in `{fn_name}` (only Int/Bool locals and scalar structs)"
+                "native-lower: unsupported let binding type in `{fn_name}` (only Int/Bool/String locals, scalar arrays, and scalar structs)"
             )),
         }
+    }
+
+    fn alloc_let_local(
+        &mut self,
+        name: &str,
+        typ: Option<&Typ>,
+        expr: &Expr,
+        fn_name: &str,
+    ) -> Result<(), String> {
+        if self.locals.contains_key(name) {
+            return Ok(());
+        }
+        let resolved = typ.cloned().or_else(|| expr_type(expr));
+        if let Some(Typ::Array(elem)) = resolved.as_ref() {
+            let Expr::ArrayLit(items) = expr else {
+                return Err(format!(
+                    "native-lower: unsupported let binding type in `{fn_name}` (array locals require literal initializers)"
+                ));
+            };
+            if !is_native_scalar_type(elem) {
+                return Err(format!(
+                    "native-lower: unsupported array element type in `{fn_name}` (only Int/Bool/String elements)"
+                ));
+            }
+            let mut offsets = Vec::with_capacity(items.len());
+            for item in items {
+                if let Some(item_ty) = expr_type(item)
+                    && !array_item_matches(elem, &item_ty)
+                {
+                    return Err(format!(
+                        "native-lower: array item type mismatch in `{fn_name}`"
+                    ));
+                }
+                offsets.push(self.alloc_slot());
+            }
+            self.locals.insert(
+                name.to_string(),
+                LocalSlot::Array {
+                    elem: elem.as_ref().clone(),
+                    offsets,
+                },
+            );
+            return Ok(());
+        }
+        self.alloc_local(name, resolved.as_ref(), fn_name)
     }
 
     fn alloc_slot(&mut self) -> u32 {
@@ -452,8 +498,7 @@ fn lower_stmt(
             Ok(())
         }
         Stmt::Let(name, typ, expr) => {
-            let resolved = typ.clone().or_else(|| expr_type(expr));
-            ctx.alloc_local(name, resolved.as_ref(), fn_name)?;
+            ctx.alloc_let_local(name, typ.as_ref(), expr, fn_name)?;
             lower_store_local(emitter, ctx, name, expr, functions, pending_calls, fn_name)
         }
         Stmt::If {
@@ -519,6 +564,30 @@ fn lower_store_local(
         LocalSlot::Scalar(offset) => {
             lower_expr_into(emitter, ctx, expr, 0, functions, pending_calls, fn_name)?;
             emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, offset));
+            Ok(())
+        }
+        LocalSlot::Array { elem, offsets } => {
+            let Expr::ArrayLit(items) = expr else {
+                return Err(format!(
+                    "native-lower: unsupported array assignment in `{fn_name}`"
+                ));
+            };
+            if items.len() != offsets.len() {
+                return Err(format!(
+                    "native-lower: array assignment length mismatch in `{fn_name}`"
+                ));
+            }
+            for (item, offset) in items.iter().zip(offsets) {
+                if let Some(item_ty) = expr_type(item)
+                    && !array_item_matches(&elem, &item_ty)
+                {
+                    return Err(format!(
+                        "native-lower: array item type mismatch in `{fn_name}`"
+                    ));
+                }
+                lower_expr_into(emitter, ctx, item, 0, functions, pending_calls, fn_name)?;
+                emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, offset));
+            }
             Ok(())
         }
         LocalSlot::Struct { typ, fields } => {
@@ -703,9 +772,9 @@ fn lower_expr_into(
                     LocalSlot::Scalar(offset) => {
                         emitter.emit_u32(aarch64::ldr64(rd, aarch64::REG_SP, *offset));
                     }
-                    LocalSlot::Struct { .. } => {
+                    LocalSlot::Array { .. } | LocalSlot::Struct { .. } => {
                         return Err(format!(
-                            "native-lower: unsupported whole-struct value `{name}` in `{fn_name}`"
+                            "native-lower: unsupported aggregate value `{name}` in `{fn_name}`"
                         ));
                     }
                 }
@@ -757,10 +826,71 @@ fn lower_expr_into(
             pending_calls,
             fn_name,
         ),
-        Expr::StructInit { .. } | Expr::ArrayLit(_) | Expr::Index { .. } => Err(format!(
+        Expr::Index { base, index } => lower_index(
+            emitter,
+            ctx,
+            base,
+            index,
+            rd,
+            functions,
+            pending_calls,
+            fn_name,
+        ),
+        Expr::StructInit { .. } | Expr::ArrayLit(_) => Err(format!(
             "native-lower: unsupported expression in `{fn_name}`"
         )),
     }
+}
+
+fn lower_index(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    base: &Expr,
+    index: &Expr,
+    rd: u8,
+    functions: &HashMap<String, FunctionInfo>,
+    pending_calls: &mut Vec<PendingCall>,
+    fn_name: &str,
+) -> Result<(), String> {
+    let Expr::Ident(name) = base else {
+        return Err(format!(
+            "native-lower: unsupported array index base in `{fn_name}`"
+        ));
+    };
+    let Some(LocalSlot::Array { offsets, .. }) = ctx.locals.get(name).cloned() else {
+        return Err(format!(
+            "native-lower: unsupported array index base in `{fn_name}`"
+        ));
+    };
+    if offsets.is_empty() {
+        return Err(format!(
+            "native-lower: unsupported empty array index in `{fn_name}`"
+        ));
+    }
+    let index_reg = if rd == 1 { 2 } else { 1 };
+    lower_expr_into(
+        emitter,
+        ctx,
+        index,
+        index_reg,
+        functions,
+        pending_calls,
+        fn_name,
+    )?;
+    let base_offset = offsets[0];
+    let base_reg = if base_offset == 0 {
+        aarch64::REG_SP
+    } else {
+        let scratch = if rd == 2 || index_reg == 2 { 3 } else { 2 };
+        emitter.emit_u32(aarch64::add_imm64(
+            scratch,
+            aarch64::REG_SP,
+            base_offset as u16,
+        ));
+        scratch
+    };
+    emitter.emit_u32(aarch64::ldr64_reg_offset(rd, base_reg, index_reg));
+    Ok(())
 }
 
 fn lower_field(
@@ -1013,6 +1143,14 @@ fn reject_unsupported_function(func: &FunctionInfo) -> Result<(), String> {
     Ok(())
 }
 
+fn is_native_scalar_type(typ: &Typ) -> bool {
+    matches!(typ, Typ::Int | Typ::Bool | Typ::String)
+}
+
+fn array_item_matches(expected: &Typ, actual: &Typ) -> bool {
+    expected == actual || matches!((expected, actual), (Typ::Int, Typ::Bool))
+}
+
 fn expr_type(expr: &Expr) -> Option<Typ> {
     match expr {
         Expr::IntLit(_) => Some(Typ::Int),
@@ -1215,6 +1353,22 @@ fn main() -> Int {
                 },
             ],
         };
+
+        lower_module(&module, "main").expect("lower");
+    }
+
+    #[test]
+    fn lowers_local_array_index_expressions() {
+        let module = crate::in_lang_parse::parse_in_source(
+            r#"
+fn main() -> Int {
+  let xs: [Int] = [2, 5, 8];
+  let i: Int = 1;
+  return xs[i];
+}
+"#,
+        )
+        .expect("parse");
 
         lower_module(&module, "main").expect("lower");
     }
@@ -1583,6 +1737,59 @@ fn main() -> Int {
                 assert!(
                     dump.contains("cmp\tx0, x1") && dump.contains("mov\tx0, #0x7"),
                     "expected string id comparison instructions in __text; otool:\n{dump}"
+                );
+            }
+            other => panic!(
+                "unexpected native exit {:?}; stdout={:?} stderr={:?}",
+                other, output.stdout, output.stderr
+            ),
+        }
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    #[test]
+    fn local_array_index_executable_exits_with_indexed_value() {
+        let module = crate::in_lang_parse::parse_in_source(
+            r#"
+fn main() -> Int {
+  let xs: [Int] = [2, 5, 8];
+  let i: Int = 1;
+  return xs[i];
+}
+"#,
+        )
+        .expect("parse");
+        let path = temp_executable("array-index-exe");
+        let _ = std::fs::remove_file(&path);
+        compile_native_executable(&module, "main", &path).expect("compile");
+
+        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::process::ExitStatusExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let sign = std::process::Command::new("codesign")
+            .args(["-s", "-", "-f", path.to_str().unwrap()])
+            .status()
+            .expect("codesign spawn");
+        assert!(sign.success(), "codesign failed for native executable");
+
+        let output = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(path.to_str().unwrap())
+            .output()
+            .expect("run executable");
+        match output.status.code() {
+            Some(5) => {}
+            None if output.status.signal() == Some(9) => {
+                let otool = std::process::Command::new("otool")
+                    .args(["-tV", path.to_str().unwrap()])
+                    .output()
+                    .expect("otool");
+                let dump = String::from_utf8_lossy(&otool.stdout);
+                assert!(
+                    dump.contains("ldr\tx0, [sp, x1, lsl #3]"),
+                    "expected dynamic array index load in __text; otool:\n{dump}"
                 );
             }
             other => panic!(
