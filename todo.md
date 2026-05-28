@@ -97,7 +97,7 @@
 - [ ] Expand the native Swift subset.
   - First bounded-body slice landed: top-level Swift functions may now carry simple `let`, assignment, call, and return statements into shared Core IR lowering; `main` remains optional for hybrid/library-style sources.
   - Continue replacing header-only parsing with a real subset AST for more top-level declarations, struct fields, function signatures, and bounded bodies.
-  - Function-call, local identifier, and struct-field name resolution now emit stable `E_UNKNOWN_FUNCTION` / `E_UNKNOWN_IDENTIFIER` / `E_UNKNOWN_FIELD`; `IN_NATIVE_SWIFT_SIL=only` has SIL snapshot coverage for locals, calls, and fields.
+  - Function-call, local identifier, struct-field, and return-type body checks now emit stable `E_UNKNOWN_FUNCTION` / `E_UNKNOWN_IDENTIFIER` / `E_UNKNOWN_FIELD` / `E_RETURN_TYPE`; `IN_NATIVE_SWIFT_SIL=only` has SIL snapshot coverage for locals, calls, and fields and preserves subset diagnostics before lowering.
   - `IN_NATIVE_SWIFT_SIL=try` now falls back only for unsupported non-subset sources and preserves real subset diagnostics such as `E_DUP_TOP`.
 
 - [x] Reuse native Swift checks in hot reload.

@@ -861,6 +861,7 @@ fn check_expr_names(
     expr: &Expr,
     env: &HashMap<String, Typ>,
     structs: &HashMap<String, Vec<(String, Typ)>>,
+    fns: &HashMap<String, Typ>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     match expr {
@@ -872,19 +873,19 @@ fn check_expr_names(
                 });
             }
         }
-        Expr::Unary { expr, .. } => check_expr_names(owner, expr, env, structs, diagnostics),
+        Expr::Unary { expr, .. } => check_expr_names(owner, expr, env, structs, fns, diagnostics),
         Expr::Binary { lhs, rhs, .. } => {
-            check_expr_names(owner, lhs, env, structs, diagnostics);
-            check_expr_names(owner, rhs, env, structs, diagnostics);
+            check_expr_names(owner, lhs, env, structs, fns, diagnostics);
+            check_expr_names(owner, rhs, env, structs, fns, diagnostics);
         }
         Expr::StructInit { fields, .. } => {
             for (_, value) in fields {
-                check_expr_names(owner, value, env, structs, diagnostics);
+                check_expr_names(owner, value, env, structs, fns, diagnostics);
             }
         }
         Expr::Field { base, name } => {
-            check_expr_names(owner, base, env, structs, diagnostics);
-            match infer_expr_type(base, env, structs) {
+            check_expr_names(owner, base, env, structs, fns, diagnostics);
+            match infer_expr_type(base, env, structs, fns) {
                 Some(Typ::Named(struct_name)) => match structs.get(&struct_name) {
                     Some(fields) if fields.iter().any(|(field, _)| field == name) => {}
                     Some(_) => diagnostics.push(Diagnostic {
@@ -905,16 +906,16 @@ fn check_expr_names(
         }
         Expr::ArrayLit(items) => {
             for item in items {
-                check_expr_names(owner, item, env, structs, diagnostics);
+                check_expr_names(owner, item, env, structs, fns, diagnostics);
             }
         }
         Expr::Index { base, index } => {
-            check_expr_names(owner, base, env, structs, diagnostics);
-            check_expr_names(owner, index, env, structs, diagnostics);
+            check_expr_names(owner, base, env, structs, fns, diagnostics);
+            check_expr_names(owner, index, env, structs, fns, diagnostics);
         }
         Expr::Call { args, .. } => {
             for arg in args {
-                check_expr_names(owner, arg, env, structs, diagnostics);
+                check_expr_names(owner, arg, env, structs, fns, diagnostics);
             }
         }
         Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => {}
@@ -925,6 +926,7 @@ fn infer_expr_type(
     expr: &Expr,
     env: &HashMap<String, Typ>,
     structs: &HashMap<String, Vec<(String, Typ)>>,
+    fns: &HashMap<String, Typ>,
 ) -> Option<Typ> {
     match expr {
         Expr::IntLit(_) => Some(Typ::Int),
@@ -933,7 +935,7 @@ fn infer_expr_type(
         Expr::Ident(name) => env.get(name).cloned(),
         Expr::StructInit { name, .. } => Some(Typ::Named(name.clone())),
         Expr::Field { base, name } => {
-            if let Some(Typ::Named(struct_name)) = infer_expr_type(base, env, structs)
+            if let Some(Typ::Named(struct_name)) = infer_expr_type(base, env, structs, fns)
                 && let Some(fields) = structs.get(&struct_name)
                 && let Some((_, typ)) = fields.iter().find(|(field, _)| field == name)
             {
@@ -944,11 +946,11 @@ fn infer_expr_type(
         Expr::ArrayLit(items) => Some(Typ::Array(Box::new(
             items
                 .iter()
-                .find_map(|item| infer_expr_type(item, env, structs))
+                .find_map(|item| infer_expr_type(item, env, structs, fns))
                 .unwrap_or(Typ::Void),
         ))),
         Expr::Index { base, .. } => {
-            if let Some(Typ::Array(item)) = infer_expr_type(base, env, structs) {
+            if let Some(Typ::Array(item)) = infer_expr_type(base, env, structs, fns) {
                 Some(*item)
             } else {
                 None
@@ -957,30 +959,38 @@ fn infer_expr_type(
         Expr::Unary { op, expr } => match op.as_str() {
             "!" => Some(Typ::Bool),
             "-" => Some(Typ::Int),
-            _ => infer_expr_type(expr, env, structs),
+            _ => infer_expr_type(expr, env, structs, fns),
         },
         Expr::Binary { op, .. } => match op.as_str() {
             "+" | "-" | "*" | "/" | "%" => Some(Typ::Int),
             "==" | "!=" | "<" | ">" | "<=" | ">=" => Some(Typ::Bool),
             _ => None,
         },
-        Expr::Call { .. } => None,
+        Expr::Call { callee, .. } => {
+            if let Expr::Ident(name) = callee.as_ref() {
+                fns.get(name).cloned()
+            } else {
+                None
+            }
+        }
     }
 }
 
 fn check_stmt_names(
     owner: &str,
+    expected_ret: &Typ,
     stmt: &Stmt,
     env: &mut HashMap<String, Typ>,
     structs: &HashMap<String, Vec<(String, Typ)>>,
+    fns: &HashMap<String, Typ>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     match stmt {
         Stmt::Let(name, declared, expr) => {
-            check_expr_names(owner, expr, env, structs, diagnostics);
+            check_expr_names(owner, expr, env, structs, fns, diagnostics);
             let typ = declared
                 .clone()
-                .or_else(|| infer_expr_type(expr, env, structs))
+                .or_else(|| infer_expr_type(expr, env, structs, fns))
                 .unwrap_or(Typ::Void);
             env.insert(name.clone(), typ);
         }
@@ -991,50 +1001,107 @@ fn check_stmt_names(
                     message: format!("unknown assignment target {owner}.{name}"),
                 });
             }
-            check_expr_names(owner, expr, env, structs, diagnostics);
+            check_expr_names(owner, expr, env, structs, fns, diagnostics);
         }
         Stmt::IndexAssign { base, index, value } => {
-            check_expr_names(owner, base, env, structs, diagnostics);
-            check_expr_names(owner, index, env, structs, diagnostics);
-            check_expr_names(owner, value, env, structs, diagnostics);
+            check_expr_names(owner, base, env, structs, fns, diagnostics);
+            check_expr_names(owner, index, env, structs, fns, diagnostics);
+            check_expr_names(owner, value, env, structs, fns, diagnostics);
         }
-        Stmt::Return(Some(expr)) | Stmt::Expr(expr) => {
-            check_expr_names(owner, expr, env, structs, diagnostics);
+        Stmt::Return(Some(expr)) => {
+            check_expr_names(owner, expr, env, structs, fns, diagnostics);
+            if let Some(actual) = infer_expr_type(expr, env, structs, fns)
+                && &actual != expected_ret
+            {
+                diagnostics.push(Diagnostic {
+                    code: "E_RETURN_TYPE".into(),
+                    message: format!(
+                        "return type mismatch in {owner}: expected {}, got {}",
+                        string_of_type(expected_ret),
+                        string_of_type(&actual)
+                    ),
+                });
+            }
+        }
+        Stmt::Expr(expr) => {
+            check_expr_names(owner, expr, env, structs, fns, diagnostics);
         }
         Stmt::If {
             cond,
             then_body,
             else_body,
         } => {
-            check_expr_names(owner, cond, env, structs, diagnostics);
+            check_expr_names(owner, cond, env, structs, fns, diagnostics);
             let mut then_env = env.clone();
             for nested in then_body {
-                check_stmt_names(owner, nested, &mut then_env, structs, diagnostics);
+                check_stmt_names(
+                    owner,
+                    expected_ret,
+                    nested,
+                    &mut then_env,
+                    structs,
+                    fns,
+                    diagnostics,
+                );
             }
             let mut else_env = env.clone();
             for nested in else_body {
-                check_stmt_names(owner, nested, &mut else_env, structs, diagnostics);
+                check_stmt_names(
+                    owner,
+                    expected_ret,
+                    nested,
+                    &mut else_env,
+                    structs,
+                    fns,
+                    diagnostics,
+                );
             }
         }
         Stmt::Loop { cond, body, .. } => {
             if let Some(cond) = cond {
-                check_expr_names(owner, cond, env, structs, diagnostics);
+                check_expr_names(owner, cond, env, structs, fns, diagnostics);
             }
             let mut body_env = env.clone();
             for nested in body {
-                check_stmt_names(owner, nested, &mut body_env, structs, diagnostics);
+                check_stmt_names(
+                    owner,
+                    expected_ret,
+                    nested,
+                    &mut body_env,
+                    structs,
+                    fns,
+                    diagnostics,
+                );
             }
         }
         Stmt::Match { scrutinee, arms } => {
-            check_expr_names(owner, scrutinee, env, structs, diagnostics);
+            check_expr_names(owner, scrutinee, env, structs, fns, diagnostics);
             for arm in arms {
                 let mut arm_env = env.clone();
                 for nested in &arm.body {
-                    check_stmt_names(owner, nested, &mut arm_env, structs, diagnostics);
+                    check_stmt_names(
+                        owner,
+                        expected_ret,
+                        nested,
+                        &mut arm_env,
+                        structs,
+                        fns,
+                        diagnostics,
+                    );
                 }
             }
         }
-        Stmt::Return(None) => {}
+        Stmt::Return(None) => {
+            if *expected_ret != Typ::Void {
+                diagnostics.push(Diagnostic {
+                    code: "E_RETURN_TYPE".into(),
+                    message: format!(
+                        "return type mismatch in {owner}: expected {}, got Void",
+                        string_of_type(expected_ret)
+                    ),
+                });
+            }
+        }
     }
 }
 
@@ -1054,6 +1121,13 @@ pub fn check(program: &[Decl]) -> Vec<Diagnostic> {
         .iter()
         .filter_map(|d| match d {
             Decl::Function(f) => Some(f.name.clone()),
+            _ => None,
+        })
+        .collect();
+    let fn_returns: HashMap<String, Typ> = program
+        .iter()
+        .filter_map(|d| match d {
+            Decl::Function(f) => Some((f.name.clone(), f.ret.clone())),
             _ => None,
         })
         .collect();
@@ -1114,7 +1188,15 @@ pub fn check(program: &[Decl]) -> Vec<Diagnostic> {
                 }
                 let mut env: HashMap<String, Typ> = f.params.iter().cloned().collect();
                 for stmt in &f.body {
-                    check_stmt_names(&f.name, stmt, &mut env, &struct_fields, &mut type_diags);
+                    check_stmt_names(
+                        &f.name,
+                        &f.ret,
+                        stmt,
+                        &mut env,
+                        &struct_fields,
+                        &fn_returns,
+                        &mut type_diags,
+                    );
                 }
             }
         }
@@ -1473,6 +1555,38 @@ func main(u: User) -> Int {
             diagnostics.iter().any(|d| d.code == "E_UNKNOWN_FIELD"),
             "{diagnostics:?}"
         );
+    }
+
+    #[test]
+    fn check_rejects_return_type_mismatches_in_function_bodies() {
+        let program = parse(
+            r#"
+func main() -> Int {
+  return "bad"
+}
+"#,
+        );
+        let diagnostics = check(&program);
+        assert!(
+            diagnostics.iter().any(|d| d.code == "E_RETURN_TYPE"),
+            "{diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn check_resolves_function_call_return_types_in_function_bodies() {
+        let program = parse(
+            r#"
+func helper() -> Int {
+  return 1
+}
+func main() -> Int {
+  return helper()
+}
+"#,
+        );
+        let diagnostics = check(&program);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
     }
 
     #[test]

@@ -347,4 +347,15 @@ func main(u: User) -> Int {
         assert!(sil.contains("field_access"), "{sil}");
         assert!(sil.contains("return %"), "{sil}");
     }
+
+    #[test]
+    fn emit_subset_sil_rejects_return_type_mismatch_before_lowering() {
+        let src = r#"
+func main() -> Int {
+  return "bad"
+}
+"#;
+        let err = emit_in_tree_sil_or_diagnose(src, "App").expect_err("diagnostic");
+        assert!(err.contains("E_RETURN_TYPE"), "{err}");
+    }
 }
