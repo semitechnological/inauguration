@@ -1,7 +1,7 @@
 //! Swift subset line parser + checker + JSON artifact (OCaml `compiler/ocaml-front` parity).
 
 use serde::Serialize;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Typ {
@@ -199,6 +199,16 @@ fn parse_expr(s: &str) -> Expr {
             };
         }
     }
+    if let Some(dot) = find_top_level_member_dot(s) {
+        let base = trim(&s[..dot]);
+        let name = trim(&s[dot + 1..]);
+        if !base.is_empty() && !name.is_empty() {
+            return Expr::Field {
+                base: Box::new(parse_expr(base)),
+                name: name.to_string(),
+            };
+        }
+    }
     Expr::Ident(s.to_string())
 }
 
@@ -260,6 +270,35 @@ fn find_call_open_paren(s: &str) -> Option<usize> {
         }
     }
     None
+}
+
+fn find_top_level_member_dot(s: &str) -> Option<usize> {
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escape = false;
+    let mut found = None;
+    for (i, c) in s.char_indices() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        if in_string {
+            if c == '\\' {
+                escape = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => in_string = true,
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            '.' if depth == 0 => found = Some(i),
+            _ => {}
+        }
+    }
+    found
 }
 
 fn split_call_args(inner: &str) -> Vec<String> {
@@ -820,105 +859,178 @@ fn check_stmt_calls(
 fn check_expr_names(
     owner: &str,
     expr: &Expr,
-    env: &HashSet<String>,
+    env: &HashMap<String, Typ>,
+    structs: &HashMap<String, Vec<(String, Typ)>>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     match expr {
         Expr::Ident(name) => {
-            if !env.contains(name) {
+            if !env.contains_key(name) {
                 diagnostics.push(Diagnostic {
                     code: "E_UNKNOWN_IDENTIFIER".into(),
                     message: format!("unknown identifier {owner}.{name}"),
                 });
             }
         }
-        Expr::Unary { expr, .. } => check_expr_names(owner, expr, env, diagnostics),
+        Expr::Unary { expr, .. } => check_expr_names(owner, expr, env, structs, diagnostics),
         Expr::Binary { lhs, rhs, .. } => {
-            check_expr_names(owner, lhs, env, diagnostics);
-            check_expr_names(owner, rhs, env, diagnostics);
+            check_expr_names(owner, lhs, env, structs, diagnostics);
+            check_expr_names(owner, rhs, env, structs, diagnostics);
         }
         Expr::StructInit { fields, .. } => {
             for (_, value) in fields {
-                check_expr_names(owner, value, env, diagnostics);
+                check_expr_names(owner, value, env, structs, diagnostics);
             }
         }
-        Expr::Field { base, .. } => check_expr_names(owner, base, env, diagnostics),
+        Expr::Field { base, name } => {
+            check_expr_names(owner, base, env, structs, diagnostics);
+            match infer_expr_type(base, env, structs) {
+                Some(Typ::Named(struct_name)) => match structs.get(&struct_name) {
+                    Some(fields) if fields.iter().any(|(field, _)| field == name) => {}
+                    Some(_) => diagnostics.push(Diagnostic {
+                        code: "E_UNKNOWN_FIELD".into(),
+                        message: format!("unknown field {owner}.{struct_name}.{name}"),
+                    }),
+                    None => diagnostics.push(Diagnostic {
+                        code: "E_UNKNOWN_TYPE".into(),
+                        message: format!("unknown field base type {owner}.{struct_name}"),
+                    }),
+                },
+                Some(_) => diagnostics.push(Diagnostic {
+                    code: "E_FIELD_BASE_NOT_STRUCT".into(),
+                    message: format!("field base is not a struct in {owner}.{name}"),
+                }),
+                None => {}
+            }
+        }
         Expr::ArrayLit(items) => {
             for item in items {
-                check_expr_names(owner, item, env, diagnostics);
+                check_expr_names(owner, item, env, structs, diagnostics);
             }
         }
         Expr::Index { base, index } => {
-            check_expr_names(owner, base, env, diagnostics);
-            check_expr_names(owner, index, env, diagnostics);
+            check_expr_names(owner, base, env, structs, diagnostics);
+            check_expr_names(owner, index, env, structs, diagnostics);
         }
         Expr::Call { args, .. } => {
             for arg in args {
-                check_expr_names(owner, arg, env, diagnostics);
+                check_expr_names(owner, arg, env, structs, diagnostics);
             }
         }
         Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => {}
     }
 }
 
+fn infer_expr_type(
+    expr: &Expr,
+    env: &HashMap<String, Typ>,
+    structs: &HashMap<String, Vec<(String, Typ)>>,
+) -> Option<Typ> {
+    match expr {
+        Expr::IntLit(_) => Some(Typ::Int),
+        Expr::StringLit(_) => Some(Typ::String),
+        Expr::BoolLit(_) => Some(Typ::Bool),
+        Expr::Ident(name) => env.get(name).cloned(),
+        Expr::StructInit { name, .. } => Some(Typ::Named(name.clone())),
+        Expr::Field { base, name } => {
+            if let Some(Typ::Named(struct_name)) = infer_expr_type(base, env, structs)
+                && let Some(fields) = structs.get(&struct_name)
+                && let Some((_, typ)) = fields.iter().find(|(field, _)| field == name)
+            {
+                return Some(typ.clone());
+            }
+            None
+        }
+        Expr::ArrayLit(items) => Some(Typ::Array(Box::new(
+            items
+                .iter()
+                .find_map(|item| infer_expr_type(item, env, structs))
+                .unwrap_or(Typ::Void),
+        ))),
+        Expr::Index { base, .. } => {
+            if let Some(Typ::Array(item)) = infer_expr_type(base, env, structs) {
+                Some(*item)
+            } else {
+                None
+            }
+        }
+        Expr::Unary { op, expr } => match op.as_str() {
+            "!" => Some(Typ::Bool),
+            "-" => Some(Typ::Int),
+            _ => infer_expr_type(expr, env, structs),
+        },
+        Expr::Binary { op, .. } => match op.as_str() {
+            "+" | "-" | "*" | "/" | "%" => Some(Typ::Int),
+            "==" | "!=" | "<" | ">" | "<=" | ">=" => Some(Typ::Bool),
+            _ => None,
+        },
+        Expr::Call { .. } => None,
+    }
+}
+
 fn check_stmt_names(
     owner: &str,
     stmt: &Stmt,
-    env: &mut HashSet<String>,
+    env: &mut HashMap<String, Typ>,
+    structs: &HashMap<String, Vec<(String, Typ)>>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     match stmt {
-        Stmt::Let(name, _, expr) => {
-            check_expr_names(owner, expr, env, diagnostics);
-            env.insert(name.clone());
+        Stmt::Let(name, declared, expr) => {
+            check_expr_names(owner, expr, env, structs, diagnostics);
+            let typ = declared
+                .clone()
+                .or_else(|| infer_expr_type(expr, env, structs))
+                .unwrap_or(Typ::Void);
+            env.insert(name.clone(), typ);
         }
         Stmt::Assign(name, expr) => {
-            if !env.contains(name) {
+            if !env.contains_key(name) {
                 diagnostics.push(Diagnostic {
                     code: "E_UNKNOWN_IDENTIFIER".into(),
                     message: format!("unknown assignment target {owner}.{name}"),
                 });
             }
-            check_expr_names(owner, expr, env, diagnostics);
+            check_expr_names(owner, expr, env, structs, diagnostics);
         }
         Stmt::IndexAssign { base, index, value } => {
-            check_expr_names(owner, base, env, diagnostics);
-            check_expr_names(owner, index, env, diagnostics);
-            check_expr_names(owner, value, env, diagnostics);
+            check_expr_names(owner, base, env, structs, diagnostics);
+            check_expr_names(owner, index, env, structs, diagnostics);
+            check_expr_names(owner, value, env, structs, diagnostics);
         }
         Stmt::Return(Some(expr)) | Stmt::Expr(expr) => {
-            check_expr_names(owner, expr, env, diagnostics);
+            check_expr_names(owner, expr, env, structs, diagnostics);
         }
         Stmt::If {
             cond,
             then_body,
             else_body,
         } => {
-            check_expr_names(owner, cond, env, diagnostics);
+            check_expr_names(owner, cond, env, structs, diagnostics);
             let mut then_env = env.clone();
             for nested in then_body {
-                check_stmt_names(owner, nested, &mut then_env, diagnostics);
+                check_stmt_names(owner, nested, &mut then_env, structs, diagnostics);
             }
             let mut else_env = env.clone();
             for nested in else_body {
-                check_stmt_names(owner, nested, &mut else_env, diagnostics);
+                check_stmt_names(owner, nested, &mut else_env, structs, diagnostics);
             }
         }
         Stmt::Loop { cond, body, .. } => {
             if let Some(cond) = cond {
-                check_expr_names(owner, cond, env, diagnostics);
+                check_expr_names(owner, cond, env, structs, diagnostics);
             }
             let mut body_env = env.clone();
             for nested in body {
-                check_stmt_names(owner, nested, &mut body_env, diagnostics);
+                check_stmt_names(owner, nested, &mut body_env, structs, diagnostics);
             }
         }
         Stmt::Match { scrutinee, arms } => {
-            check_expr_names(owner, scrutinee, env, diagnostics);
+            check_expr_names(owner, scrutinee, env, structs, diagnostics);
             for arm in arms {
                 let mut arm_env = env.clone();
                 for nested in &arm.body {
-                    check_stmt_names(owner, nested, &mut arm_env, diagnostics);
+                    check_stmt_names(owner, nested, &mut arm_env, structs, diagnostics);
                 }
             }
         }
@@ -930,6 +1042,13 @@ fn check_stmt_names(
 pub fn check(program: &[Decl]) -> Vec<Diagnostic> {
     let struct_names = collect_struct_names(program);
     let struct_set: HashSet<&str> = struct_names.iter().map(String::as_str).collect();
+    let struct_fields: HashMap<String, Vec<(String, Typ)>> = program
+        .iter()
+        .filter_map(|d| match d {
+            Decl::Struct(s) => Some((s.name.clone(), s.fields.clone())),
+            _ => None,
+        })
+        .collect();
 
     let fn_names: Vec<String> = program
         .iter()
@@ -993,10 +1112,9 @@ pub fn check(program: &[Decl]) -> Vec<Diagnostic> {
                 for stmt in &f.body {
                     check_stmt_calls(&f.name, stmt, &fn_set, &mut type_diags);
                 }
-                let mut env: HashSet<String> =
-                    f.params.iter().map(|(name, _)| name.clone()).collect();
+                let mut env: HashMap<String, Typ> = f.params.iter().cloned().collect();
                 for stmt in &f.body {
-                    check_stmt_names(&f.name, stmt, &mut env, &mut type_diags);
+                    check_stmt_names(&f.name, stmt, &mut env, &struct_fields, &mut type_diags);
                 }
             }
         }
@@ -1322,6 +1440,37 @@ func main() -> Int {
         let diagnostics = check(&program);
         assert!(
             diagnostics.iter().any(|d| d.code == "E_UNKNOWN_IDENTIFIER"),
+            "{diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn check_resolves_known_struct_fields_in_function_bodies() {
+        let program = parse(
+            r#"
+struct User { id: Int }
+func main(u: User) -> Int {
+  return u.id
+}
+"#,
+        );
+        let diagnostics = check(&program);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn check_rejects_unknown_struct_fields_in_function_bodies() {
+        let program = parse(
+            r#"
+struct User { id: Int }
+func main(u: User) -> Int {
+  return u.missing
+}
+"#,
+        );
+        let diagnostics = check(&program);
+        assert!(
+            diagnostics.iter().any(|d| d.code == "E_UNKNOWN_FIELD"),
             "{diagnostics:?}"
         );
     }

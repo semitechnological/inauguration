@@ -325,4 +325,26 @@ func main() -> Void {
             "{sil}"
         );
     }
+
+    #[test]
+    fn emit_subset_sil_snapshots_body_locals_calls_and_fields() {
+        let src = r#"
+struct User { id: Int }
+func helper() -> Int {
+  let x: Int = 1
+  return x
+}
+func main(u: User) -> Int {
+  helper()
+  return u.id
+}
+"#;
+        let sil = emit_in_tree_sil_or_diagnose(src, "App").expect("sil");
+        assert!(sil.contains("sil @helper"), "{sil}");
+        assert!(sil.contains("sil @main"), "{sil}");
+        assert!(sil.contains("store_var x"), "{sil}");
+        assert!(sil.contains("function_ref @helper"), "{sil}");
+        assert!(sil.contains("field_access"), "{sil}");
+        assert!(sil.contains("return %"), "{sil}");
+    }
 }
