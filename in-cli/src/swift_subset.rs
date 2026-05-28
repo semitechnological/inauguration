@@ -817,6 +817,115 @@ fn check_stmt_calls(
     }
 }
 
+fn check_expr_names(
+    owner: &str,
+    expr: &Expr,
+    env: &HashSet<String>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    match expr {
+        Expr::Ident(name) => {
+            if !env.contains(name) {
+                diagnostics.push(Diagnostic {
+                    code: "E_UNKNOWN_IDENTIFIER".into(),
+                    message: format!("unknown identifier {owner}.{name}"),
+                });
+            }
+        }
+        Expr::Unary { expr, .. } => check_expr_names(owner, expr, env, diagnostics),
+        Expr::Binary { lhs, rhs, .. } => {
+            check_expr_names(owner, lhs, env, diagnostics);
+            check_expr_names(owner, rhs, env, diagnostics);
+        }
+        Expr::StructInit { fields, .. } => {
+            for (_, value) in fields {
+                check_expr_names(owner, value, env, diagnostics);
+            }
+        }
+        Expr::Field { base, .. } => check_expr_names(owner, base, env, diagnostics),
+        Expr::ArrayLit(items) => {
+            for item in items {
+                check_expr_names(owner, item, env, diagnostics);
+            }
+        }
+        Expr::Index { base, index } => {
+            check_expr_names(owner, base, env, diagnostics);
+            check_expr_names(owner, index, env, diagnostics);
+        }
+        Expr::Call { args, .. } => {
+            for arg in args {
+                check_expr_names(owner, arg, env, diagnostics);
+            }
+        }
+        Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => {}
+    }
+}
+
+fn check_stmt_names(
+    owner: &str,
+    stmt: &Stmt,
+    env: &mut HashSet<String>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    match stmt {
+        Stmt::Let(name, _, expr) => {
+            check_expr_names(owner, expr, env, diagnostics);
+            env.insert(name.clone());
+        }
+        Stmt::Assign(name, expr) => {
+            if !env.contains(name) {
+                diagnostics.push(Diagnostic {
+                    code: "E_UNKNOWN_IDENTIFIER".into(),
+                    message: format!("unknown assignment target {owner}.{name}"),
+                });
+            }
+            check_expr_names(owner, expr, env, diagnostics);
+        }
+        Stmt::IndexAssign { base, index, value } => {
+            check_expr_names(owner, base, env, diagnostics);
+            check_expr_names(owner, index, env, diagnostics);
+            check_expr_names(owner, value, env, diagnostics);
+        }
+        Stmt::Return(Some(expr)) | Stmt::Expr(expr) => {
+            check_expr_names(owner, expr, env, diagnostics);
+        }
+        Stmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            check_expr_names(owner, cond, env, diagnostics);
+            let mut then_env = env.clone();
+            for nested in then_body {
+                check_stmt_names(owner, nested, &mut then_env, diagnostics);
+            }
+            let mut else_env = env.clone();
+            for nested in else_body {
+                check_stmt_names(owner, nested, &mut else_env, diagnostics);
+            }
+        }
+        Stmt::Loop { cond, body, .. } => {
+            if let Some(cond) = cond {
+                check_expr_names(owner, cond, env, diagnostics);
+            }
+            let mut body_env = env.clone();
+            for nested in body {
+                check_stmt_names(owner, nested, &mut body_env, diagnostics);
+            }
+        }
+        Stmt::Match { scrutinee, arms } => {
+            check_expr_names(owner, scrutinee, env, diagnostics);
+            for arm in arms {
+                let mut arm_env = env.clone();
+                for nested in &arm.body {
+                    check_stmt_names(owner, nested, &mut arm_env, diagnostics);
+                }
+            }
+        }
+        Stmt::Return(None) => {}
+    }
+}
+
 /// Semantic checks (matches OCaml `checker.ml` ordering).
 pub fn check(program: &[Decl]) -> Vec<Diagnostic> {
     let struct_names = collect_struct_names(program);
@@ -883,6 +992,11 @@ pub fn check(program: &[Decl]) -> Vec<Diagnostic> {
                 }
                 for stmt in &f.body {
                     check_stmt_calls(&f.name, stmt, &fn_set, &mut type_diags);
+                }
+                let mut env: HashSet<String> =
+                    f.params.iter().map(|(name, _)| name.clone()).collect();
+                for stmt in &f.body {
+                    check_stmt_names(&f.name, stmt, &mut env, &mut type_diags);
                 }
             }
         }
@@ -1177,6 +1291,37 @@ func main() -> Void {
         let diagnostics = check(&program);
         assert!(
             diagnostics.iter().any(|d| d.code == "E_UNKNOWN_FUNCTION"),
+            "{diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn check_resolves_params_and_lets_in_function_bodies() {
+        let program = parse(
+            r#"
+func main(x: Int) -> Int {
+  let y: Int = x
+  return y
+}
+"#,
+        );
+        let diagnostics = check(&program);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn check_rejects_unknown_identifiers_in_function_bodies() {
+        let program = parse(
+            r#"
+func main() -> Int {
+  let y: Int = missing
+  return y
+}
+"#,
+        );
+        let diagnostics = check(&program);
+        assert!(
+            diagnostics.iter().any(|d| d.code == "E_UNKNOWN_IDENTIFIER"),
             "{diagnostics:?}"
         );
     }
