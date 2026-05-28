@@ -83,6 +83,18 @@ pub fn in_standard_import_bindings(import: &str) -> Vec<InExternBinding> {
             name: "process_run".into(),
             required_capabilities: vec!["process.spawn".into()],
         }],
+        "std.cli" => vec![
+            InExternBinding {
+                language: "std".into(),
+                name: "arg_count".into(),
+                required_capabilities: vec!["process.args".into()],
+            },
+            InExternBinding {
+                language: "std".into(),
+                name: "arg".into(),
+                required_capabilities: vec!["process.args".into()],
+            },
+        ],
         _ => Vec::new(),
     }
 }
@@ -122,6 +134,18 @@ fn binding_decl(binding: &InExternBinding) -> Decl {
         "process_run" => Decl::Function {
             name: binding.name.clone(),
             params: vec![("command".into(), Typ::String)],
+            ret: Typ::String,
+            body: Vec::new(),
+        },
+        "arg_count" => Decl::Function {
+            name: binding.name.clone(),
+            params: Vec::new(),
+            ret: Typ::Int,
+            body: Vec::new(),
+        },
+        "arg" => Decl::Function {
+            name: binding.name.clone(),
+            params: vec![("index".into(), Typ::Int)],
             ret: Typ::String,
             body: Vec::new(),
         },
@@ -2395,6 +2419,31 @@ fn main() -> void { read_file("x"); return; }
         let (params, ret) = decl.expect("process_run");
         assert_eq!(params, &vec![("command".to_string(), Typ::String)]);
         assert_eq!(ret, &Typ::String);
+    }
+
+    #[test]
+    fn std_cli_import_adds_core_function_declarations() {
+        let src =
+            "import std.cli;\ncapability process.args;\nfn main() -> String { return arg(0); }\n";
+        let module = parse_in_source(src).expect("std cli import");
+        let count_decl = module.decls.iter().find_map(|decl| match decl {
+            Decl::Function {
+                name, params, ret, ..
+            } if name == "arg_count" => Some((params, ret)),
+            _ => None,
+        });
+        let arg_decl = module.decls.iter().find_map(|decl| match decl {
+            Decl::Function {
+                name, params, ret, ..
+            } if name == "arg" => Some((params, ret)),
+            _ => None,
+        });
+        let (count_params, count_ret) = count_decl.expect("arg_count");
+        let (arg_params, arg_ret) = arg_decl.expect("arg");
+        assert_eq!(count_params, &Vec::<(String, Typ)>::new());
+        assert_eq!(count_ret, &Typ::Int);
+        assert_eq!(arg_params, &vec![("index".to_string(), Typ::Int)]);
+        assert_eq!(arg_ret, &Typ::String);
     }
 
     #[test]

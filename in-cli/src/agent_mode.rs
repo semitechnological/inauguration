@@ -1446,6 +1446,30 @@ fn main() -> String { return process_run("pwd"); }
     }
 
     #[test]
+    fn in_report_checks_std_cli_import_capabilities() {
+        let temp = temp_source(
+            "std-cli-missing-capability",
+            "in",
+            r#"
+import std.cli;
+fn main() -> String { return arg(0); }
+"#,
+        );
+        let report = json_report(&temp.path, &AgentModeConfig::default()).expect("report");
+        assert_eq!(report.diagnostics[0].code, "AGENT_MISSING_CAPABILITY");
+        assert!(
+            report
+                .effects
+                .contains(&"extern:std:arg:requires=process.args".to_string())
+        );
+        assert!(
+            report
+                .effects
+                .contains(&"extern:std:arg_count:requires=process.args".to_string())
+        );
+    }
+
+    #[test]
     fn in_report_includes_orchestration_facts_as_status_only() {
         let temp = temp_source(
             "orchestration",
