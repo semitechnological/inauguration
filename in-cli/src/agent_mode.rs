@@ -1403,6 +1403,30 @@ fn main() -> String { return http_get("https://example.com"); }
     }
 
     #[test]
+    fn in_report_includes_std_json_import_effects() {
+        let temp = temp_source(
+            "std-json-effects",
+            "in",
+            r#"
+import std.json;
+fn main() -> String { return json_parse("{}"); }
+"#,
+        );
+        let report = json_report(&temp.path, &AgentModeConfig::default()).expect("report");
+        assert!(report.diagnostics.is_empty(), "{:?}", report.diagnostics);
+        assert!(
+            report
+                .effects
+                .contains(&"extern:std:json_parse".to_string())
+        );
+        assert!(
+            report
+                .effects
+                .contains(&"extern:std:json_stringify".to_string())
+        );
+    }
+
+    #[test]
     fn in_report_includes_orchestration_facts_as_status_only() {
         let temp = temp_source(
             "orchestration",

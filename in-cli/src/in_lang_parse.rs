@@ -66,6 +66,18 @@ pub fn in_standard_import_bindings(import: &str) -> Vec<InExternBinding> {
             name: "http_get".into(),
             required_capabilities: vec!["network.http".into()],
         }],
+        "std.json" => vec![
+            InExternBinding {
+                language: "std".into(),
+                name: "json_parse".into(),
+                required_capabilities: Vec::new(),
+            },
+            InExternBinding {
+                language: "std".into(),
+                name: "json_stringify".into(),
+                required_capabilities: Vec::new(),
+            },
+        ],
         _ => Vec::new(),
     }
 }
@@ -93,6 +105,12 @@ fn binding_decl(binding: &InExternBinding) -> Decl {
         "http_get" => Decl::Function {
             name: binding.name.clone(),
             params: vec![("url".into(), Typ::String)],
+            ret: Typ::String,
+            body: Vec::new(),
+        },
+        "json_parse" | "json_stringify" => Decl::Function {
+            name: binding.name.clone(),
+            params: vec![("text".into(), Typ::String)],
             ret: Typ::String,
             body: Vec::new(),
         },
@@ -2327,6 +2345,30 @@ fn main() -> void { read_file("x"); return; }
         let (params, ret) = decl.expect("http_get");
         assert_eq!(params, &vec![("url".to_string(), Typ::String)]);
         assert_eq!(ret, &Typ::String);
+    }
+
+    #[test]
+    fn std_json_import_adds_core_function_declarations() {
+        let src = "import std.json;\nfn main() -> String { return json_parse(\"{}\"); }\n";
+        let module = parse_in_source(src).expect("std json import");
+        let parse_decl = module.decls.iter().find_map(|decl| match decl {
+            Decl::Function {
+                name, params, ret, ..
+            } if name == "json_parse" => Some((params, ret)),
+            _ => None,
+        });
+        let stringify_decl = module.decls.iter().find_map(|decl| match decl {
+            Decl::Function {
+                name, params, ret, ..
+            } if name == "json_stringify" => Some((params, ret)),
+            _ => None,
+        });
+        let (parse_params, parse_ret) = parse_decl.expect("json_parse");
+        let (stringify_params, stringify_ret) = stringify_decl.expect("json_stringify");
+        assert_eq!(parse_params, &vec![("text".to_string(), Typ::String)]);
+        assert_eq!(parse_ret, &Typ::String);
+        assert_eq!(stringify_params, &vec![("text".to_string(), Typ::String)]);
+        assert_eq!(stringify_ret, &Typ::String);
     }
 
     #[test]
