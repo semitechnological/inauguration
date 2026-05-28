@@ -27,6 +27,11 @@ struct PendingCall {
     target: String,
 }
 
+struct PendingStaticArray {
+    adr_site: u32,
+    values: Vec<i64>,
+}
+
 pub fn compile_native_executable(
     module: &UnifiedModule,
     entry: &str,
@@ -74,6 +79,7 @@ fn lower_module(module: &UnifiedModule, entry: &str) -> Result<LoweredModule, St
     emitter.bytes.resize(ENTRY_STUB_SIZE as usize, 0);
     let mut function_offsets = HashMap::new();
     let mut pending_calls = Vec::new();
+    let mut pending_static_arrays = Vec::new();
     let mut names: Vec<String> = functions.keys().cloned().collect();
     names.sort();
 
@@ -88,6 +94,7 @@ fn lower_module(module: &UnifiedModule, entry: &str) -> Result<LoweredModule, St
             &structs,
             &strings,
             &mut pending_calls,
+            &mut pending_static_arrays,
         )?;
     }
 
@@ -98,6 +105,8 @@ fn lower_module(module: &UnifiedModule, entry: &str) -> Result<LoweredModule, St
         let offset = target_offset as i32 - call.site as i32;
         emitter.patch_u32(call.site, aarch64::bl(offset));
     }
+
+    append_static_arrays(&mut emitter, pending_static_arrays);
 
     let entry_fn_offset = *function_offsets
         .get(entry)
@@ -267,6 +276,7 @@ fn lower_function(
     structs: &HashMap<String, Vec<(String, Typ)>>,
     strings: &HashMap<String, i64>,
     pending_calls: &mut Vec<PendingCall>,
+    pending_static_arrays: &mut Vec<PendingStaticArray>,
 ) -> Result<(), String> {
     ensure_return_type(&func.ret, &func.name, structs)?;
     reject_unsupported_function(func, structs)?;
@@ -274,7 +284,13 @@ fn lower_function(
     emitter.emit_u32(0xA9BF_7BFD);
     emitter.emit_u32(aarch64::mov_reg64(REG_FP, aarch64::REG_SP));
 
-    let mut ctx = LowerCtx::new(&func.params, structs, strings, &func.name)?;
+    let mut ctx = LowerCtx::new(
+        &func.params,
+        structs,
+        strings,
+        pending_static_arrays,
+        &func.name,
+    )?;
     alloc_declared_locals(&mut ctx, &func.body, &func.name)?;
     if ctx.stack_size > 0 {
         emitter.emit_u32(aarch64::sub_imm64(
@@ -306,6 +322,20 @@ fn lower_function(
     }
 
     Ok(())
+}
+
+fn append_static_arrays(emitter: &mut CodeEmitter, arrays: Vec<PendingStaticArray>) {
+    for array in arrays {
+        while emitter.len() % 8 != 0 {
+            emitter.bytes.push(0);
+        }
+        let data_offset = emitter.len();
+        let adr_delta = data_offset as i32 - array.adr_site as i32;
+        emitter.patch_u32(array.adr_site, aarch64::adr(0, adr_delta));
+        for value in array.values {
+            emitter.bytes.extend_from_slice(&value.to_le_bytes());
+        }
+    }
 }
 
 fn alloc_declared_locals(
@@ -360,6 +390,7 @@ struct LowerCtx<'a> {
     locals: HashMap<String, LocalSlot>,
     structs: &'a HashMap<String, Vec<(String, Typ)>>,
     strings: &'a HashMap<String, i64>,
+    pending_static_arrays: &'a mut Vec<PendingStaticArray>,
     stack_size: u32,
     emitted_return: bool,
     _params_src: &'a [(String, Typ)],
@@ -370,6 +401,7 @@ impl<'a> LowerCtx<'a> {
         params: &'a [(String, Typ)],
         structs: &'a HashMap<String, Vec<(String, Typ)>>,
         strings: &'a HashMap<String, i64>,
+        pending_static_arrays: &'a mut Vec<PendingStaticArray>,
         fn_name: &str,
     ) -> Result<Self, String> {
         let mut ctx = Self {
@@ -378,6 +410,7 @@ impl<'a> LowerCtx<'a> {
             locals: HashMap::new(),
             structs,
             strings,
+            pending_static_arrays,
             stack_size: 0,
             emitted_return: false,
             _params_src: params,
@@ -1051,10 +1084,53 @@ fn lower_array_expr_into_regs(
                 fn_name,
             )
         }
+        Expr::ArrayLit(items) => {
+            let values = static_array_values(ctx, items, elem, fn_name)?;
+            if values.is_empty() {
+                emitter.emit_insns(&aarch64::load_i64(0, 0));
+                emitter.emit_insns(&aarch64::load_i64(1, 0));
+                return Ok(());
+            }
+            let adr_site = emitter.emit_insn(aarch64::adr(0, 0));
+            emitter.emit_insns(&aarch64::load_i64(1, values.len() as i64));
+            ctx.pending_static_arrays
+                .push(PendingStaticArray { adr_site, values });
+            Ok(())
+        }
         _ => Err(format!(
             "native-lower: unsupported array return in `{fn_name}`"
         )),
     }
+}
+
+fn static_array_values(
+    ctx: &LowerCtx<'_>,
+    items: &[Expr],
+    elem: &Typ,
+    fn_name: &str,
+) -> Result<Vec<i64>, String> {
+    let mut values = Vec::with_capacity(items.len());
+    for item in items {
+        if let Some(item_ty) = expr_type(item)
+            && !array_item_matches(elem, &item_ty)
+        {
+            return Err(format!(
+                "native-lower: array return type mismatch in `{fn_name}`"
+            ));
+        }
+        let value = match (elem, item) {
+            (Typ::Int, Expr::IntLit(value)) => *value,
+            (Typ::Bool, Expr::BoolLit(value)) => i64::from(*value),
+            (Typ::String, Expr::StringLit(value)) => ctx.string_id(value),
+            _ => {
+                return Err(format!(
+                    "native-lower: unsupported array return in `{fn_name}`"
+                ));
+            }
+        };
+        values.push(value);
+    }
+    Ok(values)
 }
 
 fn lower_if(
@@ -2290,6 +2366,31 @@ fn main() -> Int {
     }
 
     #[test]
+    fn lowers_array_literal_return_as_owned_static_data() {
+        let module = crate::in_lang_parse::parse_in_source(
+            r#"
+fn values() -> [Int] {
+  return [2, 5, 8];
+}
+
+fn main() -> Int {
+  let ys: [Int] = values();
+  return ys[1];
+}
+"#,
+        )
+        .expect("parse");
+
+        let lowered = lower_module(&module, "main").expect("lower");
+        let values: Vec<i64> = lowered
+            .code
+            .chunks_exact(8)
+            .map(|chunk| i64::from_le_bytes(chunk.try_into().expect("chunk")))
+            .collect();
+        assert!(values.windows(3).any(|window| window == [2, 5, 8]));
+    }
+
+    #[test]
     fn lowers_bool_and_string_array_argument_return_paths() {
         let module = crate::in_lang_parse::parse_in_source(
             r#"
@@ -3335,18 +3436,20 @@ fn main() -> Int {
     }
 
     #[test]
-    fn rejects_unsupported_array_literal_return() {
+    fn rejects_array_literal_return_type_mismatch() {
         let module = UnifiedModule {
             decls: vec![Decl::Function {
                 name: "main".into(),
                 params: vec![],
                 ret: Typ::Array(Box::new(Typ::Int)),
-                body: vec![Stmt::Return(Some(Expr::ArrayLit(vec![Expr::IntLit(1)])))],
+                body: vec![Stmt::Return(Some(Expr::ArrayLit(vec![Expr::StringLit(
+                    "bad".into(),
+                )])))],
             }],
         };
         match lower_module(&module, "main") {
             Ok(_) => panic!("expected lowering failure"),
-            Err(err) => assert!(err.contains("unsupported array return")),
+            Err(err) => assert!(err.contains("array return type mismatch")),
         }
     }
 

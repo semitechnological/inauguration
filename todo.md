@@ -12,8 +12,8 @@
   - Bounds acceptance: negative and out-of-bounds indexed stores fail like indexed reads.
   - Borrowed array param stores stay deferred until mutability/calling convention is explicit.
 
-- [ ] Finish native array ownership ABI.
-  - Implement safe array literal returns only after adding owned storage, caller-provided result buffer, or static data policy.
+- [x] Finish native array ownership ABI.
+  - Safe scalar array literal returns now use a static data policy: the native lowerer returns a read-only pointer/length pair for literal arrays instead of exposing callee stack storage.
   - Keep borrowed array returns limited to params/forwarded calls until ownership is explicit.
   - `[Bool]` and `[String]` array args and borrowed returns are covered in native lowering and executable tests.
   - Stable diagnostics for unsupported nested arrays and arrays with aggregate elements now report `native-array-nested-unsupported` and `native-array-aggregate-unsupported`.

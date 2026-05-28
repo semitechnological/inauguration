@@ -76,6 +76,13 @@ pub fn b_cond(cond: u8, offset_bytes: i32) -> u32 {
     0x5400_0000 | (imm19 << 5) | (cond as u32)
 }
 
+pub fn adr(rd: u8, offset_bytes: i32) -> u32 {
+    let imm = offset_bytes as u32;
+    let immlo = imm & 0x3;
+    let immhi = (imm >> 2) & 0x7_FFFF;
+    0x1000_0000 | (immlo << 29) | (immhi << 5) | (rd as u32)
+}
+
 pub fn stp_pre(rt: u8, rt2: u8, offset: i32) -> u32 {
     let imm7 = ((-offset / 8) as u32) & 0x7F;
     0xA980_0000 | (imm7 << 15) | ((rt2 as u32) << 10) | (REG_SP as u32) << 5 | (rt as u32)
