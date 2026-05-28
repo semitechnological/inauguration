@@ -69,7 +69,7 @@
 - [ ] Make `.in` the agent-native hybrid language surface.
   - Keep `.in` simple by default: regular syntax, few special cases, explicit imports, explicit fallibility, explicit outside-world capabilities.
   - Let `.in` call or wrap symbols from language fronts that lower into Core IR.
-  - First slices landed: top-level `import`, `capability`, and `extern <language> fn ...;` declarations parse in `.in`; local relative `.in` imports merge declarations; `std.io` / `std.fs` synthesize bounded stdlib declarations; extern `requires` contracts warn when capabilities are missing; `if` / `else`, `while`, and binary expressions parse into Core IR; `in agent` reports surface facts and extern calls still produce Core IR graph edges.
+  - First slices landed: top-level `import`, `capability`, and `extern <language> fn ...;` declarations parse in `.in`; local relative `.in` imports merge declarations; `std.io` / `std.fs` / `std.http` synthesize bounded stdlib declarations; extern `requires` contracts warn when capabilities are missing; `if` / `else`, `while`, and binary expressions parse into Core IR; `in agent` reports surface facts and extern calls still produce Core IR graph edges.
   - Continue gradual complexity: named package/module resolution, more standard library APIs, richer expression operators, and additional control flow only when shared IR needs them.
   - Prefer standard library APIs over syntax sugar so agents have one obvious path for files, network, process, JSON, HTTP, and CLI tasks.
   - Keep `icore` as the lowest common interchange format for tools and agents that cannot or should not emit `.in` directly.

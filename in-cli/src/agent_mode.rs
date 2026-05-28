@@ -1384,6 +1384,25 @@ fn main() -> void { print("ready"); return; }
     }
 
     #[test]
+    fn in_report_checks_std_http_import_capabilities() {
+        let temp = temp_source(
+            "std-http-missing-capability",
+            "in",
+            r#"
+import std.http;
+fn main() -> String { return http_get("https://example.com"); }
+"#,
+        );
+        let report = json_report(&temp.path, &AgentModeConfig::default()).expect("report");
+        assert_eq!(report.diagnostics[0].code, "AGENT_MISSING_CAPABILITY");
+        assert!(
+            report
+                .effects
+                .contains(&"extern:std:http_get:requires=network.http".to_string())
+        );
+    }
+
+    #[test]
     fn in_report_includes_orchestration_facts_as_status_only() {
         let temp = temp_source(
             "orchestration",

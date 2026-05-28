@@ -61,6 +61,11 @@ pub fn in_standard_import_bindings(import: &str) -> Vec<InExternBinding> {
                 required_capabilities: vec!["fs.write".into()],
             },
         ],
+        "std.http" => vec![InExternBinding {
+            language: "std".into(),
+            name: "http_get".into(),
+            required_capabilities: vec!["network.http".into()],
+        }],
         _ => Vec::new(),
     }
 }
@@ -83,6 +88,12 @@ fn binding_decl(binding: &InExternBinding) -> Decl {
             name: binding.name.clone(),
             params: vec![("path".into(), Typ::String), ("text".into(), Typ::String)],
             ret: Typ::Void,
+            body: Vec::new(),
+        },
+        "http_get" => Decl::Function {
+            name: binding.name.clone(),
+            params: vec![("url".into(), Typ::String)],
+            ret: Typ::String,
             body: Vec::new(),
         },
         _ => Decl::Function {
@@ -2301,6 +2312,21 @@ fn main() -> void { read_file("x"); return; }
                 .iter()
                 .any(|decl| matches!(decl, Decl::Function { name, .. } if name == "print"))
         );
+    }
+
+    #[test]
+    fn std_http_import_adds_core_function_declaration() {
+        let src = "import std.http;\ncapability network.http;\nfn main() -> String { return http_get(\"https://example.com\"); }\n";
+        let module = parse_in_source(src).expect("std http import");
+        let decl = module.decls.iter().find_map(|decl| match decl {
+            Decl::Function {
+                name, params, ret, ..
+            } if name == "http_get" => Some((params, ret)),
+            _ => None,
+        });
+        let (params, ret) = decl.expect("http_get");
+        assert_eq!(params, &vec![("url".to_string(), Typ::String)]);
+        assert_eq!(ret, &Typ::String);
     }
 
     #[test]
