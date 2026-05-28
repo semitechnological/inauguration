@@ -85,6 +85,7 @@ pub enum Instruction {
     FieldAccess(String),
     ArrayInit(usize),
     IndexAccess,
+    IndexSet(usize),
     /// Jump to label
     Jump(String),
     /// Jump if top of stack is false (pop value)
@@ -173,6 +174,7 @@ fn instruction_to_text(inst: &Instruction) -> String {
         Instruction::FieldAccess(name) => format!("field {}", name),
         Instruction::ArrayInit(len) => format!("array_init {}", len),
         Instruction::IndexAccess => "index".to_string(),
+        Instruction::IndexSet(slot) => format!("index_set {}", slot),
         Instruction::Jump(label) => format!("jmp {}", label),
         Instruction::JumpIfFalse(label) => format!("jmpf {}", label),
         Instruction::JumpIfTrue(label) => format!("jmpt {}", label),
@@ -334,6 +336,13 @@ fn parse_instruction(line: &str) -> Result<Instruction, String> {
             Ok(Instruction::ArrayInit(len))
         }
         "index" => Ok(Instruction::IndexAccess),
+        "index_set" => {
+            let slot = parts
+                .get(1)
+                .and_then(|s| s.parse::<usize>().ok())
+                .ok_or("parse error")?;
+            Ok(Instruction::IndexSet(slot))
+        }
         "jmp" => {
             let label = parts.get(1).ok_or("parse error")?.to_string();
             Ok(Instruction::Jump(label))

@@ -18,10 +18,10 @@
   - Add tests for `[Bool]`/`[String]` array args and returns after `Int` path is stable.
   - Add stable diagnostics for unsupported nested arrays and arrays with aggregate elements.
 
-- [ ] Fill bytecode/Core IR array mutation parity.
+- [x] Fill bytecode/Core IR array mutation parity.
   - Lower `Stmt::IndexAssign` from Core IR to bytecode/runtime semantics instead of only native AArch64.
-  - Add VM coverage for `xs[i] = v; return xs[i];` once array storage exists in bytecode values.
-  - Keep native and bytecode diagnostics aligned for unsupported borrowed/owned array mutation.
+  - Add VM coverage for `xs[i] = v; return xs[i];` through the bytecode compiler.
+  - Keep native and bytecode local-array mutation aligned; borrowed/owned array mutation still follows the native ownership TODO.
 
 - [x] Make hot reload patch planning graph-aware.
   - Pass structured SIL graph detail into `plan_patch_with_sil_graph` instead of only `Option<u32>` edge counts.

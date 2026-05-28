@@ -160,6 +160,24 @@ impl BytecodeVM {
                         return Err("index access on non-array".to_string());
                     }
                 }
+                Instruction::IndexSet(slot) => {
+                    let value = self.stack.pop().ok_or("stack underflow")?;
+                    let index = self.stack.pop().ok_or("stack underflow")?.to_int();
+                    if index < 0 {
+                        return Err(format!("array index out of bounds: {}", index));
+                    }
+                    let Some(local) = self.frames[frame_idx].locals.get_mut(slot) else {
+                        return Err(format!("invalid local slot: {}", slot));
+                    };
+                    if let Value::Array(values) = local {
+                        let Some(item) = values.get_mut(index as usize) else {
+                            return Err(format!("array index out of bounds: {}", index));
+                        };
+                        *item = value;
+                    } else {
+                        return Err("index assignment on non-array".to_string());
+                    }
+                }
                 Instruction::Jump(label) => {
                     let target = label_map
                         .get(label.as_str())

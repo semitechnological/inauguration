@@ -434,6 +434,22 @@ fn parse_sil_instruction_to_bytecode(
         out.push(Instruction::Store(slot));
         return Ok(out);
     }
+    if let Some(rest) = line.strip_prefix("index_store_var ").map(str::trim) {
+        let mut parts = rest.split_whitespace();
+        let name = parts.next().ok_or("parse error")?;
+        let index_reg = parts
+            .next()
+            .map(|part| part.trim_end_matches(','))
+            .ok_or("parse error")?;
+        let value_reg = parts.next().ok_or("parse error")?;
+        let index_slot = value_map.get(index_reg).ok_or("parse error")?;
+        let value_slot = value_map.get(value_reg).ok_or("parse error")?;
+        out.push(Instruction::Load(*index_slot));
+        out.push(Instruction::Load(*value_slot));
+        let slot = variable_slot(name, local_counter, var_slots);
+        out.push(Instruction::IndexSet(slot));
+        return Ok(out);
+    }
 
     // %0 = integer_literal $Builtin.Int64, 42
     if line.contains("=") && line.contains("integer_literal") {

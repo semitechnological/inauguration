@@ -165,6 +165,21 @@ mod tests {
     }
 
     #[test]
+    fn compiles_array_index_assignment() {
+        let path = temp_file("array-index-assign.in");
+        fs::write(
+            &path,
+            "fn main() -> Int { let xs: [Int] = [2, 5, 8]; xs[1] = 9; return xs[1]; }\n",
+        )
+        .unwrap();
+
+        let output = compile_source_path(&path, "App", ParserCli::Auto).unwrap();
+        assert_eq!(run_bytecode_module(output.module).unwrap(), Value::Int(9));
+
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn compiles_struct_method_call() {
         let path = temp_file("method-call.in");
         fs::write(

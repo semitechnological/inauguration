@@ -397,11 +397,16 @@ fn lower_stmts_with_env(
                 }
             }
             Stmt::IndexAssign { base, index, value } => {
-                let base_id = lower_expr(base, env, direct_env, ssa, &mut out);
+                let Expr::Ident(name) = base else {
+                    let _ = lower_expr(base, env, direct_env, ssa, &mut out);
+                    let _ = lower_expr(index, env, direct_env, ssa, &mut out);
+                    let _ = lower_expr(value, env, direct_env, ssa, &mut out);
+                    continue;
+                };
                 let index_id = lower_expr(index, env, direct_env, ssa, &mut out);
                 let value_id = lower_expr(value, env, direct_env, ssa, &mut out);
                 out.push_str(&format!(
-                    "index_store %{base_id}, %{index_id}, %{value_id}\n"
+                    "index_store_var {name} %{index_id}, %{value_id}\n"
                 ));
             }
             Stmt::Expr(e) => {
