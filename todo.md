@@ -15,7 +15,7 @@
 - [ ] Finish native array ownership ABI.
   - Implement safe array literal returns only after adding owned storage, caller-provided result buffer, or static data policy.
   - Keep borrowed array returns limited to params/forwarded calls until ownership is explicit.
-  - Add tests for `[Bool]`/`[String]` array args and returns after `Int` path is stable.
+  - `[Bool]` and `[String]` array args and borrowed returns are covered in native lowering and executable tests.
   - Add stable diagnostics for unsupported nested arrays and arrays with aggregate elements.
 
 - [x] Fill bytecode/Core IR array mutation parity.

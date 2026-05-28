@@ -2290,6 +2290,34 @@ fn main() -> Int {
     }
 
     #[test]
+    fn lowers_bool_and_string_array_argument_return_paths() {
+        let module = crate::in_lang_parse::parse_in_source(
+            r#"
+fn pick_bool(xs: [Bool], i: Int) -> Bool {
+  return xs[i];
+}
+
+fn identity_strings(xs: [String]) -> [String] {
+  return xs;
+}
+
+fn main() -> Int {
+  let flags: [Bool] = [false, true];
+  let words: [String] = ["no", "ok"];
+  let returned: [String] = identity_strings(words);
+  if pick_bool(flags, 1) && returned[1] == "ok" {
+    return 7;
+  }
+  return 1;
+}
+"#,
+        )
+        .expect("parse");
+
+        lower_module(&module, "main").expect("lower");
+    }
+
+    #[test]
     fn lowers_local_reassignment() {
         let module = UnifiedModule {
             decls: vec![Decl::Function {
@@ -3106,6 +3134,73 @@ fn main() -> Int {
                 assert!(
                     dump.contains("str\tx0, [sp") && dump.contains("str\tx1, [sp"),
                     "expected array return pointer/length stores in __text; otool:\n{dump}"
+                );
+            }
+            other => panic!(
+                "unexpected native exit {:?}; stdout={:?} stderr={:?}",
+                other, output.stdout, output.stderr
+            ),
+        }
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    #[test]
+    fn bool_string_array_executable_exits_with_comparison_value() {
+        let module = crate::in_lang_parse::parse_in_source(
+            r#"
+fn pick_bool(xs: [Bool], i: Int) -> Bool {
+  return xs[i];
+}
+
+fn identity_strings(xs: [String]) -> [String] {
+  return xs;
+}
+
+fn main() -> Int {
+  let flags: [Bool] = [false, true];
+  let words: [String] = ["no", "ok"];
+  let returned: [String] = identity_strings(words);
+  if pick_bool(flags, 1) && returned[1] == "ok" {
+    return 7;
+  }
+  return 1;
+}
+"#,
+        )
+        .expect("parse");
+        let path = temp_executable("bool-string-array-exe");
+        let _ = std::fs::remove_file(&path);
+        compile_native_executable(&module, "main", &path).expect("compile");
+
+        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::process::ExitStatusExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let sign = std::process::Command::new("codesign")
+            .args(["-s", "-", "-f", path.to_str().unwrap()])
+            .status()
+            .expect("codesign spawn");
+        assert!(sign.success(), "codesign failed for native executable");
+
+        let output = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(path.to_str().unwrap())
+            .output()
+            .expect("run executable");
+        match output.status.code() {
+            Some(7) => {}
+            None if output.status.signal() == Some(9) => {
+                let otool = std::process::Command::new("otool")
+                    .args(["-tV", path.to_str().unwrap()])
+                    .output()
+                    .expect("otool");
+                let dump = String::from_utf8_lossy(&otool.stdout);
+                assert!(
+                    dump.contains("ldr\tx0, [")
+                        && dump.contains("cmp")
+                        && dump.contains("mov\tx0, #0x7"),
+                    "expected bool/string array index and comparison path in __text; otool:\n{dump}"
                 );
             }
             other => panic!(
