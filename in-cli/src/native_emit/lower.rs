@@ -338,6 +338,11 @@ enum LocalSlot {
         elem: Typ,
         offsets: Vec<u32>,
     },
+    ArrayParam {
+        elem: Typ,
+        ptr_offset: u32,
+        len_offset: u32,
+    },
     Struct {
         typ: String,
         fields: HashMap<String, u32>,
@@ -413,9 +418,32 @@ impl<'a> LowerCtx<'a> {
                         },
                     );
                 }
+                Typ::Array(elem) => {
+                    if !is_native_scalar_type(elem) {
+                        return Err(format!(
+                            "native-lower: unsupported parameter type in `{fn_name}` (only scalar arrays)"
+                        ));
+                    }
+                    if abi_idx + 1 >= 8 {
+                        return Err(format!("native-lower: too many parameters in `{fn_name}`"));
+                    }
+                    let ptr_offset = ctx.alloc_slot();
+                    let len_offset = ctx.alloc_slot();
+                    ctx.param_stores.push((abi_idx as u8, ptr_offset));
+                    ctx.param_stores.push(((abi_idx + 1) as u8, len_offset));
+                    ctx.locals.insert(
+                        name.clone(),
+                        LocalSlot::ArrayParam {
+                            elem: elem.as_ref().clone(),
+                            ptr_offset,
+                            len_offset,
+                        },
+                    );
+                    abi_idx += 2;
+                }
                 _ => {
                     return Err(format!(
-                        "native-lower: unsupported parameter type in `{fn_name}` (only Int/Bool/String/scalar structs)"
+                        "native-lower: unsupported parameter type in `{fn_name}` (only Int/Bool/String/scalar arrays/scalar structs)"
                     ));
                 }
             }
@@ -656,6 +684,9 @@ fn lower_store_local(
             }
             Ok(())
         }
+        LocalSlot::ArrayParam { .. } => Err(format!(
+            "native-lower: unsupported array assignment in `{fn_name}`"
+        )),
         LocalSlot::Struct { typ, fields } => lower_struct_expr_into_slots(
             emitter,
             ctx,
@@ -1042,7 +1073,9 @@ fn lower_expr_into(
                     LocalSlot::Scalar(offset) => {
                         emitter.emit_u32(aarch64::ldr64(rd, aarch64::REG_SP, *offset));
                     }
-                    LocalSlot::Array { .. } | LocalSlot::Struct { .. } => {
+                    LocalSlot::Array { .. }
+                    | LocalSlot::ArrayParam { .. }
+                    | LocalSlot::Struct { .. } => {
                         return Err(format!(
                             "native-lower: unsupported aggregate value `{name}` in `{fn_name}`"
                         ));
@@ -1127,16 +1160,11 @@ fn lower_index(
             "native-lower: unsupported array index base in `{fn_name}`"
         ));
     };
-    let Some(LocalSlot::Array { offsets, .. }) = ctx.locals.get(name).cloned() else {
+    let Some(slot) = ctx.locals.get(name).cloned() else {
         return Err(format!(
             "native-lower: unsupported array index base in `{fn_name}`"
         ));
     };
-    if offsets.is_empty() {
-        return Err(format!(
-            "native-lower: unsupported empty array index in `{fn_name}`"
-        ));
-    }
     let index_reg = if rd == 1 { 2 } else { 1 };
     lower_expr_into(
         emitter,
@@ -1150,21 +1178,45 @@ fn lower_index(
     emitter.emit_u32(aarch64::cmp_reg64(index_reg, aarch64::REG_XZR));
     let negative_branch = emitter.emit_insn(aarch64::b_cond(11, 0));
     let len_reg = pick_scratch(&[rd, index_reg]);
-    emitter.emit_insns(&aarch64::load_i64(len_reg, offsets.len() as i64));
+    let base_reg = match slot {
+        LocalSlot::Array { offsets, .. } => {
+            if offsets.is_empty() {
+                return Err(format!(
+                    "native-lower: unsupported empty array index in `{fn_name}`"
+                ));
+            }
+            emitter.emit_insns(&aarch64::load_i64(len_reg, offsets.len() as i64));
+            let base_offset = offsets[0];
+            if base_offset == 0 {
+                aarch64::REG_SP
+            } else {
+                let scratch = pick_scratch(&[rd, index_reg, len_reg]);
+                emitter.emit_u32(aarch64::add_imm64(
+                    scratch,
+                    aarch64::REG_SP,
+                    base_offset as u16,
+                ));
+                scratch
+            }
+        }
+        LocalSlot::ArrayParam {
+            ptr_offset,
+            len_offset,
+            ..
+        } => {
+            emitter.emit_u32(aarch64::ldr64(len_reg, aarch64::REG_SP, len_offset));
+            let scratch = pick_scratch(&[rd, index_reg, len_reg]);
+            emitter.emit_u32(aarch64::ldr64(scratch, aarch64::REG_SP, ptr_offset));
+            scratch
+        }
+        _ => {
+            return Err(format!(
+                "native-lower: unsupported array index base in `{fn_name}`"
+            ));
+        }
+    };
     emitter.emit_u32(aarch64::cmp_reg64(index_reg, len_reg));
     let oob_branch = emitter.emit_insn(aarch64::b_cond(10, 0));
-    let base_offset = offsets[0];
-    let base_reg = if base_offset == 0 {
-        aarch64::REG_SP
-    } else {
-        let scratch = pick_scratch(&[rd, index_reg, len_reg]);
-        emitter.emit_u32(aarch64::add_imm64(
-            scratch,
-            aarch64::REG_SP,
-            base_offset as u16,
-        ));
-        scratch
-    };
     emitter.emit_u32(aarch64::ldr64_reg_offset(rd, base_reg, index_reg));
     let end_branch = emitter.emit_insn(aarch64::b(0));
     let failure_offset = emitter.len() as i32;
@@ -1438,8 +1490,71 @@ fn lower_call_arg(
             pending_calls,
             fn_name,
         ),
+        Typ::Array(elem) => lower_array_call_arg(emitter, ctx, arg, elem, reg, fn_name),
         _ => Err(format!(
             "native-lower: unsupported call argument in `{fn_name}`"
+        )),
+    }
+}
+
+fn lower_array_call_arg(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    arg: &Expr,
+    elem: &Typ,
+    reg: u8,
+    fn_name: &str,
+) -> Result<u8, String> {
+    if !is_native_scalar_type(elem) {
+        return Err(format!(
+            "native-lower: unsupported call argument in `{fn_name}`"
+        ));
+    }
+    let Expr::Ident(local) = arg else {
+        return Err(format!(
+            "native-lower: unsupported aggregate argument in `{fn_name}`"
+        ));
+    };
+    let Some(slot) = ctx.locals.get(local) else {
+        return Err(format!(
+            "native-lower: unsupported aggregate argument `{local}` in `{fn_name}`"
+        ));
+    };
+    match slot {
+        LocalSlot::Array {
+            elem: actual,
+            offsets,
+        } => {
+            if actual != elem {
+                return Err(format!(
+                    "native-lower: array argument type mismatch in `{fn_name}`"
+                ));
+            }
+            if offsets.is_empty() {
+                return Err(format!(
+                    "native-lower: unsupported empty array argument in `{fn_name}`"
+                ));
+            }
+            emitter.emit_u32(aarch64::add_imm64(reg, aarch64::REG_SP, offsets[0] as u16));
+            emitter.emit_insns(&aarch64::load_i64(reg + 1, offsets.len() as i64));
+            Ok(reg + 2)
+        }
+        LocalSlot::ArrayParam {
+            elem: actual,
+            ptr_offset,
+            len_offset,
+        } => {
+            if actual != elem {
+                return Err(format!(
+                    "native-lower: array argument type mismatch in `{fn_name}`"
+                ));
+            }
+            emitter.emit_u32(aarch64::ldr64(reg, aarch64::REG_SP, *ptr_offset));
+            emitter.emit_u32(aarch64::ldr64(reg + 1, aarch64::REG_SP, *len_offset));
+            Ok(reg + 2)
+        }
+        _ => Err(format!(
+            "native-lower: unsupported aggregate argument `{local}` in `{fn_name}`"
         )),
     }
 }
@@ -1596,9 +1711,17 @@ fn native_param_abi_slots(
                     slots += 1;
                 }
             }
+            Typ::Array(elem) => {
+                if !is_native_scalar_type(elem) {
+                    return Err(format!(
+                        "native-lower: unsupported parameter type in `{fn_name}` (only scalar arrays)"
+                    ));
+                }
+                slots += 2;
+            }
             _ => {
                 return Err(format!(
-                    "native-lower: unsupported parameter type in `{fn_name}` (only Int/Bool/String/scalar structs)"
+                    "native-lower: unsupported parameter type in `{fn_name}` (only Int/Bool/String/scalar arrays/scalar structs)"
                 ));
             }
         }
@@ -1899,6 +2022,25 @@ fn main() -> Int {
   let xs: [Int] = [2, 5, 8];
   let i: Int = 1;
   return xs[i];
+}
+"#,
+        )
+        .expect("parse");
+
+        lower_module(&module, "main").expect("lower");
+    }
+
+    #[test]
+    fn lowers_array_parameter_index_expressions() {
+        let module = crate::in_lang_parse::parse_in_source(
+            r#"
+fn pick(xs: [Int], i: Int) -> Int {
+  return xs[i];
+}
+
+fn main() -> Int {
+  let xs: [Int] = [2, 5, 8];
+  return pick(xs, 2);
 }
 "#,
         )
@@ -2450,6 +2592,62 @@ fn main() -> Int {
                 assert!(
                     dump.contains("ldr\tx0, [sp, x1, lsl #3]"),
                     "expected dynamic array index load in __text; otool:\n{dump}"
+                );
+            }
+            other => panic!(
+                "unexpected native exit {:?}; stdout={:?} stderr={:?}",
+                other, output.stdout, output.stderr
+            ),
+        }
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    #[test]
+    fn array_parameter_executable_exits_with_indexed_value() {
+        let module = crate::in_lang_parse::parse_in_source(
+            r#"
+fn pick(xs: [Int], i: Int) -> Int {
+  return xs[i];
+}
+
+fn main() -> Int {
+  let xs: [Int] = [2, 5, 8];
+  return pick(xs, 2);
+}
+"#,
+        )
+        .expect("parse");
+        let path = temp_executable("array-param-exe");
+        let _ = std::fs::remove_file(&path);
+        compile_native_executable(&module, "main", &path).expect("compile");
+
+        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::process::ExitStatusExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let sign = std::process::Command::new("codesign")
+            .args(["-s", "-", "-f", path.to_str().unwrap()])
+            .status()
+            .expect("codesign spawn");
+        assert!(sign.success(), "codesign failed for native executable");
+
+        let output = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(path.to_str().unwrap())
+            .output()
+            .expect("run executable");
+        match output.status.code() {
+            Some(8) => {}
+            None if output.status.signal() == Some(9) => {
+                let otool = std::process::Command::new("otool")
+                    .args(["-tV", path.to_str().unwrap()])
+                    .output()
+                    .expect("otool");
+                let dump = String::from_utf8_lossy(&otool.stdout);
+                assert!(
+                    dump.contains("mov\tx1, #0x3") && dump.contains("ldr\tx0, [x"),
+                    "expected array parameter pointer/length instructions in __text; otool:\n{dump}"
                 );
             }
             other => panic!(
