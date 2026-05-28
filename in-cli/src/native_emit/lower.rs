@@ -505,16 +505,24 @@ impl<'a> LowerCtx<'a> {
         }
         let resolved = typ.cloned().or_else(|| expr_type(expr));
         if let Some(Typ::Array(elem)) = resolved.as_ref() {
-            let Expr::ArrayLit(items) = expr else {
-                return Err(format!(
-                    "native-lower: unsupported let binding type in `{fn_name}` (array locals require literal initializers)"
-                ));
-            };
             if !is_native_scalar_type(elem) {
                 return Err(format!(
                     "native-lower: unsupported array element type in `{fn_name}` (only Int/Bool/String elements)"
                 ));
             }
+            let Expr::ArrayLit(items) = expr else {
+                let ptr_offset = self.alloc_slot();
+                let len_offset = self.alloc_slot();
+                self.locals.insert(
+                    name.to_string(),
+                    LocalSlot::ArrayParam {
+                        elem: elem.as_ref().clone(),
+                        ptr_offset,
+                        len_offset,
+                    },
+                );
+                return Ok(());
+            };
             let mut offsets = Vec::with_capacity(items.len());
             for item in items {
                 if let Some(item_ty) = expr_type(item)
@@ -568,18 +576,32 @@ fn lower_stmt(
     match stmt {
         Stmt::Return(expr) => {
             if let Some(expr) = expr {
-                if let Typ::Named(struct_name) = ret_typ {
-                    lower_struct_expr_into_regs(
-                        emitter,
-                        ctx,
-                        expr,
-                        struct_name,
-                        functions,
-                        pending_calls,
-                        fn_name,
-                    )?;
-                } else {
-                    lower_expr_into(emitter, ctx, expr, 0, functions, pending_calls, fn_name)?;
+                match ret_typ {
+                    Typ::Named(struct_name) => {
+                        lower_struct_expr_into_regs(
+                            emitter,
+                            ctx,
+                            expr,
+                            struct_name,
+                            functions,
+                            pending_calls,
+                            fn_name,
+                        )?;
+                    }
+                    Typ::Array(elem) => {
+                        lower_array_expr_into_regs(
+                            emitter,
+                            ctx,
+                            expr,
+                            elem,
+                            functions,
+                            pending_calls,
+                            fn_name,
+                        )?;
+                    }
+                    _ => {
+                        lower_expr_into(emitter, ctx, expr, 0, functions, pending_calls, fn_name)?;
+                    }
                 }
             } else {
                 emitter.emit_insns(&aarch64::load_i64(0, 0));
@@ -684,9 +706,24 @@ fn lower_store_local(
             }
             Ok(())
         }
-        LocalSlot::ArrayParam { .. } => Err(format!(
-            "native-lower: unsupported array assignment in `{fn_name}`"
-        )),
+        LocalSlot::ArrayParam {
+            elem,
+            ptr_offset,
+            len_offset,
+        } => {
+            lower_array_expr_into_regs(
+                emitter,
+                ctx,
+                expr,
+                &elem,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, ptr_offset));
+            emitter.emit_u32(aarch64::str64(1, aarch64::REG_SP, len_offset));
+            Ok(())
+        }
         LocalSlot::Struct { typ, fields } => lower_struct_expr_into_slots(
             emitter,
             ctx,
@@ -871,6 +908,71 @@ fn lower_struct_expr_into_regs(
         }
         _ => Err(format!(
             "native-lower: unsupported struct return in `{fn_name}`"
+        )),
+    }
+}
+
+fn lower_array_expr_into_regs(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    expr: &Expr,
+    elem: &Typ,
+    functions: &HashMap<String, FunctionInfo>,
+    pending_calls: &mut Vec<PendingCall>,
+    fn_name: &str,
+) -> Result<(), String> {
+    if !is_native_scalar_type(elem) {
+        return Err(format!(
+            "native-lower: unsupported array return in `{fn_name}`"
+        ));
+    }
+    match expr {
+        Expr::Ident(local) => {
+            let Some(slot) = ctx.locals.get(local) else {
+                return Err(format!(
+                    "native-lower: unsupported array return in `{fn_name}`"
+                ));
+            };
+            match slot {
+                LocalSlot::ArrayParam {
+                    elem: actual,
+                    ptr_offset,
+                    len_offset,
+                } => {
+                    if actual != elem {
+                        return Err(format!(
+                            "native-lower: array return type mismatch in `{fn_name}`"
+                        ));
+                    }
+                    emitter.emit_u32(aarch64::ldr64(0, aarch64::REG_SP, *ptr_offset));
+                    emitter.emit_u32(aarch64::ldr64(1, aarch64::REG_SP, *len_offset));
+                    Ok(())
+                }
+                _ => Err(format!(
+                    "native-lower: unsupported array return in `{fn_name}`"
+                )),
+            }
+        }
+        Expr::Call { callee, args } => {
+            let return_typ = call_return_type(callee, functions, fn_name)?;
+            if return_typ != &Typ::Array(Box::new(elem.clone())) {
+                return Err(format!(
+                    "native-lower: array return type mismatch in `{fn_name}`"
+                ));
+            }
+            lower_call(
+                emitter,
+                ctx,
+                callee,
+                args,
+                0,
+                functions,
+                pending_calls,
+                fn_name,
+            )
+        }
+        _ => Err(format!(
+            "native-lower: unsupported array return in `{fn_name}`"
         )),
     }
 }
@@ -1653,8 +1755,9 @@ fn ensure_return_type(
             native_struct_fields(structs, struct_name, fn_name)?;
             Ok(())
         }
+        Typ::Array(elem) if is_native_scalar_type(elem) => Ok(()),
         _ => Err(format!(
-            "native-lower: unsupported return type in `{fn_name}` (only Int/Bool/String/Void/scalar structs)"
+            "native-lower: unsupported return type in `{fn_name}` (only Int/Bool/String/Void/scalar arrays/scalar structs)"
         )),
     }
 }
@@ -2041,6 +2144,26 @@ fn pick(xs: [Int], i: Int) -> Int {
 fn main() -> Int {
   let xs: [Int] = [2, 5, 8];
   return pick(xs, 2);
+}
+"#,
+        )
+        .expect("parse");
+
+        lower_module(&module, "main").expect("lower");
+    }
+
+    #[test]
+    fn lowers_array_return_index_expressions() {
+        let module = crate::in_lang_parse::parse_in_source(
+            r#"
+fn identity(xs: [Int]) -> [Int] {
+  return xs;
+}
+
+fn main() -> Int {
+  let xs: [Int] = [2, 5, 8];
+  let ys: [Int] = identity(xs);
+  return ys[1];
 }
 "#,
         )
@@ -2660,6 +2783,63 @@ fn main() -> Int {
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     #[test]
+    fn array_return_executable_exits_with_indexed_value() {
+        let module = crate::in_lang_parse::parse_in_source(
+            r#"
+fn identity(xs: [Int]) -> [Int] {
+  return xs;
+}
+
+fn main() -> Int {
+  let xs: [Int] = [2, 5, 8];
+  let ys: [Int] = identity(xs);
+  return ys[1];
+}
+"#,
+        )
+        .expect("parse");
+        let path = temp_executable("array-return-exe");
+        let _ = std::fs::remove_file(&path);
+        compile_native_executable(&module, "main", &path).expect("compile");
+
+        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::process::ExitStatusExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let sign = std::process::Command::new("codesign")
+            .args(["-s", "-", "-f", path.to_str().unwrap()])
+            .status()
+            .expect("codesign spawn");
+        assert!(sign.success(), "codesign failed for native executable");
+
+        let output = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(path.to_str().unwrap())
+            .output()
+            .expect("run executable");
+        match output.status.code() {
+            Some(5) => {}
+            None if output.status.signal() == Some(9) => {
+                let otool = std::process::Command::new("otool")
+                    .args(["-tV", path.to_str().unwrap()])
+                    .output()
+                    .expect("otool");
+                let dump = String::from_utf8_lossy(&otool.stdout);
+                assert!(
+                    dump.contains("str\tx0, [sp") && dump.contains("str\tx1, [sp"),
+                    "expected array return pointer/length stores in __text; otool:\n{dump}"
+                );
+            }
+            other => panic!(
+                "unexpected native exit {:?}; stdout={:?} stderr={:?}",
+                other, output.stdout, output.stderr
+            ),
+        }
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    #[test]
     fn local_array_negative_index_executable_exits_with_failure() {
         let module = crate::in_lang_parse::parse_in_source(
             r#"
@@ -2782,7 +2962,7 @@ fn main() -> Int {
     }
 
     #[test]
-    fn rejects_unsupported_array_return() {
+    fn rejects_unsupported_array_literal_return() {
         let module = UnifiedModule {
             decls: vec![Decl::Function {
                 name: "main".into(),
@@ -2793,7 +2973,7 @@ fn main() -> Int {
         };
         match lower_module(&module, "main") {
             Ok(_) => panic!("expected lowering failure"),
-            Err(err) => assert!(err.contains("unsupported return type")),
+            Err(err) => assert!(err.contains("unsupported array return")),
         }
     }
 }

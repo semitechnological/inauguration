@@ -1,3 +1,23 @@
+- [x] Fill owned compiler parity slices for native `.in` aggregates.
+  - Optimizer parity landed earlier: Core IR constant folding, dead stores, bytecode peepholes, parameter-store cleanup, and trivial branch cleanup.
+  - Multi-front body parity landed earlier: bounded TypeScript, C#, Python, Zig, Kotlin body extraction plus scalar body coverage.
+  - Native scalar parity landed: expression statements, bool literals, unary ops, assignment, runtime `if`, `while`, and numeric `match`.
+  - Native struct locals, struct methods, string scalars, local arrays, array bounds checks, struct args, struct returns, and array args are implemented and tested.
+  - Current slice: borrowed array returns. Acceptance: `fn identity(xs: [Int]) -> [Int] { return xs; }` compiles native; caller can bind return and index it; array literal return stays rejected to avoid escaping callee stack storage.
+
+- [ ] Finish native array mutation and ownership semantics.
+  - Add indexed assignment AST instead of treating `xs[i] = v` as assignment to raw string `xs[i]`.
+  - Typecheck/verifier acceptance: base is `[T]`, index is `Int`, value is compatible with `T`.
+  - Native acceptance: `let xs: [Int] = [2,5,8]; xs[1] = 9; return xs[1];` exits `9`.
+  - Bounds acceptance: negative and out-of-bounds indexed stores fail like indexed reads.
+  - Decide mutability/calling convention for storing into array params before enabling `xs[i] = v` on borrowed arrays.
+
+- [ ] Finish native array ownership ABI.
+  - Implement safe array literal returns only after adding owned storage, caller-provided result buffer, or static data policy.
+  - Keep borrowed array returns limited to params/forwarded calls until ownership is explicit.
+  - Add tests for `[Bool]`/`[String]` array args and returns after `Int` path is stable.
+  - Add stable diagnostics for unsupported nested arrays and arrays with aggregate elements.
+
 - [x] Make hot reload patch planning graph-aware.
   - Pass structured SIL graph detail into `plan_patch_with_sil_graph` instead of only `Option<u32>` edge counts.
   - Keep downgrade rules conservative: downgrade only when the callee set intersects changed symbols or another explicit dependency signal.
