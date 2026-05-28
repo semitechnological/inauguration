@@ -1,53 +1,91 @@
 # inauguration
 
-`inauguration` targets an **ultrafast** compiler for **general object-oriented and C-family** languages: multiple parsers lower into one **Core IR**, then into **textual SIL** that **`hybrid_sil`** analyzes in Rust. **Swift** is a first shipping surface (**`swiftc`** emit, in-tree **Swift-shaped subset**, SwiftPM staging) alongside **`.in`**, **`.icore`**, **Tree-sitter** polyglot fronts, and bounded **Rust / Go / V** lowers. A **SwiftUI hot reload** daemon and **`in`** CLI wrap the same pipeline for day-to-day workflows.
+`inauguration` is a language and general compiler project.
 
-## What it is
+The native language is **`.in`**: a small, capability-aware systems and orchestration language designed around deterministic source, machine-readable structure, explicit effects, and compiler-managed execution graphs.
 
-- **Compiler core** (`in-cli` + `compiler/rust-driver`): shared **Core IR** → **`lower_core`** → textual SIL → **`hybrid_sil`** passes; fronts include **C / C++ / ObjC++** and other Tree-sitter grammars (see [parser surface](docs/architecture/parser-surface.md)), **`.in`** / **`.icore`**, dedicated **Rust / Go / V** parsers, and Swift via **`swiftc`** or the **hermetic** **`IN_NATIVE_SWIFT_SIL`** path ([subset grammar](docs/architecture/subset-grammar.md)); see [multi-frontend IR](docs/architecture/multi-frontend-ir.md) and [`.in` language](docs/architecture/in-language.md).
-- **`in` CLI** (crate **`inauguration`**, binary **`in`**): **`in build`**, **`in dev`**, **`in test`**, **`in bench`**, plugins, optional SwiftPM staging — [Core commands](#core-commands).
-- **Hot reload** for SwiftUI: Unix-socket daemon in **`in`**, metrics, **`runtime/swift-preview-host`**, wire format under **`shared/protocol`**.
-- **Ecosystem glue**: **`plugins/registry`**, **`docs-site`**, **`scripts`** and **`docs/benchmarks`** harnesses.
+The compiler also acts as a general language ingestion pipeline. Multiple frontends lower into one shared **Core IR**, then move through common analysis and backend paths. The goal is one compiler architecture that can understand `.in`, `.icore`, C-family languages, Swift-shaped subsets, Rust, Go, V, OCaml, Java/Groovy body subsets, and other Tree-sitter-compatible source surfaces as the frontends mature.
 
-The published **`in`** binary bundles the default hybrid compile wave for **`in build`**, hotreload daemon, and socket-based dev preview. **`in dev`** uses a lightweight client by default; pass **`--preview-client swift`** when you want the SwiftPM preview host. Use **`in build --swiftpm`** only when you need SwiftPM **`swift build`** plus staging as a fallback alongside the in-tree pipeline.
+## What It Is
 
-Hotreload wire formats live under **`shared/protocol`**; regenerators and benchmark helpers live in **`in-cli`** and **`scripts`** (see **`scripts/check-protocol-models.sh`** and **`./scripts/bench-swift.sh`**).
+- **`.in` language**: top-level imports, capabilities, extern bindings, structs, functions, bounded bodies, annotations, distributed-function facts, and parallel-region facts.
+- **General compiler pipeline**: parser selection, frontend lowering, Core IR, textual SIL lowering, bytecode/native backend work, graph reports, and package/capability metadata.
+- **`in` CLI**: build, inspect, graph, package, test, run, and developer workflow commands.
+- **Agent-readable compiler facts**: JSON reports for parser decisions, imports, capabilities, effects, call graphs, orchestration facts, diagnostics, repair plans, and timing.
+- **Swift and hot reload tooling**: Swift-shaped subset work, optional Swift toolchain paths, protocol models, and a SwiftUI preview/hotreload runtime.
+- **Plugin hooks**: project accelerators and compiler workflow extensions under `plugins/registry`.
 
-**Protocol models:** Rust **`protocol-gen`** (`cargo run --manifest-path in-cli/Cargo.toml --bin protocol-gen`) is the **canonical checked-in codegen** from `shared/protocol/events.schema.json`. **V** is retained for **`scripts/bench_swift.v`** (Swift vs `in` timings via **`./scripts/bench-swift.sh`**) and optional **`shared/protocol/generate_models.v`** minor-tool parity (same emitted Rust/Swift as `protocol-gen`; headers identify the V generator).
+Inauguration is not a frontend UI framework. Frontend rendering and declarative UI belong in sibling projects such as Crepuscularity. Inauguration owns the language, compiler infrastructure, Core IR, backend contracts, orchestration facts, package/capability reporting, and runtime-boundary tooling.
 
-## Repository layout
+## Repository Layout
 
-- `compiler/rust-driver`: orchestrator, pipeline, SIL analysis, batch compile path.
-- `in-cli`: **`in`** CLI, hybrid pipeline sources, hotreload daemon, protocol regeneration.
-- `runtime/hotreload-daemon`: thin `cargo run` wrapper + integration tests (daemon sources live in `in-cli`, embedded into `in`).
-- `runtime/swift-preview-host`: Swift package receiving and applying reload envelopes.
-- `plugins/registry`: installable project accelerators (aurorality, crepuscularity).
-- `scripts`: operational scripts (dev loop, compiler benchmark harness).
-- `docs/architecture`: architecture and local runbooks ([interop roadmap](docs/architecture/interop-roadmap.md), [native Swift master plan](docs/architecture/native-swift-master-plan.md), [`.in` language](docs/architecture/in-language.md), [multi-frontend IR](docs/architecture/multi-frontend-ir.md), [parser surface / extension map](docs/architecture/parser-surface.md)). Hybrid `in-cli` ↔ `rust-driver` mirror: [docs/contributing-hybrid-mirror.md](docs/contributing-hybrid-mirror.md).
-- `docs-site`: static **crepuscularity-web** site (Vercel-inspired light UI, **Instrument Sans**); build with **`./scripts/build-docs-site.sh`** (needs sibling **`../crepuscularity`** or **`crepus`** on `PATH`). Top-level **`docs/*.md` symlinks** expose nested guides to `crepus web build`.
-- `docs/benchmarks`: benchmark reports and generated comparison artifacts.
-- `apps/native-subset-sample`: tiny Swift-shaped sample for the **in-tree** subset compiler (no **`swiftc`** when **`IN_NATIVE_SWIFT_SIL=only`**).
-- `apps/in-sample`: minimal **`.in`** modules (struct + helper **`fn`** + **`fn main`** with bounded body statements, plus an agent-native import/capability/extern binding sample); run **`./scripts/check-in-lang-sample.sh`** (**`in build --parser in --path …`**) — no **`swiftc`**.
-- `apps/icore-sample`: **`.icore` JSON** Core IR modules: v1 empty bodies plus v2 bounded body JSON; run **`./scripts/check-icore-sample.sh`** (CI **`icore-sample`**) — no **`swiftc`**.
+- `in-cli`: the `in` CLI, `.in` parser, Core IR paths, owned compile reporting, graph/package commands, bytecode/native backend work, hotreload daemon sources, and protocol regeneration.
+- `compiler/rust-driver`: orchestration pipeline, stage model, SIL analysis, and batch compiler path.
+- `runtime/hotreload-daemon`: thin daemon wrapper and integration tests.
+- `runtime/swift-preview-host`: Swift package that receives and applies reload envelopes.
+- `apps/in-sample`: minimal `.in` modules for language and Core IR checks.
+- `apps/icore-sample`: `.icore` JSON Core IR modules.
+- `apps/native-subset-sample`: small Swift-shaped subset sample for the in-tree Swift subset compiler.
+- `plugins/registry`: installable project accelerators.
+- `docs/architecture`: language, compiler, parser, backend, interop, and roadmap documents.
+- `docs-site`: static documentation site.
+- `scripts`: validation, generation, install, and workflow scripts.
 
-## `in build` and SwiftPM staging (macOS/Linux)
+## `.in` Language
 
-Default **`in build`** runs the in-tree hybrid/SIL pipeline: it gathers Swift sources (single file; under **`Package.swift`**, the **`Sources/<target>/`** tree that contains the entry file so unrelated targets are not merged; plus **`Generated/`** when present), emits **textual SIL**, then applies inauguration SIL passes. By default SIL comes from **`swiftc -emit-sil`** (toolchain on **`PATH`**, or override with **`IN_SWIFTC`**). **`swiftc`** rejects duplicate **basenames** across primaries; the driver splits those emits and concatenates SIL fragments.
+The current `.in` surface is intentionally small and compiler-oriented.
 
-**Core IR fronts (no `swiftc`):** **`.in`** — **`in build --path apps/in-sample/hello.in --module-id App`**; default **`--parser auto`** uses the extension; **`--parser in`** or **`IN_PARSER=in`** force that front. `.in` also accepts explicit `import`, `capability`, and `extern <language> fn ...;` surface declarations; local relative `.in` imports merge declarations into Core IR, `std.io` / `std.fs` synthesize bounded stdlib declarations, and `in agent` reports imports/externs/capabilities as machine-readable facts while extern calls still lower through Core IR graph facts. **`.icore` (JSON)** — **[`docs/architecture/general-compiler.md`](docs/architecture/general-compiler.md)**; **`in build --path apps/icore-sample/min.icore --module-id App`** or **`--parser icore`** / **`IN_PARSER=icore`**. `icoreVersion: 1` keeps declaration + empty-body compatibility; `icoreVersion: 2` accepts bounded body JSON for `let`, assignment, return, call expressions, identifiers, and int/string/bool literals. Dedicated fronts now exist for **Rust** (`.rs`, `syn` + `rustc` validation), **Go** (`.go`), **V** (`.v` / `vlang` magic token), and **OCaml** (`.ml` / `.mli`), each lowering real top-level declarations plus a bounded statement subset (declarations/assignments/returns and control-flow or application markers), not full language semantics yet. Tree-sitter fronts now include bounded Java/Groovy body lowering; other tracked polyglot extensions still route through declaration extraction; ids without a wired grammar return an `.icore` hint. For a single file, **`#!in parser=in`**, **`#!in parser=icore`**, or **`#!in parser=<slug>`** selects the front. See **[`docs/architecture/parser-surface.md`](docs/architecture/parser-surface.md)** and **[`docs/architecture/general-compiler.md`](docs/architecture/general-compiler.md)** for the exact matrix and roadmap.
+Example:
 
-**In-tree subset (Rust, no `swiftc`):** set **`IN_NATIVE_SWIFT_SIL=try`** to try the line-oriented **`swift_subset`** front first and fall back to **`swiftc`** when the source is not a valid subset. Use **`IN_NATIVE_SWIFT_SIL=only`** to require the in-tree path (CI or hermetic checks). Contracted syntax: **[docs/architecture/subset-grammar.md](docs/architecture/subset-grammar.md)**; sample **`apps/native-subset-sample/App.swift`**; local check **`./scripts/check-native-subset-sample.sh`**. With **`--swiftpm`**, **`in`** additionally runs **`swift build`** and stages outputs for runnable artifacts.
+```in
+import std.io;
 
-After a successful **`swift build`** inside that optional step (when the target path resolves under a directory that contains `Package.swift`), **`in`** creates predictable links under the package root:
+capability process.stdout;
 
-- **`.build/bin`**: runnable products — executable files (excluding typical non-binaries such as `.dylib`, `.a`, `.swiftmodule`, `.json`, `.txt`) plus **`.app`** bundles.
-- **`.build/artifacts`**: auxiliary outputs such as **`.xctest`**, **`.dSYM`**, **`.bundle`**, **`.product`**, and loose **`.plist`** files (e.g. entitlements).
+extern rust fn host_log(text: String) -> void requires process.stdout;
 
-Those directories are emptied on each **`in build --swiftpm`**, then repopulated with **symlinks** to the real SwiftPM layout from **`swift build --show-bin-path`**. SwiftPM plumbing (e.g. `Modules`, `ModuleCache`, `index`, `description.json`) is not staged. On non-Unix targets, staging is skipped.
+struct Message {
+  String text
+}
 
-## Install CLI (pick one)
+fn main() -> void {
+  print("hello from .in")
+  host_log("compiler-visible effect")
+  return
+}
+```
 
-Recommended order:
+Current language features include:
+
+- `import path;`
+- `capability name;`
+- `extern <language> fn name(...) -> Type requires capability.name;`
+- `struct Name { Type field }`
+- `fn name(params) -> Type { ... }`
+- bounded `let`, assignment, `return`, calls, literals, `if`, `while`, and expression statements
+- annotations such as `@pure`, `@gpu`, and `@parallel_safe`
+- `distributed fn` as a compiler-visible orchestration fact
+- `parallel { ... }` as a deterministic local planning fact
+
+See [docs/architecture/in-language.md](docs/architecture/in-language.md) for the exact grammar and status.
+
+## General Compiler Pipeline
+
+The compiler frontends lower source into `UnifiedModule` Core IR. Core IR then feeds shared lowering and analysis paths.
+
+Primary source surfaces today:
+
+- `.in`: native language frontend.
+- `.icore`: JSON interchange for Core IR.
+- Swift-shaped subset: hermetic in-tree subset path.
+- Swift via toolchain integration where needed.
+- Rust, Go, V, and OCaml dedicated bounded frontends.
+- C / C++ / Objective-C++ and other Tree-sitter parser routes.
+- Java/Groovy bounded body lowering through Tree-sitter paths.
+
+The maturity level varies by frontend. Some routes lower structured bodies; others currently expose declarations, signatures, parser facts, or `.icore` redirection hints. See [docs/architecture/parser-surface.md](docs/architecture/parser-surface.md), [docs/architecture/multi-frontend-ir.md](docs/architecture/multi-frontend-ir.md), and [docs/architecture/general-compiler.md](docs/architecture/general-compiler.md).
+
+## Install CLI
 
 **1. crates.io**
 
@@ -55,67 +93,51 @@ Recommended order:
 cargo install inauguration
 ```
 
-Installs the **`in`** binary as a single package.
+Installs the `in` binary.
 
-**2. Wax (Homebrew-compatible parity)**
+**2. Wax**
 
 ```bash
 wax tap semitechnological/tap
 wax install inauguration
 ```
 
-**3. Homebrew tap**
-
-```bash
-brew tap semitechnological/tap
-brew install inauguration
-```
-
-**4. Install script (GitHub release tarball or build from clone)**
-
-From a clone of this repository (detects `in-cli` with `name = "inauguration"`, runs `cargo build --release` inside `in-cli` unless `IN_USE_RELEASE=1`):
+**3. Install script from a clone**
 
 ```bash
 ./install.sh
 ```
 
-Release assets match [`.github/workflows/release.yml`](.github/workflows/release.yml) (e.g. `in-macos-aarch64.tar.gz`, `in-linux-x86_64.tar.gz`). Override install dir with **`IN_INSTALL_DIR`**, pin a tag with **`IN_VERSION`**, prefer release when working in a tree with **`IN_USE_RELEASE=1`**. A thin wrapper remains at [`scripts/install.sh`](scripts/install.sh) and delegates to `./install.sh`.
-
-**5. Build from source in this workspace**
+**4. Build from source**
 
 ```bash
 cargo build --release --manifest-path in-cli/Cargo.toml
-# binary: in-cli/target/release/in
 ```
 
-Equivalent to `cargo install --path in-cli --bin in --force` for a local path install (matches the crates.io package layout).
+The local binary is at `in-cli/target/release/in`.
 
-Publishing: **`inauguration`** crate ships from **`in-cli`**; sources stay aligned with **`compiler/rust-driver`**.
-
-## Core commands
+## Core Commands
 
 ```bash
-in build
 in build --parser in --path apps/in-sample/hello.in --module-id App
 in build --parser in --path apps/in-sample/agent-native.in --module-id App
-in build --swiftpm --path ../aurorality/examples   # hybrid pipeline + SwiftPM emit + staging
+in build --parser icore --path apps/icore-sample/min.icore --module-id App
 in agent --path apps/in-sample/agent-native.in --parser in
+in graph --path apps/in-sample/agent-native.in --parser in --json
+in package --path apps/in-sample/agent-native.in --json
 in languages
 in languages --json
 in explain INAGENT020 --json
 in fix --plan --json --path apps/in-sample/hello.in --parser in
-in dev
-in dev --preview-client swift       # Swift preview host + SwiftUI path
-in run
-in ocaml path/to/File.swift         # experimental Swift subset check → JSON
 in backend --path apps/in-sample/agent-native.in --target bytecode --json
-in backend --target native --json   # status-only; no native object backend yet
+in backend --target native --json
+in dev
+in run
 in test
 in doctor
-in bench
 ```
 
-## Plugin commands
+## Plugin Commands
 
 ```bash
 in plugin list
@@ -124,74 +146,49 @@ in plugin install crepuscularity
 in plugin run aurorality --target ../aurorality
 ```
 
-## Validation commands
+## Validation
+
+Required full check:
+
+```bash
+in test
+```
+
+Useful focused checks:
 
 ```bash
 cd compiler/rust-driver && cargo test --all
 cd in-cli && cargo test
-cd runtime/swift-preview-host && swift build -Xswiftc -warnings-as-errors && swift test
 cd runtime/hotreload-daemon && cargo test
-./scripts/check-protocol-models.sh # runs protocol-gen (Rust) then git diff
-./scripts/check-native-subset-sample.sh # IN_NATIVE_SWIFT_SIL=only; no swiftc
-./scripts/check-in-lang-sample.sh       # in build --parser in; no swiftc
-./scripts/check-icore-sample.sh         # icore v1/v2 samples; no swiftc
+./scripts/check-protocol-models.sh
+./scripts/check-native-subset-sample.sh
+./scripts/check-in-lang-sample.sh
+./scripts/check-icore-sample.sh
 ./scripts/check-polyglot-sample.sh
-./scripts/check-external-compiler-parity.sh # opportunistic installed-compiler comparisons
-# Optional: same outputs via V (header comment differs); not run in CI.
-v -gc none run shared/protocol/generate_models.v "$(pwd)"   # omit "$(pwd)" to walk up to repo root
 ```
 
-CI stays on **`protocol-gen` (Rust)** via **`scripts/check-protocol-models.sh`**.
-
-## Benchmarking
+Run Swift preview-host checks when touching the Swift runtime:
 
 ```bash
-./scripts/bench-swift.sh
+cd runtime/swift-preview-host && swift build -Xswiftc -warnings-as-errors && swift test
 ```
 
-[`scripts/bench-swift.sh`](scripts/bench-swift.sh) exports **`BENCH_ROOT`** to the repository root and runs **`v -gc none run "$BENCH_ROOT/scripts/bench_swift.v`**. The shell driver exports defaults when unset: **`BENCH_RUNS=3`**, **`BENCH_WARMUP_RUNS=1`**. Override via the environment (`BENCH_RUNS`, `BENCH_WARMUP_RUNS`). If bare **`v run`** fails with missing **`gc.h`**, use **`v -gc none`** (as this script does) or install Boehm **`gc`** development headers.
+## Protocol Models
 
-For SwiftPM examples, the harness times **`swiftc -typecheck`** via [`scripts/swiftc-bench-typecheck.sh`](scripts/swiftc-bench-typecheck.sh): same **`Sources/`** + **`Generated/`** inputs and Clang **`-Xcc`** / **`-I`** layout as **`in-cli`** **`sil_emit`** (`.build/.../debug/Modules`, local **`generated/`** / **`FFI/`**, dependency **`generated/`** from **`.build/workspace-state.json`**), so the **`swiftc`** column matches SIL emit instead of typechecking one primary file in isolation.
+Rust `protocol-gen` is the canonical checked-in code generator from `shared/protocol/events.schema.json`:
 
-Writes:
+```bash
+cargo run --manifest-path in-cli/Cargo.toml --bin protocol-gen
+./scripts/check-protocol-models.sh
+```
 
-- `docs/benchmarks/swift-vs-in.md`
-- `docs/benchmarks/swift-vs-in.json`
+V remains available only for optional parity tooling such as `shared/protocol/generate_models.v`; the Rust generator is the CI source of truth.
 
-The markdown report records host/tool versions and tables where each cell is **median wall ms** over `BENCH_RUNS` timed iterations, with **min–max** in parentheses. **`in build`** timings use the default hybrid/SIL pipeline only; **SwiftPM `swift build`** is a separate baseline column until owned native codegen replaces the Apple driver for that scope. **`swiftc`** uses a single-file probe only when there is no enclosing **`Package.swift`**; otherwise see **`swiftc-bench-typecheck.sh`** above. Details: [`docs/benchmarks/swift-vs-in.md`](docs/benchmarks/swift-vs-in.md) (+ [`swift-vs-in.json`](docs/benchmarks/swift-vs-in.json)).
+## Development Notes
 
-### Latest Benchmark Snapshot
+- Prefer owned compiler paths where possible.
+- Use `.in` and `.icore` samples for language and Core IR changes.
+- Keep frontend-specific behavior documented in `docs/architecture`.
+- Keep package/capability behavior visible through `in package`, `in graph`, and `in agent`.
+- Do not turn `.in` into a UI language.
 
-Copied from **`docs/benchmarks/swift-vs-in.md`** Easy Copy tables after **`./scripts/bench-swift.sh`**. Re-run script and paste here + commit when refreshing.
-
-Median over `BENCH_RUNS` timed iterations (default 3); parentheses = min–max on those same runs.
-
-Generated (UTC): `2026-05-09T14:19:19Z` · macOS · Apple M5 Pro · Swift 6.3 · rustc 1.94.1 · V 0.5.0
-
-| Example | SwiftPM swift build median (min–max ms) | in hybrid median (min–max ms) |
-|---|---:|---:|
-| `aurorality/examples/counter` | 984.37 (952.47–1004.23) | 548.29 (540.68–578.89) |
-| `aurorality/examples/basic` | 943.56 (936.91–1000.56) | 559.43 (541.97–608.84) |
-| `aurorality/examples/hyperchat` | 433.33 (386.77–614.14) | 4334.97 (3155.60–4571.39) |
-
-Second SwiftPM package (in-tree preview host; replaces vendor-only Swift compiler sources, which need a full Ninja Swift build and are not a portable **`in build`** probe):
-
-| Example | SwiftPM swift build median (min–max ms) | in hybrid median (min–max ms) |
-|---|---:|---:|
-| `runtime/swift-preview-host` | 681.30 (647.08–781.19) | 771.99 (725.52–774.55) |
-
-**Reading the harness:** the detail table in [`docs/benchmarks/swift-vs-in.md`](docs/benchmarks/swift-vs-in.md) labels a **loss bucket**. On small SwiftUI examples it is usually **`swift-frontend-stage`**: almost all wall time is Apple **`swiftc`** emitting textual SIL before the in-tree scheduler runs. **`hybrid-cli`** in the same report stays on the order of **single-digit ms**, which matches “Rust wave + SIL parse” being cheap today compared to **`swiftc`**.
-
-**Where to optimize the compiler next (highest leverage):**
-
-1. **Shrink or bypass `swiftc` on the hot path** — cache SIL keyed by inputs, tighter incremental **`swiftc`** flags where sound, and widen **`swift_subset`** / **`IN_NATIVE_SWIFT_SIL=try`** so simple files never spawn **`swiftc`**.
-2. **Failure-heavy UI sources** — when **`in build`** exits non-zero for a package, investigate early diagnostics vs work still done in **`sil_emit`** / driver so we do not pay full subprocess cost for unsupported shapes (see detail table **`in ok`** column).
-3. **After emit is cheap** — then profile **`parse_textual_sil`**, debug-instruction stripping, and call-graph extraction in `in-cli` (today a few ms on these samples); **`compiler/rust-driver`** pipeline stages matter more for batch / driver-scale work.
-
-**`in bench`** reads **`.brisk/hotreload/metrics/latest.ndjson`** (compile-check rows from **`in dev`**). Run it from the repo root after a dev session that produced metrics, or pass **`--metrics <path>`** when summarizing another NDJSON file.
-
-Staging under **`.build/bin`** / **`.build/artifacts`** applies only when using **`in build --swiftpm`** (SwiftPM emit step).
-
-## Acknowledgements
-
-- [brisk by plyght](https://github.com/plyght/brisk) for build orchestration patterns and command UX inspiration.
