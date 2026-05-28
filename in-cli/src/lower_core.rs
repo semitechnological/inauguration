@@ -277,6 +277,11 @@ fn collect_stmt_reads(st: &Stmt, reads: &mut HashSet<String>) {
         Stmt::Let(_, _, e) | Stmt::Assign(_, e) | Stmt::Expr(e) | Stmt::Return(Some(e)) => {
             collect_expr_reads(e, reads)
         }
+        Stmt::IndexAssign { base, index, value } => {
+            collect_expr_reads(base, reads);
+            collect_expr_reads(index, reads);
+            collect_expr_reads(value, reads);
+        }
         Stmt::If {
             cond,
             then_body,
@@ -390,6 +395,14 @@ fn lower_stmts_with_env(
                 if force_stores || future_reads(body, idx).contains(name) {
                     out.push_str(&format!("store_var {name} %{id}\n"));
                 }
+            }
+            Stmt::IndexAssign { base, index, value } => {
+                let base_id = lower_expr(base, env, direct_env, ssa, &mut out);
+                let index_id = lower_expr(index, env, direct_env, ssa, &mut out);
+                let value_id = lower_expr(value, env, direct_env, ssa, &mut out);
+                out.push_str(&format!(
+                    "index_store %{base_id}, %{index_id}, %{value_id}\n"
+                ));
             }
             Stmt::Expr(e) => {
                 let _ = lower_expr(e, env, direct_env, ssa, &mut out);

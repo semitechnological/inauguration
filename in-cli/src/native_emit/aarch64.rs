@@ -100,6 +100,10 @@ pub fn ldr64_reg_offset(rt: u8, rn: u8, rm: u8) -> u32 {
     0xF860_7800 | ((rm as u32) << 16) | ((rn as u32) << 5) | (rt as u32)
 }
 
+pub fn str64_reg_offset(rt: u8, rn: u8, rm: u8) -> u32 {
+    0xF820_7800 | ((rm as u32) << 16) | ((rn as u32) << 5) | (rt as u32)
+}
+
 pub fn svc(imm16: u16) -> u32 {
     0xD400_0001 | ((imm16 as u32) << 5)
 }

@@ -964,10 +964,15 @@ fn parse_assign_stmt(s: &str) -> Option<Stmt> {
     if name.is_empty() || name.contains(char::is_whitespace) {
         return None;
     }
-    Some(Stmt::Assign(
-        name.to_string(),
-        parse_expr(trim(&s[eq_pos + 1..])),
-    ))
+    let value = parse_expr(trim(&s[eq_pos + 1..]));
+    match parse_expr(name) {
+        Expr::Index { base, index } => Some(Stmt::IndexAssign {
+            base: *base,
+            index: *index,
+            value,
+        }),
+        _ => Some(Stmt::Assign(name.to_string(), value)),
+    }
 }
 
 fn parse_if_stmt(s: &str) -> Result<Stmt, String> {
@@ -1544,6 +1549,11 @@ fn validate_stmt_types(
         | Stmt::Expr(expr) => {
             validate_expr_shapes(fn_name, struct_fields, expr)?;
         }
+        Stmt::IndexAssign { base, index, value } => {
+            validate_expr_shapes(fn_name, struct_fields, base)?;
+            validate_expr_shapes(fn_name, struct_fields, index)?;
+            validate_expr_shapes(fn_name, struct_fields, value)?;
+        }
         Stmt::Return(None) => {}
         Stmt::If {
             cond,
@@ -1630,6 +1640,11 @@ fn desugar_method_calls_in_body(
             }
             Stmt::Assign(_, expr) | Stmt::Return(Some(expr)) | Stmt::Expr(expr) => {
                 desugar_method_calls_in_expr(expr, env, structs, fn_rets);
+            }
+            Stmt::IndexAssign { base, index, value } => {
+                desugar_method_calls_in_expr(base, env, structs, fn_rets);
+                desugar_method_calls_in_expr(index, env, structs, fn_rets);
+                desugar_method_calls_in_expr(value, env, structs, fn_rets);
             }
             Stmt::If {
                 cond,
@@ -2387,6 +2402,31 @@ fn main() -> void {
                 if name == "n"
                     && matches!(callee.as_ref(), Expr::Ident(c) if c == "add")
                     && args.len() == 2
+        ));
+    }
+
+    #[test]
+    fn fn_body_parses_index_assignment() {
+        use crate::swift_subset::Expr;
+        let src = "fn f() -> Int { let xs: [Int] = [1, 2]; xs[1] = 9; return xs[1]; }\nfn main() -> void\n";
+        let m = parse_in_source(src).expect("ok");
+        let body = match m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "f"))
+        {
+            Some(Decl::Function { body, .. }) => body,
+            _ => panic!("f"),
+        };
+        assert!(matches!(
+            &body[1],
+            Stmt::IndexAssign {
+                base,
+                index,
+                value
+            } if matches!(base, Expr::Ident(name) if name == "xs")
+                && matches!(index, Expr::IntLit(1))
+                && matches!(value, Expr::IntLit(9))
         ));
     }
 

@@ -244,6 +244,37 @@ fn check_stmt(
             }
             Ok(())
         }
+        Stmt::IndexAssign { base, index, value } => {
+            check_expr(fn_name, base, facts, env, call_edges)?;
+            check_expr(fn_name, index, facts, env, call_edges)?;
+            check_expr(fn_name, value, facts, env, call_edges)?;
+            require_type(fn_name, "array index", &Typ::Int, index, facts, env)?;
+            match expr_type(base, facts, env) {
+                Some(Typ::Array(item)) => {
+                    if let Some(value_typ) = expr_type(value, facts, env)
+                        && *item != value_typ
+                    {
+                        return Err((
+                            "type-mismatch".to_string(),
+                            format!(
+                                "type mismatch for array assignment in `{fn_name}`: expected {}, got {}",
+                                type_name(&item),
+                                type_name(&value_typ)
+                            ),
+                        ));
+                    }
+                    Ok(())
+                }
+                Some(other) => Err((
+                    "type-mismatch".to_string(),
+                    format!(
+                        "index assignment base in `{fn_name}` expected array, got {}",
+                        type_name(&other)
+                    ),
+                )),
+                None => Ok(()),
+            }
+        }
         Stmt::Expr(expr) => check_expr(fn_name, expr, facts, env, call_edges),
         Stmt::Return(Some(expr)) => {
             check_expr(fn_name, expr, facts, env, call_edges)?;
@@ -978,6 +1009,55 @@ mod tests {
                 vec![
                     Stmt::Let("value".to_string(), Some(Typ::Int), Expr::IntLit(1)),
                     Stmt::Assign("value".to_string(), Expr::StringLit("bad".to_string())),
+                ],
+            )]),
+            &default_options(),
+        );
+
+        assert!(!report.ok);
+        assert_eq!(report.reason_code.as_deref(), Some("type-mismatch"));
+    }
+
+    #[test]
+    fn accepts_array_index_assignment() {
+        let report = verify_module(
+            &module(vec![function(
+                "main",
+                vec![
+                    Stmt::Let(
+                        "xs".to_string(),
+                        Some(Typ::Array(Box::new(Typ::Int))),
+                        Expr::ArrayLit(vec![Expr::IntLit(1), Expr::IntLit(2)]),
+                    ),
+                    Stmt::IndexAssign {
+                        base: Expr::Ident("xs".to_string()),
+                        index: Expr::IntLit(1),
+                        value: Expr::IntLit(9),
+                    },
+                ],
+            )]),
+            &default_options(),
+        );
+
+        assert!(report.ok, "unexpected verifier report: {report:?}");
+    }
+
+    #[test]
+    fn rejects_array_index_assignment_type_mismatch() {
+        let report = verify_module(
+            &module(vec![function(
+                "main",
+                vec![
+                    Stmt::Let(
+                        "xs".to_string(),
+                        Some(Typ::Array(Box::new(Typ::Int))),
+                        Expr::ArrayLit(vec![Expr::IntLit(1), Expr::IntLit(2)]),
+                    ),
+                    Stmt::IndexAssign {
+                        base: Expr::Ident("xs".to_string()),
+                        index: Expr::IntLit(1),
+                        value: Expr::StringLit("bad".to_string()),
+                    },
                 ],
             )]),
             &default_options(),

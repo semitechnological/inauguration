@@ -51,6 +51,11 @@ pub enum Expr {
 pub enum Stmt {
     Let(String, Option<Typ>, Expr),
     Assign(String, Expr),
+    IndexAssign {
+        base: Expr,
+        index: Expr,
+        value: Expr,
+    },
     Return(Option<Expr>),
     If {
         cond: Expr,

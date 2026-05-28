@@ -188,6 +188,11 @@ fn collect_body_strings(body: &[Stmt], values: &mut Vec<String>) {
             | Stmt::Assign(_, expr)
             | Stmt::Return(Some(expr))
             | Stmt::Expr(expr) => collect_expr_strings(expr, values),
+            Stmt::IndexAssign { base, index, value } => {
+                collect_expr_strings(base, values);
+                collect_expr_strings(index, values);
+                collect_expr_strings(value, values);
+            }
             Stmt::If {
                 cond,
                 then_body,
@@ -325,7 +330,7 @@ fn alloc_declared_locals(
                     alloc_declared_locals(ctx, &arm.body, fn_name)?;
                 }
             }
-            Stmt::Return(_) | Stmt::Assign(_, _) | Stmt::Expr(_) => {}
+            Stmt::Return(_) | Stmt::Assign(_, _) | Stmt::IndexAssign { .. } | Stmt::Expr(_) => {}
         }
     }
     Ok(())
@@ -637,6 +642,16 @@ fn lower_stmt(
             }
             lower_store_local(emitter, ctx, name, expr, functions, pending_calls, fn_name)
         }
+        Stmt::IndexAssign { base, index, value } => lower_index_assign(
+            emitter,
+            ctx,
+            base,
+            index,
+            value,
+            functions,
+            pending_calls,
+            fn_name,
+        ),
         Stmt::Expr(expr) => {
             lower_expr_into(emitter, ctx, expr, 0, functions, pending_calls, fn_name)?;
             Ok(())
@@ -735,6 +750,79 @@ fn lower_store_local(
             fn_name,
         ),
     }
+}
+
+fn lower_index_assign(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    base: &Expr,
+    index: &Expr,
+    value: &Expr,
+    functions: &HashMap<String, FunctionInfo>,
+    pending_calls: &mut Vec<PendingCall>,
+    fn_name: &str,
+) -> Result<(), String> {
+    let Expr::Ident(name) = base else {
+        return Err(format!(
+            "native-lower: unsupported array assignment base in `{fn_name}`"
+        ));
+    };
+    if expr_contains_call(index) || expr_contains_call(value) {
+        return Err(format!(
+            "native-lower: unsupported array assignment call operand in `{fn_name}`"
+        ));
+    }
+    let Some(slot) = ctx.locals.get(name).cloned() else {
+        return Err(format!(
+            "native-lower: unsupported array assignment base in `{fn_name}`"
+        ));
+    };
+    let LocalSlot::Array { elem, offsets } = slot else {
+        return Err(format!(
+            "native-lower: unsupported array assignment base in `{fn_name}`"
+        ));
+    };
+    if offsets.is_empty() {
+        return Err(format!(
+            "native-lower: unsupported empty array assignment in `{fn_name}`"
+        ));
+    }
+    if let Some(value_ty) = expr_type(value)
+        && !array_item_matches(&elem, &value_ty)
+    {
+        return Err(format!(
+            "native-lower: array assignment item type mismatch in `{fn_name}`"
+        ));
+    }
+    lower_expr_into(emitter, ctx, value, 0, functions, pending_calls, fn_name)?;
+    lower_expr_into(emitter, ctx, index, 4, functions, pending_calls, fn_name)?;
+    emitter.emit_u32(aarch64::cmp_reg64(4, aarch64::REG_XZR));
+    let negative_branch = emitter.emit_insn(aarch64::b_cond(11, 0));
+    emitter.emit_insns(&aarch64::load_i64(5, offsets.len() as i64));
+    emitter.emit_u32(aarch64::cmp_reg64(4, 5));
+    let oob_branch = emitter.emit_insn(aarch64::b_cond(10, 0));
+    let base_offset = offsets[0];
+    let base_reg = if base_offset == 0 {
+        aarch64::REG_SP
+    } else {
+        emitter.emit_u32(aarch64::add_imm64(6, aarch64::REG_SP, base_offset as u16));
+        6
+    };
+    emitter.emit_u32(aarch64::str64_reg_offset(0, base_reg, 4));
+    let end_branch = emitter.emit_insn(aarch64::b(0));
+    let failure_offset = emitter.len() as i32;
+    emitter.patch_u32(
+        negative_branch,
+        aarch64::b_cond(11, failure_offset - negative_branch as i32),
+    );
+    emitter.patch_u32(
+        oob_branch,
+        aarch64::b_cond(10, failure_offset - oob_branch as i32),
+    );
+    emit_failure_return(emitter, ctx.stack_reserve());
+    let end_offset = emitter.len() as i32 - end_branch as i32;
+    emitter.patch_u32(end_branch, aarch64::b(end_offset));
+    Ok(())
 }
 
 fn lower_struct_expr_into_slots(
@@ -1875,6 +1963,19 @@ fn expr_type(expr: &Expr) -> Option<Typ> {
     }
 }
 
+fn expr_contains_call(expr: &Expr) -> bool {
+    match expr {
+        Expr::Call { .. } => true,
+        Expr::Unary { expr, .. } => expr_contains_call(expr),
+        Expr::Binary { lhs, rhs, .. } => expr_contains_call(lhs) || expr_contains_call(rhs),
+        Expr::StructInit { fields, .. } => fields.iter().any(|(_, expr)| expr_contains_call(expr)),
+        Expr::Field { base, .. } => expr_contains_call(base),
+        Expr::ArrayLit(items) => items.iter().any(expr_contains_call),
+        Expr::Index { base, index } => expr_contains_call(base) || expr_contains_call(index),
+        Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Ident(_) => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2125,6 +2226,22 @@ fn main() -> Int {
   let xs: [Int] = [2, 5, 8];
   let i: Int = 1;
   return xs[i];
+}
+"#,
+        )
+        .expect("parse");
+
+        lower_module(&module, "main").expect("lower");
+    }
+
+    #[test]
+    fn lowers_local_array_index_assignment() {
+        let module = crate::in_lang_parse::parse_in_source(
+            r#"
+fn main() -> Int {
+  let xs: [Int] = [2, 5, 8];
+  xs[1] = 9;
+  return xs[1];
 }
 "#,
         )
@@ -2715,6 +2832,167 @@ fn main() -> Int {
                 assert!(
                     dump.contains("ldr\tx0, [sp, x1, lsl #3]"),
                     "expected dynamic array index load in __text; otool:\n{dump}"
+                );
+            }
+            other => panic!(
+                "unexpected native exit {:?}; stdout={:?} stderr={:?}",
+                other, output.stdout, output.stderr
+            ),
+        }
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    #[test]
+    fn local_array_index_assignment_executable_exits_with_written_value() {
+        let module = crate::in_lang_parse::parse_in_source(
+            r#"
+fn main() -> Int {
+  let xs: [Int] = [2, 5, 8];
+  xs[1] = 9;
+  return xs[1];
+}
+"#,
+        )
+        .expect("parse");
+        let path = temp_executable("array-index-assign-exe");
+        let _ = std::fs::remove_file(&path);
+        compile_native_executable(&module, "main", &path).expect("compile");
+
+        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::process::ExitStatusExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let sign = std::process::Command::new("codesign")
+            .args(["-s", "-", "-f", path.to_str().unwrap()])
+            .status()
+            .expect("codesign spawn");
+        assert!(sign.success(), "codesign failed for native executable");
+
+        let output = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(path.to_str().unwrap())
+            .output()
+            .expect("run executable");
+        match output.status.code() {
+            Some(9) => {}
+            None if output.status.signal() == Some(9) => {
+                let otool = std::process::Command::new("otool")
+                    .args(["-tV", path.to_str().unwrap()])
+                    .output()
+                    .expect("otool");
+                let dump = String::from_utf8_lossy(&otool.stdout);
+                assert!(
+                    dump.contains("str\tx0, [sp, x4, lsl #3]"),
+                    "expected dynamic array index store in __text; otool:\n{dump}"
+                );
+            }
+            other => panic!(
+                "unexpected native exit {:?}; stdout={:?} stderr={:?}",
+                other, output.stdout, output.stderr
+            ),
+        }
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    #[test]
+    fn local_array_negative_index_assignment_executable_exits_with_failure() {
+        let module = crate::in_lang_parse::parse_in_source(
+            r#"
+fn main() -> Int {
+  let xs: [Int] = [2, 5, 8];
+  let i: Int = -1;
+  xs[i] = 9;
+  return xs[0];
+}
+"#,
+        )
+        .expect("parse");
+        let path = temp_executable("array-negative-index-assign-exe");
+        let _ = std::fs::remove_file(&path);
+        compile_native_executable(&module, "main", &path).expect("compile");
+
+        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::process::ExitStatusExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let sign = std::process::Command::new("codesign")
+            .args(["-s", "-", "-f", path.to_str().unwrap()])
+            .status()
+            .expect("codesign spawn");
+        assert!(sign.success(), "codesign failed for native executable");
+
+        let output = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(path.to_str().unwrap())
+            .output()
+            .expect("run executable");
+        match output.status.code() {
+            Some(1) => {}
+            None if output.status.signal() == Some(9) => {
+                let otool = std::process::Command::new("otool")
+                    .args(["-tV", path.to_str().unwrap()])
+                    .output()
+                    .expect("otool");
+                let dump = String::from_utf8_lossy(&otool.stdout);
+                assert!(
+                    dump.contains("b.lt") && dump.contains("mov\tx0, #0x1"),
+                    "expected negative array index assignment failure path in __text; otool:\n{dump}"
+                );
+            }
+            other => panic!(
+                "unexpected native exit {:?}; stdout={:?} stderr={:?}",
+                other, output.stdout, output.stderr
+            ),
+        }
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    #[test]
+    fn local_array_oob_index_assignment_executable_exits_with_failure() {
+        let module = crate::in_lang_parse::parse_in_source(
+            r#"
+fn main() -> Int {
+  let xs: [Int] = [2, 5, 8];
+  let i: Int = 3;
+  xs[i] = 9;
+  return xs[0];
+}
+"#,
+        )
+        .expect("parse");
+        let path = temp_executable("array-oob-index-assign-exe");
+        let _ = std::fs::remove_file(&path);
+        compile_native_executable(&module, "main", &path).expect("compile");
+
+        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::process::ExitStatusExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let sign = std::process::Command::new("codesign")
+            .args(["-s", "-", "-f", path.to_str().unwrap()])
+            .status()
+            .expect("codesign spawn");
+        assert!(sign.success(), "codesign failed for native executable");
+
+        let output = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(path.to_str().unwrap())
+            .output()
+            .expect("run executable");
+        match output.status.code() {
+            Some(1) => {}
+            None if output.status.signal() == Some(9) => {
+                let otool = std::process::Command::new("otool")
+                    .args(["-tV", path.to_str().unwrap()])
+                    .output()
+                    .expect("otool");
+                let dump = String::from_utf8_lossy(&otool.stdout);
+                assert!(
+                    dump.contains("b.ge") && dump.contains("mov\tx0, #0x1"),
+                    "expected out-of-bounds array index assignment failure path in __text; otool:\n{dump}"
                 );
             }
             other => panic!(

@@ -130,6 +130,31 @@ fn check_stmt(
             }
             Ok(())
         }
+        Stmt::IndexAssign { base, index, value } => {
+            check_expr(fn_name, base, facts, env)?;
+            check_expr(fn_name, index, facts, env)?;
+            check_expr(fn_name, value, facts, env)?;
+            require_type(fn_name, "array index", &Typ::Int, index, facts, env)?;
+            match expr_type(base, facts, env)? {
+                Some(Typ::Array(item)) => {
+                    if let Some(value_typ) = expr_type(value, facts, env)?
+                        && *item != value_typ
+                    {
+                        return Err(format!(
+                            "type mismatch for array assignment in `{fn_name}`: expected {}, got {}",
+                            type_name(&item),
+                            type_name(&value_typ)
+                        ));
+                    }
+                    Ok(())
+                }
+                Some(other) => Err(format!(
+                    "index assignment base in `{fn_name}` expected array, got {}",
+                    type_name(&other)
+                )),
+                None => Ok(()),
+            }
+        }
         Stmt::Expr(expr) => check_expr(fn_name, expr, facts, env),
         Stmt::Return(Some(expr)) => {
             check_expr(fn_name, expr, facts, env)?;
@@ -580,6 +605,51 @@ mod tests {
 
         assert!(
             err.contains("unresolved assignment `missing` in `main`"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn accepts_array_index_assignment() {
+        typecheck_executable(&module(vec![function(
+            "main",
+            vec![
+                Stmt::Let(
+                    "xs".to_string(),
+                    Some(Typ::Array(Box::new(Typ::Int))),
+                    Expr::ArrayLit(vec![Expr::IntLit(1), Expr::IntLit(2)]),
+                ),
+                Stmt::IndexAssign {
+                    base: Expr::Ident("xs".to_string()),
+                    index: Expr::IntLit(1),
+                    value: Expr::IntLit(9),
+                },
+            ],
+        )]))
+        .expect("array index assignment should typecheck");
+    }
+
+    #[test]
+    fn rejects_array_index_assignment_type_mismatch() {
+        let err = typecheck_executable(&module(vec![function(
+            "main",
+            vec![
+                Stmt::Let(
+                    "xs".to_string(),
+                    Some(Typ::Array(Box::new(Typ::Int))),
+                    Expr::ArrayLit(vec![Expr::IntLit(1), Expr::IntLit(2)]),
+                ),
+                Stmt::IndexAssign {
+                    base: Expr::Ident("xs".to_string()),
+                    index: Expr::IntLit(1),
+                    value: Expr::StringLit("bad".to_string()),
+                },
+            ],
+        )]))
+        .expect_err("array index assignment value must match item type");
+
+        assert!(
+            err.contains("type mismatch for array assignment in `main`: expected Int, got String"),
             "unexpected error: {err}"
         );
     }
