@@ -78,6 +78,11 @@ pub fn in_standard_import_bindings(import: &str) -> Vec<InExternBinding> {
                 required_capabilities: Vec::new(),
             },
         ],
+        "std.process" => vec![InExternBinding {
+            language: "std".into(),
+            name: "process_run".into(),
+            required_capabilities: vec!["process.spawn".into()],
+        }],
         _ => Vec::new(),
     }
 }
@@ -111,6 +116,12 @@ fn binding_decl(binding: &InExternBinding) -> Decl {
         "json_parse" | "json_stringify" => Decl::Function {
             name: binding.name.clone(),
             params: vec![("text".into(), Typ::String)],
+            ret: Typ::String,
+            body: Vec::new(),
+        },
+        "process_run" => Decl::Function {
+            name: binding.name.clone(),
+            params: vec![("command".into(), Typ::String)],
             ret: Typ::String,
             body: Vec::new(),
         },
@@ -2369,6 +2380,21 @@ fn main() -> void { read_file("x"); return; }
         assert_eq!(parse_ret, &Typ::String);
         assert_eq!(stringify_params, &vec![("text".to_string(), Typ::String)]);
         assert_eq!(stringify_ret, &Typ::String);
+    }
+
+    #[test]
+    fn std_process_import_adds_core_function_declaration() {
+        let src = "import std.process;\ncapability process.spawn;\nfn main() -> String { return process_run(\"pwd\"); }\n";
+        let module = parse_in_source(src).expect("std process import");
+        let decl = module.decls.iter().find_map(|decl| match decl {
+            Decl::Function {
+                name, params, ret, ..
+            } if name == "process_run" => Some((params, ret)),
+            _ => None,
+        });
+        let (params, ret) = decl.expect("process_run");
+        assert_eq!(params, &vec![("command".to_string(), Typ::String)]);
+        assert_eq!(ret, &Typ::String);
     }
 
     #[test]

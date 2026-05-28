@@ -17,7 +17,7 @@ Workflow entry points (flags, sample path, CI script) stay in the repo [README](
 What `in-cli/src/in_lang_parse.rs` implements today:
 
 - Top-level **`import path;`** — accepted as agent-facing source dependency facts. Local relative `.in` imports such as `import "./lib.in";` merge imported declarations into the parsed Core IR module when reading a file. `in agent` exposes imports in the `effects` list as `import:<path>`.
-- Standard imports **`std.io`**, **`std.fs`**, **`std.http`**, and **`std.json`** synthesize bounded extern-style Core IR declarations for `print`, `read_file`, `write_file`, `http_get`, `json_parse`, and `json_stringify`, with capability requirements checked by `in agent`.
+- Standard imports **`std.io`**, **`std.fs`**, **`std.http`**, **`std.json`**, and **`std.process`** synthesize bounded extern-style Core IR declarations for `print`, `read_file`, `write_file`, `http_get`, `json_parse`, `json_stringify`, and `process_run`, with capability requirements checked by `in agent`.
 - Top-level **`capability name;`** — accepted as explicit outside-world capability facts. `in agent` exposes them in the `capabilities` list.
 - Top-level **`enable name;`** — parsed as an orchestration extension fact and validated against the in-tree extension registry. It does not load plugin/runtime code by itself.
 - Top-level annotations **`@pure`**, **`@gpu`**, and **`@parallel_safe`** — parsed as metadata facts and associated with the next function when one follows. They do not execute optimization or GPU scheduling by themselves.

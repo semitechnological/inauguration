@@ -1427,6 +1427,25 @@ fn main() -> String { return json_parse("{}"); }
     }
 
     #[test]
+    fn in_report_checks_std_process_import_capabilities() {
+        let temp = temp_source(
+            "std-process-missing-capability",
+            "in",
+            r#"
+import std.process;
+fn main() -> String { return process_run("pwd"); }
+"#,
+        );
+        let report = json_report(&temp.path, &AgentModeConfig::default()).expect("report");
+        assert_eq!(report.diagnostics[0].code, "AGENT_MISSING_CAPABILITY");
+        assert!(
+            report
+                .effects
+                .contains(&"extern:std:process_run:requires=process.spawn".to_string())
+        );
+    }
+
+    #[test]
     fn in_report_includes_orchestration_facts_as_status_only() {
         let temp = temp_source(
             "orchestration",
