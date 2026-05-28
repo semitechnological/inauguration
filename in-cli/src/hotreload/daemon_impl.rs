@@ -1,6 +1,7 @@
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -42,6 +43,24 @@ pub struct RuntimeMetric {
     pub reason: String,
     pub compile_check_ms: u64,
     pub compile_cache_hit: bool,
+    #[serde(
+        default,
+        rename = "compile_frontend",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub compile_frontend: Option<String>,
+    #[serde(
+        default,
+        rename = "compile_source_hash",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub compile_source_hash: Option<u64>,
+    #[serde(
+        default,
+        rename = "compile_fallback_reason",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub compile_fallback_reason: Option<String>,
     /// Count of `function_ref` edges from [`hybrid_sil::extract_call_graph`] when in-tree subset SIL exists (no `swiftc`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sil_call_edges: Option<u32>,
@@ -432,6 +451,20 @@ fn extension_triggers_hotreload_notify(ext: &str) -> bool {
 struct CompileCacheEntry {
     modified_ms: u128,
     ok: bool,
+    cache_policy: String,
+    frontend_kind: Option<String>,
+    fallback_reason: Option<String>,
+    source_hash: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+struct CompileCheckResult {
+    ok: bool,
+    cache_hit: bool,
+    elapsed_ms: u64,
+    frontend_kind: Option<String>,
+    fallback_reason: Option<String>,
+    source_hash: Option<u64>,
 }
 
 type CompileCache = HashMap<String, CompileCacheEntry>;
@@ -446,26 +479,169 @@ fn modified_ms(path: &Path) -> Option<u128> {
         .map(|dur| dur.as_millis())
 }
 
-fn compile_check_cached(path: &Path, cache: &mut CompileCache) -> (bool, bool, u64) {
+fn source_hash(path: &Path) -> Option<u64> {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    std::fs::read(path).ok()?.hash(&mut hasher);
+    Some(hasher.finish())
+}
+
+fn source_hash_for_cache(path: &Path) -> Option<u64> {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if ext == "swift"
+        && let Ok(combined) = sil_emit::combined_swift_sources_for_path(path)
+    {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        combined.hash(&mut hasher);
+        return Some(hasher.finish());
+    }
+    source_hash(path)
+}
+
+fn compile_cache_policy(path: &Path) -> String {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if ext == "swift" {
+        return format!(
+            "swift:{:?}",
+            native_swift_sil::native_swift_sil_mode_from_env()
+        );
+    }
+    format!("core-ir:{ext}")
+}
+
+fn swift_compile_check_uncached(path: &Path) -> CompileCheckResult {
+    let hash = source_hash_for_cache(path);
+    let mode = native_swift_sil::native_swift_sil_mode_from_env();
+    let combined = sil_emit::combined_swift_sources_for_path(path);
+    match mode {
+        native_swift_sil::NativeSwiftSilMode::Only => {
+            let ok = combined
+                .as_ref()
+                .is_ok_and(|src| native_swift_sil::swift_subset_typecheck_ok(src));
+            CompileCheckResult {
+                ok,
+                cache_hit: false,
+                elapsed_ms: 0,
+                frontend_kind: Some("swift-subset".to_string()),
+                fallback_reason: if ok {
+                    None
+                } else {
+                    Some("subset_rejected".to_string())
+                },
+                source_hash: hash,
+            }
+        }
+        native_swift_sil::NativeSwiftSilMode::Try => {
+            if combined
+                .as_ref()
+                .is_ok_and(|src| native_swift_sil::swift_subset_typecheck_ok(src))
+            {
+                return CompileCheckResult {
+                    ok: true,
+                    cache_hit: false,
+                    elapsed_ms: 0,
+                    frontend_kind: Some("swift-subset".to_string()),
+                    fallback_reason: None,
+                    source_hash: hash,
+                };
+            }
+            CompileCheckResult {
+                ok: sil_emit::compile_check_swift_path_with_mode(
+                    path,
+                    native_swift_sil::NativeSwiftSilMode::Off,
+                ),
+                cache_hit: false,
+                elapsed_ms: 0,
+                frontend_kind: Some("swiftc".to_string()),
+                fallback_reason: Some("subset_rejected".to_string()),
+                source_hash: hash,
+            }
+        }
+        native_swift_sil::NativeSwiftSilMode::Off => CompileCheckResult {
+            ok: sil_emit::compile_check_swift_path_with_mode(
+                path,
+                native_swift_sil::NativeSwiftSilMode::Off,
+            ),
+            cache_hit: false,
+            elapsed_ms: 0,
+            frontend_kind: Some("swiftc".to_string()),
+            fallback_reason: Some("mode_off".to_string()),
+            source_hash: hash,
+        },
+    }
+}
+
+fn compile_check_uncached(path: &Path) -> CompileCheckResult {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if ext == "swift" {
+        return swift_compile_check_uncached(path);
+    }
+    let ok = compile_check(path);
+    CompileCheckResult {
+        ok,
+        cache_hit: false,
+        elapsed_ms: 0,
+        frontend_kind: Some("core-ir".to_string()),
+        fallback_reason: None,
+        source_hash: source_hash_for_cache(path),
+    }
+}
+
+fn compile_check_cached(path: &Path, cache: &mut CompileCache) -> CompileCheckResult {
     let start = std::time::Instant::now();
     let key = path.to_string_lossy().to_string();
     let Some(current_ms) = modified_ms(path) else {
-        return (false, false, start.elapsed().as_millis() as u64);
+        return CompileCheckResult {
+            ok: false,
+            cache_hit: false,
+            elapsed_ms: start.elapsed().as_millis() as u64,
+            frontend_kind: None,
+            fallback_reason: Some("missing_source".to_string()),
+            source_hash: None,
+        };
     };
+    let current_hash = source_hash_for_cache(path);
+    let current_policy = compile_cache_policy(path);
     if let Some(entry) = cache.get(&key)
         && entry.modified_ms == current_ms
+        && entry.source_hash == current_hash
+        && entry.cache_policy == current_policy
     {
-        return (entry.ok, true, start.elapsed().as_millis() as u64);
+        return CompileCheckResult {
+            ok: entry.ok,
+            cache_hit: true,
+            elapsed_ms: start.elapsed().as_millis() as u64,
+            frontend_kind: entry.frontend_kind.clone(),
+            fallback_reason: entry.fallback_reason.clone(),
+            source_hash: entry.source_hash,
+        };
     }
-    let ok = compile_check(path);
+    let mut result = compile_check_uncached(path);
+    result.source_hash = current_hash;
+    result.elapsed_ms = start.elapsed().as_millis() as u64;
     cache.insert(
         key,
         CompileCacheEntry {
             modified_ms: current_ms,
-            ok,
+            ok: result.ok,
+            cache_policy: current_policy,
+            frontend_kind: result.frontend_kind.clone(),
+            fallback_reason: result.fallback_reason.clone(),
+            source_hash: result.source_hash,
         },
     );
-    (ok, false, start.elapsed().as_millis() as u64)
+    result
 }
 
 pub fn apply_restart_supervisor(mut patch: ReloadPatch, compile_ok: bool) -> (ReloadPatch, String) {
@@ -527,10 +703,9 @@ async fn emit_patch(
     pool: &ClientPool,
     compile_cache: &mut CompileCache,
 ) -> Result<ReloadPatch, DaemonError> {
-    let (compile_ok, compile_cache_hit, compile_check_ms) =
-        compile_check_cached(Path::new(target), compile_cache);
+    let compile_check = compile_check_cached(Path::new(target), compile_cache);
     let graph_start = std::time::Instant::now();
-    let (sil_graph, sil_graph_ms) = if compile_ok {
+    let (sil_graph, sil_graph_ms) = if compile_check.ok {
         let graph = sil_subset_graph_detail(Path::new(target));
         (graph, Some(graph_start.elapsed().as_millis() as u64))
     } else {
@@ -541,7 +716,7 @@ async fn emit_patch(
     };
     let sil_call_edges = sil_graph.edge_count();
     let patch = plan_patch_with_sil_graph(target, symbols, Some(&sil_graph));
-    let (patch, mut reason) = apply_restart_supervisor(patch, compile_ok);
+    let (patch, mut reason) = apply_restart_supervisor(patch, compile_check.ok);
     reason = format!("{reason}|{}", sil_graph.reason_tag());
     if let Some(n) = sil_call_edges {
         reason = format!("{reason}|sil_call_edges={n}");
@@ -559,8 +734,11 @@ async fn emit_patch(
         target: patch.target.clone(),
         compatible: patch.compatible,
         reason,
-        compile_check_ms,
-        compile_cache_hit,
+        compile_check_ms: compile_check.elapsed_ms,
+        compile_cache_hit: compile_check.cache_hit,
+        compile_frontend: compile_check.frontend_kind,
+        compile_source_hash: compile_check.source_hash,
+        compile_fallback_reason: compile_check.fallback_reason,
         sil_call_edges,
         sil_graph_ms,
     };
@@ -775,8 +953,25 @@ mod tests {
         let mut cache = CompileCache::new();
         let first = compile_check_cached(&path, &mut cache);
         let second = compile_check_cached(&path, &mut cache);
-        assert!(!first.1);
-        assert!(second.1);
+        assert!(!first.cache_hit);
+        assert!(second.cache_hit);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn compile_check_cache_key_tracks_source_hash_and_frontend() {
+        let path = std::env::temp_dir().join(format!("compile-cache-hash-{}.swift", now_ms()));
+        std::fs::write(&path, "func main() -> Void\n").expect("write swift");
+        let mut cache = CompileCache::new();
+        let first = compile_check_cached(&path, &mut cache);
+        let second = compile_check_cached(&path, &mut cache);
+        assert_eq!(first.frontend_kind.as_deref(), Some("swift-subset"));
+        assert!(first.source_hash.is_some());
+        assert!(second.cache_hit);
+        std::fs::write(&path, "func changed() -> Void\n").expect("rewrite swift");
+        let third = compile_check_cached(&path, &mut cache);
+        assert!(!third.cache_hit);
+        assert_ne!(first.source_hash, third.source_hash);
         let _ = std::fs::remove_file(path);
     }
 
@@ -827,6 +1022,9 @@ mod tests {
             reason: "patch_applied".to_string(),
             compile_check_ms: 1,
             compile_cache_hit: false,
+            compile_frontend: None,
+            compile_source_hash: None,
+            compile_fallback_reason: None,
             sil_call_edges: None,
             sil_graph_ms: None,
         };
@@ -911,6 +1109,8 @@ mod tests {
             .await
             .expect("metric read");
         assert!(content.contains("sil_graph_ms"));
+        assert!(content.contains("\"compile_frontend\":\"swift-subset\""));
+        assert!(content.contains("\"compile_source_hash\":"));
         let _ = tokio::fs::remove_file(&metrics_path).await;
         let _ = tokio::fs::remove_file(&path).await;
     }

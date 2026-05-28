@@ -424,11 +424,7 @@ impl<'a> LowerCtx<'a> {
                     );
                 }
                 Typ::Array(elem) => {
-                    if !is_native_scalar_type(elem) {
-                        return Err(format!(
-                            "native-lower: unsupported parameter type in `{fn_name}` (only scalar arrays)"
-                        ));
-                    }
+                    ensure_native_array_element(elem, fn_name, "parameter")?;
                     if abi_idx + 1 >= 8 {
                         return Err(format!("native-lower: too many parameters in `{fn_name}`"));
                     }
@@ -510,11 +506,7 @@ impl<'a> LowerCtx<'a> {
         }
         let resolved = typ.cloned().or_else(|| expr_type(expr));
         if let Some(Typ::Array(elem)) = resolved.as_ref() {
-            if !is_native_scalar_type(elem) {
-                return Err(format!(
-                    "native-lower: unsupported array element type in `{fn_name}` (only Int/Bool/String elements)"
-                ));
-            }
+            ensure_native_array_element(elem, fn_name, "local")?;
             let Expr::ArrayLit(items) = expr else {
                 let ptr_offset = self.alloc_slot();
                 let len_offset = self.alloc_slot();
@@ -1843,10 +1835,7 @@ fn ensure_return_type(
             native_struct_fields(structs, struct_name, fn_name)?;
             Ok(())
         }
-        Typ::Array(elem) if is_native_scalar_type(elem) => Ok(()),
-        _ => Err(format!(
-            "native-lower: unsupported return type in `{fn_name}` (only Int/Bool/String/Void/scalar arrays/scalar structs)"
-        )),
+        Typ::Array(elem) => ensure_native_array_element(elem, fn_name, "return"),
     }
 }
 
@@ -1903,11 +1892,7 @@ fn native_param_abi_slots(
                 }
             }
             Typ::Array(elem) => {
-                if !is_native_scalar_type(elem) {
-                    return Err(format!(
-                        "native-lower: unsupported parameter type in `{fn_name}` (only scalar arrays)"
-                    ));
-                }
+                ensure_native_array_element(elem, fn_name, "parameter")?;
                 slots += 2;
             }
             _ => {
@@ -1945,6 +1930,21 @@ fn native_struct_fields<'a>(
 
 fn is_native_scalar_type(typ: &Typ) -> bool {
     matches!(typ, Typ::Int | Typ::Bool | Typ::String)
+}
+
+fn ensure_native_array_element(elem: &Typ, fn_name: &str, context: &str) -> Result<(), String> {
+    match elem {
+        Typ::Int | Typ::Bool | Typ::String => Ok(()),
+        Typ::Array(_) => Err(format!(
+            "native-lower[native-array-nested-unsupported]: unsupported {context} array element type in `{fn_name}` (nested arrays are not supported)"
+        )),
+        Typ::Named(_) => Err(format!(
+            "native-lower[native-array-aggregate-unsupported]: unsupported {context} array element type in `{fn_name}` (aggregate array elements are not supported)"
+        )),
+        _ => Err(format!(
+            "native-lower[native-array-element-unsupported]: unsupported {context} array element type in `{fn_name}` (only Int/Bool/String elements)"
+        )),
+    }
 }
 
 fn array_item_matches(expected: &Typ, actual: &Typ) -> bool {
@@ -3347,6 +3347,57 @@ fn main() -> Int {
         match lower_module(&module, "main") {
             Ok(_) => panic!("expected lowering failure"),
             Err(err) => assert!(err.contains("unsupported array return")),
+        }
+    }
+
+    #[test]
+    fn rejects_nested_array_params_with_stable_diagnostic() {
+        let module = UnifiedModule {
+            decls: vec![Decl::Function {
+                name: "main".into(),
+                params: vec![(
+                    "xs".into(),
+                    Typ::Array(Box::new(Typ::Array(Box::new(Typ::Int)))),
+                )],
+                ret: Typ::Int,
+                body: vec![Stmt::Return(Some(Expr::IntLit(0)))],
+            }],
+        };
+        match lower_module(&module, "main") {
+            Ok(_) => panic!("expected lowering failure"),
+            Err(err) => assert!(err.contains("native-array-nested-unsupported")),
+        }
+    }
+
+    #[test]
+    fn rejects_aggregate_array_locals_with_stable_diagnostic() {
+        let module = UnifiedModule {
+            decls: vec![
+                Decl::Struct {
+                    name: "Point".into(),
+                    fields: vec![("x".into(), Typ::Int)],
+                },
+                Decl::Function {
+                    name: "main".into(),
+                    params: vec![],
+                    ret: Typ::Int,
+                    body: vec![
+                        Stmt::Let(
+                            "points".into(),
+                            Some(Typ::Array(Box::new(Typ::Named("Point".into())))),
+                            Expr::ArrayLit(vec![Expr::StructInit {
+                                name: "Point".into(),
+                                fields: vec![("x".into(), Expr::IntLit(1))],
+                            }]),
+                        ),
+                        Stmt::Return(Some(Expr::IntLit(0))),
+                    ],
+                },
+            ],
+        };
+        match lower_module(&module, "main") {
+            Ok(_) => panic!("expected lowering failure"),
+            Err(err) => assert!(err.contains("native-array-aggregate-unsupported")),
         }
     }
 }

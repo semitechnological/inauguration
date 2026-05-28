@@ -16,7 +16,7 @@
   - Implement safe array literal returns only after adding owned storage, caller-provided result buffer, or static data policy.
   - Keep borrowed array returns limited to params/forwarded calls until ownership is explicit.
   - `[Bool]` and `[String]` array args and borrowed returns are covered in native lowering and executable tests.
-  - Add stable diagnostics for unsupported nested arrays and arrays with aggregate elements.
+  - Stable diagnostics for unsupported nested arrays and arrays with aggregate elements now report `native-array-nested-unsupported` and `native-array-aggregate-unsupported`.
 
 - [x] Fill bytecode/Core IR array mutation parity.
   - Lower `Stmt::IndexAssign` from Core IR to bytecode/runtime semantics instead of only native AArch64.
@@ -100,7 +100,7 @@
   - Add name resolution, stable diagnostics, and SIL snapshots under `IN_NATIVE_SWIFT_SIL=only`.
   - Make `IN_NATIVE_SWIFT_SIL=try` distinguish unsupported syntax fallback from real subset errors.
 
-- [ ] Reuse native Swift checks in hot reload.
+- [x] Reuse native Swift checks in hot reload.
   - Teach `compile_check_cached` to try the native subset path when the environment matches `in build`.
   - Fall back to `swiftc -typecheck` for unsupported Swift.
   - Add cache keys and metrics that include frontend kind, source hash, and fallback reason.
