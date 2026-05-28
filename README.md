@@ -2,7 +2,7 @@
 
 `inauguration` is a language and general compiler project.
 
-The native language is **`.in`**: a small, capability-aware systems and orchestration language designed around deterministic source, machine-readable structure, explicit effects, and compiler-managed execution graphs.
+The native language is **`.in`**: a small, capability-aware systems and orchestration language designed around deterministic source, machine-readable structure, explicit effects, and compiler-managed execution graphs. The language is meant to have two writing modes over the same semantics: an explicit canonical form for compilers, agents, code review, and generated source; and a human-friendly form that keeps everyday code easy to read while canonicalizing into the strict form.
 
 The compiler also acts as a general language ingestion pipeline. Multiple frontends lower into one shared **Core IR**, then move through common analysis and backend paths. The goal is one compiler architecture that can understand `.in`, `.icore`, C-family languages, Swift-shaped subsets, Rust, Go, V, OCaml, Java/Groovy body subsets, and other Tree-sitter-compatible source surfaces as the frontends mature.
 
@@ -33,9 +33,16 @@ Inauguration is not a frontend UI framework. Frontend rendering and declarative 
 
 ## `.in` Language
 
-The current `.in` surface is intentionally small and compiler-oriented.
+The current `.in` surface is intentionally small and compiler-oriented, but the language direction is flexible syntax over stable semantics.
 
-Example:
+There are two intended ways to write the same program:
+
+- **Explicit form**: every capability, external boundary, type, return value, and orchestration fact is visible. This is the form generated tools should prefer.
+- **Human form**: short, readable source that can omit ceremony where the compiler can infer or canonicalize it. This is the form people should enjoy writing.
+
+The strict parser and `in canonicalize` path are the source of truth today. Human-friendly spellings should lower into the same Core IR and canonical output rather than becoming a second language.
+
+Explicit form:
 
 ```in
 import std.io;
@@ -55,6 +62,25 @@ fn main() -> void {
 }
 ```
 
+The same idea in the human-facing direction:
+
+```in
+use std.io
+
+needs process.stdout
+
+host_log(text: String) uses process.stdout
+
+Message:
+  text: String
+
+main:
+  print "hello from .in"
+  host_log "compiler-visible effect"
+```
+
+That second spelling is the readability target: fewer separators, indentation where it helps, and lightweight calls. The compiler should still be able to produce the explicit form for review, tooling, reproducible builds, and machine edits.
+
 Current language features include:
 
 - `import path;`
@@ -66,6 +92,99 @@ Current language features include:
 - annotations such as `@pure`, `@gpu`, and `@parallel_safe`
 - `distributed fn` as a compiler-visible orchestration fact
 - `parallel { ... }` as a deterministic local planning fact
+
+Flexible syntax goals include:
+
+- `import std.io;` and `use std.io`
+- `capability process.stdout;` and `needs process.stdout`
+- `fn main() -> void { ... }` and `main: ...`
+- `print("hello")` and `print "hello"`
+- brace-delimited blocks and indentation-delimited blocks
+- explicit `return value` and expression-oriented final values where safe
+- generated canonical output for every accepted human spelling
+
+More examples:
+
+Capability-first service boundary:
+
+```in
+import std.fs;
+import std.json;
+
+capability fs.read;
+capability fs.write;
+
+extern host fn read_config(path: String) -> String requires fs.read;
+extern host fn write_report(path: String, text: String) -> void requires fs.write;
+
+struct Report {
+  String title
+  String body
+}
+
+fn main() -> void {
+  let raw: String = read_config("space.config")
+  let report: Report = Report { title: "Space", body: raw }
+  write_report("space.report", report.body)
+  return
+}
+```
+
+Orchestration facts:
+
+```in
+enable distributed-workers;
+
+capability gpu.compute;
+
+struct Frame {
+  Int id
+}
+
+@gpu
+distributed fn render_frame(frame: Frame) -> void {
+  return
+}
+
+@parallel_safe
+fn warm_cache() -> void {
+  return
+}
+
+parallel {
+  warm_cache();
+}
+
+fn main() -> void {
+  warm_cache()
+  return
+}
+```
+
+Human-facing equivalent direction:
+
+```in
+enable distributed-workers
+
+needs gpu.compute
+
+Frame:
+  id: Int
+
+@gpu
+distributed render_frame(frame: Frame):
+  done
+
+@parallel_safe
+warm_cache:
+  done
+
+parallel:
+  warm_cache
+
+main:
+  warm_cache
+```
 
 See [docs/architecture/in-language.md](docs/architecture/in-language.md) for the exact grammar and status.
 
@@ -191,4 +310,3 @@ V remains available only for optional parity tooling such as `shared/protocol/ge
 - Keep frontend-specific behavior documented in `docs/architecture`.
 - Keep package/capability behavior visible through `in package`, `in graph`, and `in agent`.
 - Do not turn `.in` into a UI language.
-
