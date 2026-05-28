@@ -698,10 +698,10 @@ pub fn compile_check_swift_path_with_mode(path: &Path, mode: NativeSwiftSilMode)
     match mode {
         NativeSwiftSilMode::Only => crate::native_swift_sil::swift_subset_typecheck_ok(&combined),
         NativeSwiftSilMode::Try => {
-            if crate::native_swift_sil::swift_subset_typecheck_ok(&combined) {
-                true
-            } else {
-                run_swiftc_typecheck_with_package_retry(path, &inputs)
+            match crate::native_swift_sil::swift_subset_typecheck_for_try(&combined) {
+                Ok(true) => true,
+                Ok(false) => run_swiftc_typecheck_with_package_retry(path, &inputs),
+                Err(_) => false,
             }
         }
         NativeSwiftSilMode::Off => run_swiftc_typecheck_with_package_retry(path, &inputs),
@@ -883,8 +883,10 @@ pub fn emit_textual_sil_with_mode(
                 .map_err(SilEmitError::Msg);
         }
         NativeSwiftSilMode::Try => {
-            if let Some(sil) = crate::native_swift_sil::try_emit_in_tree_sil(&combined, module_id) {
-                return Ok(sil);
+            match crate::native_swift_sil::try_emit_in_tree_sil_or_reject(&combined, module_id) {
+                Ok(Some(sil)) => return Ok(sil),
+                Ok(None) => {}
+                Err(msg) => return Err(SilEmitError::Msg(msg)),
             }
         }
         NativeSwiftSilMode::Off => {}
@@ -1031,6 +1033,31 @@ let package = Package(
             NativeSwiftSilMode::Only
         ));
 
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn try_mode_keeps_subset_diagnostics_instead_of_fallback() {
+        let dir = std::env::temp_dir().join(format!("in-try-diag-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let path = dir.join("Bad.swift");
+        fs::write(&path, "func main() -> Void\nfunc main() -> Void\n").unwrap();
+        let err = emit_textual_sil_with_mode(&path, "App", NativeSwiftSilMode::Try)
+            .expect_err("duplicate subset decl should be a subset diagnostic");
+        let msg = err.to_string();
+        assert!(msg.contains("E_DUP_TOP"), "{msg}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn try_mode_falls_back_for_unsupported_non_subset_source() {
+        let dir = std::env::temp_dir().join(format!("in-try-fallback-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let path = dir.join("Unsupported.swift");
+        fs::write(&path, "class Box {}\n").unwrap();
+        let sil = emit_textual_sil_with_mode(&path, "App", NativeSwiftSilMode::Try)
+            .expect("unsupported non-subset source should use swiftc fallback");
+        assert!(sil.contains("sil_stage canonical"));
         let _ = fs::remove_dir_all(&dir);
     }
 }

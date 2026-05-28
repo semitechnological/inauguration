@@ -723,6 +723,100 @@ fn duplicate_names(names: &[String]) -> Vec<String> {
     dups
 }
 
+fn check_expr_calls(
+    owner: &str,
+    expr: &Expr,
+    fn_set: &HashSet<&str>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    match expr {
+        Expr::Unary { expr, .. } => check_expr_calls(owner, expr, fn_set, diagnostics),
+        Expr::Binary { lhs, rhs, .. } => {
+            check_expr_calls(owner, lhs, fn_set, diagnostics);
+            check_expr_calls(owner, rhs, fn_set, diagnostics);
+        }
+        Expr::StructInit { fields, .. } => {
+            for (_, value) in fields {
+                check_expr_calls(owner, value, fn_set, diagnostics);
+            }
+        }
+        Expr::Field { base, .. } => check_expr_calls(owner, base, fn_set, diagnostics),
+        Expr::ArrayLit(items) => {
+            for item in items {
+                check_expr_calls(owner, item, fn_set, diagnostics);
+            }
+        }
+        Expr::Index { base, index } => {
+            check_expr_calls(owner, base, fn_set, diagnostics);
+            check_expr_calls(owner, index, fn_set, diagnostics);
+        }
+        Expr::Call { callee, args } => {
+            if let Expr::Ident(name) = callee.as_ref()
+                && !fn_set.contains(name.as_str())
+            {
+                diagnostics.push(Diagnostic {
+                    code: "E_UNKNOWN_FUNCTION".into(),
+                    message: format!("unknown function call {owner}.{name}"),
+                });
+            }
+            check_expr_calls(owner, callee, fn_set, diagnostics);
+            for arg in args {
+                check_expr_calls(owner, arg, fn_set, diagnostics);
+            }
+        }
+        Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Ident(_) => {}
+    }
+}
+
+fn check_stmt_calls(
+    owner: &str,
+    stmt: &Stmt,
+    fn_set: &HashSet<&str>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    match stmt {
+        Stmt::Let(_, _, expr)
+        | Stmt::Assign(_, expr)
+        | Stmt::Return(Some(expr))
+        | Stmt::Expr(expr) => check_expr_calls(owner, expr, fn_set, diagnostics),
+        Stmt::IndexAssign { base, index, value } => {
+            check_expr_calls(owner, base, fn_set, diagnostics);
+            check_expr_calls(owner, index, fn_set, diagnostics);
+            check_expr_calls(owner, value, fn_set, diagnostics);
+        }
+        Stmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            check_expr_calls(owner, cond, fn_set, diagnostics);
+            for nested in then_body {
+                check_stmt_calls(owner, nested, fn_set, diagnostics);
+            }
+            for nested in else_body {
+                check_stmt_calls(owner, nested, fn_set, diagnostics);
+            }
+        }
+        Stmt::Loop { cond, body, .. } => {
+            if let Some(cond) = cond {
+                check_expr_calls(owner, cond, fn_set, diagnostics);
+            }
+            for nested in body {
+                check_stmt_calls(owner, nested, fn_set, diagnostics);
+            }
+        }
+        Stmt::Match { scrutinee, arms } => {
+            check_expr_calls(owner, scrutinee, fn_set, diagnostics);
+            for arm in arms {
+                for nested in &arm.body {
+                    check_stmt_calls(owner, nested, fn_set, diagnostics);
+                }
+            }
+        }
+        Stmt::Return(None) => {}
+    }
+}
+
 /// Semantic checks (matches OCaml `checker.ml` ordering).
 pub fn check(program: &[Decl]) -> Vec<Diagnostic> {
     let struct_names = collect_struct_names(program);
@@ -735,6 +829,7 @@ pub fn check(program: &[Decl]) -> Vec<Diagnostic> {
             _ => None,
         })
         .collect();
+    let fn_set: HashSet<&str> = fn_names.iter().map(String::as_str).collect();
 
     let mut all_top: Vec<String> = struct_names.clone();
     all_top.extend(fn_names.iter().cloned());
@@ -785,6 +880,9 @@ pub fn check(program: &[Decl]) -> Vec<Diagnostic> {
                         code: "E_UNKNOWN_TYPE".into(),
                         message: format!("unknown return type in function {}", f.name),
                     });
+                }
+                for stmt in &f.body {
+                    check_stmt_calls(&f.name, stmt, &fn_set, &mut type_diags);
                 }
             }
         }
@@ -1064,6 +1162,23 @@ func main() -> Void {
             }
             _ => panic!("expected main function"),
         }
+    }
+
+    #[test]
+    fn check_rejects_unknown_function_calls_in_bodies() {
+        let program = parse(
+            r#"
+func main() -> Void {
+  missing()
+  return
+}
+"#,
+        );
+        let diagnostics = check(&program);
+        assert!(
+            diagnostics.iter().any(|d| d.code == "E_UNKNOWN_FUNCTION"),
+            "{diagnostics:?}"
+        );
     }
 
     #[test]

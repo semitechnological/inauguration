@@ -539,18 +539,30 @@ fn swift_compile_check_uncached(path: &Path) -> CompileCheckResult {
             }
         }
         native_swift_sil::NativeSwiftSilMode::Try => {
-            if combined
-                .as_ref()
-                .is_ok_and(|src| native_swift_sil::swift_subset_typecheck_ok(src))
-            {
-                return CompileCheckResult {
-                    ok: true,
-                    cache_hit: false,
-                    elapsed_ms: 0,
-                    frontend_kind: Some("swift-subset".to_string()),
-                    fallback_reason: None,
-                    source_hash: hash,
-                };
+            if let Ok(src) = combined.as_ref() {
+                match native_swift_sil::swift_subset_typecheck_for_try(src) {
+                    Ok(true) => {
+                        return CompileCheckResult {
+                            ok: true,
+                            cache_hit: false,
+                            elapsed_ms: 0,
+                            frontend_kind: Some("swift-subset".to_string()),
+                            fallback_reason: None,
+                            source_hash: hash,
+                        };
+                    }
+                    Ok(false) => {}
+                    Err(_) => {
+                        return CompileCheckResult {
+                            ok: false,
+                            cache_hit: false,
+                            elapsed_ms: 0,
+                            frontend_kind: Some("swift-subset".to_string()),
+                            fallback_reason: Some("subset_diagnostic".to_string()),
+                            source_hash: hash,
+                        };
+                    }
+                }
             }
             CompileCheckResult {
                 ok: sil_emit::compile_check_swift_path_with_mode(

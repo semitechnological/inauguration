@@ -36,6 +36,12 @@ pub enum NativeSwiftSilMode {
     Only,
 }
 
+pub enum NativeSwiftSubsetStatus {
+    Supported(Vec<Decl>),
+    Unsupported,
+    Rejected(String),
+}
+
 pub fn native_swift_sil_mode_from_env() -> NativeSwiftSilMode {
     match std::env::var("IN_NATIVE_SWIFT_SIL") {
         Ok(v) if v == "try" || v == "1" || v.eq_ignore_ascii_case("true") => {
@@ -52,20 +58,48 @@ pub fn native_swift_sil_mode_from_env() -> NativeSwiftSilMode {
 }
 
 fn subset_program_if_valid(combined_sources: &str) -> Option<Vec<Decl>> {
+    match analyze_subset_program(combined_sources, "try") {
+        NativeSwiftSubsetStatus::Supported(program) => Some(program),
+        NativeSwiftSubsetStatus::Unsupported | NativeSwiftSubsetStatus::Rejected(_) => None,
+    }
+}
+
+fn format_subset_diagnostics(mode: &str, diags: &[Diagnostic]) -> String {
+    let msg = diags
+        .iter()
+        .map(|d| format!("{}: {}", d.code, d.message))
+        .collect::<Vec<_>>()
+        .join("; ");
+    format!(
+        "IN_NATIVE_SWIFT_SIL={mode}: in-tree subset rejected this source ({msg}). \
+Subset expects top-level `struct`/`func` lines only (see `swift_subset` + `native_swift_sil`)."
+    )
+}
+
+pub fn analyze_subset_program(combined_sources: &str, mode: &str) -> NativeSwiftSubsetStatus {
     let filtered = filter_top_level_decl_lines(combined_sources);
     let program = swift_subset::parse(&filtered);
-    if !swift_subset::check(&program).is_empty() {
-        return None;
+    let diags: Vec<Diagnostic> = swift_subset::check(&program);
+    if !diags.is_empty() {
+        return NativeSwiftSubsetStatus::Rejected(format_subset_diagnostics(mode, &diags));
     }
     if program.is_empty() {
-        return None;
+        return NativeSwiftSubsetStatus::Unsupported;
     }
-    Some(program)
+    NativeSwiftSubsetStatus::Supported(program)
 }
 
 /// **`swift_subset`** parse + check + top-level **`main`**, without emitting SIL.
 pub fn swift_subset_typecheck_ok(combined_sources: &str) -> bool {
     subset_program_if_valid(combined_sources).is_some()
+}
+
+pub fn swift_subset_typecheck_for_try(combined_sources: &str) -> Result<bool, String> {
+    match analyze_subset_program(combined_sources, "try") {
+        NativeSwiftSubsetStatus::Supported(_) => Ok(true),
+        NativeSwiftSubsetStatus::Unsupported => Ok(false),
+        NativeSwiftSubsetStatus::Rejected(msg) => Err(msg),
+    }
 }
 
 fn brace_delta(line: &str) -> i32 {
@@ -177,28 +211,32 @@ pub fn try_emit_in_tree_sil(combined_sources: &str, module_id: &str) -> Option<S
     Some(program_to_textual_sil(&program, module_id))
 }
 
+pub fn try_emit_in_tree_sil_or_reject(
+    combined_sources: &str,
+    module_id: &str,
+) -> Result<Option<String>, String> {
+    match analyze_subset_program(combined_sources, "try") {
+        NativeSwiftSubsetStatus::Supported(program) => {
+            Ok(Some(program_to_textual_sil(&program, module_id)))
+        }
+        NativeSwiftSubsetStatus::Unsupported => Ok(None),
+        NativeSwiftSubsetStatus::Rejected(msg) => Err(msg),
+    }
+}
+
 pub fn emit_in_tree_sil_or_diagnose(
     combined_sources: &str,
     module_id: &str,
 ) -> Result<String, String> {
-    let filtered = filter_top_level_decl_lines(combined_sources);
-    let program = swift_subset::parse(&filtered);
-    let diags: Vec<Diagnostic> = swift_subset::check(&program);
-    if !diags.is_empty() {
-        let msg = diags
-            .iter()
-            .map(|d| format!("{}: {}", d.code, d.message))
-            .collect::<Vec<_>>()
-            .join("; ");
-        return Err(format!(
-            "IN_NATIVE_SWIFT_SIL=only: in-tree subset rejected this source ({msg}). \
-Subset expects top-level `struct`/`func` lines only (see `swift_subset` + `native_swift_sil`)."
-        ));
+    match analyze_subset_program(combined_sources, "only") {
+        NativeSwiftSubsetStatus::Supported(program) => {
+            Ok(program_to_textual_sil(&program, module_id))
+        }
+        NativeSwiftSubsetStatus::Unsupported => {
+            Err("IN_NATIVE_SWIFT_SIL=only: no top-level decls after filtering".into())
+        }
+        NativeSwiftSubsetStatus::Rejected(msg) => Err(msg),
     }
-    if program.is_empty() {
-        return Err("IN_NATIVE_SWIFT_SIL=only: no top-level decls after filtering".into());
-    }
-    Ok(program_to_textual_sil(&program, module_id))
 }
 
 #[cfg(test)]
