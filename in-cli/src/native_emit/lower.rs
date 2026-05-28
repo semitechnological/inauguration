@@ -263,7 +263,7 @@ fn lower_function(
     strings: &HashMap<String, i64>,
     pending_calls: &mut Vec<PendingCall>,
 ) -> Result<(), String> {
-    ensure_return_type(&func.ret, &func.name)?;
+    ensure_return_type(&func.ret, &func.name, structs)?;
     reject_unsupported_function(func, structs)?;
 
     emitter.emit_u32(0xA9BF_7BFD);
@@ -289,6 +289,7 @@ fn lower_function(
             functions,
             pending_calls,
             &func.name,
+            &func.ret,
         )?;
     }
 
@@ -534,11 +535,24 @@ fn lower_stmt(
     functions: &HashMap<String, FunctionInfo>,
     pending_calls: &mut Vec<PendingCall>,
     fn_name: &str,
+    ret_typ: &Typ,
 ) -> Result<(), String> {
     match stmt {
         Stmt::Return(expr) => {
             if let Some(expr) = expr {
-                lower_expr_into(emitter, ctx, expr, 0, functions, pending_calls, fn_name)?;
+                if let Typ::Named(struct_name) = ret_typ {
+                    lower_struct_expr_into_regs(
+                        emitter,
+                        ctx,
+                        expr,
+                        struct_name,
+                        functions,
+                        pending_calls,
+                        fn_name,
+                    )?;
+                } else {
+                    lower_expr_into(emitter, ctx, expr, 0, functions, pending_calls, fn_name)?;
+                }
             } else {
                 emitter.emit_insns(&aarch64::load_i64(0, 0));
             }
@@ -563,6 +577,7 @@ fn lower_stmt(
             functions,
             pending_calls,
             fn_name,
+            ret_typ,
         ),
         Stmt::Assign(name, expr) => {
             if !ctx.locals.contains_key(name) {
@@ -584,6 +599,7 @@ fn lower_stmt(
             functions,
             pending_calls,
             fn_name,
+            ret_typ,
         ),
         Stmt::Match { scrutinee, arms } => lower_match(
             emitter,
@@ -593,6 +609,7 @@ fn lower_stmt(
             functions,
             pending_calls,
             fn_name,
+            ret_typ,
         ),
     }
 }
@@ -639,17 +656,35 @@ fn lower_store_local(
             }
             Ok(())
         }
-        LocalSlot::Struct { typ, fields } => {
-            let Expr::StructInit {
-                name: init,
-                fields: values,
-            } = expr
-            else {
-                return Err(format!(
-                    "native-lower: unsupported struct assignment in `{fn_name}`"
-                ));
-            };
-            if init != &typ {
+        LocalSlot::Struct { typ, fields } => lower_struct_expr_into_slots(
+            emitter,
+            ctx,
+            expr,
+            &typ,
+            &fields,
+            functions,
+            pending_calls,
+            fn_name,
+        ),
+    }
+}
+
+fn lower_struct_expr_into_slots(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    expr: &Expr,
+    typ: &str,
+    fields: &HashMap<String, u32>,
+    functions: &HashMap<String, FunctionInfo>,
+    pending_calls: &mut Vec<PendingCall>,
+    fn_name: &str,
+) -> Result<(), String> {
+    match expr {
+        Expr::StructInit {
+            name: init,
+            fields: values,
+        } => {
+            if init != typ {
                 return Err(format!(
                     "native-lower: struct assignment type mismatch in `{fn_name}`"
                 ));
@@ -663,6 +698,149 @@ fn lower_store_local(
             }
             Ok(())
         }
+        Expr::Ident(local) => {
+            let Some(LocalSlot::Struct {
+                typ: local_typ,
+                fields: local_fields,
+            }) = ctx.locals.get(local).cloned()
+            else {
+                return Err(format!(
+                    "native-lower: unsupported struct assignment in `{fn_name}`"
+                ));
+            };
+            if local_typ != typ {
+                return Err(format!(
+                    "native-lower: struct assignment type mismatch in `{fn_name}`"
+                ));
+            }
+            let schema = native_struct_fields(ctx.structs, typ, fn_name)?;
+            for (field, _) in schema {
+                let src = local_fields.get(field).ok_or_else(|| {
+                    format!("native-lower: unknown struct field `{typ}.{field}` in `{fn_name}`")
+                })?;
+                let dst = fields.get(field).ok_or_else(|| {
+                    format!("native-lower: unknown struct field `{typ}.{field}` in `{fn_name}`")
+                })?;
+                emitter.emit_u32(aarch64::ldr64(0, aarch64::REG_SP, *src));
+                emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, *dst));
+            }
+            Ok(())
+        }
+        Expr::Call { callee, args } => {
+            let return_typ = call_return_type(callee, functions, fn_name)?;
+            if return_typ != &Typ::Named(typ.to_string()) {
+                return Err(format!(
+                    "native-lower: struct assignment type mismatch in `{fn_name}`"
+                ));
+            }
+            lower_call(
+                emitter,
+                ctx,
+                callee,
+                args,
+                0,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            let schema = native_struct_fields(ctx.structs, typ, fn_name)?;
+            for (reg, (field, _)) in schema.iter().enumerate() {
+                let offset = fields.get(field).ok_or_else(|| {
+                    format!("native-lower: unknown struct field `{typ}.{field}` in `{fn_name}`")
+                })?;
+                emitter.emit_u32(aarch64::str64(reg as u8, aarch64::REG_SP, *offset));
+            }
+            Ok(())
+        }
+        _ => Err(format!(
+            "native-lower: unsupported struct assignment in `{fn_name}`"
+        )),
+    }
+}
+
+fn lower_struct_expr_into_regs(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    expr: &Expr,
+    typ: &str,
+    functions: &HashMap<String, FunctionInfo>,
+    pending_calls: &mut Vec<PendingCall>,
+    fn_name: &str,
+) -> Result<(), String> {
+    match expr {
+        Expr::StructInit {
+            name: init,
+            fields: values,
+        } => {
+            if init != typ {
+                return Err(format!(
+                    "native-lower: struct return type mismatch in `{fn_name}`"
+                ));
+            }
+            let schema = native_struct_fields(ctx.structs, typ, fn_name)?;
+            for (reg, (field, _)) in schema.iter().enumerate() {
+                let Some((_, value)) = values.iter().find(|(name, _)| name == field) else {
+                    return Err(format!(
+                        "native-lower: unknown struct field `{typ}.{field}` in `{fn_name}`"
+                    ));
+                };
+                lower_expr_into(
+                    emitter,
+                    ctx,
+                    value,
+                    reg as u8,
+                    functions,
+                    pending_calls,
+                    fn_name,
+                )?;
+            }
+            Ok(())
+        }
+        Expr::Ident(local) => {
+            let Some(LocalSlot::Struct {
+                typ: local_typ,
+                fields,
+            }) = ctx.locals.get(local).cloned()
+            else {
+                return Err(format!(
+                    "native-lower: unsupported struct return in `{fn_name}`"
+                ));
+            };
+            if local_typ != typ {
+                return Err(format!(
+                    "native-lower: struct return type mismatch in `{fn_name}`"
+                ));
+            }
+            let schema = native_struct_fields(ctx.structs, typ, fn_name)?;
+            for (reg, (field, _)) in schema.iter().enumerate() {
+                let offset = fields.get(field).ok_or_else(|| {
+                    format!("native-lower: unknown struct field `{typ}.{field}` in `{fn_name}`")
+                })?;
+                emitter.emit_u32(aarch64::ldr64(reg as u8, aarch64::REG_SP, *offset));
+            }
+            Ok(())
+        }
+        Expr::Call { callee, args } => {
+            let return_typ = call_return_type(callee, functions, fn_name)?;
+            if return_typ != &Typ::Named(typ.to_string()) {
+                return Err(format!(
+                    "native-lower: struct return type mismatch in `{fn_name}`"
+                ));
+            }
+            lower_call(
+                emitter,
+                ctx,
+                callee,
+                args,
+                0,
+                functions,
+                pending_calls,
+                fn_name,
+            )
+        }
+        _ => Err(format!(
+            "native-lower: unsupported struct return in `{fn_name}`"
+        )),
     }
 }
 
@@ -675,18 +853,35 @@ fn lower_if(
     functions: &HashMap<String, FunctionInfo>,
     pending_calls: &mut Vec<PendingCall>,
     fn_name: &str,
+    ret_typ: &Typ,
 ) -> Result<(), String> {
     lower_expr_into(emitter, ctx, cond, 0, functions, pending_calls, fn_name)?;
     emitter.emit_u32(aarch64::cmp_reg64(0, aarch64::REG_XZR));
     let else_branch = emitter.emit_insn(aarch64::b_cond(0, 0));
     for stmt in then_body {
-        lower_stmt(emitter, ctx, stmt, functions, pending_calls, fn_name)?;
+        lower_stmt(
+            emitter,
+            ctx,
+            stmt,
+            functions,
+            pending_calls,
+            fn_name,
+            ret_typ,
+        )?;
     }
     let end_branch = emitter.emit_insn(aarch64::b(0));
     let else_offset = emitter.len() as i32 - else_branch as i32;
     emitter.patch_u32(else_branch, aarch64::b_cond(0, else_offset));
     for stmt in else_body {
-        lower_stmt(emitter, ctx, stmt, functions, pending_calls, fn_name)?;
+        lower_stmt(
+            emitter,
+            ctx,
+            stmt,
+            functions,
+            pending_calls,
+            fn_name,
+            ret_typ,
+        )?;
     }
     let end_offset = emitter.len() as i32 - end_branch as i32;
     emitter.patch_u32(end_branch, aarch64::b(end_offset));
@@ -701,6 +896,7 @@ fn lower_loop(
     functions: &HashMap<String, FunctionInfo>,
     pending_calls: &mut Vec<PendingCall>,
     fn_name: &str,
+    ret_typ: &Typ,
 ) -> Result<(), String> {
     let head = emitter.len();
     let end_branch = if let Some(cond) = cond {
@@ -711,7 +907,15 @@ fn lower_loop(
         None
     };
     for stmt in body {
-        lower_stmt(emitter, ctx, stmt, functions, pending_calls, fn_name)?;
+        lower_stmt(
+            emitter,
+            ctx,
+            stmt,
+            functions,
+            pending_calls,
+            fn_name,
+            ret_typ,
+        )?;
     }
     let back_offset = head as i32 - emitter.len() as i32;
     emitter.emit_u32(aarch64::b(back_offset));
@@ -730,6 +934,7 @@ fn lower_match(
     functions: &HashMap<String, FunctionInfo>,
     pending_calls: &mut Vec<PendingCall>,
     fn_name: &str,
+    ret_typ: &Typ,
 ) -> Result<(), String> {
     lower_expr_into(
         emitter,
@@ -757,7 +962,15 @@ fn lower_match(
         emitter.emit_u32(aarch64::cmp_reg64(2, 1));
         let next_branch = emitter.emit_insn(aarch64::b_cond(1, 0));
         for stmt in &arm.body {
-            lower_stmt(emitter, ctx, stmt, functions, pending_calls, fn_name)?;
+            lower_stmt(
+                emitter,
+                ctx,
+                stmt,
+                functions,
+                pending_calls,
+                fn_name,
+                ret_typ,
+            )?;
         }
         end_branches.push(emitter.emit_insn(aarch64::b(0)));
         let next_offset = emitter.len() as i32 - next_branch as i32;
@@ -765,7 +978,15 @@ fn lower_match(
     }
     if let Some(body) = default_body {
         for stmt in body {
-            lower_stmt(emitter, ctx, stmt, functions, pending_calls, fn_name)?;
+            lower_stmt(
+                emitter,
+                ctx,
+                stmt,
+                functions,
+                pending_calls,
+                fn_name,
+                ret_typ,
+            )?;
         }
     }
     for branch in end_branches {
@@ -1306,13 +1527,36 @@ fn emit_epilogue(emitter: &mut CodeEmitter, stack_reserve: u32) {
     emitter.emit_u32(aarch64::ret());
 }
 
-fn ensure_return_type(ret: &Typ, fn_name: &str) -> Result<(), String> {
+fn ensure_return_type(
+    ret: &Typ,
+    fn_name: &str,
+    structs: &HashMap<String, Vec<(String, Typ)>>,
+) -> Result<(), String> {
     match ret {
         Typ::Int | Typ::Bool | Typ::String | Typ::Void => Ok(()),
+        Typ::Named(struct_name) => {
+            native_struct_fields(structs, struct_name, fn_name)?;
+            Ok(())
+        }
         _ => Err(format!(
-            "native-lower: unsupported return type in `{fn_name}` (only Int/Bool/String/Void)"
+            "native-lower: unsupported return type in `{fn_name}` (only Int/Bool/String/Void/scalar structs)"
         )),
     }
+}
+
+fn call_return_type<'a>(
+    callee: &Expr,
+    functions: &'a HashMap<String, FunctionInfo>,
+    fn_name: &str,
+) -> Result<&'a Typ, String> {
+    let Expr::Ident(target) = callee else {
+        return Err(format!(
+            "native-lower: unsupported call callee in `{fn_name}`"
+        ));
+    };
+    functions.get(target).map(|func| &func.ret).ok_or_else(|| {
+        format!("native-lower: call to unknown function `{target}` from `{fn_name}`")
+    })
 }
 
 fn reject_unsupported_function(
@@ -1360,6 +1604,29 @@ fn native_param_abi_slots(
         }
     }
     Ok(slots)
+}
+
+fn native_struct_fields<'a>(
+    structs: &'a HashMap<String, Vec<(String, Typ)>>,
+    typ: &str,
+    fn_name: &str,
+) -> Result<&'a Vec<(String, Typ)>, String> {
+    let fields = structs
+        .get(typ)
+        .ok_or_else(|| format!("native-lower: unsupported struct `{typ}` in `{fn_name}`"))?;
+    if fields.len() > 8 {
+        return Err(format!(
+            "native-lower: unsupported struct `{typ}` in `{fn_name}` (too many fields)"
+        ));
+    }
+    for (_, field_ty) in fields {
+        if !matches!(field_ty, Typ::Int | Typ::Bool | Typ::String) {
+            return Err(format!(
+                "native-lower: unsupported struct field type in `{fn_name}` (only Int/Bool/String fields)"
+            ));
+        }
+    }
+    Ok(fields)
 }
 
 fn is_native_scalar_type(typ: &Typ) -> bool {
@@ -1556,6 +1823,30 @@ fn sum(p: Point) -> Int {
 fn main() -> Int {
   let p: Point = Point { x: 2, y: 5 };
   return sum(p);
+}
+"#,
+        )
+        .expect("parse");
+
+        lower_module(&module, "main").expect("lower");
+    }
+
+    #[test]
+    fn lowers_struct_return_field_access() {
+        let module = crate::in_lang_parse::parse_in_source(
+            r#"
+struct Point {
+  Int x
+  Int y
+}
+
+fn make_point() -> Point {
+  return Point { x: 2, y: 5 };
+}
+
+fn main() -> Int {
+  let p: Point = make_point();
+  return p.y;
 }
 "#,
         )
@@ -1970,6 +2261,69 @@ fn main() -> Int {
                         && dump.contains("str\tx1, [sp, #0x8]")
                         && dump.contains("add\tx0, x0, x1"),
                     "expected flattened struct parameter instructions in __text; otool:\n{dump}"
+                );
+            }
+            other => panic!(
+                "unexpected native exit {:?}; stdout={:?} stderr={:?}",
+                other, output.stdout, output.stderr
+            ),
+        }
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    #[test]
+    fn struct_return_executable_exits_with_field_value() {
+        let module = crate::in_lang_parse::parse_in_source(
+            r#"
+struct Point {
+  Int x
+  Int y
+}
+
+fn make_point() -> Point {
+  return Point { x: 2, y: 5 };
+}
+
+fn main() -> Int {
+  let p: Point = make_point();
+  return p.y;
+}
+"#,
+        )
+        .expect("parse");
+        let path = temp_executable("struct-return-exe");
+        let _ = std::fs::remove_file(&path);
+        compile_native_executable(&module, "main", &path).expect("compile");
+
+        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::process::ExitStatusExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let sign = std::process::Command::new("codesign")
+            .args(["-s", "-", "-f", path.to_str().unwrap()])
+            .status()
+            .expect("codesign spawn");
+        assert!(sign.success(), "codesign failed for native executable");
+
+        let output = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(path.to_str().unwrap())
+            .output()
+            .expect("run executable");
+        match output.status.code() {
+            Some(5) => {}
+            None if output.status.signal() == Some(9) => {
+                let otool = std::process::Command::new("otool")
+                    .args(["-tV", path.to_str().unwrap()])
+                    .output()
+                    .expect("otool");
+                let dump = String::from_utf8_lossy(&otool.stdout);
+                assert!(
+                    dump.contains("mov\tx0, #0x2")
+                        && dump.contains("mov\tx1, #0x5")
+                        && dump.contains("str\tx1, [sp, #0x8]"),
+                    "expected flattened struct return instructions in __text; otool:\n{dump}"
                 );
             }
             other => panic!(
