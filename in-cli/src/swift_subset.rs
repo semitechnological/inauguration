@@ -583,6 +583,41 @@ fn extract_braced_body(s: &str, open_idx: usize) -> Option<&str> {
     None
 }
 
+fn matching_brace_index(s: &str, open_idx: usize) -> Option<usize> {
+    if open_idx >= s.len() || !s[open_idx..].starts_with('{') {
+        return None;
+    }
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escape = false;
+    for (i, c) in s[open_idx..].char_indices() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        if in_string {
+            if c == '\\' {
+                escape = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => in_string = true,
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(open_idx + i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 fn split_body_statements(body: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut start = 0usize;
@@ -666,10 +701,42 @@ fn parse_assign_stmt(s: &str) -> Option<Stmt> {
     ))
 }
 
+fn parse_if_stmt(s: &str) -> Option<Stmt> {
+    let rest = trim(s.strip_prefix("if ")?);
+    let open = rest.find('{')?;
+    let cond = trim(&rest[..open]);
+    if cond.is_empty() {
+        return None;
+    }
+    let then_close = matching_brace_index(rest, open)?;
+    let then_body = parse_body(&rest[open + 1..then_close]);
+    let tail = trim(&rest[then_close + 1..]);
+    let else_body = if let Some(after_else) = tail.strip_prefix("else") {
+        let after_else = trim(after_else);
+        if after_else.is_empty() {
+            Vec::new()
+        } else {
+            let else_open = after_else.find('{')?;
+            let else_close = matching_brace_index(after_else, else_open)?;
+            parse_body(&after_else[else_open + 1..else_close])
+        }
+    } else {
+        Vec::new()
+    };
+    Some(Stmt::If {
+        cond: parse_expr(cond),
+        then_body,
+        else_body,
+    })
+}
+
 fn parse_stmt(s: &str) -> Option<Stmt> {
     let s = trim(s);
     if s.is_empty() {
         return None;
+    }
+    if s.starts_with("if ") {
+        return parse_if_stmt(s);
     }
     if s.starts_with("let ") {
         return parse_let_stmt(s);
@@ -1068,6 +1135,17 @@ fn check_stmt_names(
             else_body,
         } => {
             check_expr_names(owner, cond, env, structs, fns, fn_params, diagnostics);
+            if let Some(actual) = infer_expr_type(cond, env, structs, fns)
+                && actual != Typ::Bool
+            {
+                diagnostics.push(Diagnostic {
+                    code: "E_IF_COND_TYPE".into(),
+                    message: format!(
+                        "if condition type mismatch in {owner}: expected Bool, got {}",
+                        string_of_type(&actual)
+                    ),
+                });
+            }
             let mut then_env = env.clone();
             for nested in then_body {
                 check_stmt_names(
@@ -1719,6 +1797,57 @@ func main() -> Void {
         assert!(
             diagnostics.iter().any(|d| d.code == "E_CALL_ARG_TYPE"
                 && d.message == "call argument type mismatch in main.helper argument 1: expected Int, got String"),
+            "{diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn parse_func_body_if_else() {
+        let program = parse(
+            r#"
+func choose(flag: Bool) -> Int {
+  if flag {
+    return 1
+  } else {
+    return 2
+  }
+}
+"#,
+        );
+        match &program[0] {
+            Decl::Function(f) => {
+                assert_eq!(f.body.len(), 1);
+                assert!(matches!(
+                    &f.body[0],
+                    Stmt::If {
+                        cond: Expr::Ident(name),
+                        then_body,
+                        else_body,
+                    } if name == "flag"
+                        && matches!(then_body.as_slice(), [Stmt::Return(Some(Expr::IntLit(1)))])
+                        && matches!(else_body.as_slice(), [Stmt::Return(Some(Expr::IntLit(2)))])
+                ));
+            }
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn check_rejects_non_bool_if_condition() {
+        let program = parse(
+            r#"
+func choose(flag: Int) -> Int {
+  if flag {
+    return 1
+  } else {
+    return 2
+  }
+}
+"#,
+        );
+        let diagnostics = check(&program);
+        assert!(
+            diagnostics.iter().any(|d| d.code == "E_IF_COND_TYPE"),
             "{diagnostics:?}"
         );
     }

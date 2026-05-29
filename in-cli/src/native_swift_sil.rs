@@ -397,4 +397,22 @@ func main() -> Void {
         assert!(err.contains("E_CALL_ARG_TYPE"), "{err}");
         assert!(!err.contains("store_var"), "{err}");
     }
+
+    #[test]
+    fn emit_subset_sil_lowers_if_else_body() {
+        let src = r#"
+func main(flag: Bool) -> Int {
+  if flag {
+    return 1
+  } else {
+    return 2
+  }
+}
+"#;
+        let sil = emit_in_tree_sil_or_diagnose(src, "App").expect("sil");
+        assert!(sil.contains("cond_br"), "{sil}");
+        assert!(sil.contains("bb_if_then_"), "{sil}");
+        assert!(sil.contains("bb_if_else_"), "{sil}");
+        assert!(sil.contains("bb_if_end_"), "{sil}");
+    }
 }
