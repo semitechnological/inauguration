@@ -52,7 +52,8 @@
 - [x] Deepen one Tree-sitter front end-to-end.
   - Java now has source to `UnifiedModule` to textual SIL to `hybrid_sil` graph coverage.
   - Java method extraction now lowers bounded returns, assignments, and call expressions into Core IR bodies.
-  - Promote another high-value front only after Java-style fixture coverage exists for declarations, bounded bodies, lowering, and diagnostics.
+  - Dart now shares the generic Tree-sitter scalar body path for params, return types, locals, assignment, calls, `if`, `while`, and returns, with cross-language control-flow fixture coverage.
+  - Next high-value promotion: move one remaining level-1 front (`php`, `lua`, `scala`, or `fsharp`) through the same declaration + bounded-body + lowering + diagnostics path.
   - Keep parser maturity labels current in `docs/architecture/parser-surface.md`.
 
 - [x] Add an agent-first compiler mode.
@@ -69,10 +70,16 @@
 - [ ] Make `.in` the agent-native hybrid language surface.
   - Keep `.in` simple by default: regular syntax, few special cases, explicit imports, explicit fallibility, explicit outside-world capabilities.
   - Let `.in` call or wrap symbols from language fronts that lower into Core IR.
-  - First slices landed: top-level `import`, `capability`, and `extern <language> fn ...;` declarations parse in `.in`; local relative `.in` imports merge declarations; `std.io` / `std.fs` / `std.http` / `std.json` / `std.process` / `std.cli` synthesize bounded stdlib declarations; extern `requires` contracts warn when capabilities are missing; `if` / `else`, `while`, and binary expressions parse into Core IR; `in agent` reports surface facts and extern calls still produce Core IR graph edges.
-  - Continue gradual complexity: named package/module resolution, more standard library APIs, richer expression operators, and additional control flow only when shared IR needs them.
+  - First slices landed: top-level `package`, `module`, `import`, `capability`, and `extern <language> fn ...;` declarations parse in `.in`; local relative `.in` imports merge declarations; `std.io` / `std.fs` / `std.http` / `std.json` / `std.process` / `std.cli` synthesize bounded stdlib declarations; extern `requires` contracts warn when capabilities are missing; `if` / `else`, `while`, and binary expressions parse into Core IR; `in agent` and `in graph` report package/module/import facts, capabilities, orchestration facts, and extern call graph edges.
+  - Continue gradual complexity: bind `.in package` / `module` facts to `inauguration.package`, semantic import resolution, more standard library APIs, richer expression operators, and additional control flow only when shared IR needs them.
   - Prefer standard library APIs over syntax sugar so agents have one obvious path for files, network, process, JSON, HTTP, and CLI tasks.
   - Keep `icore` as the lowest common interchange format for tools and agents that cannot or should not emit `.in` directly.
+
+- [ ] Unify `.in` identity with the package graph.
+  - `idea.md` wants one semantic package graph: package identity, targets, dependencies, capabilities, extensions, indexing, graph invalidation, and semantic imports.
+  - Current state: `in package` reports `inauguration.package`; `.in package` / `module` are agent/graph effects only and do not affect package discovery, dependency resolution, Core IR names, or import lookup.
+  - Next slice: when source declares `package` / `module`, `in graph --json` and `in package --json` should report whether those facts match the nearest `inauguration.package`, with stable reason codes for match, missing manifest, or mismatch.
+  - After that: semantic imports such as `use database.postgres` / `import std.fs` should resolve through package graph facts before any dependency installation or extension loading is claimed.
 
 - [x] Build a language-compatibility ladder.
   - Level 0: route extension or magic line to a known `ParserId`.
