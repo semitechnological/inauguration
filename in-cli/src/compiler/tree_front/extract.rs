@@ -4,8 +4,8 @@
 
 use super::ruby::extract_ruby;
 use crate::core_ir::{Decl, UnifiedModule};
+use crate::core_ir::{Expr, Stmt, Typ};
 use crate::parser_registry::ParserId;
-use crate::swift_subset::{Expr, Stmt, Typ};
 use std::collections::HashSet;
 use std::path::Path;
 use tree_sitter::{Language, Node, Parser};
@@ -469,7 +469,7 @@ fn c_while_statement(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
         .map(|n| c_stmt_or_body(src, n))
         .unwrap_or_default();
     Some(Stmt::Loop {
-        kind: crate::swift_subset::LoopKind::While,
+        kind: crate::core_ir::LoopKind::While,
         cond: Some(cond),
         body,
     })
@@ -885,7 +885,7 @@ fn java_while_statement(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
         .map(|n| java_stmt_or_body(src, n))
         .unwrap_or_default();
     Some(Stmt::Loop {
-        kind: crate::swift_subset::LoopKind::While,
+        kind: crate::core_ir::LoopKind::While,
         cond: Some(cond),
         body,
     })
@@ -1174,7 +1174,7 @@ fn kotlin_while_statement(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
         .map(|n| kotlin_stmt_or_body(src, n))
         .unwrap_or_default();
     Some(Stmt::Loop {
-        kind: crate::swift_subset::LoopKind::While,
+        kind: crate::core_ir::LoopKind::While,
         cond: Some(cond),
         body,
     })
@@ -1446,7 +1446,7 @@ fn csharp_while_statement(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
         .map(|n| csharp_stmt_or_body(src, n))
         .unwrap_or_default();
     Some(Stmt::Loop {
-        kind: crate::swift_subset::LoopKind::While,
+        kind: crate::core_ir::LoopKind::While,
         cond: Some(cond),
         body,
     })
@@ -1688,7 +1688,7 @@ fn python_while_statement(src: &[u8], stmt: Node<'_>, locals: &HashSet<String>) 
         .map(|n| python_body_with_locals(src, n, locals))
         .unwrap_or_default();
     Some(Stmt::Loop {
-        kind: crate::swift_subset::LoopKind::While,
+        kind: crate::core_ir::LoopKind::While,
         cond: Some(cond),
         body,
     })
@@ -2032,7 +2032,7 @@ fn js_while_statement(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
         .map(|n| js_stmt_or_body(src, n))
         .unwrap_or_default();
     Some(Stmt::Loop {
-        kind: crate::swift_subset::LoopKind::While,
+        kind: crate::core_ir::LoopKind::While,
         cond: Some(cond),
         body,
     })
@@ -2375,7 +2375,7 @@ fn zig_while_expression(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
         .map(|n| zig_stmt_or_body(src, n))
         .unwrap_or_default();
     Some(Stmt::Loop {
-        kind: crate::swift_subset::LoopKind::While,
+        kind: crate::core_ir::LoopKind::While,
         cond: Some(cond),
         body,
     })

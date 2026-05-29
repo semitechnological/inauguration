@@ -6,11 +6,13 @@ pub mod preview_client;
 pub mod agent_mode;
 pub mod bytecode;
 pub mod bytecode_compiler;
+pub mod compile_cache;
 pub mod compiler;
 pub mod core_ir;
-pub mod core_typecheck;
 pub mod core_ir_verifier;
+pub mod core_typecheck;
 pub mod extension_registry;
+pub mod external_guard;
 pub mod graph_report;
 pub mod hotreload;
 pub mod hybrid_core;
@@ -22,29 +24,27 @@ pub mod in_lang_parse;
 pub mod inrt;
 pub mod language_support;
 pub mod lower_core;
-pub mod compile_cache;
 pub mod native_backend;
-pub mod external_guard;
 pub mod native_emit;
-pub mod owned_compile;
 pub mod native_swift_sil;
+pub mod owned_compile;
 pub mod package_manifest;
 pub mod parser_registry;
 pub mod sil_emit;
 pub mod sil_to_bytecode;
 pub mod swift_subset;
-pub mod vm;
 pub mod v_native;
+pub mod vm;
 
 #[cfg(test)]
 mod in_pipeline_tests {
     use crate::compiler::{driver, icore, tree_front};
     use crate::core_ir::Decl;
+    use crate::core_ir::{Expr, Stmt};
     use crate::hybrid_sil;
     use crate::in_lang_parse;
     use crate::lower_core;
     use crate::parser_registry::ParserId;
-    use crate::swift_subset::{Expr, Stmt};
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -386,8 +386,7 @@ fn main() -> void {
 
     #[test]
     fn bytecode_logical_expression_from_in_source() {
-        let src =
-            "fn main() -> Int { let x: Int = 2; if false || true && x == 2 { return 7; } return 0; }";
+        let src = "fn main() -> Int { let x: Int = 2; if false || true && x == 2 { return 7; } return 0; }";
         let module = in_lang_parse::parse_in_source(src).expect("parse .in");
         let sil = lower_core::lower_to_textual_sil(&module, "App");
         assert!(sil.contains("builtin_binop \"||\""));

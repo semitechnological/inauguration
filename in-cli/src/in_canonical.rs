@@ -1,6 +1,5 @@
-use crate::core_ir::{Decl, Typ, UnifiedModule};
+use crate::core_ir::{Decl, Expr, LoopKind, Stmt, Typ, UnifiedModule};
 use crate::in_lang_parse::parse_in_source;
-use crate::swift_subset::{Expr, LoopKind, Stmt};
 
 pub fn canonicalize_in_source(source: &str) -> Result<String, String> {
     let module = parse_in_source(source)?;

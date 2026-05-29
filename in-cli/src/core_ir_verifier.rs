@@ -1,5 +1,5 @@
 use crate::core_ir::{Decl, UnifiedModule};
-use crate::swift_subset::{Expr, Stmt, Typ};
+use crate::core_ir::{Expr, Stmt, Typ};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -633,7 +633,7 @@ fn type_name(typ: &Typ) -> String {
 mod tests {
     use super::*;
     use crate::core_ir::{Decl, UnifiedModule};
-    use crate::swift_subset::{Expr, Stmt};
+    use crate::core_ir::{Expr, Stmt};
 
     fn function(name: &str, body: Vec<Stmt>) -> Decl {
         Decl::Function {
@@ -971,7 +971,7 @@ mod tests {
             &module(vec![function(
                 "main",
                 vec![Stmt::Loop {
-                    kind: crate::swift_subset::LoopKind::While,
+                    kind: crate::core_ir::LoopKind::While,
                     cond: Some(Expr::IntLit(1)),
                     body: Vec::new(),
                 }],

@@ -1,7 +1,7 @@
 //! `.in` v0.2: top-level `struct` / `fn` with multiline struct bodies and minimal `fn` bodies.
 
 use crate::core_ir::{Decl, Typ, UnifiedModule};
-use crate::swift_subset::{Expr, LoopKind, Stmt};
+use crate::core_ir::{Expr, LoopKind, Stmt};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -1103,7 +1103,7 @@ fn parse_match_stmt(s: &str) -> Result<Stmt, String> {
     Ok(Stmt::Match { scrutinee, arms })
 }
 
-fn parse_match_arms(inner: &str) -> Result<Vec<crate::swift_subset::MatchArm>, String> {
+fn parse_match_arms(inner: &str) -> Result<Vec<crate::core_ir::MatchArm>, String> {
     let mut arms = Vec::new();
     let mut pos = 0usize;
     while pos < inner.len() {
@@ -1123,7 +1123,7 @@ fn parse_match_arms(inner: &str) -> Result<Vec<crate::swift_subset::MatchArm>, S
         }
         let (body_inner, close) = brace_content_bounds_after_open(inner, open)
             .ok_or_else(|| ".in: unclosed match arm body".to_string())?;
-        arms.push(crate::swift_subset::MatchArm {
+        arms.push(crate::core_ir::MatchArm {
             pattern: pattern.to_string(),
             body: parse_function_body(body_inner)?,
         });
@@ -2452,7 +2452,7 @@ fn main() -> void { read_file("x"); return; }
 
     #[test]
     fn fn_body_let_and_return() {
-        use crate::swift_subset::Expr;
+        use crate::core_ir::Expr;
         let src = r#"
 fn bump() -> Int {
   let x: Int = 1;
@@ -2500,7 +2500,7 @@ fn main() -> void {
 
     #[test]
     fn fn_body_infers_let_without_type() {
-        use crate::swift_subset::Expr;
+        use crate::core_ir::Expr;
         let src = "fn f() -> void { let n = 0; return; }\nfn main() -> void\n";
         let m = parse_in_source(src).expect("ok");
         let body = match m
@@ -2516,7 +2516,7 @@ fn main() -> void {
 
     #[test]
     fn expr_statement_parsed() {
-        use crate::swift_subset::Expr;
+        use crate::core_ir::Expr;
         let src = "fn g() -> void { 42; return; }\nfn main() -> void\n";
         let m = parse_in_source(src).expect("ok");
         let body = match m
@@ -2532,7 +2532,7 @@ fn main() -> void {
 
     #[test]
     fn fn_body_assignment_and_call_expr() {
-        use crate::swift_subset::Expr;
+        use crate::core_ir::Expr;
         let src = "fn f() -> void { let n = 0; n = add(n, 1); return; }\nfn main() -> void\n";
         let m = parse_in_source(src).expect("ok");
         let body = match m
@@ -2554,7 +2554,7 @@ fn main() -> void {
 
     #[test]
     fn fn_body_parses_index_assignment() {
-        use crate::swift_subset::Expr;
+        use crate::core_ir::Expr;
         let src = "fn f() -> Int { let xs: [Int] = [1, 2]; xs[1] = 9; return xs[1]; }\nfn main() -> void\n";
         let m = parse_in_source(src).expect("ok");
         let body = match m
@@ -2579,7 +2579,7 @@ fn main() -> void {
 
     #[test]
     fn fn_body_parses_binary_expression() {
-        use crate::swift_subset::Expr;
+        use crate::core_ir::Expr;
         let src = "fn f() -> Int { return 1 + 2 * 3; }\nfn main() -> void\n";
         let m = parse_in_source(src).expect("ok");
         let body = match m
@@ -2598,7 +2598,7 @@ fn main() -> void {
 
     #[test]
     fn fn_body_parses_modulo_at_multiplicative_precedence() {
-        use crate::swift_subset::Expr;
+        use crate::core_ir::Expr;
         let src = "fn main() -> Int { return 7 % 4; }\n";
         let m = parse_in_source(src).expect("ok");
         let body = match m
@@ -2620,7 +2620,7 @@ fn main() -> void {
 
     #[test]
     fn fn_body_parses_unary_and_parenthesized_expression() {
-        use crate::swift_subset::Expr;
+        use crate::core_ir::Expr;
         let src = r#"
 fn negate(flag: Bool, value: Int) -> Int {
   if !flag == false {
@@ -2657,7 +2657,7 @@ fn main() -> void
 
     #[test]
     fn fn_body_parses_logical_binary_precedence() {
-        use crate::swift_subset::Expr;
+        use crate::core_ir::Expr;
         let src = r#"
 fn choose(a: Bool, b: Bool, n: Int) -> Int {
   if a || b && n == 1 {
@@ -2689,7 +2689,7 @@ fn main() -> void
 
     #[test]
     fn fn_body_parses_if_else() {
-        use crate::swift_subset::Expr;
+        use crate::core_ir::Expr;
         let src = r#"
 fn label(flag: Bool) -> String {
   if flag == true {
@@ -2721,7 +2721,7 @@ fn main() -> void
 
     #[test]
     fn fn_body_parses_else_if_as_nested_if() {
-        use crate::swift_subset::Expr;
+        use crate::core_ir::Expr;
         let src = r#"
 fn classify(n: Int) -> Int {
   if n == 0 {

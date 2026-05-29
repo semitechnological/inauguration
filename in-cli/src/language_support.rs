@@ -43,8 +43,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         level: 2,
         level_label: "Swift subset or swiftc textual SIL path",
         front: "swift_subset, native_swift_sil, sil_emit",
-        runtime_boundary:
-            "in-tree subset when IN_NATIVE_SWIFT_SIL=only; optional Swift toolchain fallback",
+        runtime_boundary: "in-tree subset when IN_NATIVE_SWIFT_SIL=only; optional Swift toolchain fallback",
         example: "apps/polyglot-sample/sample.swift",
         next_step: "Widen the in-tree subset and shrink the swiftc dependency on hot paths",
     },

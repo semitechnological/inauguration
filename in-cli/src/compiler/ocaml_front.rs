@@ -1,5 +1,5 @@
 use crate::core_ir::{Decl, UnifiedModule};
-use crate::swift_subset::{Expr, Stmt, Typ};
+use crate::core_ir::{Expr, Stmt, Typ};
 use std::path::Path;
 
 pub fn parse_ocaml_file(path: &Path) -> Result<UnifiedModule, String> {

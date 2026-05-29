@@ -3,7 +3,7 @@
 //! Parses with Tree-sitter Go grammar and lowers top-level structs/functions plus a statement subset.
 
 use crate::core_ir::{Decl, UnifiedModule};
-use crate::swift_subset::{Expr, LoopKind, MatchArm, Stmt, Typ};
+use crate::core_ir::{Expr, LoopKind, MatchArm, Stmt, Typ};
 use std::path::Path;
 use tree_sitter::{Node, Parser};
 
@@ -645,7 +645,7 @@ fn parse_expr(s: &str) -> Expr {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::swift_subset::LoopKind;
+    use crate::core_ir::LoopKind;
 
     #[test]
     fn parses_go_struct_and_main() {

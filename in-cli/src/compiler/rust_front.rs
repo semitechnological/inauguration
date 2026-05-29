@@ -3,7 +3,7 @@
 //! This is the first non-`.in` front that lowers real statement bodies (subset) into Core IR.
 
 use crate::core_ir::{Decl, UnifiedModule};
-use crate::swift_subset::{Expr, LoopKind, MatchArm, Stmt, Typ};
+use crate::core_ir::{Expr, LoopKind, MatchArm, Stmt, Typ};
 use quote::ToTokens;
 use std::path::Path;
 

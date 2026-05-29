@@ -159,10 +159,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
     };
     let frontend_hash = compile_cache::source_frontend_hash(&request.path, &source);
     if let Some(mut cached) = compile_cache::read_cached_report(&cwd, &frontend_hash) {
-        let requested_out = request
-            .out
-            .as_ref()
-            .map(|path| path.display().to_string());
+        let requested_out = request.out.as_ref().map(|path| path.display().to_string());
         let cached_out = cached
             .executable_path
             .clone()
@@ -248,10 +245,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
     if !verify_report.ok {
         report.reason_code = Some(format!(
             "verify-{}",
-            verify_report
-                .reason_code
-                .as_deref()
-                .unwrap_or("failed")
+            verify_report.reason_code.as_deref().unwrap_or("failed")
         ));
         report.reason = verify_report.reason.clone();
         report.error = verify_report.reason;
@@ -349,19 +343,16 @@ fn compile_native(
 }
 
 fn try_const_answer_entry(module: &UnifiedModule, entry: &str) -> Option<u8> {
-    use crate::swift_subset::{Expr, Stmt};
+    use crate::core_ir::{Expr, Stmt};
     for decl in &module.decls {
         if let Decl::Function {
-            name,
-            body,
-            ret,
-            ..
+            name, body, ret, ..
         } = decl
         {
             if name != entry {
                 continue;
             }
-            if *ret != crate::swift_subset::Typ::Int {
+            if *ret != crate::core_ir::Typ::Int {
                 return None;
             }
             if body.len() != 1 {
@@ -426,7 +417,8 @@ fn finalize_report(
     frontend_hash: &str,
 ) -> OwnedCompileReport {
     report.external_invocations = external_guard::ExternalInvocationGuard::active_invocations();
-    if let Err(reason) = external_guard::assert_no_forbidden_invocations(&report.external_invocations)
+    if let Err(reason) =
+        external_guard::assert_no_forbidden_invocations(&report.external_invocations)
     {
         report.success = false;
         report.reason_code = Some("external-tool-invoked".to_string());
@@ -442,7 +434,8 @@ fn finalize_report(
 }
 
 pub fn report_to_json(report: &OwnedCompileReport) -> Result<String, String> {
-    serde_json::to_string_pretty(report).map_err(|err| format!("serialize owned compile report: {err}"))
+    serde_json::to_string_pretty(report)
+        .map_err(|err| format!("serialize owned compile report: {err}"))
 }
 
 #[cfg(test)]
@@ -462,7 +455,12 @@ mod tests {
         ))
     }
 
-    fn default_request(path: PathBuf, target: CompileTarget, entry: Option<&str>, out: Option<PathBuf>) -> OwnedCompileRequest {
+    fn default_request(
+        path: PathBuf,
+        target: CompileTarget,
+        entry: Option<&str>,
+        out: Option<PathBuf>,
+    ) -> OwnedCompileRequest {
         OwnedCompileRequest {
             path,
             module_id: "App".to_string(),
@@ -498,7 +496,10 @@ mod tests {
         assert_eq!(report.runtime_level, "inrt-bytecode");
         assert_eq!(report.parsed_function_count, 2);
         assert_eq!(report.typed_function_count, 2);
-        assert_eq!(report.artifact_path.as_deref(), Some(out_path.to_str().unwrap()));
+        assert_eq!(
+            report.artifact_path.as_deref(),
+            Some(out_path.to_str().unwrap())
+        );
         assert!(out_path.exists());
 
         fs::remove_file(source_path).unwrap();

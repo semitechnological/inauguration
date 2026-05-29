@@ -1,7 +1,7 @@
 //! Lower [`crate::core_ir::UnifiedModule`] to textual SIL matching `native_swift_sil` stubs.
 
 use crate::core_ir::{Decl, Typ, UnifiedModule};
-use crate::swift_subset::{Expr, Stmt};
+use crate::core_ir::{Expr, Stmt};
 use std::collections::{HashMap, HashSet};
 
 fn lower_expr(
@@ -645,7 +645,7 @@ fn lower_to_textual_sil_inner(module: &UnifiedModule, synthesize_main_helper_ref
 mod tests {
     use super::*;
     use crate::core_ir::Typ;
-    use crate::swift_subset::{Expr, Stmt};
+    use crate::core_ir::{Expr, Stmt};
 
     #[test]
     fn lower_orders_helpers_and_main() {
@@ -863,11 +863,11 @@ mod tests {
                     Stmt::Match {
                         scrutinee: Expr::Ident("tag".into()),
                         arms: vec![
-                            crate::swift_subset::MatchArm {
+                            crate::core_ir::MatchArm {
                                 pattern: "1".into(),
                                 body: vec![Stmt::Assign("out".into(), Expr::IntLit(10))],
                             },
-                            crate::swift_subset::MatchArm {
+                            crate::core_ir::MatchArm {
                                 pattern: "_".into(),
                                 body: vec![Stmt::Assign("out".into(), Expr::IntLit(20))],
                             },

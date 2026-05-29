@@ -5,7 +5,7 @@
 //! without re-implementing the `.in` lexer.
 
 use crate::core_ir::{Decl, Typ, UnifiedModule};
-use crate::swift_subset::{Expr, Stmt};
+use crate::core_ir::{Expr, Stmt};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 use std::collections::HashSet;

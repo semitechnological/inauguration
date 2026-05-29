@@ -1,6 +1,6 @@
 use super::extract::{extract_fn_nodes, first_named, last_named, node_txt, normalize_entry};
 use crate::core_ir::Decl;
-use crate::swift_subset::{Expr, Stmt, Typ};
+use crate::core_ir::{Expr, Stmt, Typ};
 use std::collections::HashSet;
 use tree_sitter::Node;
 

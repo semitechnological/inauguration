@@ -1,10 +1,9 @@
 //! Core IR → AArch64 lowering for the owned native subset.
 
-use crate::core_ir::{Decl, UnifiedModule};
+use crate::core_ir::{Decl, Expr, Stmt, Typ, UnifiedModule};
 use crate::inrt;
 use crate::native_emit::aarch64::{self, CodeEmitter, REG_FP};
 use crate::native_emit::macho::{self, MachOExecutable};
-use crate::swift_subset::{Expr, Stmt, Typ};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -1219,7 +1218,7 @@ fn lower_match(
     emitter: &mut CodeEmitter,
     ctx: &mut LowerCtx<'_>,
     scrutinee: &Expr,
-    arms: &[crate::swift_subset::MatchArm],
+    arms: &[crate::core_ir::MatchArm],
     functions: &HashMap<String, FunctionInfo>,
     pending_calls: &mut Vec<PendingCall>,
     fn_name: &str,
@@ -2569,7 +2568,7 @@ fn main() -> Int {
                 body: vec![
                     Stmt::Let("x".into(), Some(Typ::Int), Expr::IntLit(0)),
                     Stmt::Loop {
-                        kind: crate::swift_subset::LoopKind::While,
+                        kind: crate::core_ir::LoopKind::While,
                         cond: Some(Expr::Binary {
                             op: "<".into(),
                             lhs: Box::new(Expr::Ident("x".into())),
@@ -2604,11 +2603,11 @@ fn main() -> Int {
                     Stmt::Match {
                         scrutinee: Expr::Ident("tag".into()),
                         arms: vec![
-                            crate::swift_subset::MatchArm {
+                            crate::core_ir::MatchArm {
                                 pattern: "1".into(),
                                 body: vec![Stmt::Assign("out".into(), Expr::IntLit(10))],
                             },
-                            crate::swift_subset::MatchArm {
+                            crate::core_ir::MatchArm {
                                 pattern: "_".into(),
                                 body: vec![Stmt::Assign("out".into(), Expr::IntLit(20))],
                             },
