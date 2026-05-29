@@ -1,7 +1,9 @@
 fn ready(flag: Bool) -> String {
   if flag == true {
     return "ready";
-  } else {
+  } else if flag == false {
     return "wait";
+  } else {
+    return "unknown";
   }
 }

@@ -29,7 +29,7 @@ What `in-cli/src/in_lang_parse.rs` implements today:
 - Parameters: **`param: Type`** comma-separated.
 - Types: **`Int`**, **`String`**, **`Bool`**, **`void` / `Void`** (`void` matching is ASCII case-insensitive), and **named structs** declared above.
 - **`fn main`** is required (same spirit as the Swift subset front).
-- **Function bodies**: optional brace bodies support `let`, assignment, `return`, `if` / `else`, `while`, binary expressions, call expressions, simple literals, identifiers, and expression statements. Lowering (`in-cli/src/lower_core.rs`) emits bounded textual SIL from non-empty Core IR bodies and records `function_ref` edges for explicit call expressions.
+- **Function bodies**: optional brace bodies support `let`, assignment, `return`, `if` / `else if` / `else`, `while`, binary expressions, call expressions, simple literals, identifiers, and expression statements. Lowering (`in-cli/src/lower_core.rs`) emits bounded textual SIL from non-empty Core IR bodies and records `function_ref` edges for explicit call expressions.
 - Nesting: lines inside **`{` … `}`** are ignored for **declaration discovery** when brace-depth ≠ 0 (nested `fn` lines are not top-level), matching the Swift subset filter.
 
 Optional spellings for forward compatibility: **`function`** as an alias may appear later; v0 **does not** accept it. **`Int`** lowers with the same **`Int64`** stub vocabulary as the Swift subset / Core IR `Typ`.

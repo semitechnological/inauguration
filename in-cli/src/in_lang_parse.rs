@@ -1052,12 +1052,16 @@ fn parse_if_stmt(s: &str) -> Result<Stmt, String> {
     let tail = trim(&rest[then_close + 1..]);
     let else_body = if let Some(else_rest) = tail.strip_prefix("else") {
         let else_rest = trim(else_rest);
-        let open = else_rest
-            .find('{')
-            .ok_or_else(|| ".in: `else` needs `{` body".to_string())?;
-        let (else_inner, _) = brace_content_bounds_after_open(else_rest, open)
-            .ok_or_else(|| ".in: unclosed `else` body".to_string())?;
-        parse_function_body(else_inner)?
+        if else_rest.starts_with("if ") {
+            vec![parse_if_stmt(else_rest)?]
+        } else {
+            let open = else_rest
+                .find('{')
+                .ok_or_else(|| ".in: `else` needs `{` body".to_string())?;
+            let (else_inner, _) = brace_content_bounds_after_open(else_rest, open)
+                .ok_or_else(|| ".in: unclosed `else` body".to_string())?;
+            parse_function_body(else_inner)?
+        }
     } else {
         Vec::new()
     };
@@ -2712,6 +2716,47 @@ fn main() -> void
                 then_body,
                 else_body
             } if op == "==" && then_body.len() == 1 && else_body.len() == 1
+        ));
+    }
+
+    #[test]
+    fn fn_body_parses_else_if_as_nested_if() {
+        use crate::swift_subset::Expr;
+        let src = r#"
+fn classify(n: Int) -> Int {
+  if n == 0 {
+    return 0;
+  } else if n == 1 {
+    return 1;
+  } else {
+    return 2;
+  }
+}
+fn main() -> void
+"#;
+        let m = parse_in_source(src).expect("ok");
+        let body = match m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "classify"))
+        {
+            Some(Decl::Function { body, .. }) => body,
+            _ => panic!("classify"),
+        };
+        assert!(matches!(
+            &body[0],
+            Stmt::If {
+                cond: Expr::Binary { op, .. },
+                else_body,
+                ..
+            } if op == "==" && matches!(
+                else_body.as_slice(),
+                [Stmt::If {
+                    cond: Expr::Binary { op, .. },
+                    then_body,
+                    else_body,
+                }] if op == "==" && then_body.len() == 1 && else_body.len() == 1
+            )
         ));
     }
 
