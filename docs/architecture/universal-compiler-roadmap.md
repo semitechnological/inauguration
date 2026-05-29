@@ -69,7 +69,7 @@ The first owned runtime is the existing bytecode VM subset fed by Core IR/SIL. T
 
 ## Current slice
 
-The current implementation has moved past the first matrix-only slice. OCaml now has a dedicated bounded front for top-level `let` functions and simple application expressions; Odin and Hare remain tracked level-0 `.icore` redirects until their own fronts land.
+The current implementation has moved past the first matrix-only slice. OCaml has a dedicated bounded front for top-level `let` functions and simple application expressions. Ruby is level 2 for bounded scalar method bodies. Parser ids without a compatible wired front remain tracked level-0 `.icore` redirects until their own fronts land.
 
 ## See also
 

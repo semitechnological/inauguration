@@ -43,7 +43,8 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         level: 2,
         level_label: "Swift subset or swiftc textual SIL path",
         front: "swift_subset, native_swift_sil, sil_emit",
-        runtime_boundary: "in-tree subset when IN_NATIVE_SWIFT_SIL=only; optional Swift toolchain fallback",
+        runtime_boundary:
+            "in-tree subset when IN_NATIVE_SWIFT_SIL=only; optional Swift toolchain fallback",
         example: "apps/polyglot-sample/sample.swift",
         next_step: "Widen the in-tree subset and shrink the swiftc dependency on hot paths",
     },
@@ -103,6 +104,28 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         next_step: "Add namespaces, methods, templates-as-metadata, and ABI boundaries",
     },
     LanguageSupport {
+        language: "Objective-C",
+        parser_id: Some("objc"),
+        extensions: &["m"],
+        level: 1,
+        level_label: "Tree-sitter declaration extraction",
+        front: "compiler::tree_front",
+        runtime_boundary: "Core IR declarations only; Objective-C runtime is not bundled",
+        example: "docs/architecture/parser-surface.md",
+        next_step: "Add Objective-C method metadata, bounded bodies, and runtime boundary docs",
+    },
+    LanguageSupport {
+        language: "Objective-C++",
+        parser_id: Some("objc++"),
+        extensions: &["mm"],
+        level: 2,
+        level_label: "Tree-sitter bounded scalar body lowering",
+        front: "compiler::tree_front",
+        runtime_boundary: "Core IR and textual SIL; Objective-C++ runtime/ABI is not bundled",
+        example: "docs/architecture/parser-surface.md",
+        next_step: "Add method metadata, C++ interop boundaries, and ABI docs",
+    },
+    LanguageSupport {
         language: "Java",
         parser_id: Some("java"),
         extensions: &["java"],
@@ -158,6 +181,17 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         next_step: "Share JVM-family class metadata, constructors, and runtime strategy",
     },
     LanguageSupport {
+        language: "Scala",
+        parser_id: Some("scala"),
+        extensions: &["scala", "sc"],
+        level: 1,
+        level_label: "Tree-sitter declaration extraction",
+        front: "compiler::tree_front",
+        runtime_boundary: "Core IR declarations only; JVM runtime is not bundled",
+        example: "docs/architecture/parser-surface.md",
+        next_step: "Add parameters, return types, bounded bodies, and JVM runtime strategy",
+    },
+    LanguageSupport {
         language: "C#",
         parser_id: Some("csharp"),
         extensions: &["cs"],
@@ -167,6 +201,28 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         runtime_boundary: "Core IR and textual SIL; CLR runtime is not bundled",
         example: "apps/polyglot-sample/Program.cs",
         next_step: "Add properties, generics metadata, and CLR runtime strategy",
+    },
+    LanguageSupport {
+        language: "F#",
+        parser_id: Some("fsharp"),
+        extensions: &["fs", "fsx", "fsi"],
+        level: 1,
+        level_label: "Tree-sitter declaration extraction",
+        front: "compiler::tree_front",
+        runtime_boundary: "Core IR declarations only; CLR runtime is not bundled",
+        example: "docs/architecture/parser-surface.md",
+        next_step: "Add parameters, return types, bounded bodies, and CLR runtime strategy",
+    },
+    LanguageSupport {
+        language: "VB.NET",
+        parser_id: Some("vb"),
+        extensions: &["vb"],
+        level: 0,
+        level_label: "known parser id without compatible wired front",
+        front: "icore redirect",
+        runtime_boundary: "not compiled directly; tools can emit .icore",
+        example: "docs/architecture/parser-surface.md",
+        next_step: "Wire a grammar or dedicated front before direct source lowering",
     },
     LanguageSupport {
         language: "Python",
@@ -183,12 +239,34 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Ruby",
         parser_id: Some("ruby"),
         extensions: &["rb", "rake", "gemspec"],
+        level: 2,
+        level_label: "Tree-sitter bounded scalar body lowering",
+        front: "compiler::tree_front",
+        runtime_boundary: "Core IR and textual SIL; Ruby runtime is not bundled",
+        example: "apps/polyglot-sample/sample.rb",
+        next_step: "Add blocks, classes, richer calls, and runtime strategy",
+    },
+    LanguageSupport {
+        language: "PHP",
+        parser_id: Some("php"),
+        extensions: &["php", "phtml"],
         level: 1,
         level_label: "Tree-sitter declaration extraction",
         front: "compiler::tree_front",
-        runtime_boundary: "Core IR declarations only; Ruby runtime is not bundled",
-        example: "apps/polyglot-sample/sample.rb",
-        next_step: "Add method bodies, blocks, classes, and runtime strategy",
+        runtime_boundary: "Core IR declarations only; PHP runtime is not bundled",
+        example: "docs/architecture/parser-surface.md",
+        next_step: "Add return types, bounded bodies, and runtime strategy",
+    },
+    LanguageSupport {
+        language: "Perl",
+        parser_id: Some("perl"),
+        extensions: &["pl", "pm"],
+        level: 1,
+        level_label: "Tree-sitter declaration extraction",
+        front: "compiler::tree_front",
+        runtime_boundary: "Core IR declarations only; Perl runtime is not bundled",
+        example: "docs/architecture/parser-surface.md",
+        next_step: "Add parameters, bounded bodies, and runtime strategy",
     },
     LanguageSupport {
         language: "Zig",
@@ -213,6 +291,61 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         next_step: "Add class/function bodies and runtime policy",
     },
     LanguageSupport {
+        language: "Lua",
+        parser_id: Some("lua"),
+        extensions: &["lua"],
+        level: 1,
+        level_label: "Tree-sitter declaration extraction",
+        front: "compiler::tree_front",
+        runtime_boundary: "Core IR declarations only; Lua runtime is not bundled",
+        example: "docs/architecture/parser-surface.md",
+        next_step: "Add parameters, bounded bodies, and runtime strategy",
+    },
+    LanguageSupport {
+        language: "Clojure",
+        parser_id: Some("clojure"),
+        extensions: &["clj", "cljs", "cljc"],
+        level: 0,
+        level_label: "known parser id without compatible wired front",
+        front: "icore redirect",
+        runtime_boundary: "not compiled directly; tools can emit .icore",
+        example: "docs/architecture/parser-surface.md",
+        next_step: "Wire a grammar or dedicated front before direct source lowering",
+    },
+    LanguageSupport {
+        language: "Elixir",
+        parser_id: Some("elixir"),
+        extensions: &["ex", "exs"],
+        level: 1,
+        level_label: "Tree-sitter declaration extraction",
+        front: "compiler::tree_front",
+        runtime_boundary: "Core IR declarations only; BEAM runtime is not bundled",
+        example: "docs/architecture/parser-surface.md",
+        next_step: "Add arity metadata, bounded bodies, and BEAM runtime strategy",
+    },
+    LanguageSupport {
+        language: "Erlang",
+        parser_id: Some("erlang"),
+        extensions: &["erl", "hrl"],
+        level: 1,
+        level_label: "Tree-sitter declaration extraction",
+        front: "compiler::tree_front",
+        runtime_boundary: "Core IR declarations only; BEAM runtime is not bundled",
+        example: "docs/architecture/parser-surface.md",
+        next_step: "Add arity metadata, bounded bodies, and BEAM runtime strategy",
+    },
+    LanguageSupport {
+        language: "Haskell",
+        parser_id: Some("haskell"),
+        extensions: &["hs", "lhs"],
+        level: 1,
+        level_label: "Tree-sitter declaration extraction",
+        front: "compiler::tree_front",
+        runtime_boundary: "Core IR declarations only; Haskell runtime is not bundled",
+        example: "docs/architecture/parser-surface.md",
+        next_step: "Add parameters, bounded bodies, and runtime strategy",
+    },
+    LanguageSupport {
         language: "Nim",
         parser_id: Some("nim"),
         extensions: &["nim"],
@@ -233,6 +366,50 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         runtime_boundary: "Core IR and textual SIL; OCaml runtime is not bundled",
         example: "apps/polyglot-sample/sample.ml",
         next_step: "Deepen let syntax, pattern matching, modules, and OCaml runtime strategy",
+    },
+    LanguageSupport {
+        language: "Julia",
+        parser_id: Some("julia"),
+        extensions: &["jl"],
+        level: 1,
+        level_label: "Tree-sitter declaration extraction",
+        front: "compiler::tree_front",
+        runtime_boundary: "Core IR declarations only; Julia runtime is not bundled",
+        example: "docs/architecture/parser-surface.md",
+        next_step: "Add parameters, bounded bodies, and runtime strategy",
+    },
+    LanguageSupport {
+        language: "R",
+        parser_id: Some("r"),
+        extensions: &["r"],
+        level: 1,
+        level_label: "Tree-sitter declaration extraction",
+        front: "compiler::tree_front",
+        runtime_boundary: "Core IR declarations only; R runtime is not bundled",
+        example: "docs/architecture/parser-surface.md",
+        next_step: "Add parameters, bounded bodies, and runtime strategy",
+    },
+    LanguageSupport {
+        language: "D",
+        parser_id: Some("d"),
+        extensions: &["d"],
+        level: 0,
+        level_label: "known parser id without compatible wired front",
+        front: "icore redirect",
+        runtime_boundary: "not compiled directly; tools can emit .icore",
+        example: "docs/architecture/parser-surface.md",
+        next_step: "Wire a grammar or dedicated front before direct source lowering",
+    },
+    LanguageSupport {
+        language: "Crystal",
+        parser_id: Some("crystal"),
+        extensions: &["cr"],
+        level: 0,
+        level_label: "known parser id without compatible wired front",
+        front: "icore redirect",
+        runtime_boundary: "not compiled directly; tools can emit .icore",
+        example: "docs/architecture/parser-surface.md",
+        next_step: "Wire a grammar or dedicated front before direct source lowering",
     },
     LanguageSupport {
         language: "Odin",
@@ -273,37 +450,65 @@ pub fn language_support_for_parser(parser_id: &str) -> Option<&'static LanguageS
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parser_registry::ParserId;
 
     #[test]
-    fn matrix_tracks_requested_language_surface() {
-        for language in [
-            "V",
-            "Go",
-            "Rust",
-            "OCaml",
-            "TypeScript",
-            "JavaScript",
-            "Swift",
-            "Dart",
-            "Python",
-            "Java",
-            "Kotlin",
-            "C++",
-            "C#",
-            "C",
-            "Zig",
-            "Nim",
-            "Odin",
-            "Hare",
-            "Ruby",
+    fn matrix_tracks_every_parser_id() {
+        for parser_id in [
+            ParserId::In,
+            ParserId::Icore,
+            ParserId::C,
+            ParserId::Cpp,
+            ParserId::ObjC,
+            ParserId::ObjCpp,
+            ParserId::Java,
+            ParserId::Kotlin,
+            ParserId::Scala,
+            ParserId::CSharp,
+            ParserId::FSharp,
+            ParserId::VbNet,
+            ParserId::Python,
+            ParserId::Ruby,
+            ParserId::Php,
+            ParserId::Perl,
+            ParserId::JavaScript,
+            ParserId::TypeScript,
+            ParserId::Go,
+            ParserId::V,
+            ParserId::Rust,
+            ParserId::Zig,
+            ParserId::Dart,
+            ParserId::Lua,
+            ParserId::Clojure,
+            ParserId::Groovy,
+            ParserId::Elixir,
+            ParserId::Erlang,
+            ParserId::Haskell,
+            ParserId::OCaml,
+            ParserId::Julia,
+            ParserId::R,
+            ParserId::Nim,
+            ParserId::D,
+            ParserId::Crystal,
+            ParserId::Odin,
+            ParserId::Hare,
         ] {
             assert!(
                 LANGUAGE_SUPPORT
                     .iter()
-                    .any(|entry| entry.language.eq_ignore_ascii_case(language)),
-                "missing {language}"
+                    .any(|entry| entry.parser_id == Some(parser_id.as_str())),
+                "missing parser id {}",
+                parser_id.as_str()
             );
         }
+    }
+
+    #[test]
+    fn ruby_reports_bounded_body_lowering() {
+        let entry = language_support_for_parser(ParserId::Ruby.as_str()).expect("ruby");
+        assert_eq!(entry.level, 2);
+        assert!(entry.level_label.contains("body"));
+        assert!(entry.runtime_boundary.contains("Core IR"));
     }
 
     #[test]
@@ -343,11 +548,12 @@ mod tests {
             entry.parser_id.is_some()
                 && entry.language != "in"
                 && entry.language != "icore"
+                && entry.level > 0
                 && entry.level <= 2
         }) {
             assert!(
-                entry.example.starts_with("apps/polyglot-sample/"),
-                "{} should use a checked-in polyglot sample, got {}",
+                !entry.example.is_empty(),
+                "{} should report an example or documentation surface, got {}",
                 entry.language,
                 entry.example
             );

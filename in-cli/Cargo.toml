@@ -3,10 +3,10 @@ name = "inauguration"
 version = "0.2.0"
 edition = "2024"
 license = "MPL-2.0"
-description = "Swift developer toolchain CLI (hybrid compiler pipeline, staging, plugins)"
+description = ".in language and general compiler CLI (Core IR, hybrid SIL, staging, plugins)"
 repository = "https://github.com/semitechnological/inauguration"
 readme = "README.md"
-keywords = ["swift", "compiler", "cli", "toolchain"]
+keywords = ["compiler", "cli", "language", "core-ir"]
 categories = ["development-tools", "command-line-utilities"]
 
 [lib]

@@ -1,6 +1,6 @@
 # Parser surface (`in build`)
 
-`in-cli/src/parser_registry.rs` resolves which **front** runs before the hybrid SIL pipeline. **Full** Core IR fronts: **`.in`**, **`.icore` (JSON)**. Dedicated language fronts now include **Rust** (`compiler::rust_front`), **Go** (`compiler::go_front`), **V** (`compiler::v_front`), and **OCaml** (`compiler::ocaml_front`) with real function/struct or top-level function lowering plus bounded body subsets (not full language semantics yet). Other tracked extensions use **`compiler::tree_front`** (**Tree-sitter** grammars → `UnifiedModule`). Java is wired through Tree-sitter method extraction with bounded returns, assignments, and call expressions, plus source → textual SIL → `hybrid_sil` graph coverage. C / C++ / Objective-C++ additionally fill a bounded trivial return-body subset where wired. Parser ids without a wired grammar return an error that directs callers to `.icore` — see [general-compiler.md](general-compiler.md).
+`in-cli/src/parser_registry.rs` resolves which **front** runs before the hybrid SIL pipeline. **Full** Core IR fronts: **`.in`**, **`.icore` (JSON)**. Dedicated language fronts now include **Rust** (`compiler::rust_front`), **Go** (`compiler::go_front`), **V** (`compiler::v_front`), and **OCaml** (`compiler::ocaml_front`) with real function/struct or top-level function lowering plus bounded body subsets (not full language semantics yet). Other tracked extensions use **`compiler::tree_front`** (**Tree-sitter** grammars → `UnifiedModule`). Java/Groovy, JavaScript/TypeScript, Kotlin, C#, Python, Ruby, and Zig have bounded scalar body extraction where wired. C / C++ / Objective-C++ additionally fill a bounded trivial return-body subset where wired. Parser ids without a wired grammar return an error that directs callers to `.icore` — see [general-compiler.md](general-compiler.md).
 
 Resolution order is documented in the `parser_registry` module rustdoc. Summary:
 
@@ -67,13 +67,13 @@ Resolution order is documented in the `parser_registry` module rustdoc. Summary:
 | Level | Meaning | Current fronts |
 |-------|---------|----------------|
 | 0 | Routes to a known `ParserId`, but no compatible grammar/front is wired; callers get an `.icore` hint. | `clojure`, `nim`, `odin`, `hare`, `d`, `crystal`, `vb` |
-| 1 | Extracts top-level declarations into `UnifiedModule`; bodies are empty or ignored. | `icore` v1, `kotlin`, `scala`, `csharp`, `fsharp`, `python`, `ruby`, `php`, `perl`, `zig`, `dart`, `lua`, `elixir`, `erlang`, `haskell`, `julia`, `r`; Objective-C methods are also declaration-only. |
-| 2 | Lowers a bounded statement/expression subset into Core IR. | `.in` (including agent-facing imports, capabilities, and extern function binding declarations), `icore` v2, `rust`, `go`, `v`, `ocaml`, `java`, `groovy`, `javascript`, `typescript`; C / C++ / Objective-C++ functions support only trivial `return <integer>;`, `return <param>;`, or `return;` bodies. |
+| 1 | Extracts top-level declarations into `UnifiedModule`; bodies are empty or ignored. | `scala`, `fsharp`, `php`, `perl`, `dart`, `lua`, `elixir`, `erlang`, `haskell`, `julia`, `r`; Objective-C methods are also declaration-only. |
+| 2 | Lowers a bounded statement/expression subset into Core IR. | `.in` (including agent-facing imports, capabilities, and extern function binding declarations), `icore` v2, `rust`, `go`, `v`, `ocaml`, `java`, `groovy`, `javascript`, `typescript`, `kotlin`, `csharp`, `python`, `ruby`, `zig`; C / C++ / Objective-C++ functions support only bounded scalar bodies and C-family runtime/ABI remains unowned. |
 | 3 | Typechecks enough language semantics to produce reliable diagnostics. | Not landed for a full language family yet. |
 | 4 | Emits graph-aware SIL artifacts and agent repair plans. | Agent JSON exists; no language front is promoted to this level until its diagnostics and repair plans are source-semantic for that front. |
 | 5 | Supports production build/hotreload semantics for that language family. | Swift uses the separate Swift SIL path today; Core IR language families are not at this level yet. |
 
-The ladder is a routing and agent-contract signal, not a promise of full language semantics. `swift` is intentionally outside the Core IR extension table: it selects the Swift SIL path (`swiftc` and/or `IN_NATIVE_SWIFT_SIL`) until agent-mode JSON gives it a comparable compatibility report.
+The ladder is a routing and agent-contract signal, not a promise of full language semantics or bundled runtimes. `swift` is intentionally outside the Core IR extension table and has no `ParserId`: it selects the Swift SIL path (`swiftc` and/or `IN_NATIVE_SWIFT_SIL`) until agent-mode JSON gives it a comparable compatibility report.
 
 ## Compiler roadmap (honest scope)
 
