@@ -206,6 +206,19 @@ fn parse_v2_expr(value: &Value, context: &str) -> Result<Expr, String> {
             let name = string_field(object, "name", context)?;
             Ok(Expr::Ident(name.to_string()))
         }
+        "binary" | "binop" => {
+            let op = string_field(object, "op", context)?;
+            if !is_supported_binary_op(op) {
+                return Err(format!("{context}: unsupported binary operator `{op}`"));
+            }
+            let lhs = parse_v2_expr(required_field(object, "lhs", context)?, context)?;
+            let rhs = parse_v2_expr(required_field(object, "rhs", context)?, context)?;
+            Ok(Expr::Binary {
+                op: op.to_string(),
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            })
+        }
         "call" => {
             let callee = parse_callee(required_field(object, "callee", context)?, context)?;
             let args = match object.get("args") {
@@ -231,6 +244,13 @@ fn parse_callee(value: &Value, context: &str) -> Result<Expr, String> {
         return Ok(Expr::Ident(name.to_string()));
     }
     parse_v2_expr(value, context)
+}
+
+fn is_supported_binary_op(op: &str) -> bool {
+    matches!(
+        op,
+        "+" | "-" | "*" | "/" | "%" | "==" | "!=" | "<" | ">" | "<=" | ">=" | "&&" | "||"
+    )
 }
 
 fn value_object<'a>(value: &'a Value, context: &str) -> Result<&'a Map<String, Value>, String> {
@@ -473,5 +493,81 @@ mod tests {
                 Stmt::Return(None),
             ]
         );
+    }
+
+    #[test]
+    fn parses_v2_modulo_binary_expression() {
+        let j = r#"{
+            "icoreVersion": 2,
+            "decls": [
+                {
+                    "kind": "function",
+                    "name": "main",
+                    "params": [],
+                    "return": "Int",
+                    "body": [
+                        {
+                            "kind": "return",
+                            "expr": {
+                                "kind": "binary",
+                                "op": "%",
+                                "lhs": { "kind": "int", "value": 7 },
+                                "rhs": { "kind": "int", "value": 4 }
+                            }
+                        }
+                    ]
+                }
+            ]
+        }"#;
+        let m = parse_icore_source(j).expect("ok");
+        let body = m
+            .decls
+            .iter()
+            .find_map(|d| match d {
+                Decl::Function { name, body, .. } if name == "main" => Some(body),
+                _ => None,
+            })
+            .expect("main body");
+        assert_eq!(
+            body,
+            &vec![Stmt::Return(Some(Expr::Binary {
+                op: "%".into(),
+                lhs: Box::new(Expr::IntLit(7)),
+                rhs: Box::new(Expr::IntLit(4)),
+            }))]
+        );
+
+        let sil = crate::lower_core::lower_to_textual_sil(&m, "App");
+
+        assert!(sil.contains("integer_literal $Builtin.Int64, 3"));
+        assert!(!sil.contains("builtin_binop"));
+    }
+
+    #[test]
+    fn rejects_v2_unknown_binary_operator() {
+        let j = r#"{
+            "icoreVersion": 2,
+            "decls": [
+                {
+                    "kind": "function",
+                    "name": "main",
+                    "params": [],
+                    "return": "Int",
+                    "body": [
+                        {
+                            "kind": "return",
+                            "expr": {
+                                "kind": "binary",
+                                "op": "%%",
+                                "lhs": 7,
+                                "rhs": 4
+                            }
+                        }
+                    ]
+                }
+            ]
+        }"#;
+        let err = parse_icore_source(j).expect_err("unknown binary operator must be rejected");
+        assert!(err.contains("unsupported binary operator `%%`"), "{err}");
     }
 }
