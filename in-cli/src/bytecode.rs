@@ -3,6 +3,7 @@
 //! Bytecode is a minimal intermediate representation that SIL can lower to,
 //! enabling code generation without external compilers or complex backends.
 
+use crate::core_ir::ModuleIdentityReport;
 use serde::{Deserialize, Serialize};
 
 /// Runtime value on the stack.
@@ -117,6 +118,7 @@ pub struct BytecodeFunction {
 pub struct BytecodeModule {
     pub functions: Vec<BytecodeFunction>,
     pub entry_point: String,
+    pub identity: Option<ModuleIdentityReport>,
 }
 
 impl BytecodeModule {
@@ -124,6 +126,7 @@ impl BytecodeModule {
         BytecodeModule {
             functions: Vec::new(),
             entry_point,
+            identity: None,
         }
     }
 
@@ -143,6 +146,11 @@ pub fn module_to_text(module: &BytecodeModule) -> String {
         "; Bytecode module (entry: {})\n",
         module.entry_point
     ));
+    if let Some(identity) = &module.identity {
+        if let Ok(encoded) = serde_json::to_string(identity) {
+            out.push_str(&format!("; module_identity: {encoded}\n"));
+        }
+    }
     out.push_str("; ---\n\n");
 
     for func in &module.functions {
@@ -191,6 +199,7 @@ pub fn text_to_module(text: &str) -> Result<BytecodeModule, String> {
     let mut functions = Vec::new();
     let mut current_func: Option<BytecodeFunction> = None;
     let mut entry_point = "main".to_string();
+    let mut identity = None;
 
     for line in text.lines() {
         let trimmed = line.trim();
@@ -205,6 +214,8 @@ pub fn text_to_module(text: &str) -> Result<BytecodeModule, String> {
                     .to_string();
             } else if let Some(rest) = trimmed.strip_prefix("; Bytecode module (entry:") {
                 entry_point = rest.trim_end_matches(')').trim().to_string();
+            } else if let Some(rest) = trimmed.strip_prefix("; module_identity:") {
+                identity = parse_module_identity_line(rest.trim());
             }
             continue;
         }
@@ -257,6 +268,38 @@ pub fn text_to_module(text: &str) -> Result<BytecodeModule, String> {
     Ok(BytecodeModule {
         functions,
         entry_point,
+        identity,
+    })
+}
+
+fn parse_module_identity_line(line: &str) -> Option<ModuleIdentityReport> {
+    if let Ok(identity) = serde_json::from_str(line) {
+        return Some(identity);
+    }
+    let mut requested = None;
+    let mut effective = None;
+    let mut package = None;
+    let mut module = None;
+    for part in line.split_whitespace() {
+        if let Some(value) = part.strip_prefix("requested=") {
+            requested = Some(value.to_string());
+        } else if let Some(value) = part.strip_prefix("effective=") {
+            effective = Some(value.to_string());
+        } else if let Some(value) = part.strip_prefix("package=") {
+            if value != "none" {
+                package = Some(value.to_string());
+            }
+        } else if let Some(value) = part.strip_prefix("module=")
+            && value != "none"
+        {
+            module = Some(value.to_string());
+        }
+    }
+    Some(ModuleIdentityReport {
+        package,
+        module,
+        requested_module_id: requested?,
+        effective_module_id: effective?,
     })
 }
 
@@ -440,6 +483,24 @@ mod tests {
 
         let parsed = text_to_module(&text).unwrap();
         assert_eq!(parsed.entry_point, "main");
+    }
+
+    #[test]
+    fn module_identity_text_roundtrip_preserves_literal_none() {
+        let mut module = BytecodeModule::new("main".to_string());
+        module.identity = Some(ModuleIdentityReport {
+            package: Some("none".to_string()),
+            module: Some("none.main".to_string()),
+            requested_module_id: "App".to_string(),
+            effective_module_id: "none.main".to_string(),
+        });
+
+        let parsed = text_to_module(&module_to_text(&module)).unwrap();
+        let identity = parsed.identity.expect("module identity");
+        assert_eq!(identity.package.as_deref(), Some("none"));
+        assert_eq!(identity.module.as_deref(), Some("none.main"));
+        assert_eq!(identity.requested_module_id, "App");
+        assert_eq!(identity.effective_module_id, "none.main");
     }
 
     #[test]

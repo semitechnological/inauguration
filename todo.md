@@ -90,9 +90,9 @@
   - First identity slice landed: when a `.in` source declares `package` / `module`, `in graph --json` and `in package --json` report `package_identity` / `source_identity` with stable status and reason codes for match, missing manifest, mismatch, undeclared, unreadable, and non-`.in` sources.
   - Semantic import binding slice landed: top-level `.in` `use database.postgres;` facts parse, resolve against nearest `inauguration.package` dependencies by exact key or dotted suffix, create package symbol-index facts, appear in `in graph --symbols` as dependency symbols, and emit `INPKG001` warnings for unresolved imports without dependency installation or extension loading.
   - Direct calls to resolved dependency symbols now produce `INPKG002` source-semantic warnings so agents see the difference between a known package dependency and a local unknown function.
-  - `.in package` and `module` facts now survive in Core IR identity and agent Core IR summaries while preserving unqualified SIL function names.
+  - `.in package` and `module` facts now survive in Core IR identity, agent Core IR summaries, graph `package_identity`, package `source_identity`, backend report metadata, and bytecode artifact metadata while preserving unqualified SIL and bytecode function names.
   - Current limitation: `.in package`, `module`, and `use` facts do not affect code generation, dependency installation, or extension loading.
-  - Next slice: make package/module identity visible in artifact/report metadata beyond agent summaries without renaming SIL symbols.
+  - Next slice: expose package/module identity in owned native artifacts once native artifact metadata exists, without renaming symbols or changing runtime behavior.
 
 - [x] Build a language-compatibility ladder.
   - Level 0: route extension or magic line to a known `ParserId`.

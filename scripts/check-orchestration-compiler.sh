@@ -29,6 +29,13 @@ require(parser.get("parser_id") == "in", "graph parser_id was not in")
 require(parser.get("route") == "core_ir", "graph route was not core_ir")
 require(data.get("entry_function") == "main", "graph entry function was not main")
 
+identity = data.get("package_identity") or {}
+require(identity.get("package") == "agents.sample", "graph package identity package was not agents.sample")
+require(
+    identity.get("module") == "agents.sample.main",
+    "graph package identity module was not agents.sample.main",
+)
+
 calls = {
     (edge.get("caller"), edge.get("callee"))
     for edge in data.get("call_edges") or []
@@ -198,6 +205,31 @@ require(
 )
 PY
 
+package_backend_json="$tmp_dir/package-backend.json"
+"${in_cmd[@]}" backend --path apps/package-sample/main.in --target bytecode --json > "$package_backend_json"
+python3 - "$package_backend_json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+data = json.loads(Path(sys.argv[1]).read_text())
+
+def require(condition, message):
+    if not condition:
+        raise SystemExit(message)
+
+identity = data.get("module_identity") or {}
+require(identity.get("package") == "hyperchat", "backend module identity package was not hyperchat")
+require(identity.get("module") == "hyperchat.main", "backend module identity module was not hyperchat.main")
+require(identity.get("requested_module_id") == "App", "backend requested module id was not App")
+require(identity.get("effective_module_id") == "hyperchat.main", "backend effective module id was not hyperchat.main")
+artifact_identity = (data.get("artifact") or {}).get("module_identity") or {}
+require(
+    artifact_identity.get("effective_module_id") == "hyperchat.main",
+    "backend artifact module identity was not hyperchat.main",
+)
+PY
+
 native_backend_json="$tmp_dir/native-backend.json"
 "${in_cmd[@]}" backend --path apps/in-sample/agent-native.in --target native --json > "$native_backend_json"
 if [[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "arm64" ]]; then
@@ -287,6 +319,9 @@ require(("extension", "extension:distributed-workers") in nodes, "package graph 
 
 identity = data.get("source_identity") or {}
 require(identity.get("status") == "match", "package source identity was not match")
+require(identity.get("package") == "hyperchat", "package source identity package was not hyperchat")
+require(identity.get("module") == "hyperchat.main", "package source identity module was not hyperchat.main")
+require(identity.get("manifest_name") == "hyperchat", "package source identity manifest was not hyperchat")
 
 semantic_imports = data.get("semantic_imports") or []
 require(
@@ -320,6 +355,10 @@ symbols = {
     (symbol.get("kind"), symbol.get("name"), symbol.get("detail"))
     for symbol in data.get("symbols") or []
 }
+identity = data.get("package_identity") or {}
+require(identity.get("package") == "hyperchat", "package graph identity package was not hyperchat")
+require(identity.get("module") == "hyperchat.main", "package graph identity module was not hyperchat.main")
+require(identity.get("manifest_name") == "hyperchat", "package graph identity manifest was not hyperchat")
 require(
     ("dependency", "postgres", "database.postgres") in symbols,
     "package graph missing postgres dependency symbol",

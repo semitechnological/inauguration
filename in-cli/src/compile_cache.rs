@@ -10,6 +10,8 @@ struct CachedOwnedCompileReport {
     owned: bool,
     path: String,
     module_id: String,
+    #[serde(default)]
+    module_identity: Option<crate::core_ir::ModuleIdentityReport>,
     target: String,
     entry: Option<String>,
     frontend_level: String,
@@ -41,6 +43,7 @@ impl From<&OwnedCompileReport> for CachedOwnedCompileReport {
             owned: report.owned,
             path: report.path.clone(),
             module_id: report.module_id.clone(),
+            module_identity: report.module_identity.clone(),
             target: report.target.clone(),
             entry: report.entry.clone(),
             frontend_level: report.frontend_level.to_string(),
@@ -74,6 +77,7 @@ impl From<CachedOwnedCompileReport> for OwnedCompileReport {
             owned: cached.owned,
             path: cached.path,
             module_id: cached.module_id,
+            module_identity: cached.module_identity,
             target: cached.target,
             entry: cached.entry,
             frontend_level: leak_static(cached.frontend_level),
@@ -172,7 +176,10 @@ pub fn write_cached_report(
 }
 
 pub fn workspace_cwd_for_path(source_path: &Path) -> PathBuf {
-    std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).canonicalize().ok()
+    std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .canonicalize()
+        .ok()
         .filter(|cwd| source_path.starts_with(cwd))
         .unwrap_or_else(|| {
             source_path
@@ -205,7 +212,10 @@ mod tests {
         let a = source_frontend_hash(path, "fn main() -> void { return; }\n");
         let b = source_frontend_hash(path, "fn main() -> void { return; }\n");
         assert_eq!(a, b);
-        assert_ne!(a, source_frontend_hash(path, "fn main() -> void { return; }"));
+        assert_ne!(
+            a,
+            source_frontend_hash(path, "fn main() -> void { return; }")
+        );
     }
 
     #[test]
@@ -218,6 +228,12 @@ mod tests {
             owned: true,
             path: "sample.in".to_string(),
             module_id: "App".to_string(),
+            module_identity: Some(crate::core_ir::ModuleIdentityReport {
+                package: Some("agents.video".to_string()),
+                module: Some("agents.video.main".to_string()),
+                requested_module_id: "App".to_string(),
+                effective_module_id: "agents.video.main".to_string(),
+            }),
             target: "bytecode".to_string(),
             entry: None,
             frontend_level: "core-ir-direct",
@@ -245,6 +261,20 @@ mod tests {
         let loaded = read_cached_report(&cwd, hash).expect("cached report");
         assert!(loaded.success);
         assert_eq!(loaded.frontend_hash.as_deref(), Some(hash));
+        assert_eq!(
+            loaded
+                .module_identity
+                .as_ref()
+                .and_then(|identity| identity.package.as_deref()),
+            Some("agents.video")
+        );
+        assert_eq!(
+            loaded
+                .module_identity
+                .as_ref()
+                .map(|identity| identity.effective_module_id.as_str()),
+            Some("agents.video.main")
+        );
         let _ = fs::remove_dir_all(cwd);
     }
 }

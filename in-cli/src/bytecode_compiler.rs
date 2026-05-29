@@ -10,6 +10,7 @@ use std::path::Path;
 pub struct BytecodeCompileOutput {
     pub module: BytecodeModule,
     pub sil: String,
+    pub identity: crate::core_ir::ModuleIdentityReport,
 }
 
 pub fn compile_source_path(
@@ -24,13 +25,16 @@ pub fn compile_source_path(
         return Err("bytecode compiler requires a Core IR frontend; Swift SIL emit is not supported by this path".to_string());
     };
     core_typecheck::typecheck_executable(&module)?;
-    let sil = crate::compiler::driver::lower_unified_module(
-        &module,
-        module.effective_module_id(module_id),
-    );
+    let identity = module.identity_report(module_id);
+    let sil = crate::compiler::driver::lower_unified_module(&module, &identity.effective_module_id);
     let artifact = crate::hybrid_sil::parse_textual_sil(&sil);
-    let module = sil_to_bytecode::lower_sil_to_bytecode(&artifact)?;
-    Ok(BytecodeCompileOutput { module, sil })
+    let mut module = sil_to_bytecode::lower_sil_to_bytecode(&artifact)?;
+    module.identity = Some(identity.clone());
+    Ok(BytecodeCompileOutput {
+        module,
+        sil,
+        identity,
+    })
 }
 
 pub fn write_bytecode_module(module: &BytecodeModule, out_path: &Path) -> Result<(), String> {
@@ -93,6 +97,57 @@ mod tests {
         assert_eq!(run_bytecode_module(output.module).unwrap(), Value::Int(7));
 
         fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn compile_output_and_artifact_carry_core_identity_metadata() {
+        let source_path = temp_file("identity.in");
+        let bytecode_path = temp_file("identity.bca");
+        fs::write(
+            &source_path,
+            "package agents.video;\nmodule agents.video.main;\nfn helper(value: Int) -> Int { return value; }\nfn main() -> Int { return helper(9); }\n",
+        )
+        .unwrap();
+
+        let output = compile_source_path(&source_path, "App", ParserCli::Auto).unwrap();
+        assert_eq!(output.identity.package.as_deref(), Some("agents.video"));
+        assert_eq!(output.identity.module.as_deref(), Some("agents.video.main"));
+        assert_eq!(output.identity.requested_module_id, "App");
+        assert_eq!(output.identity.effective_module_id, "agents.video.main");
+        let module_identity = output.module.identity.as_ref().expect("module identity");
+        assert_eq!(module_identity.package.as_deref(), Some("agents.video"));
+        assert_eq!(module_identity.module.as_deref(), Some("agents.video.main"));
+        assert_eq!(module_identity.requested_module_id, "App");
+        assert_eq!(module_identity.effective_module_id, "agents.video.main");
+        assert!(output.sil.contains("sil @helper"), "{}", output.sil);
+        assert!(
+            !output.sil.contains("sil @agents.video.main.helper"),
+            "{}",
+            output.sil
+        );
+        assert_eq!(
+            run_bytecode_module(output.module.clone()).unwrap(),
+            Value::Int(9)
+        );
+
+        write_bytecode_module(&output.module, &bytecode_path).unwrap();
+        let roundtrip = read_bytecode_module(&bytecode_path).unwrap();
+        assert_eq!(roundtrip.entry_point, "main");
+        let roundtrip_identity = roundtrip.identity.as_ref().expect("roundtrip identity");
+        assert_eq!(roundtrip_identity.package.as_deref(), Some("agents.video"));
+        assert_eq!(
+            roundtrip_identity.module.as_deref(),
+            Some("agents.video.main")
+        );
+        assert_eq!(roundtrip_identity.requested_module_id.as_str(), "App");
+        assert_eq!(
+            roundtrip_identity.effective_module_id.as_str(),
+            "agents.video.main"
+        );
+        assert_eq!(run_bytecode_module(roundtrip).unwrap(), Value::Int(9));
+
+        fs::remove_file(source_path).unwrap();
+        fs::remove_file(bytecode_path).unwrap();
     }
 
     #[test]

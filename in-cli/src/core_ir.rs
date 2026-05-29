@@ -1,5 +1,7 @@
 //! Cross-frontend core AST (v0). Bodies may be empty until a frontend fills statements.
 
+use serde::{Deserialize, Serialize};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Typ {
     Int,
@@ -92,10 +94,18 @@ pub struct UnifiedModule {
     pub decls: Vec<Decl>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CoreModuleIdentity {
     pub package: Option<String>,
     pub module: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModuleIdentityReport {
+    pub package: Option<String>,
+    pub module: Option<String>,
+    pub requested_module_id: String,
+    pub effective_module_id: String,
 }
 
 impl UnifiedModule {
@@ -122,6 +132,16 @@ impl UnifiedModule {
             .as_deref()
             .or(self.identity.package.as_deref())
             .unwrap_or(requested)
+    }
+
+    #[must_use]
+    pub fn identity_report(&self, requested: &str) -> ModuleIdentityReport {
+        ModuleIdentityReport {
+            package: self.identity.package.clone(),
+            module: self.identity.module.clone(),
+            requested_module_id: requested.to_string(),
+            effective_module_id: self.effective_module_id(requested).to_string(),
+        }
     }
 }
 

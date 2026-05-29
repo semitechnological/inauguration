@@ -1317,6 +1317,17 @@ fn cmd_compile(
         }
         println!("path: {}", report.path);
         println!("module_id: {}", report.module_id);
+        if let Some(identity) = &report.module_identity {
+            if let Some(package) = &identity.package {
+                println!("package: {package}");
+            }
+            if let Some(module) = &identity.module {
+                println!("module: {module}");
+            }
+            if identity.effective_module_id != report.module_id {
+                println!("effective_module_id: {}", identity.effective_module_id);
+            }
+        }
         println!("target: {}", report.target);
         if let Some(entry) = &report.entry {
             println!("entry: {entry}");
@@ -1570,6 +1581,7 @@ fn cmd_backend(
     };
     let mut request_error: Option<String> = None;
     let mut external_invocations: Vec<String> = Vec::new();
+    let mut module_identity = None;
     let artifact = if matches!(target, BackendTargetCli::Bytecode) {
         let _guard = ExternalInvocationGuard::enter();
         let compile_result =
@@ -1583,11 +1595,13 @@ fn cmd_backend(
                     .iter()
                     .map(|function| function.instructions.len())
                     .sum();
+                module_identity = Some(output.identity.clone());
                 Some(serde_json::json!({
                     "entry_point": output.module.entry_point,
                     "function_count": output.module.functions.len(),
                     "instruction_count": instruction_count,
                     "artifact_kind": selected.artifact_kind,
+                    "module_identity": output.identity,
                 }))
             }
             Err(e) => {
@@ -1612,6 +1626,7 @@ fn cmd_backend(
             "schema_version": 1,
             "path": source_path.display().to_string(),
             "module_id": module_id,
+            "module_identity": module_identity.clone(),
             "owned": true,
             "external_invocations": external_invocations,
             "frontend_level": frontend_level,
@@ -1621,6 +1636,7 @@ fn cmd_backend(
             "request": {
                 "path": source_path.display().to_string(),
                 "module_id": module_id,
+                "module_identity": module_identity.clone(),
                 "parser": format!("{parser:?}"),
                 "target": match target {
                     BackendTargetCli::Bytecode => "bytecode",

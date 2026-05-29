@@ -1,6 +1,6 @@
 use crate::bytecode_compiler;
 use crate::compile_cache;
-use crate::core_ir::{Decl, UnifiedModule};
+use crate::core_ir::{Decl, ModuleIdentityReport, UnifiedModule};
 use crate::core_ir_verifier;
 use crate::core_typecheck;
 use crate::external_guard::{self, ExternalInvocationGuard};
@@ -37,6 +37,7 @@ pub struct OwnedCompileReport {
     pub owned: bool,
     pub path: String,
     pub module_id: String,
+    pub module_identity: Option<ModuleIdentityReport>,
     pub target: String,
     pub entry: Option<String>,
     pub frontend_level: &'static str,
@@ -129,6 +130,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
                 owned: true,
                 path: request.path.display().to_string(),
                 module_id: request.module_id.clone(),
+                module_identity: None,
                 target: target_label(request.target).to_string(),
                 entry: request.entry.clone(),
                 frontend_level: "unsupported",
@@ -188,6 +190,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         owned: true,
         path: request.path.display().to_string(),
         module_id: request.module_id.clone(),
+        module_identity: None,
         target: target_label(request.target).to_string(),
         entry: request.entry.clone(),
         frontend_level: "unsupported",
@@ -238,6 +241,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
     };
 
     report.frontend_level = "core-ir-direct";
+    report.module_identity = Some(module.identity_report(&request.module_id));
     report.parsed_function_count = count_functions(&module);
 
     let verify_opts = core_ir_verifier::VerifyOptions {
@@ -608,6 +612,54 @@ mod tests {
         assert!(json.contains("\"schema_version\": 1"));
         assert!(json.contains("\"owned\": true"));
         assert!(json.contains("\"external_invocations\": []"));
+
+        fs::remove_file(source_path).unwrap();
+    }
+
+    #[test]
+    fn report_carries_core_identity_metadata() {
+        let source_path = temp_path("identity.in");
+        fs::write(
+            &source_path,
+            "package agents.video;\nmodule agents.video.main;\nfn main() -> Int { return 7; }\n",
+        )
+        .unwrap();
+
+        let report = compile_owned(&default_request(
+            source_path.clone(),
+            CompileTarget::Bytecode,
+            None,
+            None,
+        ));
+
+        assert!(report.success, "{:?}", report);
+        let identity = report.module_identity.as_ref().expect("module identity");
+        assert_eq!(identity.package.as_deref(), Some("agents.video"));
+        assert_eq!(identity.module.as_deref(), Some("agents.video.main"));
+        assert_eq!(identity.requested_module_id, "App");
+        assert_eq!(identity.effective_module_id, "agents.video.main");
+
+        fs::remove_file(source_path).unwrap();
+    }
+
+    #[test]
+    fn report_defaults_identity_metadata_without_source_identity() {
+        let source_path = temp_path("default-identity.in");
+        fs::write(&source_path, "fn main() -> void { return; }\n").unwrap();
+
+        let report = compile_owned(&default_request(
+            source_path.clone(),
+            CompileTarget::Bytecode,
+            None,
+            None,
+        ));
+
+        assert!(report.success, "{:?}", report);
+        let identity = report.module_identity.as_ref().expect("module identity");
+        assert_eq!(identity.package, None);
+        assert_eq!(identity.module, None);
+        assert_eq!(identity.requested_module_id, "App");
+        assert_eq!(identity.effective_module_id, "App");
 
         fs::remove_file(source_path).unwrap();
     }
