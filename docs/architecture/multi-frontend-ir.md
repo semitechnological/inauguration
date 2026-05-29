@@ -31,7 +31,7 @@ Rust type: `in_cli::core_ir::UnifiedModule`.
 |----|--------|--------|
 | `In` | `.in` files (and `#!in parser=in`) | `in_lang_parse` → `UnifiedModule` → `compiler::driver` / `lower_core`; parser-side surface facts feed agent `effects` / `capabilities` |
 | `Icore` | `.icore` files (and `#!in parser=icore`) | `compiler::icore` v1 declarations or v2 bounded body JSON → `UnifiedModule` → same lowering |
-| `c`, `cpp`, `java`, `python`, … | Known extensions or `#!in parser=<slug>` | **Tree-sitter polyglot** — [`compiler::tree_front`](../../in-cli/src/compiler/tree_front/mod.rs) grammar-backed AST → `UnifiedModule`; Java/Groovy and C-family have bounded body lowering where documented, other routed fronts remain declaration-level; icore-only ids documented in [parser-surface.md](parser-surface.md). |
+| `c`, `cpp`, `java`, `python`, … | Known extensions or `#!in parser=<slug>` | **Tree-sitter polyglot** — [`compiler::tree_front`](../../in-cli/src/compiler/tree_front/mod.rs) grammar-backed AST → `UnifiedModule`; selected fronts share bounded scalar body lowering through generic AST conventions, other routed fronts remain declaration-level; icore-only ids documented in [parser-surface.md](parser-surface.md). |
 
 ## Resolution order for `in build`
 

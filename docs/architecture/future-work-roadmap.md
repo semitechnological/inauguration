@@ -2,7 +2,7 @@
 
 ## Executive summary
 
-`inauguration` is becoming a **general hybrid compiler**: many source fronts can lower into shared Core IR, then reuse one SIL-oriented driver and `hybrid_sil` pipeline. The current model is layered: **full parsers** (`.in`, `.icore`) own rich grammars and semantics; dedicated **Rust/Go/V** fronts already lower real declarations plus bounded body subsets; selected **Tree-sitter polyglot** fronts now lower bounded bodies (Java/Groovy and trivial C-family returns), while many other routed extensions remain declaration-level. Parser ids without a compatible grammar still route contributors to **`.icore`**.
+`inauguration` is becoming a **general hybrid compiler**: many source fronts can lower into shared Core IR, then reuse one SIL-oriented driver and `hybrid_sil` pipeline. The current model is layered: **full parsers** (`.in`, `.icore`) own rich grammars and semantics; dedicated **Rust/Go/V** fronts already lower real declarations plus bounded body subsets; selected **Tree-sitter polyglot** fronts now lower bounded scalar bodies through shared AST conventions, while many other routed extensions remain declaration-level. Parser ids without a compatible grammar still route contributors to **`.icore`**.
 
 The near-term goal is not to finish every language at once. It is to keep parser routing, Core IR, SIL lowering, hot reload, and rust-driver parity moving together so each Tree-sitter front can deepen (statements, types, diagnostics) without forking the pipeline.
 
@@ -17,7 +17,7 @@ The near-term goal is not to finish every language at once. It is to keep parser
 
 | Track | v0 near-term | v1 direction |
 |-------|--------------|--------------|
-| **Per-language semantics** | Deepen dedicated Rust/Go/V fronts from body subsets into richer CFG-aware lowering; in parallel, lift selected Tree-sitter fronts from signature-only to body lowering. | Dedicated semantics / typecheck layers per language family where overlap allows shared infrastructure. |
+| **Per-language semantics** | Deepen dedicated Rust/Go/V fronts from body subsets into richer CFG-aware lowering; in parallel, widen the generic Tree-sitter AST convention layer and promote declaration-only fronts when they can share it. | Dedicated semantics / typecheck layers per language family where overlap allows shared infrastructure. |
 | **icore evolution** | Keep `icoreVersion: 1` stable for declarations and empty bodies; document rejected shapes clearly. | Add statement / expression JSON, versioned compatibility rules, and fixture-driven lowering tests for tool-generated IR. |
 | **rust-driver parity with `in-cli`** | Mirror parser ids, Core IR contracts, and SIL lowering behavior as fronts stabilize. | Reduce drift by extracting shared crates or generated contract tests across `in-cli` and `compiler/rust-driver`. |
 | **`hybrid_sil` correctness** | Preserve the current merged textual SIL contract while tests pin call-graph behavior. | Model multiple functions explicitly: stable `function_id`s, per-function blocks, and graph extraction that does not depend on the last `sil @...` line. |

@@ -223,6 +223,604 @@ fn named_descendant<'a>(root: Node<'a>, kind: &str) -> Option<Node<'a>> {
     None
 }
 
+#[derive(Clone, Copy)]
+struct AstShape {
+    block_kinds: &'static [&'static str],
+    return_kinds: &'static [&'static str],
+    expr_stmt_kinds: &'static [&'static str],
+    local_decl_kinds: &'static [&'static str],
+    assignment_kinds: &'static [&'static str],
+    if_kinds: &'static [&'static str],
+    while_kinds: &'static [&'static str],
+    call_kinds: &'static [&'static str],
+    arg_container_kinds: &'static [&'static str],
+    arg_wrapper_kinds: &'static [&'static str],
+    paren_kinds: &'static [&'static str],
+    binary_kinds: &'static [&'static str],
+    unary_kinds: &'static [&'static str],
+    int_kinds: &'static [&'static str],
+    string_kinds: &'static [&'static str],
+    type_kinds: &'static [&'static str],
+    local_decl_prefixes: &'static [&'static str],
+    shell_first_kinds: &'static [&'static str],
+    shell_last_kinds: &'static [&'static str],
+    first_assignment_is_let: bool,
+    strict_args: bool,
+}
+
+const JAVA_AST: AstShape = AstShape {
+    block_kinds: &["block"],
+    return_kinds: &["return_statement"],
+    expr_stmt_kinds: &["expression_statement"],
+    local_decl_kinds: &["local_variable_declaration"],
+    assignment_kinds: &["assignment_expression"],
+    if_kinds: &["if_statement"],
+    while_kinds: &["while_statement"],
+    call_kinds: &["method_invocation"],
+    arg_container_kinds: &["argument_list"],
+    arg_wrapper_kinds: &[],
+    paren_kinds: &["parenthesized_expression"],
+    binary_kinds: &["binary_expression"],
+    unary_kinds: &["unary_expression"],
+    int_kinds: &[
+        "decimal_integer_literal",
+        "hex_integer_literal",
+        "octal_integer_literal",
+        "binary_integer_literal",
+        "integer_literal",
+    ],
+    string_kinds: &["string_literal"],
+    type_kinds: &[
+        "integral_type",
+        "floating_point_type",
+        "boolean_type",
+        "scoped_type_identifier",
+        "generic_type",
+        "array_type",
+        "type_identifier",
+    ],
+    local_decl_prefixes: &[],
+    shell_first_kinds: &[],
+    shell_last_kinds: &[],
+    first_assignment_is_let: false,
+    strict_args: true,
+};
+
+const KOTLIN_AST: AstShape = AstShape {
+    block_kinds: &["block", "control_structure_body"],
+    return_kinds: &["return_expression"],
+    expr_stmt_kinds: &[],
+    local_decl_kinds: &["property_declaration"],
+    assignment_kinds: &["assignment"],
+    if_kinds: &["if_expression"],
+    while_kinds: &["while_statement", "while_expression"],
+    call_kinds: &["call_expression"],
+    arg_container_kinds: &["value_arguments"],
+    arg_wrapper_kinds: &["value_argument"],
+    paren_kinds: &["parenthesized_expression"],
+    binary_kinds: &["binary_expression"],
+    unary_kinds: &["unary_expression"],
+    int_kinds: &["number_literal"],
+    string_kinds: &["string_literal"],
+    type_kinds: &["user_type", "type"],
+    local_decl_prefixes: &[],
+    shell_first_kinds: &["control_structure_body"],
+    shell_last_kinds: &[],
+    first_assignment_is_let: false,
+    strict_args: false,
+};
+
+const CSHARP_AST: AstShape = AstShape {
+    block_kinds: &["block"],
+    return_kinds: &["return_statement"],
+    expr_stmt_kinds: &["expression_statement"],
+    local_decl_kinds: &["local_declaration_statement"],
+    assignment_kinds: &["assignment_expression"],
+    if_kinds: &["if_statement"],
+    while_kinds: &["while_statement"],
+    call_kinds: &["invocation_expression"],
+    arg_container_kinds: &["argument_list"],
+    arg_wrapper_kinds: &["argument"],
+    paren_kinds: &["parenthesized_expression"],
+    binary_kinds: &["binary_expression"],
+    unary_kinds: &["unary_expression", "prefix_unary_expression"],
+    int_kinds: &["integer_literal"],
+    string_kinds: &["string_literal"],
+    type_kinds: &["predefined_type"],
+    local_decl_prefixes: &[],
+    shell_first_kinds: &[],
+    shell_last_kinds: &[],
+    first_assignment_is_let: false,
+    strict_args: false,
+};
+
+const PYTHON_AST: AstShape = AstShape {
+    block_kinds: &["block"],
+    return_kinds: &["return_statement"],
+    expr_stmt_kinds: &["expression_statement"],
+    local_decl_kinds: &[],
+    assignment_kinds: &["assignment"],
+    if_kinds: &["if_statement"],
+    while_kinds: &["while_statement"],
+    call_kinds: &["call"],
+    arg_container_kinds: &["argument_list"],
+    arg_wrapper_kinds: &[],
+    paren_kinds: &["parenthesized_expression"],
+    binary_kinds: &["binary_operator", "comparison_operator"],
+    unary_kinds: &["unary_operator"],
+    int_kinds: &["integer"],
+    string_kinds: &["string"],
+    type_kinds: &[],
+    local_decl_prefixes: &[],
+    shell_first_kinds: &[],
+    shell_last_kinds: &[],
+    first_assignment_is_let: true,
+    strict_args: false,
+};
+
+const JS_AST: AstShape = AstShape {
+    block_kinds: &["statement_block"],
+    return_kinds: &["return_statement"],
+    expr_stmt_kinds: &["expression_statement"],
+    local_decl_kinds: &["lexical_declaration", "variable_declaration"],
+    assignment_kinds: &["assignment_expression", "augmented_assignment_expression"],
+    if_kinds: &["if_statement"],
+    while_kinds: &["while_statement"],
+    call_kinds: &["call_expression"],
+    arg_container_kinds: &["arguments"],
+    arg_wrapper_kinds: &[],
+    paren_kinds: &["parenthesized_expression"],
+    binary_kinds: &["binary_expression"],
+    unary_kinds: &["unary_expression"],
+    int_kinds: &["number"],
+    string_kinds: &["string"],
+    type_kinds: &[],
+    local_decl_prefixes: &[],
+    shell_first_kinds: &[],
+    shell_last_kinds: &["else_clause"],
+    first_assignment_is_let: false,
+    strict_args: false,
+};
+
+const ZIG_AST: AstShape = AstShape {
+    block_kinds: &["block"],
+    return_kinds: &["return_expression"],
+    expr_stmt_kinds: &["expression_statement"],
+    local_decl_kinds: &["variable_declaration"],
+    assignment_kinds: &["assign_expression", "assignment_expression"],
+    if_kinds: &["if_expression", "if_statement"],
+    while_kinds: &["while_expression", "while_statement"],
+    call_kinds: &["call_expression"],
+    arg_container_kinds: &[],
+    arg_wrapper_kinds: &[],
+    paren_kinds: &["grouped_expression", "parenthesized_expression"],
+    binary_kinds: &["binary_expression"],
+    unary_kinds: &["unary_expression"],
+    int_kinds: &["integer"],
+    string_kinds: &["string_literal"],
+    type_kinds: &["builtin_type", "type", "identifier"],
+    local_decl_prefixes: &["var ", "const "],
+    shell_first_kinds: &["block_expression"],
+    shell_last_kinds: &["labeled_statement"],
+    first_assignment_is_let: false,
+    strict_args: false,
+};
+
+fn kind_in(n: Node<'_>, kinds: &[&str]) -> bool {
+    kinds.contains(&n.kind())
+}
+
+fn ast_body(src: &[u8], body: Node<'_>, shape: AstShape) -> Vec<Stmt> {
+    let block = ast_body_node(body, shape)
+        .or_else(|| first_body_child(body, shape))
+        .unwrap_or(body);
+    let mut locals = HashSet::new();
+    ast_body_with_locals(src, block, shape, &mut locals)
+}
+
+fn ast_body_with_locals(
+    src: &[u8],
+    body: Node<'_>,
+    shape: AstShape,
+    locals: &mut HashSet<String>,
+) -> Vec<Stmt> {
+    let block = ast_body_node(body, shape).unwrap_or(body);
+    let mut out = Vec::new();
+    let mut w = block.walk();
+    for ch in block.named_children(&mut w) {
+        if let Some(stmt) = ast_stmt(src, ch, shape, locals) {
+            out.push(stmt);
+        }
+    }
+    out
+}
+
+fn ast_body_node<'a>(n: Node<'a>, shape: AstShape) -> Option<Node<'a>> {
+    if kind_in(n, shape.block_kinds) {
+        if kind_in(n, shape.shell_first_kinds)
+            && let Some(block) = shape
+                .block_kinds
+                .iter()
+                .filter(|k| **k != n.kind())
+                .find_map(|k| first_named(n, k))
+        {
+            return Some(block);
+        }
+        return Some(n);
+    }
+    if kind_in(n, shape.shell_first_kinds) {
+        return n.named_child(0).or(Some(n));
+    }
+    if kind_in(n, shape.shell_last_kinds) {
+        return last_named(n).or(Some(n));
+    }
+    None
+}
+
+fn ast_stmt(
+    src: &[u8],
+    stmt: Node<'_>,
+    shape: AstShape,
+    locals: &mut HashSet<String>,
+) -> Option<Stmt> {
+    let stmt = ast_body_node(stmt, shape).unwrap_or(stmt);
+    if kind_in(stmt, shape.return_kinds) {
+        return ast_return_expr(src, stmt, shape).map(Stmt::Return);
+    }
+    if kind_in(stmt, shape.expr_stmt_kinds) {
+        return ast_expr_statement(src, stmt, shape, locals);
+    }
+    if kind_in(stmt, shape.local_decl_kinds) {
+        return ast_local_decl(src, stmt, shape)
+            .or_else(|| ast_assignment(src, stmt, shape, locals));
+    }
+    if kind_in(stmt, shape.assignment_kinds) {
+        return ast_assignment(src, stmt, shape, locals);
+    }
+    if kind_in(stmt, shape.if_kinds) {
+        return ast_if(src, stmt, shape, locals);
+    }
+    if kind_in(stmt, shape.while_kinds) {
+        return ast_while(src, stmt, shape, locals);
+    }
+    if kind_in(stmt, shape.call_kinds) {
+        return ast_expr(src, stmt, shape).map(Stmt::Expr);
+    }
+    None
+}
+
+fn ast_return_expr(src: &[u8], ret: Node<'_>, shape: AstShape) -> Option<Option<Expr>> {
+    let mut w = ret.walk();
+    if let Some(ch) = ret.named_children(&mut w).next() {
+        return ast_expr(src, ch, shape).map(Some);
+    }
+    Some(None)
+}
+
+fn ast_expr_statement(
+    src: &[u8],
+    stmt: Node<'_>,
+    shape: AstShape,
+    locals: &mut HashSet<String>,
+) -> Option<Stmt> {
+    let mut w = stmt.walk();
+    let expr = stmt.named_children(&mut w).next()?;
+    if kind_in(expr, shape.return_kinds) {
+        return ast_return_expr(src, expr, shape).map(Stmt::Return);
+    }
+    if kind_in(expr, shape.assignment_kinds) {
+        return ast_assignment(src, expr, shape, locals);
+    }
+    ast_expr(src, expr, shape).map(Stmt::Expr)
+}
+
+fn ast_local_decl(src: &[u8], decl: Node<'_>, shape: AstShape) -> Option<Stmt> {
+    if !shape.local_decl_prefixes.is_empty() {
+        let text = node_txt(src, decl).trim_start();
+        if !shape
+            .local_decl_prefixes
+            .iter()
+            .any(|prefix| text.starts_with(prefix))
+        {
+            return None;
+        }
+    }
+    let var = named_descendant(decl, "variable_declarator").unwrap_or(decl);
+    let name_node = var
+        .child_by_field_name("name")
+        .or_else(|| first_named(var, "identifier"))
+        .or_else(|| named_descendant(var, "identifier"))?;
+    let value = var
+        .child_by_field_name("value")
+        .or_else(|| last_named(var))?;
+    if name_node == value {
+        return None;
+    }
+    let ty = ast_decl_type(src, decl, name_node, value, shape);
+    Some(Stmt::Let(
+        node_txt(src, name_node).trim().to_string(),
+        ty,
+        ast_expr(src, value, shape)?,
+    ))
+}
+
+fn ast_decl_type(
+    src: &[u8],
+    decl: Node<'_>,
+    name_node: Node<'_>,
+    value: Node<'_>,
+    shape: AstShape,
+) -> Option<Typ> {
+    if shape.type_kinds.is_empty() {
+        return None;
+    }
+    for kind in shape.type_kinds {
+        let mut hits = Vec::new();
+        collect_kinds(decl, &[*kind], &mut hits);
+        if let Some(t) = hits.into_iter().find(|t| *t != name_node && *t != value) {
+            return Some(Typ::Named(node_txt(src, t).trim().to_string()));
+        }
+    }
+    None
+}
+
+fn ast_assignment(
+    src: &[u8],
+    expr: Node<'_>,
+    shape: AstShape,
+    locals: &mut HashSet<String>,
+) -> Option<Stmt> {
+    let left = expr
+        .child_by_field_name("left")
+        .or_else(|| expr.named_child(0))?;
+    let right = expr
+        .child_by_field_name("right")
+        .or_else(|| expr.child_by_field_name("value"))
+        .or_else(|| expr.named_child(expr.named_child_count().saturating_sub(1) as u32))?;
+    if left == right || left.kind() != "identifier" {
+        return None;
+    }
+    let name = node_txt(src, left).trim().to_string();
+    let value = ast_expr(src, right, shape)?;
+    if shape.first_assignment_is_let && locals.insert(name.clone()) {
+        Some(Stmt::Let(name, None, value))
+    } else {
+        Some(Stmt::Assign(name, value))
+    }
+}
+
+fn ast_if(src: &[u8], stmt: Node<'_>, shape: AstShape, locals: &HashSet<String>) -> Option<Stmt> {
+    let cond = stmt
+        .child_by_field_name("condition")
+        .and_then(|n| ast_expr(src, n, shape))
+        .or_else(|| {
+            shape
+                .paren_kinds
+                .iter()
+                .find_map(|k| first_named(stmt, k).and_then(|n| ast_expr(src, n, shape)))
+        })
+        .or_else(|| {
+            shape
+                .binary_kinds
+                .iter()
+                .find_map(|k| first_named(stmt, k).and_then(|n| ast_expr(src, n, shape)))
+        })?;
+    let mut then_locals = locals.clone();
+    let then_body = stmt
+        .child_by_field_name("consequence")
+        .or_else(|| stmt.child_by_field_name("body"))
+        .or_else(|| first_body_child(stmt, shape))
+        .map(|n| ast_stmt_or_body(src, n, shape, &mut then_locals))
+        .unwrap_or_default();
+    let mut else_locals = locals.clone();
+    let mut else_body = stmt
+        .child_by_field_name("alternative")
+        .or_else(|| first_named(stmt, "else_clause"))
+        .and_then(|n| ast_else_node(n, shape))
+        .map(|n| ast_stmt_or_body(src, n, shape, &mut else_locals))
+        .unwrap_or_default();
+    if else_body.is_empty() {
+        let mut bodies = Vec::new();
+        collect_kinds(stmt, shape.block_kinds, &mut bodies);
+        if let Some(n) = bodies.into_iter().nth(1) {
+            let mut fallback_locals = locals.clone();
+            else_body = ast_stmt_or_body(src, n, shape, &mut fallback_locals);
+        }
+    }
+    Some(Stmt::If {
+        cond,
+        then_body,
+        else_body,
+    })
+}
+
+fn ast_while(
+    src: &[u8],
+    stmt: Node<'_>,
+    shape: AstShape,
+    locals: &HashSet<String>,
+) -> Option<Stmt> {
+    let cond = stmt
+        .child_by_field_name("condition")
+        .and_then(|n| ast_expr(src, n, shape))
+        .or_else(|| {
+            shape
+                .paren_kinds
+                .iter()
+                .find_map(|k| first_named(stmt, k).and_then(|n| ast_expr(src, n, shape)))
+        })
+        .or_else(|| {
+            shape
+                .binary_kinds
+                .iter()
+                .find_map(|k| first_named(stmt, k).and_then(|n| ast_expr(src, n, shape)))
+        })?;
+    let mut scoped = locals.clone();
+    let body = stmt
+        .child_by_field_name("body")
+        .or_else(|| first_body_child(stmt, shape))
+        .map(|n| ast_stmt_or_body(src, n, shape, &mut scoped))
+        .unwrap_or_default();
+    Some(Stmt::Loop {
+        kind: crate::core_ir::LoopKind::While,
+        cond: Some(cond),
+        body,
+    })
+}
+
+fn first_body_child<'a>(stmt: Node<'a>, shape: AstShape) -> Option<Node<'a>> {
+    shape
+        .block_kinds
+        .iter()
+        .find_map(|kind| first_named(stmt, kind))
+}
+
+fn ast_else_node<'a>(n: Node<'a>, shape: AstShape) -> Option<Node<'a>> {
+    if kind_in(n, shape.shell_last_kinds) || n.kind() == "else_clause" {
+        return last_named(n);
+    }
+    if kind_in(n, shape.shell_first_kinds) {
+        return first_body_child(n, shape).or_else(|| n.named_child(0));
+    }
+    Some(n)
+}
+
+fn ast_stmt_or_body(
+    src: &[u8],
+    n: Node<'_>,
+    shape: AstShape,
+    locals: &mut HashSet<String>,
+) -> Vec<Stmt> {
+    let n = ast_else_node(n, shape).unwrap_or(n);
+    if ast_body_node(n, shape).is_some() {
+        ast_body_with_locals(src, n, shape, locals)
+    } else {
+        ast_stmt(src, n, shape, locals).into_iter().collect()
+    }
+}
+
+fn ast_expr(src: &[u8], expr: Node<'_>, shape: AstShape) -> Option<Expr> {
+    if expr.kind() == "identifier" {
+        return Some(Expr::Ident(node_txt(src, expr).trim().to_string()));
+    }
+    if kind_in(expr, shape.int_kinds) {
+        return java_int_literal(node_txt(src, expr)).map(Expr::IntLit);
+    }
+    if kind_in(expr, shape.string_kinds) {
+        return Some(Expr::StringLit(
+            node_txt(src, expr)
+                .trim()
+                .trim_matches(['"', '\''])
+                .to_string(),
+        ));
+    }
+    if matches!(node_txt(src, expr).trim(), "true" | "True") {
+        return Some(Expr::BoolLit(true));
+    }
+    if matches!(node_txt(src, expr).trim(), "false" | "False") {
+        return Some(Expr::BoolLit(false));
+    }
+    if kind_in(expr, shape.call_kinds) {
+        return ast_call_expr(src, expr, shape);
+    }
+    if kind_in(expr, shape.arg_wrapper_kinds) || kind_in(expr, shape.paren_kinds) {
+        return expr.named_child(0).and_then(|n| ast_expr(src, n, shape));
+    }
+    if kind_in(expr, shape.binary_kinds) {
+        return ast_binary_expr(src, expr, shape);
+    }
+    if kind_in(expr, shape.unary_kinds) {
+        return ast_unary_expr(src, expr, shape);
+    }
+    None
+}
+
+fn ast_binary_expr(src: &[u8], expr: Node<'_>, shape: AstShape) -> Option<Expr> {
+    let lhs = expr
+        .child_by_field_name("left")
+        .or_else(|| expr.child_by_field_name("lhs"))
+        .or_else(|| expr.named_child(0))?;
+    let rhs = expr
+        .child_by_field_name("right")
+        .or_else(|| expr.child_by_field_name("rhs"))
+        .or_else(|| expr.named_child(expr.named_child_count().saturating_sub(1) as u32))?;
+    let op = std::str::from_utf8(src.get(lhs.end_byte()..rhs.start_byte())?)
+        .ok()?
+        .trim()
+        .to_string();
+    Some(Expr::Binary {
+        op,
+        lhs: Box::new(ast_expr(src, lhs, shape)?),
+        rhs: Box::new(ast_expr(src, rhs, shape)?),
+    })
+}
+
+fn ast_unary_expr(src: &[u8], expr: Node<'_>, shape: AstShape) -> Option<Expr> {
+    let inner = last_named(expr)?;
+    let op = std::str::from_utf8(src.get(expr.start_byte()..inner.start_byte())?)
+        .ok()?
+        .trim()
+        .to_string();
+    Some(Expr::Unary {
+        op,
+        expr: Box::new(ast_expr(src, inner, shape)?),
+    })
+}
+
+fn ast_call_expr(src: &[u8], call: Node<'_>, shape: AstShape) -> Option<Expr> {
+    let callee = call
+        .child_by_field_name("function")
+        .and_then(|n| ast_expr(src, n, shape))
+        .or_else(|| {
+            call.child_by_field_name("name")
+                .map(|n| Expr::Ident(node_txt(src, n).trim().to_string()))
+        })
+        .or_else(|| {
+            first_named(call, "identifier")
+                .map(|id| Expr::Ident(node_txt(src, id).trim().to_string()))
+        })?;
+    let mut args = Vec::new();
+    if shape.arg_container_kinds.is_empty() {
+        let mut w = call.walk();
+        for ch in call.named_children(&mut w) {
+            if matches!(&callee, Expr::Ident(name) if node_txt(src, ch).trim() == name) {
+                continue;
+            }
+            if let Some(expr) = ast_expr(src, ch, shape) {
+                args.push(expr);
+            }
+        }
+    } else {
+        for kind in shape.arg_container_kinds {
+            if let Some(arg_node) = call
+                .child_by_field_name("arguments")
+                .filter(|n| n.kind() == *kind)
+                .or_else(|| named_descendant(call, kind))
+            {
+                args.extend(ast_args(src, arg_node, shape)?);
+                break;
+            }
+        }
+    }
+    Some(Expr::Call {
+        callee: Box::new(callee),
+        args,
+    })
+}
+
+fn ast_args(src: &[u8], args: Node<'_>, shape: AstShape) -> Option<Vec<Expr>> {
+    let mut out = Vec::new();
+    let mut w = args.walk();
+    for ch in args.named_children(&mut w) {
+        if let Some(expr) = ast_expr(src, ch, shape) {
+            out.push(expr);
+        } else if shape.strict_args {
+            return None;
+        }
+    }
+    Some(out)
+}
+
 pub(super) fn extract_fn_nodes<'a>(
     src: &[u8],
     root: Node<'a>,
@@ -781,203 +1379,7 @@ fn java_param_name<'a>(src: &[u8], fp: Node<'a>) -> Option<String> {
 }
 
 fn java_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
-    let mut out = Vec::new();
-    let mut w = body.walk();
-    for ch in body.named_children(&mut w) {
-        if let Some(stmt) = java_stmt(src, ch) {
-            out.push(stmt);
-        }
-    }
-    out
-}
-
-fn java_stmt(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
-    match stmt.kind() {
-        "return_statement" => java_return_expr(src, stmt).map(Stmt::Return),
-        "expression_statement" => java_expr_statement(src, stmt),
-        "local_variable_declaration" => java_local_variable(src, stmt),
-        "if_statement" => java_if_statement(src, stmt),
-        "while_statement" => java_while_statement(src, stmt),
-        _ => None,
-    }
-}
-
-fn java_return_expr(src: &[u8], ret: Node<'_>) -> Option<Option<Expr>> {
-    let mut w = ret.walk();
-    if let Some(ch) = ret.named_children(&mut w).next() {
-        return java_expr(src, ch).map(Some);
-    }
-    Some(None)
-}
-
-fn java_expr_statement(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
-    let mut w = stmt.walk();
-    let expr = stmt.named_children(&mut w).next()?;
-    match expr.kind() {
-        "assignment_expression" => java_assignment(src, expr),
-        _ => java_expr(src, expr).map(Stmt::Expr),
-    }
-}
-
-fn java_local_variable(src: &[u8], decl: Node<'_>) -> Option<Stmt> {
-    let var = first_named(decl, "variable_declarator")?;
-    let name_node = var
-        .child_by_field_name("name")
-        .or_else(|| first_named(var, "identifier"))?;
-    let value = var
-        .child_by_field_name("value")
-        .or_else(|| last_named(var))?;
-    let ty = decl
-        .child_by_field_name("type")
-        .or_else(|| first_named(decl, "integral_type"))
-        .or_else(|| first_named(decl, "boolean_type"))
-        .or_else(|| first_named(decl, "type_identifier"))
-        .map(|t| Typ::Named(node_txt(src, t).trim().to_string()));
-    Some(Stmt::Let(
-        node_txt(src, name_node).trim().to_string(),
-        ty,
-        java_expr(src, value)?,
-    ))
-}
-
-fn java_assignment(src: &[u8], expr: Node<'_>) -> Option<Stmt> {
-    let left = expr
-        .child_by_field_name("left")
-        .or_else(|| expr.named_child(0))?;
-    let right = expr
-        .child_by_field_name("right")
-        .or_else(|| expr.named_child(expr.named_child_count().saturating_sub(1) as u32))?;
-    let name = java_assignee_name(src, left)?;
-    Some(Stmt::Assign(name, java_expr(src, right)?))
-}
-
-fn java_if_statement(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
-    let cond = stmt
-        .child_by_field_name("condition")
-        .and_then(|n| java_expr(src, n))
-        .or_else(|| {
-            first_named(stmt, "parenthesized_expression").and_then(|n| java_expr(src, n))
-        })?;
-    let then_body = stmt
-        .child_by_field_name("consequence")
-        .map(|n| java_stmt_or_body(src, n))
-        .unwrap_or_default();
-    let else_body = stmt
-        .child_by_field_name("alternative")
-        .map(|n| java_stmt_or_body(src, n))
-        .unwrap_or_default();
-    Some(Stmt::If {
-        cond,
-        then_body,
-        else_body,
-    })
-}
-
-fn java_while_statement(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
-    let cond = stmt
-        .child_by_field_name("condition")
-        .and_then(|n| java_expr(src, n))
-        .or_else(|| {
-            first_named(stmt, "parenthesized_expression").and_then(|n| java_expr(src, n))
-        })?;
-    let body = stmt
-        .child_by_field_name("body")
-        .map(|n| java_stmt_or_body(src, n))
-        .unwrap_or_default();
-    Some(Stmt::Loop {
-        kind: crate::core_ir::LoopKind::While,
-        cond: Some(cond),
-        body,
-    })
-}
-
-fn java_stmt_or_body(src: &[u8], n: Node<'_>) -> Vec<Stmt> {
-    if n.kind() == "block" {
-        java_body(src, n)
-    } else {
-        java_stmt(src, n).into_iter().collect()
-    }
-}
-
-fn java_assignee_name(src: &[u8], n: Node<'_>) -> Option<String> {
-    if n.kind() == "identifier" {
-        return Some(node_txt(src, n).trim().to_string());
-    }
-    None
-}
-
-fn java_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
-    match expr.kind() {
-        "identifier" => Some(Expr::Ident(node_txt(src, expr).trim().to_string())),
-        "decimal_integer_literal"
-        | "hex_integer_literal"
-        | "octal_integer_literal"
-        | "binary_integer_literal"
-        | "integer_literal" => java_int_literal(node_txt(src, expr)).map(Expr::IntLit),
-        "true" => Some(Expr::BoolLit(true)),
-        "false" => Some(Expr::BoolLit(false)),
-        "string_literal" => Some(Expr::StringLit(
-            node_txt(src, expr).trim().trim_matches('"').to_string(),
-        )),
-        "method_invocation" => java_call_expr(src, expr),
-        "parenthesized_expression" => expr.named_child(0).and_then(|n| java_expr(src, n)),
-        "binary_expression" => java_binary_expr(src, expr),
-        "unary_expression" => java_unary_expr(src, expr),
-        _ => None,
-    }
-}
-
-fn java_binary_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
-    let lhs = expr
-        .child_by_field_name("left")
-        .or_else(|| expr.named_child(0))?;
-    let rhs = expr
-        .child_by_field_name("right")
-        .or_else(|| expr.named_child(expr.named_child_count().saturating_sub(1) as u32))?;
-    let op = std::str::from_utf8(src.get(lhs.end_byte()..rhs.start_byte())?)
-        .ok()?
-        .trim()
-        .to_string();
-    Some(Expr::Binary {
-        op,
-        lhs: Box::new(java_expr(src, lhs)?),
-        rhs: Box::new(java_expr(src, rhs)?),
-    })
-}
-
-fn java_unary_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
-    let inner = last_named(expr)?;
-    let op = std::str::from_utf8(src.get(expr.start_byte()..inner.start_byte())?)
-        .ok()?
-        .trim()
-        .to_string();
-    Some(Expr::Unary {
-        op,
-        expr: Box::new(java_expr(src, inner)?),
-    })
-}
-
-fn java_call_expr(src: &[u8], call: Node<'_>) -> Option<Expr> {
-    let callee = call
-        .child_by_field_name("name")
-        .or_else(|| first_named(call, "identifier"))?;
-    let args = match call.child_by_field_name("arguments") {
-        Some(args) => java_args(src, args)?,
-        None => Vec::new(),
-    };
-    Some(Expr::Call {
-        callee: Box::new(Expr::Ident(node_txt(src, callee).trim().to_string())),
-        args,
-    })
-}
-
-fn java_args(src: &[u8], args: Node<'_>) -> Option<Vec<Expr>> {
-    let mut out = Vec::new();
-    let mut w = args.walk();
-    for ch in args.named_children(&mut w) {
-        out.push(java_expr(src, ch)?);
-    }
-    Some(out)
+    ast_body(src, body, JAVA_AST)
 }
 
 fn java_int_literal(raw: &str) -> Option<i64> {
@@ -1066,216 +1468,7 @@ fn kotlin_params<'a>(src: &[u8], fun: Node<'a>) -> Vec<(String, Typ)> {
 }
 
 fn kotlin_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
-    let block = first_named(body, "block").unwrap_or(body);
-    let mut out = Vec::new();
-    let mut w = block.walk();
-    for ch in block.named_children(&mut w) {
-        if let Some(stmt) = kotlin_stmt(src, ch) {
-            out.push(stmt);
-        }
-    }
-    out
-}
-
-fn kotlin_stmt(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
-    match stmt.kind() {
-        "return_expression" => kotlin_return_expr(src, stmt).map(Stmt::Return),
-        "property_declaration" => kotlin_local_declaration(src, stmt),
-        "assignment" => kotlin_assignment(src, stmt),
-        "call_expression" => kotlin_expr(src, stmt).map(Stmt::Expr),
-        "if_expression" => kotlin_if_expression(src, stmt),
-        "while_statement" | "while_expression" => kotlin_while_statement(src, stmt),
-        _ => None,
-    }
-}
-
-fn kotlin_return_expr(src: &[u8], ret: Node<'_>) -> Option<Option<Expr>> {
-    let mut w = ret.walk();
-    if let Some(ch) = ret.named_children(&mut w).next() {
-        return kotlin_expr(src, ch).map(Some);
-    }
-    Some(None)
-}
-
-fn kotlin_assignment(src: &[u8], expr: Node<'_>) -> Option<Stmt> {
-    let left = expr.named_child(0)?;
-    let right = last_named(expr)?;
-    if left == right {
-        return None;
-    }
-    if left.kind() != "identifier" {
-        return None;
-    }
-    Some(Stmt::Assign(
-        node_txt(src, left).trim().to_string(),
-        kotlin_expr(src, right)?,
-    ))
-}
-
-fn kotlin_local_declaration(src: &[u8], decl: Node<'_>) -> Option<Stmt> {
-    let name_node = decl
-        .child_by_field_name("name")
-        .or_else(|| named_descendant(decl, "identifier"))?;
-    let value = decl
-        .child_by_field_name("value")
-        .or_else(|| last_named(decl))?;
-    if name_node == value {
-        return None;
-    }
-    let ty = named_descendant(decl, "user_type")
-        .or_else(|| named_descendant(decl, "type"))
-        .map(|t| Typ::Named(node_txt(src, t).trim().to_string()));
-    Some(Stmt::Let(
-        node_txt(src, name_node).trim().to_string(),
-        ty,
-        kotlin_expr(src, value)?,
-    ))
-}
-
-fn kotlin_if_expression(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
-    let cond = stmt
-        .child_by_field_name("condition")
-        .and_then(|n| kotlin_expr(src, n))
-        .or_else(|| first_named(stmt, "parenthesized_expression").and_then(|n| kotlin_expr(src, n)))
-        .or_else(|| first_named(stmt, "binary_expression").and_then(|n| kotlin_expr(src, n)))?;
-    let then_body = stmt
-        .child_by_field_name("consequence")
-        .or_else(|| first_named(stmt, "control_structure_body"))
-        .or_else(|| first_named(stmt, "block"))
-        .map(|n| kotlin_stmt_or_body(src, n))
-        .unwrap_or_default();
-    let else_body = stmt
-        .child_by_field_name("alternative")
-        .and_then(|n| first_named(n, "control_structure_body").or(Some(n)))
-        .or_else(|| {
-            let mut bodies = Vec::new();
-            collect_kinds(stmt, &["control_structure_body", "block"], &mut bodies);
-            bodies.into_iter().nth(1)
-        })
-        .map(|n| kotlin_stmt_or_body(src, n))
-        .unwrap_or_default();
-    Some(Stmt::If {
-        cond,
-        then_body,
-        else_body,
-    })
-}
-
-fn kotlin_while_statement(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
-    let cond = stmt
-        .child_by_field_name("condition")
-        .and_then(|n| kotlin_expr(src, n))
-        .or_else(|| first_named(stmt, "parenthesized_expression").and_then(|n| kotlin_expr(src, n)))
-        .or_else(|| first_named(stmt, "binary_expression").and_then(|n| kotlin_expr(src, n)))?;
-    let body = stmt
-        .child_by_field_name("body")
-        .or_else(|| first_named(stmt, "control_structure_body"))
-        .or_else(|| first_named(stmt, "block"))
-        .map(|n| kotlin_stmt_or_body(src, n))
-        .unwrap_or_default();
-    Some(Stmt::Loop {
-        kind: crate::core_ir::LoopKind::While,
-        cond: Some(cond),
-        body,
-    })
-}
-
-fn kotlin_stmt_or_body(src: &[u8], n: Node<'_>) -> Vec<Stmt> {
-    if n.kind() == "control_structure_body" {
-        if let Some(block) = first_named(n, "block") {
-            return kotlin_body(src, block);
-        }
-        let mut out = Vec::new();
-        let mut w = n.walk();
-        for ch in n.named_children(&mut w) {
-            if let Some(stmt) = kotlin_stmt(src, ch) {
-                out.push(stmt);
-            }
-        }
-        return out;
-    }
-    if n.kind() == "block" {
-        kotlin_body(src, n)
-    } else {
-        kotlin_stmt(src, n).into_iter().collect()
-    }
-}
-
-fn kotlin_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
-    match expr.kind() {
-        "identifier" => Some(Expr::Ident(node_txt(src, expr).trim().to_string())),
-        "number_literal" => node_txt(src, expr)
-            .trim()
-            .parse::<i64>()
-            .ok()
-            .map(Expr::IntLit),
-        "string_literal" => Some(Expr::StringLit(
-            node_txt(src, expr).trim().trim_matches('"').to_string(),
-        )),
-        "boolean_literal" => match node_txt(src, expr).trim() {
-            "true" => Some(Expr::BoolLit(true)),
-            "false" => Some(Expr::BoolLit(false)),
-            _ => None,
-        },
-        "call_expression" => kotlin_call_expr(src, expr),
-        "value_argument" => expr.named_child(0).and_then(|n| kotlin_expr(src, n)),
-        "parenthesized_expression" => expr.named_child(0).and_then(|n| kotlin_expr(src, n)),
-        "binary_expression" => kotlin_binary_expr(src, expr),
-        "unary_expression" => kotlin_unary_expr(src, expr),
-        _ => None,
-    }
-}
-
-fn kotlin_binary_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
-    let lhs = expr
-        .child_by_field_name("left")
-        .or_else(|| expr.named_child(0))?;
-    let rhs = expr
-        .child_by_field_name("right")
-        .or_else(|| expr.named_child(expr.named_child_count().saturating_sub(1) as u32))?;
-    let op = std::str::from_utf8(src.get(lhs.end_byte()..rhs.start_byte())?)
-        .ok()?
-        .trim()
-        .to_string();
-    Some(Expr::Binary {
-        op,
-        lhs: Box::new(kotlin_expr(src, lhs)?),
-        rhs: Box::new(kotlin_expr(src, rhs)?),
-    })
-}
-
-fn kotlin_unary_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
-    let inner = last_named(expr)?;
-    let op = std::str::from_utf8(src.get(expr.start_byte()..inner.start_byte())?)
-        .ok()?
-        .trim()
-        .to_string();
-    Some(Expr::Unary {
-        op,
-        expr: Box::new(kotlin_expr(src, inner)?),
-    })
-}
-
-fn kotlin_call_expr(src: &[u8], call: Node<'_>) -> Option<Expr> {
-    let callee = first_named(call, "identifier")?;
-    let args = named_descendant(call, "value_arguments")
-        .map(|n| kotlin_args(src, n))
-        .unwrap_or_default();
-    Some(Expr::Call {
-        callee: Box::new(Expr::Ident(node_txt(src, callee).trim().to_string())),
-        args,
-    })
-}
-
-fn kotlin_args(src: &[u8], args: Node<'_>) -> Vec<Expr> {
-    let mut out = Vec::new();
-    let mut w = args.walk();
-    for ch in args.named_children(&mut w) {
-        if let Some(expr) = kotlin_expr(src, ch) {
-            out.push(expr);
-        }
-    }
-    out
+    ast_body(src, body, KOTLIN_AST)
 }
 
 fn extract_scala(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
@@ -1343,191 +1536,7 @@ fn csharp_params<'a>(src: &[u8], plist: Node<'a>) -> Vec<(String, Typ)> {
 }
 
 fn csharp_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
-    let mut out = Vec::new();
-    let mut w = body.walk();
-    for ch in body.named_children(&mut w) {
-        if let Some(stmt) = csharp_stmt(src, ch) {
-            out.push(stmt);
-        }
-    }
-    out
-}
-
-fn csharp_stmt(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
-    match stmt.kind() {
-        "return_statement" => csharp_return_expr(src, stmt).map(Stmt::Return),
-        "expression_statement" => csharp_expr_statement(src, stmt),
-        "local_declaration_statement" => csharp_local_declaration(src, stmt),
-        "if_statement" => csharp_if_statement(src, stmt),
-        "while_statement" => csharp_while_statement(src, stmt),
-        _ => None,
-    }
-}
-
-fn csharp_return_expr(src: &[u8], ret: Node<'_>) -> Option<Option<Expr>> {
-    let mut w = ret.walk();
-    if let Some(ch) = ret.named_children(&mut w).next() {
-        return csharp_expr(src, ch).map(Some);
-    }
-    Some(None)
-}
-
-fn csharp_expr_statement(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
-    let mut w = stmt.walk();
-    let expr = stmt.named_children(&mut w).next()?;
-    match expr.kind() {
-        "assignment_expression" => csharp_assignment(src, expr),
-        _ => csharp_expr(src, expr).map(Stmt::Expr),
-    }
-}
-
-fn csharp_assignment(src: &[u8], expr: Node<'_>) -> Option<Stmt> {
-    let left = expr.named_child(0)?;
-    let right = last_named(expr)?;
-    if left == right || left.kind() != "identifier" {
-        return None;
-    }
-    Some(Stmt::Assign(
-        node_txt(src, left).trim().to_string(),
-        csharp_expr(src, right)?,
-    ))
-}
-
-fn csharp_local_declaration(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
-    let var = named_descendant(stmt, "variable_declarator")?;
-    let name_node = var
-        .child_by_field_name("name")
-        .or_else(|| first_named(var, "identifier"))?;
-    let value = var
-        .child_by_field_name("value")
-        .or_else(|| last_named(var))?;
-    let ty = stmt
-        .child_by_field_name("type")
-        .or_else(|| named_descendant(stmt, "predefined_type"))
-        .map(|t| Typ::Named(node_txt(src, t).trim().to_string()));
-    Some(Stmt::Let(
-        node_txt(src, name_node).trim().to_string(),
-        ty,
-        csharp_expr(src, value)?,
-    ))
-}
-
-fn csharp_if_statement(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
-    let cond = stmt
-        .child_by_field_name("condition")
-        .and_then(|n| csharp_expr(src, n))
-        .or_else(|| {
-            first_named(stmt, "parenthesized_expression").and_then(|n| csharp_expr(src, n))
-        })?;
-    let then_body = stmt
-        .child_by_field_name("consequence")
-        .map(|n| csharp_stmt_or_body(src, n))
-        .unwrap_or_default();
-    let else_body = stmt
-        .child_by_field_name("alternative")
-        .map(|n| csharp_stmt_or_body(src, n))
-        .unwrap_or_default();
-    Some(Stmt::If {
-        cond,
-        then_body,
-        else_body,
-    })
-}
-
-fn csharp_while_statement(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
-    let cond = stmt
-        .child_by_field_name("condition")
-        .and_then(|n| csharp_expr(src, n))
-        .or_else(|| {
-            first_named(stmt, "parenthesized_expression").and_then(|n| csharp_expr(src, n))
-        })?;
-    let body = stmt
-        .child_by_field_name("body")
-        .map(|n| csharp_stmt_or_body(src, n))
-        .unwrap_or_default();
-    Some(Stmt::Loop {
-        kind: crate::core_ir::LoopKind::While,
-        cond: Some(cond),
-        body,
-    })
-}
-
-fn csharp_stmt_or_body(src: &[u8], n: Node<'_>) -> Vec<Stmt> {
-    if n.kind() == "block" {
-        csharp_body(src, n)
-    } else {
-        csharp_stmt(src, n).into_iter().collect()
-    }
-}
-
-fn csharp_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
-    match expr.kind() {
-        "identifier" => Some(Expr::Ident(node_txt(src, expr).trim().to_string())),
-        "integer_literal" => java_int_literal(node_txt(src, expr)).map(Expr::IntLit),
-        "true" => Some(Expr::BoolLit(true)),
-        "false" => Some(Expr::BoolLit(false)),
-        "string_literal" => Some(Expr::StringLit(
-            node_txt(src, expr).trim().trim_matches('"').to_string(),
-        )),
-        "invocation_expression" => csharp_call_expr(src, expr),
-        "parenthesized_expression" => expr.named_child(0).and_then(|n| csharp_expr(src, n)),
-        "argument" => expr.named_child(0).and_then(|n| csharp_expr(src, n)),
-        "binary_expression" => csharp_binary_expr(src, expr),
-        "unary_expression" | "prefix_unary_expression" => csharp_unary_expr(src, expr),
-        _ => None,
-    }
-}
-
-fn csharp_binary_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
-    let lhs = expr
-        .child_by_field_name("left")
-        .or_else(|| expr.named_child(0))?;
-    let rhs = expr
-        .child_by_field_name("right")
-        .or_else(|| expr.named_child(expr.named_child_count().saturating_sub(1) as u32))?;
-    let op = std::str::from_utf8(src.get(lhs.end_byte()..rhs.start_byte())?)
-        .ok()?
-        .trim()
-        .to_string();
-    Some(Expr::Binary {
-        op,
-        lhs: Box::new(csharp_expr(src, lhs)?),
-        rhs: Box::new(csharp_expr(src, rhs)?),
-    })
-}
-
-fn csharp_unary_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
-    let inner = last_named(expr)?;
-    let op = std::str::from_utf8(src.get(expr.start_byte()..inner.start_byte())?)
-        .ok()?
-        .trim()
-        .to_string();
-    Some(Expr::Unary {
-        op,
-        expr: Box::new(csharp_expr(src, inner)?),
-    })
-}
-
-fn csharp_call_expr(src: &[u8], call: Node<'_>) -> Option<Expr> {
-    let callee = first_named(call, "identifier")?;
-    let args = named_descendant(call, "argument_list")
-        .map(|n| csharp_args(src, n))
-        .unwrap_or_default();
-    Some(Expr::Call {
-        callee: Box::new(Expr::Ident(node_txt(src, callee).trim().to_string())),
-        args,
-    })
-}
-
-fn csharp_args(src: &[u8], args: Node<'_>) -> Vec<Expr> {
-    let mut out = Vec::new();
-    let mut w = args.walk();
-    for ch in args.named_children(&mut w) {
-        if let Some(expr) = csharp_expr(src, ch) {
-            out.push(expr);
-        }
-    }
-    out
+    ast_body(src, body, CSHARP_AST)
 }
 
 fn extract_python(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
@@ -1601,195 +1610,7 @@ fn simple_param_names<'a>(src: &[u8], plist: Node<'a>) -> Vec<(String, Typ)> {
 }
 
 fn python_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
-    let mut out = Vec::new();
-    let mut locals = HashSet::new();
-    let mut w = body.walk();
-    for ch in body.named_children(&mut w) {
-        if let Some(stmt) = python_stmt(src, ch, &mut locals) {
-            out.push(stmt);
-        }
-    }
-    out
-}
-
-fn python_stmt(src: &[u8], stmt: Node<'_>, locals: &mut HashSet<String>) -> Option<Stmt> {
-    match stmt.kind() {
-        "return_statement" => python_return_expr(src, stmt).map(Stmt::Return),
-        "expression_statement" => python_expr_statement(src, stmt, locals),
-        "if_statement" => python_if_statement(src, stmt, locals),
-        "while_statement" => python_while_statement(src, stmt, locals),
-        _ => None,
-    }
-}
-
-fn python_return_expr(src: &[u8], ret: Node<'_>) -> Option<Option<Expr>> {
-    let mut w = ret.walk();
-    if let Some(ch) = ret.named_children(&mut w).next() {
-        return python_expr(src, ch).map(Some);
-    }
-    Some(None)
-}
-
-fn python_expr_statement(src: &[u8], stmt: Node<'_>, locals: &mut HashSet<String>) -> Option<Stmt> {
-    let mut w = stmt.walk();
-    let expr = stmt.named_children(&mut w).next()?;
-    match expr.kind() {
-        "assignment" => python_assignment(src, expr, locals),
-        _ => python_expr(src, expr).map(Stmt::Expr),
-    }
-}
-
-fn python_assignment(src: &[u8], expr: Node<'_>, locals: &mut HashSet<String>) -> Option<Stmt> {
-    let left = expr.named_child(0)?;
-    let right = last_named(expr)?;
-    if left == right || left.kind() != "identifier" {
-        return None;
-    }
-    let name = node_txt(src, left).trim().to_string();
-    let value = python_expr(src, right)?;
-    if locals.insert(name.clone()) {
-        Some(Stmt::Let(name, None, value))
-    } else {
-        Some(Stmt::Assign(name, value))
-    }
-}
-
-fn python_if_statement(src: &[u8], stmt: Node<'_>, locals: &HashSet<String>) -> Option<Stmt> {
-    let cond = stmt
-        .child_by_field_name("condition")
-        .and_then(|n| python_expr(src, n))
-        .or_else(|| first_named(stmt, "comparison_operator").and_then(|n| python_expr(src, n)))
-        .or_else(|| first_named(stmt, "binary_operator").and_then(|n| python_expr(src, n)))?;
-    let then_body = stmt
-        .child_by_field_name("consequence")
-        .or_else(|| first_named(stmt, "block"))
-        .map(|n| python_body_with_locals(src, n, locals))
-        .unwrap_or_default();
-    let else_body = stmt
-        .child_by_field_name("alternative")
-        .map(|n| python_else_body(src, n, locals))
-        .unwrap_or_default();
-    Some(Stmt::If {
-        cond,
-        then_body,
-        else_body,
-    })
-}
-
-fn python_while_statement(src: &[u8], stmt: Node<'_>, locals: &HashSet<String>) -> Option<Stmt> {
-    let cond = stmt
-        .child_by_field_name("condition")
-        .and_then(|n| python_expr(src, n))
-        .or_else(|| first_named(stmt, "comparison_operator").and_then(|n| python_expr(src, n)))
-        .or_else(|| first_named(stmt, "binary_operator").and_then(|n| python_expr(src, n)))?;
-    let body = stmt
-        .child_by_field_name("body")
-        .or_else(|| first_named(stmt, "block"))
-        .map(|n| python_body_with_locals(src, n, locals))
-        .unwrap_or_default();
-    Some(Stmt::Loop {
-        kind: crate::core_ir::LoopKind::While,
-        cond: Some(cond),
-        body,
-    })
-}
-
-fn python_else_body(src: &[u8], n: Node<'_>, locals: &HashSet<String>) -> Vec<Stmt> {
-    let body = first_named(n, "block").unwrap_or(n);
-    python_body_with_locals(src, body, locals)
-}
-
-fn python_body_with_locals(src: &[u8], body: Node<'_>, locals: &HashSet<String>) -> Vec<Stmt> {
-    let mut scoped = locals.clone();
-    let mut out = Vec::new();
-    let mut w = body.walk();
-    for ch in body.named_children(&mut w) {
-        if let Some(stmt) = python_stmt(src, ch, &mut scoped) {
-            out.push(stmt);
-        }
-    }
-    out
-}
-
-fn python_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
-    match expr.kind() {
-        "identifier" => Some(Expr::Ident(node_txt(src, expr).trim().to_string())),
-        "integer" => node_txt(src, expr)
-            .trim()
-            .parse::<i64>()
-            .ok()
-            .map(Expr::IntLit),
-        "string" => Some(Expr::StringLit(
-            node_txt(src, expr)
-                .trim()
-                .trim_matches(['"', '\''])
-                .to_string(),
-        )),
-        "true" => Some(Expr::BoolLit(true)),
-        "false" => Some(Expr::BoolLit(false)),
-        "call" => python_call_expr(src, expr),
-        "argument_list" => expr.named_child(0).and_then(|n| python_expr(src, n)),
-        "parenthesized_expression" => expr.named_child(0).and_then(|n| python_expr(src, n)),
-        "binary_operator" | "comparison_operator" => python_binary_expr(src, expr),
-        "unary_operator" => python_unary_expr(src, expr),
-        _ => match node_txt(src, expr).trim() {
-            "True" => Some(Expr::BoolLit(true)),
-            "False" => Some(Expr::BoolLit(false)),
-            _ => None,
-        },
-    }
-}
-
-fn python_binary_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
-    let lhs = expr
-        .child_by_field_name("left")
-        .or_else(|| expr.named_child(0))?;
-    let rhs = expr
-        .child_by_field_name("right")
-        .or_else(|| expr.named_child(expr.named_child_count().saturating_sub(1) as u32))?;
-    let op = std::str::from_utf8(src.get(lhs.end_byte()..rhs.start_byte())?)
-        .ok()?
-        .trim()
-        .to_string();
-    Some(Expr::Binary {
-        op,
-        lhs: Box::new(python_expr(src, lhs)?),
-        rhs: Box::new(python_expr(src, rhs)?),
-    })
-}
-
-fn python_unary_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
-    let inner = last_named(expr)?;
-    let op = std::str::from_utf8(src.get(expr.start_byte()..inner.start_byte())?)
-        .ok()?
-        .trim()
-        .to_string();
-    Some(Expr::Unary {
-        op,
-        expr: Box::new(python_expr(src, inner)?),
-    })
-}
-
-fn python_call_expr(src: &[u8], call: Node<'_>) -> Option<Expr> {
-    let callee = first_named(call, "identifier")?;
-    let args = named_descendant(call, "argument_list")
-        .map(|n| python_args(src, n))
-        .unwrap_or_default();
-    Some(Expr::Call {
-        callee: Box::new(Expr::Ident(node_txt(src, callee).trim().to_string())),
-        args,
-    })
-}
-
-fn python_args(src: &[u8], args: Node<'_>) -> Vec<Expr> {
-    let mut out = Vec::new();
-    let mut w = args.walk();
-    for ch in args.named_children(&mut w) {
-        if let Some(expr) = python_expr(src, ch) {
-            out.push(expr);
-        }
-    }
-    out
+    ast_body(src, body, PYTHON_AST)
 }
 
 fn extract_php(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
@@ -1940,203 +1761,7 @@ fn js_function_decl<'a>(src: &[u8], n: Node<'a>) -> Option<Decl> {
 }
 
 fn js_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
-    let mut out = Vec::new();
-    let mut w = body.walk();
-    for ch in body.named_children(&mut w) {
-        if let Some(stmt) = js_stmt(src, ch) {
-            out.push(stmt);
-        }
-    }
-    out
-}
-
-fn js_stmt(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
-    match stmt.kind() {
-        "return_statement" => Some(Stmt::Return(js_return_expr(src, stmt))),
-        "expression_statement" => js_expr_statement(src, stmt),
-        "lexical_declaration" | "variable_declaration" => js_variable_declaration(src, stmt),
-        "if_statement" => js_if_statement(src, stmt),
-        "while_statement" => js_while_statement(src, stmt),
-        _ => None,
-    }
-}
-
-fn js_expr_statement(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
-    let mut w = stmt.walk();
-    let expr = stmt.named_children(&mut w).next()?;
-    match expr.kind() {
-        "assignment_expression" | "augmented_assignment_expression" => js_assignment(src, expr),
-        _ => js_expr(src, expr).map(Stmt::Expr),
-    }
-}
-
-fn js_variable_declaration(src: &[u8], decl: Node<'_>) -> Option<Stmt> {
-    let var = first_named(decl, "variable_declarator")?;
-    let name_node = var
-        .child_by_field_name("name")
-        .or_else(|| first_named(var, "identifier"))?;
-    let value = var
-        .child_by_field_name("value")
-        .or_else(|| last_named(var))?;
-    Some(Stmt::Let(
-        node_txt(src, name_node).trim().to_string(),
-        None,
-        js_expr(src, value)?,
-    ))
-}
-
-fn js_assignment(src: &[u8], expr: Node<'_>) -> Option<Stmt> {
-    let left = expr
-        .child_by_field_name("left")
-        .or_else(|| expr.named_child(0))?;
-    let right = expr
-        .child_by_field_name("right")
-        .or_else(|| expr.named_child(expr.named_child_count().saturating_sub(1) as u32))?;
-    if left.kind() != "identifier" {
-        return None;
-    }
-    Some(Stmt::Assign(
-        node_txt(src, left).trim().to_string(),
-        js_expr(src, right)?,
-    ))
-}
-
-fn js_if_statement(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
-    let cond = stmt
-        .child_by_field_name("condition")
-        .and_then(|n| js_expr(src, n))
-        .or_else(|| first_named(stmt, "parenthesized_expression").and_then(|n| js_expr(src, n)))?;
-    let then_body = stmt
-        .child_by_field_name("consequence")
-        .map(|n| js_stmt_or_body(src, n))
-        .unwrap_or_default();
-    let else_body = stmt
-        .child_by_field_name("alternative")
-        .or_else(|| first_named(stmt, "else_clause"))
-        .map(|n| js_stmt_or_body(src, n))
-        .unwrap_or_default();
-    Some(Stmt::If {
-        cond,
-        then_body,
-        else_body,
-    })
-}
-
-fn js_while_statement(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
-    let cond = stmt
-        .child_by_field_name("condition")
-        .and_then(|n| js_expr(src, n))
-        .or_else(|| first_named(stmt, "parenthesized_expression").and_then(|n| js_expr(src, n)))?;
-    let body = stmt
-        .child_by_field_name("body")
-        .map(|n| js_stmt_or_body(src, n))
-        .unwrap_or_default();
-    Some(Stmt::Loop {
-        kind: crate::core_ir::LoopKind::While,
-        cond: Some(cond),
-        body,
-    })
-}
-
-fn js_stmt_or_body(src: &[u8], n: Node<'_>) -> Vec<Stmt> {
-    let n = if n.kind() == "else_clause" {
-        last_named(n).unwrap_or(n)
-    } else {
-        n
-    };
-    if n.kind() == "statement_block" {
-        js_body(src, n)
-    } else {
-        js_stmt(src, n).into_iter().collect()
-    }
-}
-
-fn js_return_expr(src: &[u8], ret: Node<'_>) -> Option<Expr> {
-    let mut w = ret.walk();
-    ret.named_children(&mut w).find_map(|ch| js_expr(src, ch))
-}
-
-fn js_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
-    match expr.kind() {
-        "identifier" => Some(Expr::Ident(node_txt(src, expr).trim().to_string())),
-        "number" => node_txt(src, expr)
-            .trim()
-            .parse::<i64>()
-            .ok()
-            .map(Expr::IntLit),
-        "string" => Some(Expr::StringLit(
-            node_txt(src, expr)
-                .trim()
-                .trim_matches(['"', '\''])
-                .to_string(),
-        )),
-        "true" => Some(Expr::BoolLit(true)),
-        "false" => Some(Expr::BoolLit(false)),
-        "call_expression" => js_call_expr(src, expr),
-        "parenthesized_expression" => expr.named_child(0).and_then(|n| js_expr(src, n)),
-        "binary_expression" => js_binary_expr(src, expr),
-        "unary_expression" => js_unary_expr(src, expr),
-        _ => None,
-    }
-}
-
-fn js_binary_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
-    let lhs = expr
-        .child_by_field_name("left")
-        .or_else(|| expr.named_child(0))?;
-    let rhs = expr
-        .child_by_field_name("right")
-        .or_else(|| expr.named_child(expr.named_child_count().saturating_sub(1) as u32))?;
-    let op = std::str::from_utf8(src.get(lhs.end_byte()..rhs.start_byte())?)
-        .ok()?
-        .trim()
-        .to_string();
-    Some(Expr::Binary {
-        op,
-        lhs: Box::new(js_expr(src, lhs)?),
-        rhs: Box::new(js_expr(src, rhs)?),
-    })
-}
-
-fn js_unary_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
-    let inner = last_named(expr)?;
-    let op = std::str::from_utf8(src.get(expr.start_byte()..inner.start_byte())?)
-        .ok()?
-        .trim()
-        .to_string();
-    Some(Expr::Unary {
-        op,
-        expr: Box::new(js_expr(src, inner)?),
-    })
-}
-
-fn js_call_expr(src: &[u8], call: Node<'_>) -> Option<Expr> {
-    let callee = call
-        .child_by_field_name("function")
-        .and_then(|n| js_expr(src, n))
-        .or_else(|| {
-            first_named(call, "identifier")
-                .map(|id| Expr::Ident(node_txt(src, id).trim().to_string()))
-        })?;
-    let args = call
-        .child_by_field_name("arguments")
-        .map(|n| js_args(src, n))
-        .unwrap_or_default();
-    Some(Expr::Call {
-        callee: Box::new(callee),
-        args,
-    })
-}
-
-fn js_args(src: &[u8], args: Node<'_>) -> Vec<Expr> {
-    let mut out = Vec::new();
-    let mut w = args.walk();
-    for ch in args.named_children(&mut w) {
-        if let Some(expr) = js_expr(src, ch) {
-            out.push(expr);
-        }
-    }
-    out
+    ast_body(src, body, JS_AST)
 }
 
 // Go uses dedicated compiler::go_front.
@@ -2252,222 +1877,7 @@ fn zig_return_type(src: &[u8], fun: Node<'_>) -> Option<Typ> {
 }
 
 fn zig_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
-    let mut out = Vec::new();
-    let mut w = body.walk();
-    for ch in body.named_children(&mut w) {
-        if let Some(stmt) = zig_stmt(src, ch) {
-            out.push(stmt);
-        }
-    }
-    out
-}
-
-fn zig_stmt(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
-    match stmt.kind() {
-        "expression_statement" => {
-            let mut w = stmt.walk();
-            let expr = stmt.named_children(&mut w).next()?;
-            match expr.kind() {
-                "return_expression" => zig_return_expr(src, expr).map(Stmt::Return),
-                "assign_expression" | "assignment_expression" => zig_assignment_expr(src, expr),
-                _ => zig_expr(src, expr).map(Stmt::Expr),
-            }
-        }
-        "variable_declaration" => zig_local_declaration(src, stmt),
-        "return_expression" => zig_return_expr(src, stmt).map(Stmt::Return),
-        "assign_expression" | "assignment_expression" => zig_assignment_expr(src, stmt),
-        "call_expression" => zig_expr(src, stmt).map(Stmt::Expr),
-        "if_expression" | "if_statement" => zig_if_expression(src, stmt),
-        "while_expression" | "while_statement" => zig_while_expression(src, stmt),
-        "labeled_statement" => last_named(stmt).and_then(|n| zig_stmt(src, n)),
-        _ => None,
-    }
-}
-
-fn zig_return_expr(src: &[u8], ret: Node<'_>) -> Option<Option<Expr>> {
-    let mut w = ret.walk();
-    if let Some(ch) = ret.named_children(&mut w).next() {
-        return zig_expr(src, ch).map(Some);
-    }
-    Some(None)
-}
-
-fn zig_local_declaration(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
-    let left = first_named(stmt, "identifier")?;
-    let right = last_named(stmt)?;
-    if left == right {
-        return None;
-    }
-    if !matches!(
-        node_txt(src, stmt).trim_start(),
-        s if s.starts_with("var ") || s.starts_with("const ")
-    ) {
-        return Some(Stmt::Assign(
-            node_txt(src, left).trim().to_string(),
-            zig_expr(src, right)?,
-        ));
-    }
-    let ty = stmt
-        .child_by_field_name("type")
-        .or_else(|| {
-            let mut w = stmt.walk();
-            stmt.named_children(&mut w)
-                .find(|n| !matches!(n.kind(), "identifier" | "integer" | "call_expression"))
-        })
-        .filter(|t| *t != left && *t != right)
-        .map(|t| Typ::Named(node_txt(src, t).trim().to_string()));
-    Some(Stmt::Let(
-        node_txt(src, left).trim().to_string(),
-        ty,
-        zig_expr(src, right)?,
-    ))
-}
-
-fn zig_assignment_expr(src: &[u8], expr: Node<'_>) -> Option<Stmt> {
-    let left = expr
-        .child_by_field_name("left")
-        .or_else(|| expr.named_child(0))?;
-    let right = expr
-        .child_by_field_name("right")
-        .or_else(|| expr.named_child(expr.named_child_count().saturating_sub(1) as u32))?;
-    if left.kind() != "identifier" {
-        return None;
-    }
-    Some(Stmt::Assign(
-        node_txt(src, left).trim().to_string(),
-        zig_expr(src, right)?,
-    ))
-}
-
-fn zig_if_expression(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
-    let cond = stmt
-        .child_by_field_name("condition")
-        .and_then(|n| zig_expr(src, n))
-        .or_else(|| first_named(stmt, "binary_expression").and_then(|n| zig_expr(src, n)))?;
-    let then_body = stmt
-        .child_by_field_name("consequence")
-        .or_else(|| stmt.child_by_field_name("body"))
-        .or_else(|| first_named(stmt, "block"))
-        .map(|n| zig_stmt_or_body(src, n))
-        .unwrap_or_default();
-    let else_body = stmt
-        .child_by_field_name("alternative")
-        .or_else(|| {
-            first_named(stmt, "else_clause").and_then(|n| n.child_by_field_name("alternative"))
-        })
-        .map(|n| zig_stmt_or_body(src, n))
-        .unwrap_or_default();
-    Some(Stmt::If {
-        cond,
-        then_body,
-        else_body,
-    })
-}
-
-fn zig_while_expression(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
-    let cond = stmt
-        .child_by_field_name("condition")
-        .and_then(|n| zig_expr(src, n))
-        .or_else(|| first_named(stmt, "binary_expression").and_then(|n| zig_expr(src, n)))?;
-    let body = stmt
-        .child_by_field_name("body")
-        .or_else(|| first_named(stmt, "block"))
-        .map(|n| zig_stmt_or_body(src, n))
-        .unwrap_or_default();
-    Some(Stmt::Loop {
-        kind: crate::core_ir::LoopKind::While,
-        cond: Some(cond),
-        body,
-    })
-}
-
-fn zig_stmt_or_body(src: &[u8], n: Node<'_>) -> Vec<Stmt> {
-    if n.kind() == "labeled_statement" {
-        return last_named(n)
-            .map(|n| zig_stmt_or_body(src, n))
-            .unwrap_or_default();
-    }
-    if n.kind() == "block_expression" {
-        return named_descendant(n, "block")
-            .map(|n| zig_body(src, n))
-            .unwrap_or_default();
-    }
-    if n.kind() == "block" {
-        zig_body(src, n)
-    } else {
-        zig_stmt(src, n).into_iter().collect()
-    }
-}
-
-fn zig_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
-    match expr.kind() {
-        "identifier" => Some(Expr::Ident(node_txt(src, expr).trim().to_string())),
-        "integer" => node_txt(src, expr)
-            .trim()
-            .parse::<i64>()
-            .ok()
-            .map(Expr::IntLit),
-        "string_literal" => Some(Expr::StringLit(
-            node_txt(src, expr).trim().trim_matches('"').to_string(),
-        )),
-        "true" => Some(Expr::BoolLit(true)),
-        "false" => Some(Expr::BoolLit(false)),
-        "call_expression" => zig_call_expr(src, expr),
-        "grouped_expression" | "parenthesized_expression" => {
-            expr.named_child(0).and_then(|n| zig_expr(src, n))
-        }
-        "binary_expression" => zig_binary_expr(src, expr),
-        "unary_expression" => zig_unary_expr(src, expr),
-        _ => None,
-    }
-}
-
-fn zig_binary_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
-    let lhs = expr
-        .child_by_field_name("left")
-        .or_else(|| expr.named_child(0))?;
-    let rhs = expr
-        .child_by_field_name("right")
-        .or_else(|| expr.named_child(expr.named_child_count().saturating_sub(1) as u32))?;
-    let op = std::str::from_utf8(src.get(lhs.end_byte()..rhs.start_byte())?)
-        .ok()?
-        .trim()
-        .to_string();
-    Some(Expr::Binary {
-        op,
-        lhs: Box::new(zig_expr(src, lhs)?),
-        rhs: Box::new(zig_expr(src, rhs)?),
-    })
-}
-
-fn zig_unary_expr(src: &[u8], expr: Node<'_>) -> Option<Expr> {
-    let inner = last_named(expr)?;
-    let op = std::str::from_utf8(src.get(expr.start_byte()..inner.start_byte())?)
-        .ok()?
-        .trim()
-        .to_string();
-    Some(Expr::Unary {
-        op,
-        expr: Box::new(zig_expr(src, inner)?),
-    })
-}
-
-fn zig_call_expr(src: &[u8], call: Node<'_>) -> Option<Expr> {
-    let callee = first_named(call, "identifier")?;
-    let mut args = Vec::new();
-    let mut w = call.walk();
-    for ch in call.named_children(&mut w) {
-        if ch == callee {
-            continue;
-        }
-        if let Some(expr) = zig_expr(src, ch) {
-            args.push(expr);
-        }
-    }
-    Some(Expr::Call {
-        callee: Box::new(Expr::Ident(node_txt(src, callee).trim().to_string())),
-        args,
-    })
+    ast_body(src, body, ZIG_AST)
 }
 
 fn extract_lua(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
@@ -2621,6 +2031,51 @@ fn extract_dart(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+
+    fn repo_sample(name: &str) -> String {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("repo root")
+            .to_path_buf();
+        std::fs::read_to_string(root.join("apps/polyglot-sample").join(name)).expect(name)
+    }
+
+    fn main_body(module: &UnifiedModule) -> &[Stmt] {
+        module
+            .decls
+            .iter()
+            .find_map(|decl| match decl {
+                Decl::Function { name, body, .. } if name == "main" => Some(body.as_slice()),
+                _ => None,
+            })
+            .expect("main body")
+    }
+
+    fn body_shape(body: &[Stmt]) -> Vec<&'static str> {
+        body.iter()
+            .map(|stmt| match stmt {
+                Stmt::Let(..) => "let",
+                Stmt::Assign(..) => "assign",
+                Stmt::Expr(Expr::Call { .. }) => "call",
+                Stmt::If {
+                    then_body,
+                    else_body,
+                    ..
+                } => {
+                    assert_eq!(body_shape(then_body), vec!["assign"]);
+                    assert_eq!(body_shape(else_body), vec!["assign"]);
+                    "if"
+                }
+                Stmt::Loop { body, .. } => {
+                    assert_eq!(body_shape(body), vec!["assign"]);
+                    "while"
+                }
+                Stmt::Return(Some(Expr::Ident(name))) if name == "value" => "return-ident",
+                other => panic!("unexpected stmt shape: {other:?}"),
+            })
+            .collect()
+    }
 
     #[test]
     fn java_main_method_extracted() {
@@ -2637,6 +2092,39 @@ mod tests {
                 .any(|d| matches!(d, Decl::Function { name, .. } if name == "main")),
             "{m:?}"
         );
+    }
+
+    #[test]
+    fn generic_ast_examples_converge_with_inlang_control_flow() {
+        let expected = vec!["let", "assign", "call", "if", "while", "return-ident"];
+
+        let in_module = crate::in_lang_parse::parse_in_source(&repo_sample("control_flow.in"))
+            .expect("parse .in control flow");
+        assert_eq!(body_shape(main_body(&in_module)), expected);
+
+        let c_module = parse_lang(
+            tree_sitter_c::LANGUAGE.into(),
+            &repo_sample("control_flow.c"),
+            |b, r| extract_fn_nodes(b, r, &["function_definition"], c_like_function_decl),
+        )
+        .expect("parse c control flow");
+        assert_eq!(body_shape(main_body(&c_module)), expected);
+
+        let java_module = parse_lang(
+            tree_sitter_java::LANGUAGE.into(),
+            &repo_sample("ControlFlow.java"),
+            extract_java_style_methods,
+        )
+        .expect("parse java control flow");
+        assert_eq!(body_shape(main_body(&java_module)), expected);
+
+        let ts_module = parse_lang(
+            tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            &repo_sample("control_flow.ts"),
+            extract_ts_family,
+        )
+        .expect("parse typescript control flow");
+        assert_eq!(body_shape(main_body(&ts_module)), expected);
     }
 
     #[test]

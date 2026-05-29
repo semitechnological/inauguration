@@ -4,7 +4,7 @@
 
 The native language is **`.in`**: a small, capability-aware systems and orchestration language designed around deterministic source, machine-readable structure, explicit effects, and compiler-managed execution graphs. The language is meant to have two writing modes over the same semantics: an explicit canonical form for compilers, agents, code review, and generated source; and a human-friendly form that keeps everyday code easy to read while canonicalizing into the strict form.
 
-The compiler also acts as a general language ingestion pipeline. Multiple frontends lower into one shared **Core IR**, then move through common analysis and backend paths. The goal is one compiler architecture that can understand `.in`, `.icore`, C-family languages, Swift-shaped subsets, Rust, Go, V, OCaml, Java/Groovy body subsets, and other Tree-sitter-compatible source surfaces as the frontends mature.
+The compiler also acts as a general language ingestion pipeline. Multiple frontends lower into one shared **Core IR**, then move through common analysis and backend paths. The goal is one compiler architecture that can understand `.in`, `.icore`, C-family languages, Swift-shaped subsets, Rust, Go, V, OCaml, Java/Groovy, JavaScript/TypeScript, Python/Ruby, Zig, and other Tree-sitter-compatible source surfaces as the frontends mature.
 
 ## What It Is
 
@@ -200,7 +200,7 @@ Primary source surfaces today:
 - Swift via toolchain integration where needed.
 - Rust, Go, V, and OCaml dedicated bounded frontends.
 - C / C++ / Objective-C++ and other Tree-sitter parser routes.
-- Java/Groovy bounded body lowering through Tree-sitter paths.
+- Shared bounded scalar body lowering through Tree-sitter AST conventions where wired.
 
 The maturity level varies by frontend. Some routes lower structured bodies; others currently expose declarations, signatures, parser facts, or `.icore` redirection hints. See [docs/architecture/parser-surface.md](docs/architecture/parser-surface.md), [docs/architecture/multi-frontend-ir.md](docs/architecture/multi-frontend-ir.md), and [docs/architecture/general-compiler.md](docs/architecture/general-compiler.md).
 

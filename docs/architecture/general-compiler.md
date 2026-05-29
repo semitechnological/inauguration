@@ -50,6 +50,8 @@ Any tool may emit **icore** so inauguration runs **without** a native lexer for 
 
 ## Per-language roadmap (signatures → semantics)
 
+Tree-sitter fronts should share one generic AST convention layer for common scalar bodies before adding language-specific lowering. The shared convention covers returns, locals, assignment, calls, literals, unary/binary expressions, `if`, and `while`; individual fronts keep their own declaration, type, and runtime-boundary rules where the source language actually differs. `.in` remains the first-class convention target for agent-facing source, but its bodies lower to the same `UnifiedModule` statement and expression shapes as compatible Tree-sitter examples.
+
 For each [`ParserId`](parser-surface.md) where Tree-sitter extraction is signature-only today (most polyglot ids):
 
 1. **Lex + parse** (hand-rolled, `logos`, `tree-sitter`, or bridge to an external AST).
