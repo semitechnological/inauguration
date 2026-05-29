@@ -1,3 +1,5 @@
+package agents.sample;
+module agents.sample.main;
 import std.io;
 import "./agent-lib.in";
 capability process.stdout;

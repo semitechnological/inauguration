@@ -487,6 +487,12 @@ fn build_report(path: &Path, config: &AgentModeConfig) -> Result<AgentReport, Ag
                         }
                     }
                 }
+                if let Some(package) = surface.package {
+                    effects.push(format!("package:{package}"));
+                }
+                if let Some(module) = surface.module {
+                    effects.push(format!("module:{module}"));
+                }
                 effects.extend(
                     surface
                         .imports
@@ -1323,6 +1329,26 @@ fn main() -> void { host_log("ready"); return; }
         assert!(report.effects.contains(&"import:host.log".to_string()));
         assert!(report.effects.contains(&"extern:rust:host_log".to_string()));
         assert!(report.capabilities.contains(&"process.stdout".to_string()));
+    }
+
+    #[test]
+    fn in_report_includes_package_and_module_effects() {
+        let temp = temp_source(
+            "module-facts",
+            "in",
+            r#"
+package agents.video;
+module agents.video.main;
+fn main() -> void { return; }
+"#,
+        );
+        let report = json_report(&temp.path, &AgentModeConfig::default()).expect("report");
+        assert!(report.effects.contains(&"package:agents.video".to_string()));
+        assert!(
+            report
+                .effects
+                .contains(&"module:agents.video.main".to_string())
+        );
     }
 
     #[test]

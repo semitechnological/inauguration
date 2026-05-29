@@ -406,6 +406,38 @@ const ZIG_AST: AstShape = AstShape {
     strict_args: false,
 };
 
+const DART_AST: AstShape = AstShape {
+    block_kinds: &["function_body", "block"],
+    return_kinds: &["return_statement"],
+    expr_stmt_kinds: &["expression_statement"],
+    local_decl_kinds: &["local_variable_declaration"],
+    assignment_kinds: &["assignment_expression"],
+    if_kinds: &["if_statement"],
+    while_kinds: &["while_statement"],
+    call_kinds: &["call_expression"],
+    arg_container_kinds: &["arguments"],
+    arg_wrapper_kinds: &["assignable_expression"],
+    paren_kinds: &["parenthesized_expression"],
+    binary_kinds: &[
+        "additive_expression",
+        "multiplicative_expression",
+        "relational_expression",
+    ],
+    unary_kinds: &["unary_expression"],
+    int_kinds: &[
+        "decimal_integer_literal",
+        "integer_literal",
+        "number_literal",
+    ],
+    string_kinds: &["string_literal"],
+    type_kinds: &["type"],
+    local_decl_prefixes: &[],
+    shell_first_kinds: &["function_body"],
+    shell_last_kinds: &[],
+    first_assignment_is_let: false,
+    strict_args: false,
+};
+
 fn kind_in(n: Node<'_>, kinds: &[&str]) -> bool {
     kinds.contains(&n.kind())
 }
@@ -525,7 +557,9 @@ fn ast_local_decl(src: &[u8], decl: Node<'_>, shape: AstShape) -> Option<Stmt> {
             return None;
         }
     }
-    let var = named_descendant(decl, "variable_declarator").unwrap_or(decl);
+    let var = named_descendant(decl, "variable_declarator")
+        .or_else(|| named_descendant(decl, "initialized_variable_definition"))
+        .unwrap_or(decl);
     let name_node = var
         .child_by_field_name("name")
         .or_else(|| first_named(var, "identifier"))
@@ -577,7 +611,14 @@ fn ast_assignment(
         .child_by_field_name("right")
         .or_else(|| expr.child_by_field_name("value"))
         .or_else(|| expr.named_child(expr.named_child_count().saturating_sub(1) as u32))?;
-    if left == right || left.kind() != "identifier" {
+    let left = if left.kind() == "identifier" {
+        left
+    } else if kind_in(left, shape.arg_wrapper_kinds) {
+        first_named(left, "identifier")?
+    } else {
+        return None;
+    };
+    if left == right {
         return None;
     }
     let name = node_txt(src, left).trim().to_string();
@@ -2023,9 +2064,51 @@ fn extract_dart(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
                 node_txt(src, id).trim()
             };
             let name = normalize_entry(raw);
-            Some(decl_fn(name, vec![], Typ::Void))
+            let params = dart_params(src, fp);
+            let ret = sig
+                .child_by_field_name("return_type")
+                .map(|t| Typ::Named(node_txt(src, t).trim().to_string()))
+                .unwrap_or(Typ::Void);
+            let body = n
+                .child_by_field_name("body")
+                .or_else(|| first_named(n, "function_body"))
+                .map(|b| dart_body(src, b))
+                .unwrap_or_default();
+            Some(Decl::Function {
+                name,
+                params,
+                ret,
+                body,
+            })
         },
     )
+}
+
+fn dart_params<'a>(src: &[u8], plist: Node<'a>) -> Vec<(String, Typ)> {
+    let mut out = Vec::new();
+    let mut w = plist.walk();
+    for ch in plist.named_children(&mut w) {
+        if ch.kind() != "formal_parameter" {
+            continue;
+        }
+        let Some(name) = ch
+            .child_by_field_name("name")
+            .or_else(|| first_named(ch, "identifier"))
+        else {
+            continue;
+        };
+        let ty = ch
+            .child_by_field_name("type")
+            .or_else(|| first_named(ch, "type"))
+            .map(|t| Typ::Named(node_txt(src, t).trim().to_string()))
+            .unwrap_or(Typ::Named("Any".into()));
+        out.push((node_txt(src, name).trim().to_string(), ty));
+    }
+    out
+}
+
+fn dart_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
+    ast_body(src, body, DART_AST)
 }
 
 #[cfg(test)]
@@ -2125,6 +2208,14 @@ mod tests {
         )
         .expect("parse typescript control flow");
         assert_eq!(body_shape(main_body(&ts_module)), expected);
+
+        let dart_module = parse_lang(
+            tree_sitter_dart::LANGUAGE.into(),
+            &repo_sample("control_flow.dart"),
+            extract_dart,
+        )
+        .expect("parse dart control flow");
+        assert_eq!(body_shape(main_body(&dart_module)), expected);
     }
 
     #[test]
@@ -3193,6 +3284,86 @@ int main(void) {
                     Stmt::Return(Some(Expr::Ident(ret_name))),
                 ] if name == "value" && assign_name == "value" && op == "+" && ret_name == "value"
             )),
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn dart_functions_extract_params_return_and_body() {
+        let src = r#"
+int helper(int value) { return value; }
+int main() {
+  int value = 1;
+  value = value + 2;
+  helper(value);
+  if (value > 2) { value = value - 1; } else { value = 0; }
+  while (value < 4) { value = value + 1; }
+  return value;
+}
+"#;
+        let m = parse_lang(tree_sitter_dart::LANGUAGE.into(), src, extract_dart).expect("ok");
+        let helper = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "helper"))
+            .expect("helper");
+        match helper {
+            Decl::Function {
+                params, ret, body, ..
+            } => {
+                assert_eq!(params, &vec![("value".into(), Typ::Named("int".into()))]);
+                assert_eq!(ret, &Typ::Named("int".into()));
+                assert_eq!(body, &vec![Stmt::Return(Some(Expr::Ident("value".into())))]);
+            }
+            _ => panic!("expected function"),
+        }
+        let main = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+            .expect("main");
+        match main {
+            Decl::Function {
+                params, ret, body, ..
+            } => {
+                assert!(params.is_empty(), "{params:?}");
+                assert_eq!(ret, &Typ::Named("int".into()));
+                assert!(
+                    matches!(
+                        &body[0],
+                        Stmt::Let(name, Some(Typ::Named(ty)), Expr::IntLit(1))
+                            if name == "value" && ty == "int"
+                    ),
+                    "{body:?}"
+                );
+                assert!(matches!(
+                    &body[1],
+                    Stmt::Assign(name, Expr::Binary { op, .. }) if name == "value" && op == "+"
+                ));
+                assert!(matches!(
+                    &body[2],
+                    Stmt::Expr(Expr::Call { callee, args })
+                        if matches!(callee.as_ref(), Expr::Ident(name) if name == "helper")
+                            && args == &vec![Expr::Ident("value".into())]
+                ));
+                assert!(
+                    matches!(
+                        &body[3],
+                        Stmt::If { cond: Expr::Binary { op, .. }, then_body, else_body }
+                            if op == ">" && then_body.len() == 1 && else_body.len() == 1
+                    ),
+                    "{body:?}"
+                );
+                assert!(matches!(
+                    &body[4],
+                    Stmt::Loop { cond: Some(Expr::Binary { op, .. }), body, .. }
+                        if op == "<" && body.len() == 1
+                ));
+                assert!(matches!(
+                    &body[5],
+                    Stmt::Return(Some(Expr::Ident(name))) if name == "value"
+                ));
+            }
             _ => panic!("expected function"),
         }
     }

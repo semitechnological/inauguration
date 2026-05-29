@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct InSurfaceInfo {
+    pub package: Option<String>,
+    pub module: Option<String>,
     pub imports: Vec<String>,
     pub capabilities: Vec<String>,
     pub externs: Vec<InExternBinding>,
@@ -1256,6 +1258,28 @@ fn parse_annotation_name(line: &str) -> Result<String, String> {
     }
 }
 
+fn valid_package_or_module_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.split('.').all(|part| {
+            let mut chars = part.chars();
+            chars
+                .next()
+                .is_some_and(|ch| ch == '_' || ch.is_ascii_alphabetic())
+                && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+        })
+}
+
+fn parse_package_or_module_name(kind: &str, rest: &str) -> Result<String, String> {
+    let name = trim(rest).trim_end_matches(';').trim();
+    if name.is_empty() {
+        return Err(format!(".in: {kind} name missing"));
+    }
+    if !valid_package_or_module_name(name) {
+        return Err(format!(".in: invalid {kind} name `{name}`"));
+    }
+    Ok(name.to_string())
+}
+
 fn next_function_name_after_annotation<'a, I>(lines: I) -> Option<String>
 where
     I: Iterator<Item = &'a str>,
@@ -1395,6 +1419,28 @@ pub fn parse_in_surface_info(source: &str) -> Result<InSurfaceInfo, String> {
             continue;
         }
         if depth == 0 {
+            if let Some(rest) = line.strip_prefix("package ") {
+                let package = parse_package_or_module_name("package", rest)?;
+                if info.package.replace(package).is_some() {
+                    return Err(".in: duplicate package declaration".into());
+                }
+                depth += brace_delta(raw_line);
+                if depth < 0 {
+                    depth = 0;
+                }
+                continue;
+            }
+            if let Some(rest) = line.strip_prefix("module ") {
+                let module = parse_package_or_module_name("module", rest)?;
+                if info.module.replace(module).is_some() {
+                    return Err(".in: duplicate module declaration".into());
+                }
+                depth += brace_delta(raw_line);
+                if depth < 0 {
+                    depth = 0;
+                }
+                continue;
+            }
             if let Some(rest) = line.strip_prefix("import ") {
                 let import = trim(rest).trim_end_matches(';').trim();
                 if import.is_empty() {
@@ -2181,6 +2227,34 @@ fn main() -> void { read_file("x"); return; }
                 required_capabilities: Vec::new()
             }]
         );
+    }
+
+    #[test]
+    fn surface_info_parses_package_and_module_facts() {
+        let src = r#"
+package agents.video;
+module agents.video.main;
+fn main() -> void { return; }
+"#;
+        let info = parse_in_surface_info(src).expect("surface");
+        assert_eq!(info.package.as_deref(), Some("agents.video"));
+        assert_eq!(info.module.as_deref(), Some("agents.video.main"));
+        parse_in_source(src).expect("parse");
+    }
+
+    #[test]
+    fn duplicate_package_or_module_facts_are_rejected() {
+        let err = parse_in_source(
+            "package one;\npackage two;\nmodule one.main;\nfn main() -> void { return; }\n",
+        )
+        .expect_err("duplicate package fact");
+        assert!(err.contains("duplicate package"), "{err}");
+
+        let err = parse_in_source(
+            "package one;\nmodule one.main;\nmodule one.extra;\nfn main() -> void { return; }\n",
+        )
+        .expect_err("duplicate module fact");
+        assert!(err.contains("duplicate module"), "{err}");
     }
 
     #[test]

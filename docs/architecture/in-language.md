@@ -16,6 +16,7 @@ Workflow entry points (flags, sample path, CI script) stay in the repo [README](
 
 What `in-cli/src/in_lang_parse.rs` implements today:
 
+- Top-level **`package name;`** and **`module name;`** — accepted as dotted identity facts for agent and graph consumers. At most one package and one module declaration may appear in a source file. `in agent` and `in graph` expose them in the `effects` list as `package:<name>` and `module:<name>`. They do not replace `inauguration.package`, install dependencies, or change Core IR names yet.
 - Top-level **`import path;`** — accepted as agent-facing source dependency facts. Local relative `.in` imports such as `import "./lib.in";` merge imported declarations into the parsed Core IR module when reading a file. `in agent` exposes imports in the `effects` list as `import:<path>`.
 - Standard imports **`std.io`**, **`std.fs`**, **`std.http`**, **`std.json`**, **`std.process`**, and **`std.cli`** synthesize bounded extern-style Core IR declarations for `print`, `read_file`, `write_file`, `http_get`, `json_parse`, `json_stringify`, `process_run`, `arg_count`, and `arg`, with capability requirements checked by `in agent`.
 - Top-level **`capability name;`** — accepted as explicit outside-world capability facts. `in agent` exposes them in the `capabilities` list.
@@ -41,7 +42,7 @@ The v0.4 contract is deterministic local visibility and planning before remote e
 | Surface | `.in` contribution |
 |---------|--------------------|
 | Canonicalization | `in canonicalize --path <file> [--check]` parses source through the strict `.in` front and emits deterministic `.in` with normalized types, explicit `-> void`, braced bodies, and semicolon-free statements. |
-| Graph command | `in graph --path <file> [--imports] [--capabilities] [--symbols] [--calls] [--json]` reports parser decision, imports/effects, capabilities, symbols, call edges, entry function, orchestration facts, and timing. |
+| Graph command | `in graph --path <file> [--imports] [--capabilities] [--symbols] [--calls] [--json]` reports parser decision, package/module/import effects, capabilities, symbols, call edges, entry function, orchestration facts, and timing. |
 | Package manifest report | `in package --path <dir\|manifest\|source> [--json]` reports package identity, targets, dependencies, capabilities, extensions, package graph nodes, target selection, and capability policy. |
 | Orchestration facts | `parse_in_surface_info`, `in agent`, and `in graph --json` expose enabled extensions, annotations, distributed function declarations, parallel region count, local plan steps, local distributed job facts, and explicit runtime reason codes. |
 

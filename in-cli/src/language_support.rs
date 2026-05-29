@@ -282,12 +282,12 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Dart",
         parser_id: Some("dart"),
         extensions: &["dart"],
-        level: 1,
-        level_label: "Tree-sitter declaration extraction",
+        level: 2,
+        level_label: "Tree-sitter bounded scalar body lowering",
         front: "compiler::tree_front",
-        runtime_boundary: "Core IR declarations only; Dart runtime is not bundled",
+        runtime_boundary: "Core IR and textual SIL; Dart runtime is not bundled",
         example: "apps/polyglot-sample/sample.dart",
-        next_step: "Add class/function bodies and runtime policy",
+        next_step: "Add class metadata, async forms, and runtime policy",
     },
     LanguageSupport {
         language: "Lua",
@@ -530,6 +530,7 @@ mod tests {
             "C#",
             "Python",
             "Zig",
+            "Dart",
         ] {
             let entry = LANGUAGE_SUPPORT
                 .iter()
