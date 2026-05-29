@@ -381,4 +381,20 @@ func main() -> Int {
         let err = emit_in_tree_sil_or_diagnose(src, "App").expect_err("diagnostic");
         assert!(err.contains("E_RETURN_TYPE"), "{err}");
     }
+
+    #[test]
+    fn emit_subset_sil_rejects_call_argument_type_mismatch_before_lowering() {
+        let src = r#"
+func helper(x: Int) -> Void {
+  return
+}
+func main() -> Void {
+  helper("bad")
+  return
+}
+"#;
+        let err = emit_in_tree_sil_or_diagnose(src, "App").expect_err("diagnostic");
+        assert!(err.contains("E_CALL_ARG_TYPE"), "{err}");
+        assert!(!err.contains("store_var"), "{err}");
+    }
 }

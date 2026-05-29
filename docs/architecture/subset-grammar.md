@@ -45,6 +45,7 @@ Implementation today: `in-cli` modules **`native_swift_sil`** (filter + emit) an
 - No duplicate top-level names: struct names and function names share one namespace; duplicates are errors.
 - No duplicate **field** names within one struct (`E_DUP_FIELD`).
 - Parameter, return, and **struct field** types must be “known” (built-in or declared struct).
+- Function calls inside bounded bodies must target a declared function, pass the exact parameter count (`E_CALL_ARITY`), and pass arguments whose inferred subset types match the declared parameter types (`E_CALL_ARG_TYPE`).
 
 ## Explicit non-support (do not rely on these)
 
