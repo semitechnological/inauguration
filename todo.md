@@ -77,9 +77,9 @@
 
 - [ ] Unify `.in` identity with the package graph.
   - `idea.md` wants one semantic package graph: package identity, targets, dependencies, capabilities, extensions, indexing, graph invalidation, and semantic imports.
-  - Current state: `in package` reports `inauguration.package`; `.in package` / `module` are agent/graph effects only and do not affect package discovery, dependency resolution, Core IR names, or import lookup.
-  - Next slice: when source declares `package` / `module`, `in graph --json` and `in package --json` should report whether those facts match the nearest `inauguration.package`, with stable reason codes for match, missing manifest, or mismatch.
-  - After that: semantic imports such as `use database.postgres` / `import std.fs` should resolve through package graph facts before any dependency installation or extension loading is claimed.
+  - First identity slice landed: when a `.in` source declares `package` / `module`, `in graph --json` and `in package --json` report `package_identity` / `source_identity` with stable status and reason codes for match, missing manifest, mismatch, undeclared, unreadable, and non-`.in` sources.
+  - Current limitation: `.in package` / `module` do not affect dependency resolution, Core IR names, or import lookup.
+  - Next slice: semantic imports such as `use database.postgres` / `import std.fs` should resolve through package graph facts before any dependency installation or extension loading is claimed.
 
 - [x] Build a language-compatibility ladder.
   - Level 0: route extension or magic line to a known `ParserId`.

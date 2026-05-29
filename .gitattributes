@@ -1,0 +1,30 @@
+* text=auto eol=lf
+
+*.sh text eol=lf
+*.bash text eol=lf
+*.zsh text eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.tar binary
+*.tgz binary
+*.a binary
+*.o binary
+*.dylib binary
+*.so binary
+*.wasm binary
+*.bca binary
+
+vendor/** linguist-vendored
+scripts/** linguist-vendored
+plugins/registry/*.sh linguist-vendored
+*.sh linguist-vendored
+*.bash linguist-vendored
+*.zsh linguist-vendored
+docs-site/dist/** linguist-generated

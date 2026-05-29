@@ -51,6 +51,7 @@ pub struct PackageReport {
     pub target_selection: PackageTargetSelection,
     pub capability_policy: CapabilityPolicyValidation,
     pub graph: PackageGraphReport,
+    pub source_identity: Option<PackageSourceIdentity>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -72,6 +73,15 @@ pub struct PackageGraphEdge {
     pub from: String,
     pub to: String,
     pub kind: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PackageSourceIdentity {
+    pub package: Option<String>,
+    pub module: Option<String>,
+    pub manifest_name: Option<String>,
+    pub status: String,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -144,12 +154,12 @@ where
     T: AsRef<str>,
 {
     let (root, manifest) = load_package_manifest_from_source(source_path)?;
-    Ok(package_report(
-        root,
-        manifest,
-        requested_targets,
-        required_capabilities,
-    ))
+    let mut report = package_report(root, manifest, requested_targets, required_capabilities);
+    report.source_identity = Some(source_identity_for_path(
+        source_path,
+        Some(&report.manifest.name),
+    ));
+    Ok(report)
 }
 
 pub fn package_report<I, S, J, T>(
@@ -174,6 +184,85 @@ where
         target_selection,
         capability_policy,
         graph,
+        source_identity: None,
+    }
+}
+
+pub fn source_identity_for_path(
+    source_path: &Path,
+    manifest_name: Option<&str>,
+) -> PackageSourceIdentity {
+    if source_path.extension().and_then(|ext| ext.to_str()) != Some("in") {
+        return PackageSourceIdentity {
+            package: None,
+            module: None,
+            manifest_name: manifest_name.map(str::to_string),
+            status: "not_in_source".to_string(),
+            reason: "source-not-inlang".to_string(),
+        };
+    }
+
+    let source = match fs::read_to_string(source_path) {
+        Ok(source) => source,
+        Err(_) => {
+            return PackageSourceIdentity {
+                package: None,
+                module: None,
+                manifest_name: manifest_name.map(str::to_string),
+                status: "unavailable".to_string(),
+                reason: "source-read-failed".to_string(),
+            };
+        }
+    };
+    let surface = match crate::in_lang_parse::parse_in_surface_info(&source) {
+        Ok(surface) => surface,
+        Err(_) => {
+            return PackageSourceIdentity {
+                package: None,
+                module: None,
+                manifest_name: manifest_name.map(str::to_string),
+                status: "unavailable".to_string(),
+                reason: "surface-parse-failed".to_string(),
+            };
+        }
+    };
+    source_identity_for_surface(surface.package, surface.module, manifest_name)
+}
+
+pub fn source_identity_for_surface(
+    package: Option<String>,
+    module: Option<String>,
+    manifest_name: Option<&str>,
+) -> PackageSourceIdentity {
+    let manifest_name = manifest_name.map(str::to_string);
+    let (status, reason) = match (
+        package.as_deref(),
+        module.as_deref(),
+        manifest_name.as_deref(),
+    ) {
+        (None, None, _) => ("not_declared", "source-identity-not-declared"),
+        (_, _, None) => ("missing_manifest", "package-manifest-missing"),
+        (Some(package), _, Some(manifest)) if package != manifest => {
+            ("mismatch", "package-mismatch")
+        }
+        (Some(package), Some(module), Some(_))
+            if module != package && !module.starts_with(&format!("{package}.")) =>
+        {
+            ("mismatch", "module-outside-package")
+        }
+        (None, Some(module), Some(manifest))
+            if module != manifest && !module.starts_with(&format!("{manifest}.")) =>
+        {
+            ("mismatch", "module-outside-package")
+        }
+        _ => ("match", "package-module-match"),
+    };
+    PackageSourceIdentity {
+        package,
+        module,
+        manifest_name,
+        status: status.to_string(),
+        reason: reason.to_string(),
     }
 }
 
@@ -909,5 +998,61 @@ extensions:
                 .iter()
                 .any(|edge| edge.from == "package:graphable" && edge.to == "dependency:corelib")
         );
+    }
+
+    #[test]
+    fn source_package_report_carries_identity_status() {
+        let temp = TempDirGuard::new();
+        fs::write(
+            temp.path.join("inauguration.package"),
+            "name: agents.sample\nversion: 0.1.0\n",
+        )
+        .expect("write manifest");
+        let source_path = temp.path.join("main.in");
+        fs::write(
+            &source_path,
+            "package agents.sample;\nmodule agents.sample.main;\nfn main() -> void { return; }\n",
+        )
+        .expect("write source");
+
+        let report = load_package_report_from_source(
+            &source_path,
+            std::iter::empty::<&str>(),
+            std::iter::empty::<&str>(),
+        )
+        .expect("load source package report");
+
+        let identity = report.source_identity.expect("source identity");
+        assert_eq!(identity.manifest_name.as_deref(), Some("agents.sample"));
+        assert_eq!(identity.status, "match");
+        assert_eq!(identity.reason, "package-module-match");
+    }
+
+    #[test]
+    fn reports_source_identity_match_and_mismatch() {
+        let matching = source_identity_for_surface(
+            Some("graphable".into()),
+            Some("graphable.main".into()),
+            Some("graphable"),
+        );
+        assert_eq!(matching.status, "match");
+        assert_eq!(matching.reason, "package-module-match");
+
+        let package_mismatch = source_identity_for_surface(
+            Some("other".into()),
+            Some("other.main".into()),
+            Some("graphable"),
+        );
+        assert_eq!(package_mismatch.status, "mismatch");
+        assert_eq!(package_mismatch.reason, "package-mismatch");
+
+        let missing_manifest = source_identity_for_surface(Some("graphable".into()), None, None);
+        assert_eq!(missing_manifest.status, "missing_manifest");
+        assert_eq!(missing_manifest.reason, "package-manifest-missing");
+
+        let module_mismatch =
+            source_identity_for_surface(None, Some("other.main".into()), Some("graphable"));
+        assert_eq!(module_mismatch.status, "mismatch");
+        assert_eq!(module_mismatch.reason, "module-outside-package");
     }
 }

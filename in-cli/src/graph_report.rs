@@ -1,4 +1,5 @@
 use crate::agent_mode::{self, CallEdge, OrchestrationFacts, ParserDecision, SizeTiming};
+use crate::package_manifest::{self, PackageSourceIdentity};
 use crate::parser_registry::ParserCli;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -54,6 +55,7 @@ pub struct GraphSymbol {
 pub struct GraphReport {
     pub schema_version: u32,
     pub parser_decision: ParserDecision,
+    pub package_identity: Option<PackageSourceIdentity>,
     pub imports: Vec<String>,
     pub effects: Vec<String>,
     pub capabilities: Vec<String>,
@@ -72,6 +74,8 @@ pub fn build_graph_report(
     selection: GraphReportSelection,
 ) -> GraphReport {
     let report = agent_mode::analyze_path(cwd, path, module_id, parser);
+    let source_path = resolve_report_path(cwd, path);
+    let package_identity = package_identity_for_graph_source(&source_path);
     let mut imports = Vec::new();
     let mut effects = Vec::new();
     if selection.include_imports() {
@@ -143,6 +147,7 @@ pub fn build_graph_report(
     GraphReport {
         schema_version: 1,
         parser_decision: report.parser_decision,
+        package_identity,
         imports,
         effects,
         capabilities,
@@ -152,6 +157,28 @@ pub fn build_graph_report(
         orchestration: report.orchestration,
         timing: report.size_timing,
     }
+}
+
+fn resolve_report_path(cwd: &Path, path: &str) -> std::path::PathBuf {
+    let path = Path::new(path);
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        cwd.join(path)
+    }
+}
+
+fn package_identity_for_graph_source(source_path: &Path) -> Option<PackageSourceIdentity> {
+    if source_path.extension().and_then(|ext| ext.to_str()) != Some("in") {
+        return None;
+    }
+    let manifest_name = package_manifest::load_package_manifest_from_source(source_path)
+        .ok()
+        .map(|(_, manifest)| manifest.name);
+    Some(package_manifest::source_identity_for_path(
+        source_path,
+        manifest_name.as_deref(),
+    ))
 }
 
 pub fn graph_report_to_json(report: &GraphReport) -> Result<String, serde_json::Error> {
@@ -173,6 +200,12 @@ pub fn graph_report_text(report: &GraphReport, selection: GraphReportSelection) 
         "entry: {}",
         report.entry_function.as_deref().unwrap_or("none")
     ));
+    if let Some(identity) = &report.package_identity {
+        lines.push(format!(
+            "package_identity: {} ({})",
+            identity.status, identity.reason
+        ));
+    }
     if selection.include_imports() {
         lines.push(format!("imports: {}", join_or_none(&report.imports)));
         lines.push(format!("effects: {}", join_or_none(&report.effects)));
@@ -243,10 +276,33 @@ mod tests {
         path: PathBuf,
     }
 
+    struct TempDir {
+        path: PathBuf,
+    }
+
     impl Drop for TempFile {
         fn drop(&mut self) {
             let _ = fs::remove_file(&self.path);
         }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn temp_dir(name: &str) -> TempDir {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock before UNIX_EPOCH")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "inauguration-graph-report-{}-{unique}-{name}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&path).expect("create temp dir");
+        TempDir { path }
     }
 
     fn temp_source(name: &str, source: &str) -> TempFile {
@@ -300,6 +356,36 @@ fn main() -> void { print("ok"); ready(); return; }
             callee: "print".to_string()
         }));
         assert_eq!(report.entry_function.as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn report_includes_package_identity_status() {
+        let temp = temp_dir("package-identity");
+        fs::write(
+            temp.path.join("inauguration.package"),
+            "name: agents.sample\nversion: 0.1.0\n",
+        )
+        .expect("write manifest");
+        let source_path = temp.path.join("main.in");
+        fs::write(
+            &source_path,
+            "package agents.sample;\nmodule agents.sample.main;\nfn main() -> void { return; }\n",
+        )
+        .expect("write source");
+        let path = source_path.to_string_lossy().to_string();
+        let report = build_graph_report(
+            Path::new("."),
+            &path,
+            "App",
+            ParserCli::Auto,
+            GraphReportSelection::default(),
+        );
+        let identity = report.package_identity.expect("package identity");
+        assert_eq!(identity.package.as_deref(), Some("agents.sample"));
+        assert_eq!(identity.module.as_deref(), Some("agents.sample.main"));
+        assert_eq!(identity.manifest_name.as_deref(), Some("agents.sample"));
+        assert_eq!(identity.status, "match");
+        assert_eq!(identity.reason, "package-module-match");
     }
 
     #[test]

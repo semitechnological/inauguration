@@ -1,0 +1,7 @@
+package hyperchat;
+module hyperchat.main;
+capability network.http;
+
+fn main() -> void {
+  return;
+}

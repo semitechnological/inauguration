@@ -3,7 +3,9 @@ use inauguration::external_guard::ExternalInvocationGuard;
 use inauguration::hybrid_core::ChangeEvent;
 use inauguration::hybrid_pipeline::{StageTimings, run_wave_with_timings};
 use inauguration::hybrid_scheduler::BuildScheduler;
-use inauguration::owned_compile::{CompileTarget, OwnedCompileRequest, compile_owned, report_to_json};
+use inauguration::owned_compile::{
+    CompileTarget, OwnedCompileRequest, compile_owned, report_to_json,
+};
 use inauguration::parser_registry::{self, ParserCli};
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -473,7 +475,9 @@ fn cmd_build(
     };
     let display_target = resolved.display();
     if !allow_external_toolchain
-        && resolved.extension().is_some_and(|ext| ext == "swift" || ext == "swiftpm")
+        && resolved
+            .extension()
+            .is_some_and(|ext| ext == "swift" || ext == "swiftpm")
         && std::env::var("IN_NATIVE_SWIFT_SIL")
             .map(|v| v.to_lowercase() != "only")
             .unwrap_or(true)
@@ -684,6 +688,7 @@ fn cmd_package(invocation_cwd: &Path, path: &str, json: bool) -> Result<()> {
             "target_selection": report.target_selection,
             "capability_policy": report.capability_policy,
             "package_graph": report.graph,
+            "source_identity": report.source_identity,
         }))
         .map_err(|err| InError::Message(format!("serialize package report: {err}")))?;
         println!("{raw}");
@@ -700,6 +705,9 @@ fn cmd_package(invocation_cwd: &Path, path: &str, json: bool) -> Result<()> {
         println!("dependencies: {}", manifest.dependencies.len());
         println!("capabilities: {}", manifest.capabilities.join(", "));
         println!("extensions: {}", manifest.extensions.join(", "));
+        if let Some(identity) = &report.source_identity {
+            println!("source_identity: {} ({})", identity.status, identity.reason);
+        }
     }
     Ok(())
 }
@@ -1650,9 +1658,7 @@ fn cmd_test(root: &Path, options: TestOptions) -> Result<()> {
     }
 
     if !owned_native_only
-        && (options.all
-            || options.self_host
-            || (!options.toolchain && !options.external_parity))
+        && (options.all || options.self_host || (!options.toolchain && !options.external_parity))
     {
         if options.self_host && !options.all && !include_toolchain && !include_external {
             eprintln!("running self-hosted compiler gates");
@@ -2794,7 +2800,9 @@ mod tests {
     fn parse_test_owned_native_flag() {
         let cli = Cli::try_parse_from(["in", "test", "--owned-native"]).expect("cli parse");
         match cli.command {
-            Commands::Test { owned_native, all, .. } => {
+            Commands::Test {
+                owned_native, all, ..
+            } => {
                 assert!(owned_native);
                 assert!(!all);
             }

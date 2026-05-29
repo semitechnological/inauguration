@@ -1,6 +1,8 @@
 # Build artifacts
 **/target/
 **/.build/
+.DS_Store
+**/.DS_Store
 
 # Ephemeral rustc metadata from compile-check probes in in-cli (never commit)
 in-cli/libcompile_check_rs*.rmeta
