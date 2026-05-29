@@ -1601,6 +1601,12 @@ fn lower_binary(
         "+" => aarch64::add_reg64(rd, lhs_reg, rhs_reg),
         "-" => aarch64::sub_reg64(rd, lhs_reg, rhs_reg),
         "*" => aarch64::mul64(rd, lhs_reg, rhs_reg),
+        "/" => {
+            return lower_checked_div_or_mod(emitter, ctx, rd, lhs_reg, rhs_reg, false);
+        }
+        "%" => {
+            return lower_checked_div_or_mod(emitter, ctx, rd, lhs_reg, rhs_reg, true);
+        }
         "&&" | "||" => {
             lower_truthy_result(emitter, lhs_reg);
             lower_truthy_result(emitter, rhs_reg);
@@ -1621,6 +1627,35 @@ fn lower_binary(
         }
     };
     emitter.emit_u32(insn);
+    Ok(())
+}
+
+fn lower_checked_div_or_mod(
+    emitter: &mut CodeEmitter,
+    ctx: &LowerCtx<'_>,
+    rd: u8,
+    lhs_reg: u8,
+    rhs_reg: u8,
+    modulo: bool,
+) -> Result<(), String> {
+    emitter.emit_u32(aarch64::cmp_reg64(rhs_reg, aarch64::REG_XZR));
+    let failure_branch = emitter.emit_insn(aarch64::b_cond(0, 0));
+    if modulo {
+        let quotient_reg = pick_scratch(&[rd, lhs_reg, rhs_reg]);
+        emitter.emit_u32(aarch64::sdiv64(quotient_reg, lhs_reg, rhs_reg));
+        emitter.emit_u32(aarch64::msub64(rd, quotient_reg, rhs_reg, lhs_reg));
+    } else {
+        emitter.emit_u32(aarch64::sdiv64(rd, lhs_reg, rhs_reg));
+    }
+    let end_branch = emitter.emit_insn(aarch64::b(0));
+    let failure_offset = emitter.len() as i32;
+    emitter.patch_u32(
+        failure_branch,
+        aarch64::b_cond(0, failure_offset - failure_branch as i32),
+    );
+    emit_failure_return(emitter, ctx.stack_reserve());
+    let end_offset = emitter.len() as i32 - end_branch as i32;
+    emitter.patch_u32(end_branch, aarch64::b(end_offset));
     Ok(())
 }
 
@@ -2080,6 +2115,39 @@ mod tests {
         }
     }
 
+    fn return_binary_module(op: &str, lhs: i64, rhs: i64) -> UnifiedModule {
+        UnifiedModule {
+            decls: vec![Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![Stmt::Return(Some(Expr::Binary {
+                    op: op.into(),
+                    lhs: Box::new(Expr::IntLit(lhs)),
+                    rhs: Box::new(Expr::IntLit(rhs)),
+                }))],
+            }],
+        }
+    }
+
+    fn code_contains_insn(code: &[u8], insn: u32) -> bool {
+        code.windows(4)
+            .step_by(4)
+            .any(|bytes| bytes == insn.to_le_bytes())
+    }
+
+    fn assert_contains_divide_failure_path(code: &[u8], branch_distance: i32) {
+        assert!(code_contains_insn(
+            code,
+            aarch64::cmp_reg64(1, aarch64::REG_XZR)
+        ));
+        assert!(code_contains_insn(
+            code,
+            aarch64::b_cond(0, branch_distance)
+        ));
+        assert!(code_contains_insn(code, aarch64::movz64(0, 1, 0)));
+    }
+
     #[test]
     fn lowers_answer_literal_module_to_bytes() {
         let module = answer_module();
@@ -2128,6 +2196,39 @@ mod tests {
         };
 
         lower_module(&module, "main").expect("lower");
+    }
+
+    #[test]
+    fn lowers_integer_division_to_aarch64_sdiv() {
+        let module = return_binary_module("/", 18, 3);
+        let lowered = lower_module(&module, "main").expect("lower");
+
+        assert!(code_contains_insn(&lowered.code, 0x9AC1_0C00));
+    }
+
+    #[test]
+    fn lowers_integer_modulo_to_aarch64_sdiv_msub() {
+        let module = return_binary_module("%", 20, 6);
+        let lowered = lower_module(&module, "main").expect("lower");
+
+        assert!(code_contains_insn(&lowered.code, 0x9AC1_0C02));
+        assert!(code_contains_insn(&lowered.code, 0x9B01_8040));
+    }
+
+    #[test]
+    fn lowers_integer_division_by_zero_to_failure_return() {
+        let module = return_binary_module("/", 18, 0);
+        let lowered = lower_module(&module, "main").expect("lower");
+
+        assert_contains_divide_failure_path(&lowered.code, 12);
+    }
+
+    #[test]
+    fn lowers_integer_modulo_by_zero_to_failure_return() {
+        let module = return_binary_module("%", 18, 0);
+        let lowered = lower_module(&module, "main").expect("lower");
+
+        assert_contains_divide_failure_path(&lowered.code, 16);
     }
 
     #[test]

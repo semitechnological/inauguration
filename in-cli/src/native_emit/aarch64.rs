@@ -45,6 +45,14 @@ pub fn mul64(rd: u8, rn: u8, rm: u8) -> u32 {
     0x9B00_7C00 | ((rm as u32) << 16) | ((rn as u32) << 5) | (rd as u32)
 }
 
+pub fn sdiv64(rd: u8, rn: u8, rm: u8) -> u32 {
+    0x9AC0_0C00 | ((rm as u32) << 16) | ((rn as u32) << 5) | (rd as u32)
+}
+
+pub fn msub64(rd: u8, rn: u8, rm: u8, ra: u8) -> u32 {
+    0x9B00_8000 | ((rm as u32) << 16) | ((ra as u32) << 10) | ((rn as u32) << 5) | (rd as u32)
+}
+
 pub fn and_reg64(rd: u8, rn: u8, rm: u8) -> u32 {
     0x8A00_0000 | ((rm as u32) << 16) | ((rn as u32) << 5) | (rd as u32)
 }
