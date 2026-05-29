@@ -11,6 +11,7 @@ pub struct InSurfaceInfo {
     pub package: Option<String>,
     pub module: Option<String>,
     pub imports: Vec<String>,
+    pub semantic_imports: Vec<String>,
     pub capabilities: Vec<String>,
     pub externs: Vec<InExternBinding>,
     pub orchestration: InOrchestrationFacts,
@@ -1453,6 +1454,15 @@ pub fn parse_in_surface_info(source: &str) -> Result<InSurfaceInfo, String> {
                 }
                 continue;
             }
+            if let Some(rest) = line.strip_prefix("use ") {
+                let import = parse_package_or_module_name("use", rest)?;
+                info.semantic_imports.push(import);
+                depth += brace_delta(raw_line);
+                if depth < 0 {
+                    depth = 0;
+                }
+                continue;
+            }
             if let Some(rest) = line.strip_prefix("capability ") {
                 let capability = trim(rest).trim_end_matches(';').trim();
                 if capability.is_empty() {
@@ -2239,6 +2249,18 @@ fn main() -> void { return; }
         let info = parse_in_surface_info(src).expect("surface");
         assert_eq!(info.package.as_deref(), Some("agents.video"));
         assert_eq!(info.module.as_deref(), Some("agents.video.main"));
+        parse_in_source(src).expect("parse");
+    }
+
+    #[test]
+    fn surface_info_parses_semantic_use_imports() {
+        let src = r#"
+package hyperchat;
+use database.postgres;
+fn main() -> void { return; }
+"#;
+        let info = parse_in_surface_info(src).expect("surface");
+        assert_eq!(info.semantic_imports, vec!["database.postgres"]);
         parse_in_source(src).expect("parse");
     }
 

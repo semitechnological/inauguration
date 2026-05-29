@@ -689,6 +689,7 @@ fn cmd_package(invocation_cwd: &Path, path: &str, json: bool) -> Result<()> {
             "capability_policy": report.capability_policy,
             "package_graph": report.graph,
             "source_identity": report.source_identity,
+            "semantic_imports": report.semantic_imports,
         }))
         .map_err(|err| InError::Message(format!("serialize package report: {err}")))?;
         println!("{raw}");
@@ -707,6 +708,20 @@ fn cmd_package(invocation_cwd: &Path, path: &str, json: bool) -> Result<()> {
         println!("extensions: {}", manifest.extensions.join(", "));
         if let Some(identity) = &report.source_identity {
             println!("source_identity: {} ({})", identity.status, identity.reason);
+        }
+        if !report.semantic_imports.is_empty() {
+            println!(
+                "semantic_imports: {}",
+                report
+                    .semantic_imports
+                    .iter()
+                    .map(|import| format!(
+                        "{} {} ({})",
+                        import.import, import.status, import.reason
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
         }
     }
     Ok(())

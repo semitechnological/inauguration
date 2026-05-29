@@ -1,5 +1,6 @@
 package hyperchat;
 module hyperchat.main;
+use database.postgres;
 capability network.http;
 
 fn main() -> void {

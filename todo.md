@@ -71,15 +71,16 @@
   - Keep `.in` simple by default: regular syntax, few special cases, explicit imports, explicit fallibility, explicit outside-world capabilities.
   - Let `.in` call or wrap symbols from language fronts that lower into Core IR.
   - First slices landed: top-level `package`, `module`, `import`, `capability`, and `extern <language> fn ...;` declarations parse in `.in`; local relative `.in` imports merge declarations; `std.io` / `std.fs` / `std.http` / `std.json` / `std.process` / `std.cli` synthesize bounded stdlib declarations; extern `requires` contracts warn when capabilities are missing; `if` / `else`, `while`, and binary expressions parse into Core IR; `in agent` and `in graph` report package/module/import facts, capabilities, orchestration facts, and extern call graph edges.
-  - Continue gradual complexity: bind `.in package` / `module` facts to `inauguration.package`, semantic import resolution, more standard library APIs, richer expression operators, and additional control flow only when shared IR needs them.
+  - Continue gradual complexity: bind `.in package` / `module` facts to Core IR names and dependency symbols, more standard library APIs, richer expression operators, and additional control flow only when shared IR needs them.
   - Prefer standard library APIs over syntax sugar so agents have one obvious path for files, network, process, JSON, HTTP, and CLI tasks.
   - Keep `icore` as the lowest common interchange format for tools and agents that cannot or should not emit `.in` directly.
 
 - [ ] Unify `.in` identity with the package graph.
   - `idea.md` wants one semantic package graph: package identity, targets, dependencies, capabilities, extensions, indexing, graph invalidation, and semantic imports.
   - First identity slice landed: when a `.in` source declares `package` / `module`, `in graph --json` and `in package --json` report `package_identity` / `source_identity` with stable status and reason codes for match, missing manifest, mismatch, undeclared, unreadable, and non-`.in` sources.
-  - Current limitation: `.in package` / `module` do not affect dependency resolution, Core IR names, or import lookup.
-  - Next slice: semantic imports such as `use database.postgres` / `import std.fs` should resolve through package graph facts before any dependency installation or extension loading is claimed.
+  - First semantic import slice landed: top-level `.in` `use database.postgres;` facts parse and `in graph --json` / `in package --json` report `semantic_imports` resolved against nearest `inauguration.package` dependencies by exact key or dotted suffix, without dependency installation or extension loading.
+  - Current limitation: `.in package`, `module`, and `use` facts do not affect Core IR names, imported symbols, code generation, or dependency installation.
+  - Next slice: bind resolved semantic imports to dependency symbol indexes and diagnostics while preserving the no-install/no-extension-load boundary.
 
 - [x] Build a language-compatibility ladder.
   - Level 0: route extension or magic line to a known `ParserId`.

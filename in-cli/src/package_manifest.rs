@@ -52,6 +52,7 @@ pub struct PackageReport {
     pub capability_policy: CapabilityPolicyValidation,
     pub graph: PackageGraphReport,
     pub source_identity: Option<PackageSourceIdentity>,
+    pub semantic_imports: Vec<PackageSemanticImport>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -80,6 +81,14 @@ pub struct PackageSourceIdentity {
     pub package: Option<String>,
     pub module: Option<String>,
     pub manifest_name: Option<String>,
+    pub status: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PackageSemanticImport {
+    pub import: String,
+    pub dependency: Option<String>,
     pub status: String,
     pub reason: String,
 }
@@ -155,10 +164,12 @@ where
 {
     let (root, manifest) = load_package_manifest_from_source(source_path)?;
     let mut report = package_report(root, manifest, requested_targets, required_capabilities);
+    let semantic_imports = source_semantic_imports(source_path).unwrap_or_default();
     report.source_identity = Some(source_identity_for_path(
         source_path,
         Some(&report.manifest.name),
     ));
+    report.semantic_imports = resolve_semantic_imports(&semantic_imports, Some(&report.manifest));
     Ok(report)
 }
 
@@ -185,6 +196,72 @@ where
         capability_policy,
         graph,
         source_identity: None,
+        semantic_imports: Vec::new(),
+    }
+}
+
+fn source_semantic_imports(source_path: &Path) -> Result<Vec<String>, String> {
+    if source_path.extension().and_then(|ext| ext.to_str()) != Some("in") {
+        return Ok(Vec::new());
+    }
+    let source = fs::read_to_string(source_path)
+        .map_err(|err| format!("failed to read {}: {err}", source_path.display()))?;
+    let surface = crate::in_lang_parse::parse_in_surface_info(&source)?;
+    Ok(surface.semantic_imports)
+}
+
+pub fn semantic_imports_for_source_path(
+    source_path: &Path,
+    manifest: Option<&PackageManifest>,
+) -> Result<Vec<PackageSemanticImport>, String> {
+    let imports = source_semantic_imports(source_path)?;
+    Ok(resolve_semantic_imports(&imports, manifest))
+}
+
+pub fn resolve_semantic_imports(
+    imports: &[String],
+    manifest: Option<&PackageManifest>,
+) -> Vec<PackageSemanticImport> {
+    imports
+        .iter()
+        .map(|import| resolve_semantic_import(import, manifest))
+        .collect()
+}
+
+fn resolve_semantic_import(
+    import: &str,
+    manifest: Option<&PackageManifest>,
+) -> PackageSemanticImport {
+    let Some(manifest) = manifest else {
+        return PackageSemanticImport {
+            import: import.to_string(),
+            dependency: None,
+            status: "unresolved".to_string(),
+            reason: "package-manifest-missing".to_string(),
+        };
+    };
+    if manifest.dependencies.contains_key(import) {
+        return PackageSemanticImport {
+            import: import.to_string(),
+            dependency: Some(import.to_string()),
+            status: "resolved".to_string(),
+            reason: "dependency-exact-match".to_string(),
+        };
+    }
+    let suffix = import.rsplit('.').next().unwrap_or(import);
+    if suffix != import && manifest.dependencies.contains_key(suffix) {
+        return PackageSemanticImport {
+            import: import.to_string(),
+            dependency: Some(suffix.to_string()),
+            status: "resolved".to_string(),
+            reason: "dependency-suffix-match".to_string(),
+        };
+    }
+    PackageSemanticImport {
+        import: import.to_string(),
+        dependency: None,
+        status: "unresolved".to_string(),
+        reason: "dependency-not-declared".to_string(),
     }
 }
 
@@ -1054,5 +1131,29 @@ extensions:
             source_identity_for_surface(None, Some("other.main".into()), Some("graphable"));
         assert_eq!(module_mismatch.status, "mismatch");
         assert_eq!(module_mismatch.reason, "module-outside-package");
+    }
+
+    #[test]
+    fn semantic_imports_resolve_against_manifest_dependencies() {
+        let manifest = parse_text(
+            r#"name: hyperchat
+version: 0.1.0
+dependencies:
+  postgres:
+    version: ^1.0.0
+"#,
+        )
+        .expect("parse manifest");
+
+        let imports = resolve_semantic_imports(
+            &["database.postgres".to_string(), "cache.redis".to_string()],
+            Some(&manifest),
+        );
+
+        assert_eq!(imports[0].status, "resolved");
+        assert_eq!(imports[0].dependency.as_deref(), Some("postgres"));
+        assert_eq!(imports[0].reason, "dependency-suffix-match");
+        assert_eq!(imports[1].status, "unresolved");
+        assert_eq!(imports[1].reason, "dependency-not-declared");
     }
 }

@@ -1,5 +1,7 @@
 use crate::agent_mode::{self, CallEdge, OrchestrationFacts, ParserDecision, SizeTiming};
-use crate::package_manifest::{self, PackageSourceIdentity};
+use crate::package_manifest::{
+    self, PackageManifest, PackageSemanticImport, PackageSourceIdentity,
+};
 use crate::parser_registry::ParserCli;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -56,6 +58,7 @@ pub struct GraphReport {
     pub schema_version: u32,
     pub parser_decision: ParserDecision,
     pub package_identity: Option<PackageSourceIdentity>,
+    pub semantic_imports: Vec<PackageSemanticImport>,
     pub imports: Vec<String>,
     pub effects: Vec<String>,
     pub capabilities: Vec<String>,
@@ -75,7 +78,11 @@ pub fn build_graph_report(
 ) -> GraphReport {
     let report = agent_mode::analyze_path(cwd, path, module_id, parser);
     let source_path = resolve_report_path(cwd, path);
-    let package_identity = package_identity_for_graph_source(&source_path);
+    let package_manifest = load_manifest_for_graph_source(&source_path);
+    let package_identity =
+        package_identity_for_graph_source(&source_path, package_manifest.as_ref());
+    let semantic_imports =
+        semantic_imports_for_graph_source(&source_path, package_manifest.as_ref());
     let mut imports = Vec::new();
     let mut effects = Vec::new();
     if selection.include_imports() {
@@ -148,6 +155,7 @@ pub fn build_graph_report(
         schema_version: 1,
         parser_decision: report.parser_decision,
         package_identity,
+        semantic_imports,
         imports,
         effects,
         capabilities,
@@ -168,17 +176,33 @@ fn resolve_report_path(cwd: &Path, path: &str) -> std::path::PathBuf {
     }
 }
 
-fn package_identity_for_graph_source(source_path: &Path) -> Option<PackageSourceIdentity> {
+fn load_manifest_for_graph_source(source_path: &Path) -> Option<PackageManifest> {
     if source_path.extension().and_then(|ext| ext.to_str()) != Some("in") {
         return None;
     }
-    let manifest_name = package_manifest::load_package_manifest_from_source(source_path)
+    package_manifest::load_package_manifest_from_source(source_path)
         .ok()
-        .map(|(_, manifest)| manifest.name);
+        .map(|(_, manifest)| manifest)
+}
+
+fn package_identity_for_graph_source(
+    source_path: &Path,
+    manifest: Option<&PackageManifest>,
+) -> Option<PackageSourceIdentity> {
+    if source_path.extension().and_then(|ext| ext.to_str()) != Some("in") {
+        return None;
+    }
     Some(package_manifest::source_identity_for_path(
         source_path,
-        manifest_name.as_deref(),
+        manifest.map(|manifest| manifest.name.as_str()),
     ))
+}
+
+fn semantic_imports_for_graph_source(
+    source_path: &Path,
+    manifest: Option<&PackageManifest>,
+) -> Vec<PackageSemanticImport> {
+    package_manifest::semantic_imports_for_source_path(source_path, manifest).unwrap_or_default()
 }
 
 pub fn graph_report_to_json(report: &GraphReport) -> Result<String, serde_json::Error> {
@@ -204,6 +228,17 @@ pub fn graph_report_text(report: &GraphReport, selection: GraphReportSelection) 
         lines.push(format!(
             "package_identity: {} ({})",
             identity.status, identity.reason
+        ));
+    }
+    if !report.semantic_imports.is_empty() {
+        lines.push(format!(
+            "semantic_imports: {}",
+            report
+                .semantic_imports
+                .iter()
+                .map(|import| format!("{} {} ({})", import.import, import.status, import.reason))
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
     }
     if selection.include_imports() {
@@ -386,6 +421,42 @@ fn main() -> void { print("ok"); ready(); return; }
         assert_eq!(identity.manifest_name.as_deref(), Some("agents.sample"));
         assert_eq!(identity.status, "match");
         assert_eq!(identity.reason, "package-module-match");
+    }
+
+    #[test]
+    fn report_resolves_semantic_imports_through_package_graph() {
+        let temp = temp_dir("semantic-imports");
+        fs::write(
+            temp.path.join("inauguration.package"),
+            r#"name: hyperchat
+version: 0.1.0
+dependencies:
+  postgres:
+    version: ^1.0.0
+"#,
+        )
+        .expect("write manifest");
+        let source_path = temp.path.join("main.in");
+        fs::write(
+            &source_path,
+            "package hyperchat;\nuse database.postgres;\nfn main() -> void { return; }\n",
+        )
+        .expect("write source");
+        let path = source_path.to_string_lossy().to_string();
+        let report = build_graph_report(
+            Path::new("."),
+            &path,
+            "App",
+            ParserCli::Auto,
+            GraphReportSelection::default(),
+        );
+        assert_eq!(report.semantic_imports.len(), 1);
+        assert_eq!(report.semantic_imports[0].import, "database.postgres");
+        assert_eq!(
+            report.semantic_imports[0].dependency.as_deref(),
+            Some("postgres")
+        );
+        assert_eq!(report.semantic_imports[0].status, "resolved");
     }
 
     #[test]
