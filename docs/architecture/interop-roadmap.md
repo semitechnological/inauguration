@@ -24,6 +24,6 @@ Add **`swift-rs`** + **`build-dependencies swift-rs` with `features = ["build"]`
 ## Related paths
 
 - Core IR + parser IDs + front resolution: [`multi-frontend-ir.md`](multi-frontend-ir.md).
-- Phased roadmap (subset AST → SIL → hotreload): [`native-swift-master-plan.md`](native-swift-master-plan.md).
+- Phased roadmap (Swift subset front → shared Core IR AST → SIL → hotreload): [`native-swift-master-plan.md`](native-swift-master-plan.md).
 - Parser/check entry: `in-cli/src/swift_subset.rs`.
 - Socket client reference: `runtime/swift-preview-host/Sources/SwiftPreviewHostClient/main.swift`.

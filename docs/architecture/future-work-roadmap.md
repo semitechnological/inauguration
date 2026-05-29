@@ -22,7 +22,7 @@ The near-term goal is not to finish every language at once. It is to keep parser
 | **rust-driver parity with `in-cli`** | Mirror parser ids, Core IR contracts, and SIL lowering behavior as fronts stabilize. | Reduce drift by extracting shared crates or generated contract tests across `in-cli` and `compiler/rust-driver`. |
 | **`hybrid_sil` correctness** | Preserve the current merged textual SIL contract while tests pin call-graph behavior. | Model multiple functions explicitly: stable `function_id`s, per-function blocks, and graph extraction that does not depend on the last `sil @...` line. |
 | **Hot reload semantics** | Compile-check routing understands Core IR fronts and Tree-sitter polyglot parses. | Move beyond "can this compile?" into patch semantics: dependency-aware invalidation, graph-aware reload decisions, and frontend-specific diagnostics. |
-| **Swift subset / native SIL** | Keep the subset as a fast, bounded path with `swiftc` fallback for full language behavior. | Grow richer Swift AST, type checking, and native SIL emission so common Swift workflows avoid `swiftc` without pretending to cover all Swift semantics. |
+| **Swift subset / native SIL** | Keep the subset as a fast, bounded path with `swiftc` fallback for full language behavior. | Grow richer Swift subset parsing over shared Core IR AST nodes, type checking, and native SIL emission so common Swift workflows avoid `swiftc` without pretending to cover all Swift semantics. |
 
 ## v0 focus
 

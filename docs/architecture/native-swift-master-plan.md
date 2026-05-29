@@ -8,7 +8,7 @@ This document is the phased roadmap for growing inauguration’s **Rust-first** 
 
 - Increase the fraction of developer workflows that **never spawn `swiftc`** for SIL or typecheck when sources match an expanding **contracted language**.
 - Keep **`in build`** and future tooling **deterministic**, **fast**, and **observable** (timings, reason codes).
-- Unify artifacts where practical: **subset AST → textual SIL** shapes that **`hybrid_sil`** already parses (`sil @…`, `bbN:`, `function_ref @…`).
+- Unify artifacts where practical: **Swift subset front → shared Core IR AST → textual SIL** shapes that **`hybrid_sil`** already parses (`sil @…`, `bbN:`, `function_ref @…`).
 - Eventually feed **hotreload** with the same front-end decision stack as **`in build`** (subset vs toolchain).
 
 **Non-goals (near term)**
@@ -51,7 +51,7 @@ Also see [**multi-frontend IR**](multi-frontend-ir.md) (`UnifiedModule`, `.in` p
 
 ---
 
-## Phase 1 — Real AST for the subset (3–6 weeks)
+## Phase 1 — Richer subset parsing over shared Core IR AST (3–6 weeks)
 
 **Problem**: Parsing is still line-oriented and shallow; one-line `struct` fields and bounded function bodies exist, but richer Swift declarations, scope/name resolution, and diagnostics are incomplete.
 
@@ -153,7 +153,7 @@ When spawning coding agents, partition by **Phase 1 workstreams** above:
 | **D** | `hotreload/daemon_impl.rs`: dual compile gate, metrics |
 | **E** | Docs + CI (`IN_NATIVE_SWIFT_SIL=only` job) |
 
-Hand-off contract between agents: **`Program` AST type** in **`swift_subset`**, **`emit_program(&Program) -> String`** signature in **`native_swift_sil`**, **`SilArtifact`** fields unchanged unless version bump coordinated.
+Hand-off contract between agents: **`Program` wrapper** in **`swift_subset`** backed by shared **`core_ir::{Expr, Stmt, Typ}`** nodes, **`emit_program(&Program) -> String`** signature in **`native_swift_sil`**, **`SilArtifact`** fields unchanged unless version bump coordinated.
 
 ---
 
