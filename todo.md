@@ -80,6 +80,7 @@
   - Keep `.in` simple by default: regular syntax, few special cases, explicit imports, explicit fallibility, explicit outside-world capabilities.
   - Let `.in` call or wrap symbols from language fronts that lower into Core IR.
   - First slices landed: top-level `package`, `module`, `import`, `capability`, and `extern <language> fn ...;` declarations parse in `.in`; local relative `.in` imports merge declarations; `std.io` / `std.fs` / `std.http` / `std.json` / `std.process` / `std.cli` synthesize bounded stdlib declarations; extern `requires` contracts warn when capabilities are missing; `if` / `else`, `while`, and binary expressions parse into Core IR; `in agent` and `in graph` report package/module/import facts, capabilities, orchestration facts, and extern call graph edges.
+  - `std.env` and `std.path` now synthesize bounded Core IR declarations and agent capability diagnostics, but do not execute runtime calls.
   - Continue gradual complexity: bind `.in package` / `module` facts to Core IR names and dependency symbols, more standard library APIs, richer expression operators, and additional control flow only when shared IR needs them.
   - Prefer standard library APIs over syntax sugar so agents have one obvious path for files, network, process, JSON, HTTP, and CLI tasks.
   - Keep `icore` as the lowest common interchange format for tools and agents that cannot or should not emit `.in` directly.
@@ -88,8 +89,10 @@
   - `idea.md` wants one semantic package graph: package identity, targets, dependencies, capabilities, extensions, indexing, graph invalidation, and semantic imports.
   - First identity slice landed: when a `.in` source declares `package` / `module`, `in graph --json` and `in package --json` report `package_identity` / `source_identity` with stable status and reason codes for match, missing manifest, mismatch, undeclared, unreadable, and non-`.in` sources.
   - Semantic import binding slice landed: top-level `.in` `use database.postgres;` facts parse, resolve against nearest `inauguration.package` dependencies by exact key or dotted suffix, create package symbol-index facts, appear in `in graph --symbols` as dependency symbols, and emit `INPKG001` warnings for unresolved imports without dependency installation or extension loading.
-  - Current limitation: `.in package`, `module`, and `use` facts do not affect Core IR names, code generation, dependency installation, or extension loading.
-  - Next slice: use resolved dependency symbols for source-semantic `.in` name diagnostics without crossing the no-install/no-extension-load boundary.
+  - Direct calls to resolved dependency symbols now produce `INPKG002` source-semantic warnings so agents see the difference between a known package dependency and a local unknown function.
+  - `.in package` and `module` facts now survive in Core IR identity and agent Core IR summaries while preserving unqualified SIL function names.
+  - Current limitation: `.in package`, `module`, and `use` facts do not affect code generation, dependency installation, or extension loading.
+  - Next slice: make package/module identity visible in artifact/report metadata beyond agent summaries without renaming SIL symbols.
 
 - [x] Build a language-compatibility ladder.
   - Level 0: route extension or magic line to a known `ParserId`.
@@ -115,6 +118,7 @@
   - First bounded-body slice landed: top-level Swift functions may now carry simple `let`, assignment, call, and return statements into shared Core IR lowering; `main` remains optional for hybrid/library-style sources.
   - Continue replacing header-only parsing with a real subset AST for more top-level declarations, struct fields, function signatures, and bounded bodies.
   - Function-call, local identifier, struct-field, and return-type body checks now emit stable `E_UNKNOWN_FUNCTION` / `E_UNKNOWN_IDENTIFIER` / `E_UNKNOWN_FIELD` / `E_RETURN_TYPE`; `IN_NATIVE_SWIFT_SIL=only` has SIL snapshot coverage for locals, calls, and fields and preserves subset diagnostics before lowering.
+  - Bounded `while condition { ... }` bodies now parse into Core IR loops, require Bool conditions via `E_WHILE_COND_TYPE`, and lower through the native SIL subset path.
   - `IN_NATIVE_SWIFT_SIL=try` now falls back only for unsupported non-subset sources and preserves real subset diagnostics such as `E_DUP_TOP`.
 
 - [x] Reuse native Swift checks in hot reload.

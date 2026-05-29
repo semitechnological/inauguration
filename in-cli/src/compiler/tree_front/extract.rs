@@ -150,7 +150,7 @@ fn parse_lang(
                 .into(),
         );
     }
-    Ok(UnifiedModule { decls })
+    Ok(UnifiedModule::new(decls))
 }
 
 fn decl_fn(name: String, params: Vec<(String, Typ)>, ret: Typ) -> Decl {

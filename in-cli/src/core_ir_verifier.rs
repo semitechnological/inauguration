@@ -668,7 +668,7 @@ mod tests {
     }
 
     fn module(decls: Vec<Decl>) -> UnifiedModule {
-        UnifiedModule { decls }
+        UnifiedModule::new(decls)
     }
 
     fn point_struct() -> Decl {

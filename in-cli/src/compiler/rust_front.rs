@@ -30,7 +30,7 @@ pub fn parse_rust_source(src: &str) -> Result<UnifiedModule, String> {
     if decls.is_empty() {
         return Err("rust front parsed file but found no top-level structs/functions".to_string());
     }
-    Ok(UnifiedModule { decls })
+    Ok(UnifiedModule::new(decls))
 }
 
 fn rust_struct_fields(fields: &syn::Fields) -> Vec<(String, Typ)> {

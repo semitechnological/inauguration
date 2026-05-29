@@ -2105,6 +2105,7 @@ mod tests {
 
     fn answer_module() -> UnifiedModule {
         UnifiedModule {
+            identity: Default::default(),
             decls: vec![Decl::Function {
                 name: "answer".into(),
                 params: vec![],
@@ -2116,6 +2117,7 @@ mod tests {
 
     fn return_binary_module(op: &str, lhs: i64, rhs: i64) -> UnifiedModule {
         UnifiedModule {
+            identity: Default::default(),
             decls: vec![Decl::Function {
                 name: "main".into(),
                 params: vec![],
@@ -2172,6 +2174,7 @@ mod tests {
     #[test]
     fn lowers_expression_statement_for_side_effects() {
         let module = UnifiedModule {
+            identity: Default::default(),
             decls: vec![
                 Decl::Function {
                     name: "side".into(),
@@ -2233,6 +2236,7 @@ mod tests {
     #[test]
     fn lowers_bool_literals_as_scalar_values() {
         let module = UnifiedModule {
+            identity: Default::default(),
             decls: vec![Decl::Function {
                 name: "main".into(),
                 params: vec![],
@@ -2247,6 +2251,7 @@ mod tests {
     #[test]
     fn lowers_unary_scalar_expressions() {
         let module = UnifiedModule {
+            identity: Default::default(),
             decls: vec![
                 Decl::Function {
                     name: "neg".into(),
@@ -2361,6 +2366,7 @@ fn main() -> Int {
     #[test]
     fn lowers_string_scalar_expressions() {
         let module = UnifiedModule {
+            identity: Default::default(),
             decls: vec![
                 Decl::Function {
                     name: "same".into(),
@@ -2521,6 +2527,7 @@ fn main() -> Int {
     #[test]
     fn lowers_local_reassignment() {
         let module = UnifiedModule {
+            identity: Default::default(),
             decls: vec![Decl::Function {
                 name: "main".into(),
                 params: vec![],
@@ -2539,6 +2546,7 @@ fn main() -> Int {
     #[test]
     fn lowers_runtime_if_conditions() {
         let module = UnifiedModule {
+            identity: Default::default(),
             decls: vec![Decl::Function {
                 name: "main".into(),
                 params: vec![("flag".into(), Typ::Int)],
@@ -2561,6 +2569,7 @@ fn main() -> Int {
     #[test]
     fn lowers_runtime_while_loop_conditions() {
         let module = UnifiedModule {
+            identity: Default::default(),
             decls: vec![Decl::Function {
                 name: "main".into(),
                 params: vec![],
@@ -2594,6 +2603,7 @@ fn main() -> Int {
     #[test]
     fn lowers_numeric_match_with_default_arm() {
         let module = UnifiedModule {
+            identity: Default::default(),
             decls: vec![Decl::Function {
                 name: "main".into(),
                 params: vec![("tag".into(), Typ::Int)],
@@ -2669,6 +2679,7 @@ fn main() -> Int {
     #[test]
     fn scalar_subset_executable_exits_with_return_value() {
         let module = UnifiedModule {
+            identity: Default::default(),
             decls: vec![
                 Decl::Function {
                     name: "side".into(),
@@ -2949,6 +2960,7 @@ fn main() -> Int {
     #[test]
     fn string_scalar_executable_exits_with_comparison_value() {
         let module = UnifiedModule {
+            identity: Default::default(),
             decls: vec![
                 Decl::Function {
                     name: "same".into(),
@@ -3538,6 +3550,7 @@ fn main() -> Int {
     #[test]
     fn rejects_array_literal_return_type_mismatch() {
         let module = UnifiedModule {
+            identity: Default::default(),
             decls: vec![Decl::Function {
                 name: "main".into(),
                 params: vec![],
@@ -3556,6 +3569,7 @@ fn main() -> Int {
     #[test]
     fn rejects_nested_array_params_with_stable_diagnostic() {
         let module = UnifiedModule {
+            identity: Default::default(),
             decls: vec![Decl::Function {
                 name: "main".into(),
                 params: vec![(
@@ -3575,6 +3589,7 @@ fn main() -> Int {
     #[test]
     fn rejects_aggregate_array_locals_with_stable_diagnostic() {
         let module = UnifiedModule {
+            identity: Default::default(),
             decls: vec![
                 Decl::Struct {
                     name: "Point".into(),

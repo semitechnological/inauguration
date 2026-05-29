@@ -9,7 +9,26 @@ permissions:
   contents: write
 
 jobs:
+  prerelease-gate:
+    name: Prerelease gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      IN_TEST_SKIP_SWIFT: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build in binary
+        run: cargo build --release --bin in
+        working-directory: in-cli
+      - name: Add in binary to PATH
+        run: echo "$PWD/target/release" >> "$GITHUB_PATH"
+        working-directory: in-cli
+      - name: Run in test
+        run: in test
+
   build:
+    needs: prerelease-gate
     strategy:
       fail-fast: false
       matrix:

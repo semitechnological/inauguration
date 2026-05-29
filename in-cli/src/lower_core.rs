@@ -650,6 +650,7 @@ mod tests {
     #[test]
     fn lower_orders_helpers_and_main() {
         let module = UnifiedModule {
+            identity: Default::default(),
             decls: vec![
                 Decl::Struct {
                     name: "S".into(),
@@ -689,6 +690,7 @@ mod tests {
     #[test]
     fn lower_emits_let_and_return_for_helper() {
         let module = UnifiedModule {
+            identity: Default::default(),
             decls: vec![
                 Decl::Function {
                     name: "twice".into(),
@@ -716,6 +718,7 @@ mod tests {
     #[test]
     fn lower_emits_function_ref_for_explicit_call() {
         let module = UnifiedModule {
+            identity: Default::default(),
             decls: vec![
                 Decl::Function {
                     name: "helper".into(),
@@ -742,6 +745,7 @@ mod tests {
     #[test]
     fn lower_omits_store_var_for_never_read_let_and_param() {
         let module = UnifiedModule {
+            identity: Default::default(),
             decls: vec![Decl::Function {
                 name: "main".into(),
                 params: vec![("unused".into(), Typ::Int)],
@@ -763,6 +767,7 @@ mod tests {
     #[test]
     fn lower_keeps_store_var_for_read_variable() {
         let module = UnifiedModule {
+            identity: Default::default(),
             decls: vec![Decl::Function {
                 name: "main".into(),
                 params: vec![],
@@ -782,6 +787,7 @@ mod tests {
     #[test]
     fn lower_folds_constant_integer_binop() {
         let module = UnifiedModule {
+            identity: Default::default(),
             decls: vec![Decl::Function {
                 name: "main".into(),
                 params: vec![],
@@ -814,6 +820,7 @@ mod tests {
     #[test]
     fn lower_folds_constant_unary_and_bool_binop() {
         let module = UnifiedModule {
+            identity: Default::default(),
             decls: vec![Decl::Function {
                 name: "main".into(),
                 params: vec![],
@@ -854,6 +861,7 @@ mod tests {
     #[test]
     fn lower_match_emits_conditional_arm_branches() {
         let module = UnifiedModule {
+            identity: Default::default(),
             decls: vec![Decl::Function {
                 name: "main".into(),
                 params: vec![("tag".into(), Typ::Int)],

@@ -646,10 +646,28 @@ fn parse_if_stmt(s: &str) -> Option<Stmt> {
     })
 }
 
+fn parse_while_stmt(s: &str) -> Option<Stmt> {
+    let rest = trim(s.strip_prefix("while ")?);
+    let open = rest.find('{')?;
+    let cond = trim(&rest[..open]);
+    if cond.is_empty() {
+        return None;
+    }
+    let close = matching_brace_index(rest, open)?;
+    Some(Stmt::Loop {
+        kind: LoopKind::While,
+        cond: Some(parse_expr(cond)),
+        body: parse_body(&rest[open + 1..close]),
+    })
+}
+
 fn parse_stmt(s: &str) -> Option<Stmt> {
     let s = trim(s);
     if s.is_empty() {
         return None;
+    }
+    if s.starts_with("while ") {
+        return parse_while_stmt(s);
     }
     if s.starts_with("if ") {
         return parse_if_stmt(s);
@@ -1092,6 +1110,17 @@ fn check_stmt_names(
         Stmt::Loop { cond, body, .. } => {
             if let Some(cond) = cond {
                 check_expr_names(owner, cond, env, structs, fns, fn_params, diagnostics);
+                if let Some(actual) = infer_expr_type(cond, env, structs, fns)
+                    && actual != Typ::Bool
+                {
+                    diagnostics.push(Diagnostic {
+                        code: "E_WHILE_COND_TYPE".into(),
+                        message: format!(
+                            "while condition type mismatch in {owner}: expected Bool, got {}",
+                            string_of_type(&actual)
+                        ),
+                    });
+                }
             }
             let mut body_env = env.clone();
             for nested in body {
@@ -1764,6 +1793,53 @@ func choose(flag: Int) -> Int {
         let diagnostics = check(&program);
         assert!(
             diagnostics.iter().any(|d| d.code == "E_IF_COND_TYPE"),
+            "{diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn parse_func_body_while_loop() {
+        let program = parse(
+            r#"
+func spin(flag: Bool) -> Void {
+  while flag {
+    return
+  }
+}
+"#,
+        );
+        match &program[0] {
+            Decl::Function(f) => {
+                assert_eq!(f.body.len(), 1);
+                assert!(matches!(
+                    &f.body[0],
+                    Stmt::Loop {
+                        kind: LoopKind::While,
+                        cond: Some(Expr::Ident(name)),
+                        body,
+                    } if name == "flag" && matches!(body.as_slice(), [Stmt::Return(None)])
+                ));
+            }
+            _ => panic!("expected function"),
+        }
+        let diagnostics = check(&program);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn check_rejects_non_bool_while_condition() {
+        let program = parse(
+            r#"
+func spin(flag: Int) -> Void {
+  while flag {
+    return
+  }
+}
+"#,
+        );
+        let diagnostics = check(&program);
+        assert!(
+            diagnostics.iter().any(|d| d.code == "E_WHILE_COND_TYPE"),
             "{diagnostics:?}"
         );
     }

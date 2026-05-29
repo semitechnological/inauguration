@@ -829,7 +829,10 @@ fn run_pipeline_for_path(
         let emit_start = std::time::Instant::now();
         let sil_source = match parser_registry::parse_with_resolved(resolved, path) {
             Ok(Some(module)) => {
-                inauguration::compiler::driver::lower_unified_module(&module, module_id)
+                inauguration::compiler::driver::lower_unified_module(
+                    &module,
+                    module.effective_module_id(module_id),
+                )
             }
             Ok(None) => inauguration::sil_emit::emit_textual_sil(path, module_id).map_err(|e| {
                 InError::Message(format!(

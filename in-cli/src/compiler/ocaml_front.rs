@@ -17,7 +17,7 @@ pub fn parse_ocaml_source(src: &str) -> Result<UnifiedModule, String> {
     if decls.is_empty() {
         return Err("ocaml front parsed file but found no top-level let functions".to_string());
     }
-    Ok(UnifiedModule { decls })
+    Ok(UnifiedModule::new(decls))
 }
 
 fn top_level_lets(src: &str) -> Vec<String> {

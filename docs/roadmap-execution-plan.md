@@ -67,7 +67,7 @@ Suggested **program order**: **B0** (CI unblocks everyone) → **C0** (parity gu
 - **`in test`** (`in-cli/src/main.rs`): self-hosted compiler gates by default: polyglot samples, bytecode compiler, and orchestration/package checks through the installed `in` binary. `--toolchain` adds protocol generation, rust-driver, in-cli, SwiftPM, and hotreload-daemon implementation checks; `--external-parity` adds installed reference compiler comparisons; `--all` runs every group. Independent groups run in parallel unless `--serial` is set. Requires **workspace root** (see `workspace_root`).
 - **`IN_TEST_SKIP_SWIFT`**: skips SwiftPM steps; documented in `AGENTS.md`.
 - **`in update`**: checkout path **`cargo install --path in-cli --locked`**; Unix fallback **`curl | bash`** on raw `install.sh` with validated **`IN_REPO`** slug.
-- **GitHub Actions** (`.github/workflows/ci.yml`): **`cargo test`** in `in-cli` only; **`cargo test -p hybrid-cli`** in rust-driver; sample scripts—**does not** run full **`in test`** today.
+- **GitHub Actions** (`.github/workflows/ci.yml`): **`cargo test`** in `in-cli`; **`cargo test -p hybrid-cli`** in rust-driver; sample scripts; **`in-test-linux`** with **`IN_TEST_SKIP_SWIFT=1`**; and **`in-test-macos`** with the default **`in test`** gate plus owned-native coverage.
 
 ### Phases
 

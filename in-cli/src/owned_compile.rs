@@ -77,7 +77,10 @@ fn count_functions(module: &UnifiedModule) -> usize {
 }
 
 fn count_call_edges(module: &UnifiedModule, module_id: &str) -> usize {
-    let sil = crate::compiler::driver::lower_unified_module(module, module_id);
+    let sil = crate::compiler::driver::lower_unified_module(
+        module,
+        module.effective_module_id(module_id),
+    );
     let artifact = crate::hybrid_sil::parse_textual_sil(&sil);
     let cleaned = crate::hybrid_sil::remove_debug_insts(&artifact);
     crate::hybrid_sil::extract_call_graph(&cleaned)
@@ -377,7 +380,10 @@ fn const_eval_entry_exit_code(
             return Ok(code);
         }
     }
-    let sil = crate::compiler::driver::lower_unified_module(module, module_id);
+    let sil = crate::compiler::driver::lower_unified_module(
+        module,
+        module.effective_module_id(module_id),
+    );
     let artifact = crate::hybrid_sil::parse_textual_sil(&sil);
     let mut bytecode_module = sil_to_bytecode::lower_sil_to_bytecode(&artifact)?;
     bytecode_module.entry_point = entry.to_string();
@@ -400,7 +406,10 @@ fn compile_bytecode(
     module_id: &str,
     out: Option<&Path>,
 ) -> Result<Option<String>, String> {
-    let sil = crate::compiler::driver::lower_unified_module(module, module_id);
+    let sil = crate::compiler::driver::lower_unified_module(
+        module,
+        module.effective_module_id(module_id),
+    );
     let artifact = crate::hybrid_sil::parse_textual_sil(&sil);
     let bytecode_module = sil_to_bytecode::lower_sil_to_bytecode(&artifact)?;
     let Some(out_path) = out else {

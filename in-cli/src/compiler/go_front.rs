@@ -44,7 +44,7 @@ pub fn parse_go_source(src: &str) -> Result<UnifiedModule, String> {
     if decls.is_empty() {
         return Err("go front parsed file but found no top-level structs/functions".to_string());
     }
-    Ok(UnifiedModule { decls })
+    Ok(UnifiedModule::new(decls))
 }
 
 fn walk_collect(node: Node<'_>, f: &mut dyn FnMut(Node<'_>)) {

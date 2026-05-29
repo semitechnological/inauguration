@@ -130,7 +130,7 @@ pub fn parse_icore_source(raw: &str) -> Result<UnifiedModule, String> {
         }
     }
 
-    let module = UnifiedModule { decls };
+    let module = UnifiedModule::new(decls);
     validate_module(&module)?;
     Ok(module)
 }

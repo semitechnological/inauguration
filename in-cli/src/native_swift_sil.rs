@@ -25,7 +25,7 @@ fn subset_program_to_unified(program: &[Decl]) -> UnifiedModule {
             },
         })
         .collect();
-    UnifiedModule { decls }
+    UnifiedModule::new(decls)
 }
 
 /// Same semantics as [`crate::sil_emit`] for **`IN_NATIVE_SWIFT_SIL`**.
@@ -414,5 +414,20 @@ func main(flag: Bool) -> Int {
         assert!(sil.contains("bb_if_then_"), "{sil}");
         assert!(sil.contains("bb_if_else_"), "{sil}");
         assert!(sil.contains("bb_if_end_"), "{sil}");
+    }
+
+    #[test]
+    fn emit_subset_sil_lowers_while_body() {
+        let src = r#"
+func main(flag: Bool) -> Void {
+  while flag {
+    return
+  }
+}
+"#;
+        let sil = emit_in_tree_sil_or_diagnose(src, "App").expect("sil");
+        assert!(sil.contains("bb_loop_head_"), "{sil}");
+        assert!(sil.contains("bb_loop_body_"), "{sil}");
+        assert!(sil.contains("bb_loop_end_"), "{sil}");
     }
 }

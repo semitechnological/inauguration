@@ -468,7 +468,7 @@ mod tests {
     }
 
     fn module(decls: Vec<Decl>) -> UnifiedModule {
-        UnifiedModule { decls }
+        UnifiedModule::new(decls)
     }
 
     fn function_with_params(name: &str, params: Vec<(String, Typ)>, body: Vec<Stmt>) -> Decl {

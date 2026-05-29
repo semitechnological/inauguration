@@ -88,7 +88,41 @@ pub struct MatchArm {
 /// Single-module view produced by language fronts before lowering to textual SIL.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnifiedModule {
+    pub identity: CoreModuleIdentity,
     pub decls: Vec<Decl>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CoreModuleIdentity {
+    pub package: Option<String>,
+    pub module: Option<String>,
+}
+
+impl UnifiedModule {
+    #[must_use]
+    pub fn new(decls: Vec<Decl>) -> Self {
+        Self {
+            identity: CoreModuleIdentity::default(),
+            decls,
+        }
+    }
+
+    #[must_use]
+    pub fn with_identity(decls: Vec<Decl>, identity: CoreModuleIdentity) -> Self {
+        Self { identity, decls }
+    }
+
+    #[must_use]
+    pub fn effective_module_id<'a>(&'a self, requested: &'a str) -> &'a str {
+        if requested != "App" {
+            return requested;
+        }
+        self.identity
+            .module
+            .as_deref()
+            .or(self.identity.package.as_deref())
+            .unwrap_or(requested)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

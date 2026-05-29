@@ -1,6 +1,6 @@
 //! `.in` v0.2: top-level `struct` / `fn` with multiline struct bodies and minimal `fn` bodies.
 
-use crate::core_ir::{Decl, Typ, UnifiedModule};
+use crate::core_ir::{CoreModuleIdentity, Decl, Typ, UnifiedModule};
 use crate::core_ir::{Expr, LoopKind, Stmt};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -98,6 +98,50 @@ pub fn in_standard_import_bindings(import: &str) -> Vec<InExternBinding> {
                 required_capabilities: vec!["process.args".into()],
             },
         ],
+        "std.env" => vec![
+            InExternBinding {
+                language: "std".into(),
+                name: "env_get".into(),
+                required_capabilities: vec!["env.read".into()],
+            },
+            InExternBinding {
+                language: "std".into(),
+                name: "env_set".into(),
+                required_capabilities: vec!["env.write".into()],
+            },
+            InExternBinding {
+                language: "std".into(),
+                name: "env_has".into(),
+                required_capabilities: vec!["env.read".into()],
+            },
+        ],
+        "std.path" => vec![
+            InExternBinding {
+                language: "std".into(),
+                name: "path_join".into(),
+                required_capabilities: Vec::new(),
+            },
+            InExternBinding {
+                language: "std".into(),
+                name: "path_dirname".into(),
+                required_capabilities: Vec::new(),
+            },
+            InExternBinding {
+                language: "std".into(),
+                name: "path_basename".into(),
+                required_capabilities: Vec::new(),
+            },
+            InExternBinding {
+                language: "std".into(),
+                name: "path_extname".into(),
+                required_capabilities: Vec::new(),
+            },
+            InExternBinding {
+                language: "std".into(),
+                name: "path_normalize".into(),
+                required_capabilities: Vec::new(),
+            },
+        ],
         _ => Vec::new(),
     }
 }
@@ -149,6 +193,36 @@ fn binding_decl(binding: &InExternBinding) -> Decl {
         "arg" => Decl::Function {
             name: binding.name.clone(),
             params: vec![("index".into(), Typ::Int)],
+            ret: Typ::String,
+            body: Vec::new(),
+        },
+        "env_get" => Decl::Function {
+            name: binding.name.clone(),
+            params: vec![("name".into(), Typ::String)],
+            ret: Typ::String,
+            body: Vec::new(),
+        },
+        "env_set" => Decl::Function {
+            name: binding.name.clone(),
+            params: vec![("name".into(), Typ::String), ("value".into(), Typ::String)],
+            ret: Typ::Void,
+            body: Vec::new(),
+        },
+        "env_has" => Decl::Function {
+            name: binding.name.clone(),
+            params: vec![("name".into(), Typ::String)],
+            ret: Typ::Bool,
+            body: Vec::new(),
+        },
+        "path_join" => Decl::Function {
+            name: binding.name.clone(),
+            params: vec![("base".into(), Typ::String), ("child".into(), Typ::String)],
+            ret: Typ::String,
+            body: Vec::new(),
+        },
+        "path_dirname" | "path_basename" | "path_extname" | "path_normalize" => Decl::Function {
+            name: binding.name.clone(),
+            params: vec![("path".into(), Typ::String)],
             ret: Typ::String,
             body: Vec::new(),
         },
@@ -1402,7 +1476,7 @@ fn parse_module_from_blocks(blocks: &[String]) -> Result<UnifiedModule, String> 
             return Err(".in: expected top-level `fn` or `struct`".into());
         }
     }
-    Ok(UnifiedModule { decls })
+    Ok(UnifiedModule::new(decls))
 }
 
 pub fn parse_in_surface_info(source: &str) -> Result<InSurfaceInfo, String> {
@@ -1901,8 +1975,13 @@ fn infer_in_expr_type(
 
 fn parse_in_module_without_validation(source: &str) -> Result<UnifiedModule, String> {
     let surface = parse_in_surface_info(source)?;
+    let identity = CoreModuleIdentity {
+        package: surface.package.clone(),
+        module: surface.module.clone(),
+    };
     let blocks = split_top_level_decl_blocks(source);
     let mut module = parse_module_from_blocks(&blocks)?;
+    module.identity = identity;
     desugar_method_calls(&mut module);
     let mut std_decls = Vec::new();
     for import in surface.imports {
@@ -2013,7 +2092,7 @@ fn local_in_import_path(base: &Path, raw: &str) -> Option<PathBuf> {
 fn parse_in_file_inner(path: &Path, seen: &mut HashSet<PathBuf>) -> Result<UnifiedModule, String> {
     let key = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     if !seen.insert(key) {
-        return Ok(UnifiedModule { decls: Vec::new() });
+        return Ok(UnifiedModule::new(Vec::new()));
     }
     let source = fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let surface = parse_in_surface_info(&source)?;
@@ -2025,8 +2104,9 @@ fn parse_in_file_inner(path: &Path, seen: &mut HashSet<PathBuf>) -> Result<Unifi
         }
     }
     let module = parse_in_module_without_validation(&source)?;
+    let identity = module.identity.clone();
     decls.extend(module.decls);
-    Ok(UnifiedModule { decls })
+    Ok(UnifiedModule::with_identity(decls, identity))
 }
 
 /// Read a `.in` file and parse to core IR.
@@ -2250,6 +2330,18 @@ fn main() -> void { return; }
         assert_eq!(info.package.as_deref(), Some("agents.video"));
         assert_eq!(info.module.as_deref(), Some("agents.video.main"));
         parse_in_source(src).expect("parse");
+    }
+
+    #[test]
+    fn parsed_module_carries_package_and_module_identity() {
+        let module = parse_in_source(
+            "package agents.video;\nmodule agents.video.main;\nfn main() -> void { return; }\n",
+        )
+        .expect("parse");
+        assert_eq!(module.identity.package.as_deref(), Some("agents.video"));
+        assert_eq!(module.identity.module.as_deref(), Some("agents.video.main"));
+        assert_eq!(module.effective_module_id("App"), "agents.video.main");
+        assert_eq!(module.effective_module_id("Explicit"), "Explicit");
     }
 
     #[test]
@@ -2544,6 +2636,95 @@ fn main() -> void { read_file("x"); return; }
         assert_eq!(count_ret, &Typ::Int);
         assert_eq!(arg_params, &vec![("index".to_string(), Typ::Int)]);
         assert_eq!(arg_ret, &Typ::String);
+    }
+
+    #[test]
+    fn std_env_import_adds_core_function_declarations() {
+        let src = "import std.env;\ncapability env.read;\nfn main() -> Bool { return env_has(\"HOME\"); }\n";
+        let module = parse_in_source(src).expect("std env import");
+        let get_decl = module.decls.iter().find_map(|decl| match decl {
+            Decl::Function {
+                name, params, ret, ..
+            } if name == "env_get" => Some((params, ret)),
+            _ => None,
+        });
+        let set_decl = module.decls.iter().find_map(|decl| match decl {
+            Decl::Function {
+                name, params, ret, ..
+            } if name == "env_set" => Some((params, ret)),
+            _ => None,
+        });
+        let has_decl = module.decls.iter().find_map(|decl| match decl {
+            Decl::Function {
+                name, params, ret, ..
+            } if name == "env_has" => Some((params, ret)),
+            _ => None,
+        });
+        let (get_params, get_ret) = get_decl.expect("env_get");
+        let (set_params, set_ret) = set_decl.expect("env_set");
+        let (has_params, has_ret) = has_decl.expect("env_has");
+        assert_eq!(get_params, &vec![("name".to_string(), Typ::String)]);
+        assert_eq!(get_ret, &Typ::String);
+        assert_eq!(
+            set_params,
+            &vec![
+                ("name".to_string(), Typ::String),
+                ("value".to_string(), Typ::String)
+            ]
+        );
+        assert_eq!(set_ret, &Typ::Void);
+        assert_eq!(has_params, &vec![("name".to_string(), Typ::String)]);
+        assert_eq!(has_ret, &Typ::Bool);
+    }
+
+    #[test]
+    fn std_env_import_declares_capability_requirements() {
+        let bindings = in_standard_import_bindings("std.env");
+        assert_eq!(
+            bindings
+                .iter()
+                .map(|binding| (
+                    binding.name.as_str(),
+                    binding.required_capabilities.as_slice()
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                ("env_get", &["env.read".to_string()][..]),
+                ("env_set", &["env.write".to_string()][..]),
+                ("env_has", &["env.read".to_string()][..])
+            ]
+        );
+    }
+
+    #[test]
+    fn std_path_import_adds_core_function_declarations() {
+        let src =
+            "import std.path;\nfn main() -> String { return path_join(\"/tmp\", \"app\"); }\n";
+        let module = parse_in_source(src).expect("std path import");
+        let expected = [
+            (
+                "path_join",
+                vec![
+                    ("base".to_string(), Typ::String),
+                    ("child".to_string(), Typ::String),
+                ],
+            ),
+            ("path_dirname", vec![("path".to_string(), Typ::String)]),
+            ("path_basename", vec![("path".to_string(), Typ::String)]),
+            ("path_extname", vec![("path".to_string(), Typ::String)]),
+            ("path_normalize", vec![("path".to_string(), Typ::String)]),
+        ];
+        for (expected_name, expected_params) in expected {
+            let decl = module.decls.iter().find_map(|decl| match decl {
+                Decl::Function {
+                    name, params, ret, ..
+                } if name == expected_name => Some((params, ret)),
+                _ => None,
+            });
+            let (params, ret) = decl.expect(expected_name);
+            assert_eq!(params, &expected_params);
+            assert_eq!(ret, &Typ::String);
+        }
     }
 
     #[test]

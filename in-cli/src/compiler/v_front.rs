@@ -41,7 +41,7 @@ pub fn parse_v_source(src: &str) -> Result<UnifiedModule, String> {
     if decls.is_empty() {
         return Err("v front parsed file but found no top-level structs/functions".to_string());
     }
-    Ok(UnifiedModule { decls })
+    Ok(UnifiedModule::new(decls))
 }
 
 fn strip_comment(s: &str) -> &str {

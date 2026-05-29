@@ -1,4 +1,4 @@
-use crate::core_ir::{Decl, Stmt, Typ, UnifiedModule};
+use crate::core_ir::{Decl, Expr, Stmt, Typ, UnifiedModule};
 use crate::package_manifest::{PackageDiagnostic, PackageSymbolIndexEntry};
 use crate::parser_registry::{self, ParserCli, ParserId, ResolvedBuildParser};
 use serde::{Deserialize, Serialize};
@@ -80,6 +80,7 @@ pub struct ParserDecision {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CoreIrSummary {
+    pub identity: CoreIrIdentitySummary,
     pub decl_count: usize,
     pub struct_count: usize,
     pub function_count: usize,
@@ -88,6 +89,12 @@ pub struct CoreIrSummary {
     pub statement_count: usize,
     pub structs: Vec<StructSummary>,
     pub functions: Vec<FunctionSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CoreIrIdentitySummary {
+    pub package: Option<String>,
+    pub module: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -413,6 +420,13 @@ pub fn explain_diagnostic(code: &str) -> Option<DiagnosticExplanation> {
             "An .in semantic package import does not resolve against the nearest package manifest",
             "Add the missing dependency to inauguration.package",
         ),
+        "INPKG002" => (
+            AgentDiagnosticSeverity::Warning,
+            "call through an explicit runtime binding, generated adapter, or local wrapper",
+            "Keep the dependency import for graph identity, then add an explicit wrapper before calling it",
+            "An .in source calls a resolved dependency symbol directly, but dependency runtime binding is not implemented",
+            "Add an explicit local function or extern binding that wraps the dependency",
+        ),
         _ => return None,
     };
     Some(DiagnosticExplanation {
@@ -524,6 +538,12 @@ fn build_report(path: &Path, config: &AgentModeConfig) -> Result<AgentReport, Ag
                         &diagnostic_fact.message,
                     ));
                 }
+                diagnostics.extend(dependency_symbol_call_diagnostics(
+                    &module,
+                    &package_symbol_index,
+                    parser_id.as_deref(),
+                    &source,
+                ));
                 effects.extend(
                     semantic_imports
                         .into_iter()
@@ -808,6 +828,10 @@ fn summarize_core_ir(module: &UnifiedModule) -> CoreIrSummary {
         }
     }
     CoreIrSummary {
+        identity: CoreIrIdentitySummary {
+            package: module.identity.package.clone(),
+            module: module.identity.module.clone(),
+        },
         decl_count: module.decls.len(),
         struct_count: structs.len(),
         function_count: functions.len(),
@@ -844,11 +868,175 @@ fn core_diagnostics(
     }
 }
 
+fn dependency_symbol_call_diagnostics(
+    module: &UnifiedModule,
+    symbols: &[PackageSymbolIndexEntry],
+    parser_id: Option<&str>,
+    source: &str,
+) -> Vec<AgentDiagnostic> {
+    if symbols.is_empty() {
+        return Vec::new();
+    }
+    let dependency_symbols = symbols
+        .iter()
+        .map(|symbol| {
+            (
+                symbol.name.as_str(),
+                symbol.source_import.as_str(),
+                symbol.dependency.as_str(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let functions = module
+        .decls
+        .iter()
+        .filter_map(|decl| match decl {
+            Decl::Function { name, .. } => Some(name.as_str()),
+            _ => None,
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut calls = std::collections::BTreeSet::new();
+    collect_dependency_symbol_calls(module, &dependency_symbols, &functions, &mut calls);
+    calls
+        .into_iter()
+        .map(|(name, source_import, dependency)| {
+            diagnostic(
+                "INPKG002",
+                AgentDiagnosticSeverity::Warning,
+                None,
+                parser_id,
+                Some("call through an explicit runtime binding, generated adapter, or local wrapper"),
+                excerpt_bounds(source, None),
+                Some("Keep the dependency import for graph identity, then add an explicit wrapper before calling it"),
+                &format!(
+                    "dependency symbol `{name}` from semantic import `{source_import}` resolves to package dependency `{dependency}`, but runtime binding is not implemented"
+                ),
+            )
+        })
+        .collect()
+}
+
+fn collect_dependency_symbol_calls<'a>(
+    module: &'a UnifiedModule,
+    symbols: &[(&'a str, &'a str, &'a str)],
+    functions: &std::collections::BTreeSet<&'a str>,
+    out: &mut std::collections::BTreeSet<(&'a str, &'a str, &'a str)>,
+) {
+    for decl in &module.decls {
+        if let Decl::Function { body, .. } = decl {
+            for stmt in body {
+                collect_dependency_symbol_calls_from_stmt(stmt, symbols, functions, out);
+            }
+        }
+    }
+}
+
+fn collect_dependency_symbol_calls_from_stmt<'a>(
+    stmt: &'a Stmt,
+    symbols: &[(&'a str, &'a str, &'a str)],
+    functions: &std::collections::BTreeSet<&'a str>,
+    out: &mut std::collections::BTreeSet<(&'a str, &'a str, &'a str)>,
+) {
+    match stmt {
+        Stmt::Let(_, _, expr)
+        | Stmt::Assign(_, expr)
+        | Stmt::Return(Some(expr))
+        | Stmt::Expr(expr) => {
+            collect_dependency_symbol_calls_from_expr(expr, symbols, functions, out);
+        }
+        Stmt::IndexAssign { base, index, value } => {
+            collect_dependency_symbol_calls_from_expr(base, symbols, functions, out);
+            collect_dependency_symbol_calls_from_expr(index, symbols, functions, out);
+            collect_dependency_symbol_calls_from_expr(value, symbols, functions, out);
+        }
+        Stmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            collect_dependency_symbol_calls_from_expr(cond, symbols, functions, out);
+            for nested in then_body {
+                collect_dependency_symbol_calls_from_stmt(nested, symbols, functions, out);
+            }
+            for nested in else_body {
+                collect_dependency_symbol_calls_from_stmt(nested, symbols, functions, out);
+            }
+        }
+        Stmt::Loop { cond, body, .. } => {
+            if let Some(cond) = cond {
+                collect_dependency_symbol_calls_from_expr(cond, symbols, functions, out);
+            }
+            for nested in body {
+                collect_dependency_symbol_calls_from_stmt(nested, symbols, functions, out);
+            }
+        }
+        Stmt::Match { scrutinee, arms } => {
+            collect_dependency_symbol_calls_from_expr(scrutinee, symbols, functions, out);
+            for arm in arms {
+                for nested in &arm.body {
+                    collect_dependency_symbol_calls_from_stmt(nested, symbols, functions, out);
+                }
+            }
+        }
+        Stmt::Return(None) => {}
+    }
+}
+
+fn collect_dependency_symbol_calls_from_expr<'a>(
+    expr: &'a Expr,
+    symbols: &[(&'a str, &'a str, &'a str)],
+    functions: &std::collections::BTreeSet<&'a str>,
+    out: &mut std::collections::BTreeSet<(&'a str, &'a str, &'a str)>,
+) {
+    match expr {
+        Expr::Unary { expr, .. } => {
+            collect_dependency_symbol_calls_from_expr(expr, symbols, functions, out);
+        }
+        Expr::Binary { lhs, rhs, .. } => {
+            collect_dependency_symbol_calls_from_expr(lhs, symbols, functions, out);
+            collect_dependency_symbol_calls_from_expr(rhs, symbols, functions, out);
+        }
+        Expr::StructInit { fields, .. } => {
+            for (_, expr) in fields {
+                collect_dependency_symbol_calls_from_expr(expr, symbols, functions, out);
+            }
+        }
+        Expr::Field { base, .. } => {
+            collect_dependency_symbol_calls_from_expr(base, symbols, functions, out);
+        }
+        Expr::ArrayLit(items) => {
+            for item in items {
+                collect_dependency_symbol_calls_from_expr(item, symbols, functions, out);
+            }
+        }
+        Expr::Index { base, index } => {
+            collect_dependency_symbol_calls_from_expr(base, symbols, functions, out);
+            collect_dependency_symbol_calls_from_expr(index, symbols, functions, out);
+        }
+        Expr::Call { callee, args } => {
+            if let Expr::Ident(name) = callee.as_ref()
+                && !functions.contains(name.as_str())
+                && let Some(symbol) = symbols
+                    .iter()
+                    .find(|(symbol_name, _, _)| symbol_name == &name.as_str())
+            {
+                out.insert(*symbol);
+            }
+            collect_dependency_symbol_calls_from_expr(callee, symbols, functions, out);
+            for arg in args {
+                collect_dependency_symbol_calls_from_expr(arg, symbols, functions, out);
+            }
+        }
+        Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Ident(_) => {}
+    }
+}
+
 fn lower_textual_sil(module: &UnifiedModule, module_id: &str) -> String {
-    let sil = crate::compiler::driver::lower_unified_module(module, module_id);
+    let effective_module_id = module.effective_module_id(module_id);
+    let sil = crate::compiler::driver::lower_unified_module(module, effective_module_id);
     debug_assert_eq!(
         sil,
-        crate::lower_core::lower_to_textual_sil(module, module_id)
+        crate::lower_core::lower_to_textual_sil(module, effective_module_id)
     );
     sil
 }
@@ -1149,6 +1337,25 @@ fn repair_plan_for(diagnostic: &AgentDiagnostic, source: &str) -> Option<RepairP
             ],
             rationale: "agent-mode can identify the unresolved package import, but package dependency edits depend on the intended dependency version".to_string(),
         }),
+        "INPKG002" => Some(RepairPlan {
+            id: "wrap-package-dependency".to_string(),
+            code: diagnostic.code.clone(),
+            title: "Wrap package dependency".to_string(),
+            applies_to_code: diagnostic.code.clone(),
+            parser_id: diagnostic.parser_id.clone(),
+            confidence: 0.64,
+            actions: vec![RepairAction {
+                kind: "manual_review".to_string(),
+                span: diagnostic.span.clone(),
+                replacement: None,
+                description: "Add an explicit local function or extern binding before calling the dependency symbol".to_string(),
+            }],
+            notes: vec![
+                "semantic package imports provide graph identity and dependency indexing".to_string(),
+                "dependency installation and runtime binding are not performed by this report".to_string(),
+            ],
+            rationale: "agent-mode can see that the call targets a resolved dependency symbol, but the runtime binding shape must be explicit".to_string(),
+        }),
         _ => None,
     }
 }
@@ -1419,6 +1626,12 @@ fn main() -> void { return; }
                 .effects
                 .contains(&"module:agents.video.main".to_string())
         );
+        let summary = report.core_ir_summary.expect("core summary");
+        assert_eq!(summary.identity.package.as_deref(), Some("agents.video"));
+        assert_eq!(
+            summary.identity.module.as_deref(),
+            Some("agents.video.main")
+        );
     }
 
     #[test]
@@ -1462,6 +1675,44 @@ dependencies:
             "symbol:dependency:postgres"
         );
         assert!(report.package_diagnostics.is_empty());
+        fs::remove_dir_all(dir).expect("remove temp package");
+    }
+
+    #[test]
+    fn in_report_warns_when_calling_resolved_dependency_symbol_directly() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock before UNIX_EPOCH")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "inauguration-agent-mode-package-call-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).expect("create temp package");
+        fs::write(
+            dir.join("inauguration.package"),
+            r#"name: hyperchat
+version: 0.1.0
+dependencies:
+  postgres:
+    version: ^1.0.0
+"#,
+        )
+        .expect("write manifest");
+        let source_path = dir.join("main.in");
+        fs::write(
+            &source_path,
+            "package hyperchat;\nuse database.postgres;\nfn main() -> void { postgres(\"select 1\"); return; }\n",
+        )
+        .expect("write source");
+
+        let report = json_report(&source_path, &AgentModeConfig::default()).expect("report");
+
+        assert!(report.package_diagnostics.is_empty());
+        assert!(report.diagnostics.iter().any(|item| item.code == "INPKG002"
+            && item.message.contains("database.postgres")
+            && item.message.contains("postgres")));
+        assert_eq!(report.repair_plans[0].id, "wrap-package-dependency");
         fs::remove_dir_all(dir).expect("remove temp package");
     }
 
@@ -1644,6 +1895,35 @@ fn main() -> String { return arg(0); }
             report
                 .effects
                 .contains(&"extern:std:arg_count:requires=process.args".to_string())
+        );
+    }
+
+    #[test]
+    fn in_report_checks_std_env_import_capabilities() {
+        let temp = temp_source(
+            "std-env-missing-capability",
+            "in",
+            r#"
+import std.env;
+fn main() -> String { return env_get("HOME"); }
+"#,
+        );
+        let report = json_report(&temp.path, &AgentModeConfig::default()).expect("report");
+        assert_eq!(report.diagnostics[0].code, "AGENT_MISSING_CAPABILITY");
+        assert!(
+            report
+                .effects
+                .contains(&"extern:std:env_get:requires=env.read".to_string())
+        );
+        assert!(
+            report
+                .effects
+                .contains(&"extern:std:env_set:requires=env.write".to_string())
+        );
+        assert!(
+            report
+                .effects
+                .contains(&"extern:std:env_has:requires=env.read".to_string())
         );
     }
 

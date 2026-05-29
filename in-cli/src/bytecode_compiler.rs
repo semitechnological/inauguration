@@ -24,7 +24,10 @@ pub fn compile_source_path(
         return Err("bytecode compiler requires a Core IR frontend; Swift SIL emit is not supported by this path".to_string());
     };
     core_typecheck::typecheck_executable(&module)?;
-    let sil = crate::compiler::driver::lower_unified_module(&module, module_id);
+    let sil = crate::compiler::driver::lower_unified_module(
+        &module,
+        module.effective_module_id(module_id),
+    );
     let artifact = crate::hybrid_sil::parse_textual_sil(&sil);
     let module = sil_to_bytecode::lower_sil_to_bytecode(&artifact)?;
     Ok(BytecodeCompileOutput { module, sil })
