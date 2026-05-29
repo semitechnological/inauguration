@@ -23,8 +23,8 @@ Implementation today: `in-cli` modules **`native_swift_sil`** (filter + emit) an
 **`struct`**
 
 - A single line: trimmed text starts with `struct `.
-- The struct **name** is the token between `struct ` and `{` when `{ … }` appears on the **same line**; inner text is comma-separated **`name: Type`** fields (same tokens as `func` parameters). If there is no `{` / `}` pair on the line, the name is the rest of the line after `struct ` and **fields stay empty** (legacy one-token form).
-- **Multi-line** `struct { … }` is still **out of contract** for field capture: only brace-balanced **single-line** struct headers populate `fields`.
+- The struct **name** is the token between `struct ` and `{` when `{ … }` appears. Inner text is comma-, semicolon-, or newline-separated **`name: Type`** fields (same tokens as `func` parameters). If there is no `{` / `}` pair, the name is the rest of the line after `struct ` and **fields stay empty** (legacy one-token form).
+- **Multi-line** `struct { … }` field capture is supported when the top-level `struct` block is brace-balanced.
 
 **`func`**
 

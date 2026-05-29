@@ -489,8 +489,11 @@ fn parse_struct_field_list(inner: &str) -> Vec<(String, Typ)> {
     if inner.is_empty() {
         return Vec::new();
     }
-    split_and_trim(',', inner)
+    inner
+        .split([',', ';', '\n'])
         .into_iter()
+        .map(trim)
+        .filter(|t| !t.is_empty())
         .map(|t| parse_param(&t))
         .collect()
 }
@@ -1417,6 +1420,33 @@ mod tests {
                 assert_eq!(
                     s.fields,
                     vec![("id".into(), Typ::Int), ("name".into(), Typ::String),]
+                );
+            }
+            _ => panic!("expected struct"),
+        }
+        let diagnostics = check(&program);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn parse_struct_multiline_fields() {
+        let src = r#"
+struct User {
+  id: Int
+  name: String
+}
+func main(u: User) -> String {
+  return u.name
+}
+"#;
+        let program = parse(src);
+        assert_eq!(program.len(), 2);
+        match &program[0] {
+            Decl::Struct(s) => {
+                assert_eq!(s.name, "User");
+                assert_eq!(
+                    s.fields,
+                    vec![("id".into(), Typ::Int), ("name".into(), Typ::String)]
                 );
             }
             _ => panic!("expected struct"),

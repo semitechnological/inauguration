@@ -980,7 +980,7 @@ mod tests {
         let src = fs::read_to_string(&sample).unwrap();
         let sil = crate::native_swift_sil::emit_in_tree_sil_or_diagnose(&src, "App").unwrap();
         assert!(sil.contains("sil @main"));
-        assert!(sil.contains("function_ref @helper"));
+        assert!(sil.contains("function_ref @userName"));
     }
 
     #[test]

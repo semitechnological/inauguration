@@ -147,14 +147,13 @@ fn starts_top_level_decl(line: &str) -> bool {
     line.starts_with("func ") || line.starts_with("struct ")
 }
 
-fn starts_top_level_func(line: &str) -> bool {
+fn starts_top_level_struct(line: &str) -> bool {
     let line = strip_leading_keyword(
         line,
         &["fileprivate", "internal", "private", "public", "open"],
         4,
     );
-    let line = strip_leading_keyword(line, &["async", "throws", "reasync", "nonisolated"], 4);
-    line.starts_with("func ")
+    line.starts_with("struct ")
 }
 
 /// Keep only top-level `func` / `struct` lines (brace-depth 0) for the line-oriented subset parser.
@@ -162,6 +161,7 @@ pub fn filter_top_level_decl_lines(source: &str) -> String {
     let mut depth = 0i32;
     let mut out = String::new();
     let mut collecting = false;
+    let mut collecting_struct = false;
     for raw_line in source.lines() {
         let t = raw_line.trim();
         if t.is_empty() {
@@ -175,19 +175,26 @@ pub fn filter_top_level_decl_lines(source: &str) -> String {
         }
         let at_zero = depth == 0 && !collecting;
         let delta = brace_delta(raw_line);
-        if collecting || (at_zero && starts_top_level_decl(t)) {
+        let emit_collecting = if collecting_struct {
+            depth == 1 && (t == "}" || (!starts_top_level_decl(t) && t.contains(':')))
+        } else {
+            collecting
+        };
+        if emit_collecting || (at_zero && starts_top_level_decl(t)) {
             out.push_str(t);
             out.push('\n');
         }
         depth += delta;
-        if at_zero && delta > 0 && starts_top_level_func(t) {
+        if at_zero && delta > 0 && starts_top_level_decl(t) {
             collecting = true;
+            collecting_struct = starts_top_level_struct(t);
         }
         if depth < 0 {
             depth = 0;
         }
         if collecting && depth == 0 {
             collecting = false;
+            collecting_struct = false;
         }
     }
     out
@@ -346,6 +353,22 @@ func main(u: User) -> Int {
         assert!(sil.contains("function_ref @helper"), "{sil}");
         assert!(sil.contains("field_access"), "{sil}");
         assert!(sil.contains("return %"), "{sil}");
+    }
+
+    #[test]
+    fn emit_subset_sil_accepts_multiline_struct_fields() {
+        let src = r#"
+struct User {
+  id: Int
+  name: String
+}
+func main(u: User) -> String {
+  return u.name
+}
+"#;
+        let sil = emit_in_tree_sil_or_diagnose(src, "App").expect("sil");
+        assert!(sil.contains("sil @main"), "{sil}");
+        assert!(sil.contains("field_access"), "{sil}");
     }
 
     #[test]
