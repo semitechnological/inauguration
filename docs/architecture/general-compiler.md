@@ -78,4 +78,4 @@ Swift-shaped work in parallel: [native-swift-master-plan.md](native-swift-master
 - [universal-compiler-roadmap.md](universal-compiler-roadmap.md) — full language/runtime ambition and compatibility ladder
 - [parser-surface.md](parser-surface.md) — extensions, magic line, routing matrix  
 - [multi-frontend-ir.md](multi-frontend-ir.md) — `UnifiedModule` schema  
-- [README · in build](../../README.md#in-build-and-swiftpm-staging-macoslinux) — CLI flags
+- [README · Core Commands](../../README.md#core-commands) — CLI flags

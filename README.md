@@ -65,7 +65,7 @@ fn main() -> void {
 The same idea in the human-facing direction:
 
 ```in
-use std.io
+import std.io
 
 needs process.stdout
 
@@ -95,7 +95,8 @@ Current language features include:
 
 Flexible syntax goals include:
 
-- `import std.io;` and `use std.io`
+- `import std.io;` and semicolon-free `import std.io`
+- `use database.postgres;` as a semantic package import resolved through `inauguration.package`
 - `capability process.stdout;` and `needs process.stdout`
 - `fn main() -> void { ... }` and `main: ...`
 - `print("hello")` and `print "hello"`
@@ -212,7 +213,7 @@ The maturity level varies by frontend. Some routes lower structured bodies; othe
 cargo install inauguration
 ```
 
-Installs the `in` binary.
+Installs the `in` binary after a public crate release. During prerelease work, install from a clone.
 
 **2. Wax**
 
@@ -220,6 +221,8 @@ Installs the `in` binary.
 wax tap semitechnological/tap
 wax install inauguration
 ```
+
+Use after the tap release is available.
 
 **3. Install script from a clone**
 
@@ -243,7 +246,7 @@ in build --parser in --path apps/in-sample/agent-native.in --module-id App
 in build --parser icore --path apps/icore-sample/min.icore --module-id App
 in agent --path apps/in-sample/agent-native.in --parser in
 in graph --path apps/in-sample/agent-native.in --parser in --json
-in package --path apps/in-sample/agent-native.in --json
+in package --path apps/package-sample/main.in --json
 in languages
 in languages --json
 in explain INAGENT020 --json
@@ -309,4 +312,5 @@ V remains available only for optional parity tooling such as `shared/protocol/ge
 - Use `.in` and `.icore` samples for language and Core IR changes.
 - Keep frontend-specific behavior documented in `docs/architecture`.
 - Keep package/capability behavior visible through `in package`, `in graph`, and `in agent`.
+- Treat `in agent` output as JSON by default; do not pass `--json` to that command.
 - Do not turn `.in` into a UI language.

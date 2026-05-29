@@ -1,3 +1,12 @@
+- [x] Prerelease readiness wave for `.in` + general compiler technical preview.
+  - Agent JSON cleanup confirmed: `in agent` remains JSON-by-default and does not accept or require `--json`; valid JSON flags remain on `graph`, `package`, `languages`, `explain`, `fix`, and `backend`.
+  - Resolved semantic imports now bind to package symbol-index facts in package, graph, and agent reports without installing dependencies or loading extensions.
+  - Unresolved semantic imports now produce stable `INPKG001` warning diagnostics in package, graph, and agent-facing reports.
+  - `.in` is promoted to Level 3 for its bounded subset only: package/module/import/capability/function diagnostics are source-semantic enough for prerelease agent workflows.
+  - Package examples cover both a resolved semantic import and an undeclared semantic import warning.
+  - Self-hosting boundary stays honest: owned `.in` / `.icore` / bounded Core IR paths are prerelease-ready, while full self-hosted `.in` compiler replacement remains future work.
+  - Acceptance gates: focused package/graph/agent/language tests, sample scripts, `in test`, protocol checks, and diff checks must pass before push.
+
 - [x] Fill owned compiler parity slices for native `.in` aggregates.
   - Optimizer parity landed earlier: Core IR constant folding, dead stores, bytecode peepholes, parameter-store cleanup, and trivial branch cleanup.
   - Multi-front body parity landed earlier: bounded TypeScript, C#, Python, Zig, Kotlin body extraction plus scalar body coverage.
@@ -78,9 +87,9 @@
 - [ ] Unify `.in` identity with the package graph.
   - `idea.md` wants one semantic package graph: package identity, targets, dependencies, capabilities, extensions, indexing, graph invalidation, and semantic imports.
   - First identity slice landed: when a `.in` source declares `package` / `module`, `in graph --json` and `in package --json` report `package_identity` / `source_identity` with stable status and reason codes for match, missing manifest, mismatch, undeclared, unreadable, and non-`.in` sources.
-  - First semantic import slice landed: top-level `.in` `use database.postgres;` facts parse and `in graph --json` / `in package --json` report `semantic_imports` resolved against nearest `inauguration.package` dependencies by exact key or dotted suffix, without dependency installation or extension loading.
-  - Current limitation: `.in package`, `module`, and `use` facts do not affect Core IR names, imported symbols, code generation, or dependency installation.
-  - Next slice: bind resolved semantic imports to dependency symbol indexes and diagnostics while preserving the no-install/no-extension-load boundary.
+  - Semantic import binding slice landed: top-level `.in` `use database.postgres;` facts parse, resolve against nearest `inauguration.package` dependencies by exact key or dotted suffix, create package symbol-index facts, and emit `INPKG001` warnings for unresolved imports without dependency installation or extension loading.
+  - Current limitation: `.in package`, `module`, and `use` facts do not affect Core IR names, code generation, dependency installation, or extension loading.
+  - Next slice: let resolved dependency symbol-index entries participate in `.in` imported-symbol lookup without crossing the no-install/no-extension-load boundary.
 
 - [x] Build a language-compatibility ladder.
   - Level 0: route extension or magic line to a known `ParserId`.

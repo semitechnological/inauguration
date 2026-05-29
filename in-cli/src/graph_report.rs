@@ -1,6 +1,7 @@
 use crate::agent_mode::{self, CallEdge, OrchestrationFacts, ParserDecision, SizeTiming};
 use crate::package_manifest::{
-    self, PackageManifest, PackageSemanticImport, PackageSourceIdentity,
+    self, PackageDiagnostic, PackageManifest, PackageSemanticImport, PackageSourceIdentity,
+    PackageSymbolIndexEntry,
 };
 use crate::parser_registry::ParserCli;
 use serde::{Deserialize, Serialize};
@@ -59,6 +60,8 @@ pub struct GraphReport {
     pub parser_decision: ParserDecision,
     pub package_identity: Option<PackageSourceIdentity>,
     pub semantic_imports: Vec<PackageSemanticImport>,
+    pub package_symbol_index: Vec<PackageSymbolIndexEntry>,
+    pub package_diagnostics: Vec<PackageDiagnostic>,
     pub imports: Vec<String>,
     pub effects: Vec<String>,
     pub capabilities: Vec<String>,
@@ -83,6 +86,9 @@ pub fn build_graph_report(
         package_identity_for_graph_source(&source_path, package_manifest.as_ref());
     let semantic_imports =
         semantic_imports_for_graph_source(&source_path, package_manifest.as_ref());
+    let package_symbol_index =
+        package_manifest::symbol_index_for_semantic_imports(&semantic_imports);
+    let package_diagnostics = package_manifest::diagnostics_for_semantic_imports(&semantic_imports);
     let mut imports = Vec::new();
     let mut effects = Vec::new();
     if selection.include_imports() {
@@ -101,40 +107,40 @@ pub fn build_graph_report(
         capabilities.sort();
     }
     let mut symbols = Vec::new();
-    if selection.include_symbols() {
-        if let Some(summary) = &report.core_ir_summary {
-            symbols.extend(summary.structs.iter().map(|item| {
-                GraphSymbol {
-                    kind: "struct".to_string(),
-                    name: item.name.clone(),
-                    detail: item
-                        .fields
-                        .iter()
-                        .map(|field| format!("{}: {}", field.name, field.typ))
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                }
-            }));
-            symbols.extend(summary.functions.iter().map(|item| GraphSymbol {
-                kind: "function".to_string(),
+    if selection.include_symbols()
+        && let Some(summary) = &report.core_ir_summary
+    {
+        symbols.extend(summary.structs.iter().map(|item| {
+            GraphSymbol {
+                kind: "struct".to_string(),
                 name: item.name.clone(),
-                detail: format!(
-                    "fn({}) -> {}",
-                    item.params
-                        .iter()
-                        .map(|param| param.typ.clone())
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                    item.return_type
-                ),
-            }));
-            symbols.sort_by(|left, right| {
-                left.kind
-                    .cmp(&right.kind)
-                    .then_with(|| left.name.cmp(&right.name))
-                    .then_with(|| left.detail.cmp(&right.detail))
-            });
-        }
+                detail: item
+                    .fields
+                    .iter()
+                    .map(|field| format!("{}: {}", field.name, field.typ))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            }
+        }));
+        symbols.extend(summary.functions.iter().map(|item| GraphSymbol {
+            kind: "function".to_string(),
+            name: item.name.clone(),
+            detail: format!(
+                "fn({}) -> {}",
+                item.params
+                    .iter()
+                    .map(|param| param.typ.clone())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                item.return_type
+            ),
+        }));
+        symbols.sort_by(|left, right| {
+            left.kind
+                .cmp(&right.kind)
+                .then_with(|| left.name.cmp(&right.name))
+                .then_with(|| left.detail.cmp(&right.detail))
+        });
     }
     let (mut call_edges, entry_function) = if let Some(graph) = report.graph_facts {
         let call_edges = if selection.include_calls() {
@@ -156,6 +162,8 @@ pub fn build_graph_report(
         parser_decision: report.parser_decision,
         package_identity,
         semantic_imports,
+        package_symbol_index,
+        package_diagnostics,
         imports,
         effects,
         capabilities,
@@ -237,6 +245,31 @@ pub fn graph_report_text(report: &GraphReport, selection: GraphReportSelection) 
                 .semantic_imports
                 .iter()
                 .map(|import| format!("{} {} ({})", import.import, import.status, import.reason))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    if !report.package_symbol_index.is_empty() {
+        lines.push(format!(
+            "package_symbol_index: {}",
+            report
+                .package_symbol_index
+                .iter()
+                .map(|symbol| format!("{} {}", symbol.id, symbol.source_import))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    if !report.package_diagnostics.is_empty() {
+        lines.push(format!(
+            "package_diagnostics: {}",
+            report
+                .package_diagnostics
+                .iter()
+                .map(|diagnostic| format!(
+                    "{} {} ({})",
+                    diagnostic.code, diagnostic.import, diagnostic.reason
+                ))
                 .collect::<Vec<_>>()
                 .join(", ")
         ));
@@ -457,6 +490,48 @@ dependencies:
             Some("postgres")
         );
         assert_eq!(report.semantic_imports[0].status, "resolved");
+        assert_eq!(report.package_symbol_index.len(), 1);
+        assert_eq!(
+            report.package_symbol_index[0].id,
+            "symbol:dependency:postgres"
+        );
+        assert_eq!(
+            report.package_symbol_index[0].source_import,
+            "database.postgres"
+        );
+        assert!(report.package_diagnostics.is_empty());
+    }
+
+    #[test]
+    fn report_warns_for_unresolved_semantic_imports() {
+        let temp = temp_dir("unresolved-semantic-imports");
+        fs::write(
+            temp.path.join("inauguration.package"),
+            "name: hyperchat\nversion: 0.1.0\n",
+        )
+        .expect("write manifest");
+        let source_path = temp.path.join("main.in");
+        fs::write(
+            &source_path,
+            "package hyperchat;\nuse database.postgres;\nfn main() -> void { return; }\n",
+        )
+        .expect("write source");
+        let path = source_path.to_string_lossy().to_string();
+        let report = build_graph_report(
+            Path::new("."),
+            &path,
+            "App",
+            ParserCli::Auto,
+            GraphReportSelection::default(),
+        );
+        assert!(report.package_symbol_index.is_empty());
+        assert_eq!(report.package_diagnostics.len(), 1);
+        assert_eq!(report.package_diagnostics[0].code, "INPKG001");
+        assert_eq!(report.package_diagnostics[0].severity, "warning");
+        assert_eq!(
+            report.package_diagnostics[0].reason,
+            "dependency-not-declared"
+        );
     }
 
     #[test]

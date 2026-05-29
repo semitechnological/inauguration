@@ -244,7 +244,7 @@ PY
 
 echo "check package json"
 package_json="$tmp_dir/package.json"
-"${in_cmd[@]}" package --path apps/package-sample --json > "$package_json"
+"${in_cmd[@]}" package --path apps/package-sample/main.in --json > "$package_json"
 python3 - "$package_json" <<'PY'
 import json
 import sys
@@ -284,6 +284,44 @@ nodes = {
 }
 require(("package", "package:hyperchat") in nodes, "package graph missing package node")
 require(("extension", "extension:distributed-workers") in nodes, "package graph missing distributed-workers extension node")
+
+identity = data.get("source_identity") or {}
+require(identity.get("status") == "match", "package source identity was not match")
+
+semantic_imports = data.get("semantic_imports") or []
+require(
+    any(item.get("import") == "database.postgres" and item.get("status") == "resolved" for item in semantic_imports),
+    "package semantic import did not resolve database.postgres",
+)
+
+symbol_index = data.get("symbol_index") or []
+require(
+    any(item.get("id") == "symbol:dependency:postgres" for item in symbol_index),
+    "package symbol index missing postgres dependency",
+)
+require(data.get("diagnostics") == [], "package report unexpectedly had diagnostics")
+PY
+
+echo "check unresolved package semantic import"
+missing_package_json="$tmp_dir/package-missing-import.json"
+"${in_cmd[@]}" package --path apps/package-sample/missing-import.in --json > "$missing_package_json"
+python3 - "$missing_package_json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+data = json.loads(Path(sys.argv[1]).read_text())
+
+def require(condition, message):
+    if not condition:
+        raise SystemExit(message)
+
+diagnostics = data.get("diagnostics") or []
+require(
+    any(item.get("code") == "INPKG001" and item.get("severity") == "warning" for item in diagnostics),
+    "missing package semantic import did not produce INPKG001 warning",
+)
+require(data.get("symbol_index") == [], "unresolved package import should not create symbols")
 PY
 
 echo "orchestration compiler checks passed"

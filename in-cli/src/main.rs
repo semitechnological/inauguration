@@ -690,6 +690,8 @@ fn cmd_package(invocation_cwd: &Path, path: &str, json: bool) -> Result<()> {
             "package_graph": report.graph,
             "source_identity": report.source_identity,
             "semantic_imports": report.semantic_imports,
+            "symbol_index": report.symbol_index,
+            "diagnostics": report.diagnostics,
         }))
         .map_err(|err| InError::Message(format!("serialize package report: {err}")))?;
         println!("{raw}");
@@ -718,6 +720,31 @@ fn cmd_package(invocation_cwd: &Path, path: &str, json: bool) -> Result<()> {
                     .map(|import| format!(
                         "{} {} ({})",
                         import.import, import.status, import.reason
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+        if !report.symbol_index.is_empty() {
+            println!(
+                "symbol_index: {}",
+                report
+                    .symbol_index
+                    .iter()
+                    .map(|symbol| format!("{} {}", symbol.id, symbol.source_import))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+        if !report.diagnostics.is_empty() {
+            println!(
+                "diagnostics: {}",
+                report
+                    .diagnostics
+                    .iter()
+                    .map(|diagnostic| format!(
+                        "{} {} ({})",
+                        diagnostic.code, diagnostic.import, diagnostic.reason
                     ))
                     .collect::<Vec<_>>()
                     .join(", ")

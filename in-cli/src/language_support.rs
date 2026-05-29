@@ -18,12 +18,12 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "in",
         parser_id: Some("in"),
         extensions: &["in"],
-        level: 2,
-        level_label: "Core IR body subset",
+        level: 3,
+        level_label: "bounded Core IR body subset with source diagnostics",
         front: "in_lang_parse",
         runtime_boundary: "self-hosted Core IR to textual SIL and bytecode VM subset",
         example: "apps/polyglot-sample/sample.in",
-        next_step: "Deepen diagnostics, type rules, and executable runtime coverage",
+        next_step: "Bind more package symbols and deepen executable runtime coverage",
     },
     LanguageSupport {
         language: "icore",
@@ -516,6 +516,16 @@ mod tests {
             assert!(entry.front.contains("icore"));
             assert!(entry.runtime_boundary.contains(".icore"));
         }
+    }
+
+    #[test]
+    fn only_in_reports_level_three() {
+        let level_three = LANGUAGE_SUPPORT
+            .iter()
+            .filter(|entry| entry.level == 3)
+            .map(|entry| entry.language)
+            .collect::<Vec<_>>();
+        assert_eq!(level_three, vec!["in"]);
     }
 
     #[test]

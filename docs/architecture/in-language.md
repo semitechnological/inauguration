@@ -4,7 +4,7 @@ The **`.in`** front is inauguration’s **brace + line-oriented** compiler/orche
 
 `.in` is shipped here first as something **`in build` can lower to textual SIL** without `swiftc`. It is not a UI language and should not absorb crepuscularity view-tree or rendering responsibilities.
 
-Workflow entry points (flags, sample path, CI script) stay in the repo [README](../../README.md#in-build-and-swiftpm-staging-macoslinux); this page is grammar + IR shape only.
+Workflow entry points (flags, sample path, CI script) stay in the repo [README](../../README.md#core-commands); this page is grammar + IR shape only.
 
 ## Ideology
 
@@ -17,7 +17,7 @@ Workflow entry points (flags, sample path, CI script) stay in the repo [README](
 What `in-cli/src/in_lang_parse.rs` implements today:
 
 - Top-level **`package name;`** and **`module name;`** — accepted as dotted identity facts for agent and graph consumers. At most one package and one module declaration may appear in a source file. `in agent` and `in graph` expose them in the `effects` list as `package:<name>` and `module:<name>`. `in graph --json` reports `package_identity`, and `in package --json` reports `source_identity` for source paths, comparing `.in` facts to the nearest `inauguration.package`. They do not install dependencies or change Core IR names yet.
-- Top-level **`use name;`** — accepted as semantic package import facts. `in graph --json` and `in package --json` report `semantic_imports` for `.in` source paths, resolving each import against the nearest `inauguration.package` dependency by exact key or final dotted segment. They do not install dependencies, load extensions, or change Core IR names yet.
+- Top-level **`use name;`** — accepted as semantic package import facts. `in graph --json`, `in package --json`, and `in agent` report semantic imports for `.in` source paths, resolving each import against the nearest `inauguration.package` dependency by exact key or final dotted segment. Resolved imports create package symbol-index facts such as `symbol:dependency:postgres`; unresolved imports produce `INPKG001` warnings. They do not install dependencies, load extensions, or change code generation yet.
 - Top-level **`import path;`** — accepted as agent-facing source dependency facts. Local relative `.in` imports such as `import "./lib.in";` merge imported declarations into the parsed Core IR module when reading a file. `in agent` exposes imports in the `effects` list as `import:<path>`.
 - Standard imports **`std.io`**, **`std.fs`**, **`std.http`**, **`std.json`**, **`std.process`**, and **`std.cli`** synthesize bounded extern-style Core IR declarations for `print`, `read_file`, `write_file`, `http_get`, `json_parse`, `json_stringify`, `process_run`, `arg_count`, and `arg`, with capability requirements checked by `in agent`.
 - Top-level **`capability name;`** — accepted as explicit outside-world capability facts. `in agent` exposes them in the `capabilities` list.
@@ -44,8 +44,18 @@ The v0.4 contract is deterministic local visibility and planning before remote e
 |---------|--------------------|
 | Canonicalization | `in canonicalize --path <file> [--check]` parses source through the strict `.in` front and emits deterministic `.in` with normalized types, explicit `-> void`, braced bodies, and semicolon-free statements. |
 | Graph command | `in graph --path <file> [--imports] [--capabilities] [--symbols] [--calls] [--json]` reports parser decision, package/module/import effects, semantic import resolution, capabilities, symbols, call edges, entry function, orchestration facts, and timing. |
-| Package manifest report | `in package --path <dir\|manifest\|source> [--json]` reports package identity, semantic import resolution, targets, dependencies, capabilities, extensions, package graph nodes, target selection, and capability policy. |
+| Package manifest report | `in package --path <dir\|manifest\|source> [--json]` reports package identity, semantic import resolution, semantic import diagnostics, package symbol-index facts, targets, dependencies, capabilities, extensions, package graph nodes, target selection, and capability policy. |
 | Orchestration facts | `parse_in_surface_info`, `in agent`, and `in graph --json` expose enabled extensions, annotations, distributed function declarations, parallel region count, local plan steps, local distributed job facts, and explicit runtime reason codes. |
+
+Semantic import examples:
+
+```in
+package hyperchat;
+module hyperchat.main;
+use database.postgres;
+```
+
+With `postgres` declared in `inauguration.package`, reports include `status: "resolved"` and `symbol:dependency:postgres`. An undeclared import such as `use database.mysql;` reports `INPKG001` with `severity: "warning"` and does not create a symbol-index entry.
 
 See [orchestration-compiler.md](orchestration-compiler.md) for the command/status contract.
 

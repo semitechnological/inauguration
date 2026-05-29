@@ -53,6 +53,8 @@ pub struct PackageReport {
     pub graph: PackageGraphReport,
     pub source_identity: Option<PackageSourceIdentity>,
     pub semantic_imports: Vec<PackageSemanticImport>,
+    pub symbol_index: Vec<PackageSymbolIndexEntry>,
+    pub diagnostics: Vec<PackageDiagnostic>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -91,6 +93,24 @@ pub struct PackageSemanticImport {
     pub dependency: Option<String>,
     pub status: String,
     pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PackageSymbolIndexEntry {
+    pub id: String,
+    pub kind: String,
+    pub name: String,
+    pub source_import: String,
+    pub dependency: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PackageDiagnostic {
+    pub code: String,
+    pub severity: String,
+    pub import: String,
+    pub reason: String,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -170,6 +190,8 @@ where
         Some(&report.manifest.name),
     ));
     report.semantic_imports = resolve_semantic_imports(&semantic_imports, Some(&report.manifest));
+    report.symbol_index = symbol_index_for_semantic_imports(&report.semantic_imports);
+    report.diagnostics = diagnostics_for_semantic_imports(&report.semantic_imports);
     Ok(report)
 }
 
@@ -197,6 +219,8 @@ where
         graph,
         source_identity: None,
         semantic_imports: Vec::new(),
+        symbol_index: Vec::new(),
+        diagnostics: Vec::new(),
     }
 }
 
@@ -263,6 +287,46 @@ fn resolve_semantic_import(
         status: "unresolved".to_string(),
         reason: "dependency-not-declared".to_string(),
     }
+}
+
+pub fn symbol_index_for_semantic_imports(
+    imports: &[PackageSemanticImport],
+) -> Vec<PackageSymbolIndexEntry> {
+    imports
+        .iter()
+        .filter_map(|import| {
+            let dependency = import.dependency.as_ref()?;
+            if import.status != "resolved" {
+                return None;
+            }
+            Some(PackageSymbolIndexEntry {
+                id: format!("symbol:dependency:{dependency}"),
+                kind: "dependency".to_string(),
+                name: dependency.clone(),
+                source_import: import.import.clone(),
+                dependency: dependency.clone(),
+            })
+        })
+        .collect()
+}
+
+pub fn diagnostics_for_semantic_imports(
+    imports: &[PackageSemanticImport],
+) -> Vec<PackageDiagnostic> {
+    imports
+        .iter()
+        .filter(|import| import.status != "resolved")
+        .map(|import| PackageDiagnostic {
+            code: "INPKG001".to_string(),
+            severity: "warning".to_string(),
+            import: import.import.clone(),
+            reason: import.reason.clone(),
+            message: format!(
+                "semantic import `{}` is not declared in the nearest inauguration.package",
+                import.import
+            ),
+        })
+        .collect()
 }
 
 pub fn source_identity_for_path(
@@ -1106,6 +1170,41 @@ extensions:
     }
 
     #[test]
+    fn source_package_report_carries_semantic_symbol_index_and_diagnostics() {
+        let temp = TempDirGuard::new();
+        fs::write(
+            temp.path.join("inauguration.package"),
+            r#"name: agents.sample
+version: 0.1.0
+dependencies:
+  postgres:
+    version: ^1.0.0
+"#,
+        )
+        .expect("write manifest");
+        let source_path = temp.path.join("main.in");
+        fs::write(
+            &source_path,
+            "package agents.sample;\nuse database.postgres;\nuse cache.redis;\nfn main() -> void { return; }\n",
+        )
+        .expect("write source");
+
+        let report = load_package_report_from_source(
+            &source_path,
+            std::iter::empty::<&str>(),
+            std::iter::empty::<&str>(),
+        )
+        .expect("load source package report");
+
+        assert_eq!(report.symbol_index.len(), 1);
+        assert_eq!(report.symbol_index[0].id, "symbol:dependency:postgres");
+        assert_eq!(report.symbol_index[0].source_import, "database.postgres");
+        assert_eq!(report.diagnostics.len(), 1);
+        assert_eq!(report.diagnostics[0].code, "INPKG001");
+        assert_eq!(report.diagnostics[0].import, "cache.redis");
+    }
+
+    #[test]
     fn reports_source_identity_match_and_mismatch() {
         let matching = source_identity_for_surface(
             Some("graphable".into()),
@@ -1155,5 +1254,16 @@ dependencies:
         assert_eq!(imports[0].reason, "dependency-suffix-match");
         assert_eq!(imports[1].status, "unresolved");
         assert_eq!(imports[1].reason, "dependency-not-declared");
+
+        let symbols = symbol_index_for_semantic_imports(&imports);
+        assert_eq!(symbols.len(), 1);
+        assert_eq!(symbols[0].id, "symbol:dependency:postgres");
+        assert_eq!(symbols[0].source_import, "database.postgres");
+
+        let diagnostics = diagnostics_for_semantic_imports(&imports);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "INPKG001");
+        assert_eq!(diagnostics[0].severity, "warning");
+        assert_eq!(diagnostics[0].import, "cache.redis");
     }
 }

@@ -1,0 +1,7 @@
+package hyperchat;
+module hyperchat.missing;
+use database.mysql;
+
+fn main() -> void {
+  return;
+}

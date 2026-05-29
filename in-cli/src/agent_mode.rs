@@ -1,22 +1,18 @@
 use crate::core_ir::{Decl, Stmt, Typ, UnifiedModule};
+use crate::package_manifest::{PackageDiagnostic, PackageSymbolIndexEntry};
 use crate::parser_registry::{self, ParserCli, ParserId, ResolvedBuildParser};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 use std::time::Instant;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentParserPreference {
+    #[default]
     Auto,
     In,
     Icore,
-}
-
-impl Default for AgentParserPreference {
-    fn default() -> Self {
-        Self::Auto
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -219,6 +215,8 @@ pub struct AgentReport {
     pub orchestration: OrchestrationFacts,
     pub effects: Vec<String>,
     pub capabilities: Vec<String>,
+    pub package_symbol_index: Vec<PackageSymbolIndexEntry>,
+    pub package_diagnostics: Vec<PackageDiagnostic>,
     pub size_timing: SizeTiming,
     pub repair_plans: Vec<RepairPlan>,
 }
@@ -408,6 +406,13 @@ pub fn explain_diagnostic(code: &str) -> Option<DiagnosticExplanation> {
             "An .in extern binding declares a required capability that the module did not declare",
             "Add the missing top-level capability declaration",
         ),
+        "INPKG001" => (
+            AgentDiagnosticSeverity::Warning,
+            "top-level use declaration matching a dependency in the nearest inauguration.package",
+            "Declare the dependency in inauguration.package or remove the semantic import",
+            "An .in semantic package import does not resolve against the nearest package manifest",
+            "Add the missing dependency to inauguration.package",
+        ),
         _ => return None,
     };
     Some(DiagnosticExplanation {
@@ -454,6 +459,8 @@ fn build_report(path: &Path, config: &AgentModeConfig) -> Result<AgentReport, Ag
     let mut orchestration = OrchestrationFacts::default();
     let mut effects = Vec::new();
     let mut capabilities = Vec::new();
+    let mut package_symbol_index = Vec::new();
+    let mut package_diagnostics = Vec::new();
     match parsed {
         Ok(Some(module)) => {
             core_decl_count = module.decls.len();
@@ -493,6 +500,35 @@ fn build_report(path: &Path, config: &AgentModeConfig) -> Result<AgentReport, Ag
                 if let Some(module) = surface.module {
                     effects.push(format!("module:{module}"));
                 }
+                let package_manifest =
+                    crate::package_manifest::load_package_manifest_from_source(path)
+                        .ok()
+                        .map(|(_, manifest)| manifest);
+                let semantic_imports = crate::package_manifest::resolve_semantic_imports(
+                    &surface.semantic_imports,
+                    package_manifest.as_ref(),
+                );
+                package_symbol_index =
+                    crate::package_manifest::symbol_index_for_semantic_imports(&semantic_imports);
+                package_diagnostics =
+                    crate::package_manifest::diagnostics_for_semantic_imports(&semantic_imports);
+                for diagnostic_fact in &package_diagnostics {
+                    diagnostics.push(diagnostic(
+                        &diagnostic_fact.code,
+                        AgentDiagnosticSeverity::Warning,
+                        None,
+                        parser_id.as_deref(),
+                        Some("top-level use declaration matching a dependency in the nearest inauguration.package"),
+                        excerpt_bounds(&source, None),
+                        Some("Declare the dependency in inauguration.package or remove the semantic import"),
+                        &diagnostic_fact.message,
+                    ));
+                }
+                effects.extend(
+                    semantic_imports
+                        .into_iter()
+                        .map(|import| format!("use:{}:{}", import.import, import.status)),
+                );
                 effects.extend(
                     surface
                         .imports
@@ -586,6 +622,8 @@ fn build_report(path: &Path, config: &AgentModeConfig) -> Result<AgentReport, Ag
         orchestration,
         effects,
         capabilities,
+        package_symbol_index,
+        package_diagnostics,
         size_timing: SizeTiming {
             source_bytes,
             source_lines,
@@ -665,8 +703,8 @@ fn language_level(resolved: ResolvedBuildParser) -> LanguageLevel {
             label: "native Swift subset to SIL".to_string(),
         },
         ResolvedBuildParser::CoreIr(ParserId::In) => LanguageLevel {
-            level: 2,
-            label: ".in Core IR body subset".to_string(),
+            level: 3,
+            label: ".in bounded subset with source diagnostics".to_string(),
         },
         ResolvedBuildParser::CoreIr(ParserId::Icore) => LanguageLevel {
             level: 1,
@@ -931,6 +969,8 @@ fn io_error_report(path: &Path, config: &AgentModeConfig, err: AgentModeError) -
         orchestration: OrchestrationFacts::default(),
         effects: Vec::new(),
         capabilities: Vec::new(),
+        package_symbol_index: Vec::new(),
+        package_diagnostics: Vec::new(),
         size_timing: SizeTiming {
             source_bytes: 0,
             source_lines: 0,
@@ -1090,6 +1130,25 @@ fn repair_plan_for(diagnostic: &AgentDiagnostic, source: &str) -> Option<RepairP
             ],
             rationale: "agent-mode can identify the missing capability and propose an explicit declaration".to_string(),
         }),
+        "INPKG001" => Some(RepairPlan {
+            id: "declare-package-dependency".to_string(),
+            code: diagnostic.code.clone(),
+            title: "Declare package dependency".to_string(),
+            applies_to_code: diagnostic.code.clone(),
+            parser_id: diagnostic.parser_id.clone(),
+            confidence: 0.72,
+            actions: vec![RepairAction {
+                kind: "manual_review".to_string(),
+                span: diagnostic.span.clone(),
+                replacement: None,
+                description: "Add the dependency to inauguration.package or remove the semantic import".to_string(),
+            }],
+            notes: vec![
+                "semantic imports resolve against the nearest inauguration.package".to_string(),
+                "dependency installation and extension loading are not performed by this report".to_string(),
+            ],
+            rationale: "agent-mode can identify the unresolved package import, but package dependency edits depend on the intended dependency version".to_string(),
+        }),
         _ => None,
     }
 }
@@ -1225,6 +1284,17 @@ mod tests {
     }
 
     #[test]
+    fn in_report_uses_level_three_after_diagnostic_contract() {
+        let temp = temp_source("level-three", "in", "fn main() -> void { return; }\n");
+        let report = json_report(&temp.path, &AgentModeConfig::default()).expect("report");
+        assert_eq!(report.language_level.level, 3);
+        assert_eq!(
+            report.language_level.label,
+            ".in bounded subset with source diagnostics"
+        );
+    }
+
+    #[test]
     fn fix_plan_reports_parse_failure_repair() {
         let temp = temp_source(
             "library",
@@ -1349,6 +1419,88 @@ fn main() -> void { return; }
                 .effects
                 .contains(&"module:agents.video.main".to_string())
         );
+    }
+
+    #[test]
+    fn in_report_indexes_resolved_semantic_imports() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock before UNIX_EPOCH")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "inauguration-agent-mode-package-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).expect("create temp package");
+        fs::write(
+            dir.join("inauguration.package"),
+            r#"name: hyperchat
+version: 0.1.0
+dependencies:
+  postgres:
+    version: ^1.0.0
+"#,
+        )
+        .expect("write manifest");
+        let source_path = dir.join("main.in");
+        fs::write(
+            &source_path,
+            "package hyperchat;\nuse database.postgres;\nfn main() -> void { return; }\n",
+        )
+        .expect("write source");
+
+        let report = json_report(&source_path, &AgentModeConfig::default()).expect("report");
+
+        assert!(
+            report
+                .effects
+                .contains(&"use:database.postgres:resolved".to_string())
+        );
+        assert_eq!(report.package_symbol_index.len(), 1);
+        assert_eq!(
+            report.package_symbol_index[0].id,
+            "symbol:dependency:postgres"
+        );
+        assert!(report.package_diagnostics.is_empty());
+        fs::remove_dir_all(dir).expect("remove temp package");
+    }
+
+    #[test]
+    fn in_report_warns_for_unresolved_semantic_imports() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock before UNIX_EPOCH")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "inauguration-agent-mode-package-missing-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).expect("create temp package");
+        fs::write(
+            dir.join("inauguration.package"),
+            "name: hyperchat\nversion: 0.1.0\n",
+        )
+        .expect("write manifest");
+        let source_path = dir.join("main.in");
+        fs::write(
+            &source_path,
+            "package hyperchat;\nuse database.postgres;\nfn main() -> void { return; }\n",
+        )
+        .expect("write source");
+
+        let report = json_report(&source_path, &AgentModeConfig::default()).expect("report");
+
+        assert!(report.package_symbol_index.is_empty());
+        assert_eq!(report.package_diagnostics.len(), 1);
+        assert_eq!(report.package_diagnostics[0].code, "INPKG001");
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|item| item.code == "INPKG001")
+        );
+        assert_eq!(report.repair_plans[0].id, "declare-package-dependency");
+        fs::remove_dir_all(dir).expect("remove temp package");
     }
 
     #[test]
