@@ -511,7 +511,7 @@ fn parse_expr(s: &str) -> Expr {
         &["&&"][..],
         &["==", "!=", ">=", "<=", ">", "<"][..],
         &["+", "-"][..],
-        &["*", "/"][..],
+        &["*", "/", "%"][..],
     ] {
         if let Some((op, idx)) = find_top_level_binary_op(s, ops) {
             let lhs = trim(&s[..idx]);
@@ -2589,6 +2589,28 @@ fn main() -> void {
         assert!(matches!(
             &body[0],
             Stmt::Return(Some(Expr::Binary { op, .. })) if op == "+"
+        ));
+    }
+
+    #[test]
+    fn fn_body_parses_modulo_at_multiplicative_precedence() {
+        use crate::swift_subset::Expr;
+        let src = "fn main() -> Int { return 7 % 4; }\n";
+        let m = parse_in_source(src).expect("ok");
+        let body = match m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+        {
+            Some(Decl::Function { body, .. }) => body,
+            _ => panic!("main"),
+        };
+        assert!(matches!(
+            &body[0],
+            Stmt::Return(Some(Expr::Binary { op, lhs, rhs }))
+                if op == "%"
+                    && matches!(lhs.as_ref(), Expr::IntLit(7))
+                    && matches!(rhs.as_ref(), Expr::IntLit(4))
         ));
     }
 

@@ -93,6 +93,17 @@ mod tests {
     }
 
     #[test]
+    fn compiles_in_modulo_to_runnable_bytecode() {
+        let path = temp_file("modulo.in");
+        fs::write(&path, "fn main() -> Int { return 7 % 4; }\n").unwrap();
+
+        let output = compile_source_path(&path, "App", ParserCli::Auto).unwrap();
+        assert_eq!(run_bytecode_module(output.module).unwrap(), Value::Int(3));
+
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn rejects_unresolved_identifier_before_lowering() {
         let path = temp_file("unresolved-ident.in");
         fs::write(&path, "fn main() -> Int { return missing; }\n").unwrap();
