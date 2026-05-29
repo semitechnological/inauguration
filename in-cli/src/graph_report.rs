@@ -107,33 +107,38 @@ pub fn build_graph_report(
         capabilities.sort();
     }
     let mut symbols = Vec::new();
-    if selection.include_symbols()
-        && let Some(summary) = &report.core_ir_summary
-    {
-        symbols.extend(summary.structs.iter().map(|item| {
-            GraphSymbol {
-                kind: "struct".to_string(),
+    if selection.include_symbols() {
+        if let Some(summary) = &report.core_ir_summary {
+            symbols.extend(summary.structs.iter().map(|item| {
+                GraphSymbol {
+                    kind: "struct".to_string(),
+                    name: item.name.clone(),
+                    detail: item
+                        .fields
+                        .iter()
+                        .map(|field| format!("{}: {}", field.name, field.typ))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                }
+            }));
+            symbols.extend(summary.functions.iter().map(|item| GraphSymbol {
+                kind: "function".to_string(),
                 name: item.name.clone(),
-                detail: item
-                    .fields
-                    .iter()
-                    .map(|field| format!("{}: {}", field.name, field.typ))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            }
-        }));
-        symbols.extend(summary.functions.iter().map(|item| GraphSymbol {
-            kind: "function".to_string(),
+                detail: format!(
+                    "fn({}) -> {}",
+                    item.params
+                        .iter()
+                        .map(|param| param.typ.clone())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    item.return_type
+                ),
+            }));
+        }
+        symbols.extend(package_symbol_index.iter().map(|item| GraphSymbol {
+            kind: item.kind.clone(),
             name: item.name.clone(),
-            detail: format!(
-                "fn({}) -> {}",
-                item.params
-                    .iter()
-                    .map(|param| param.typ.clone())
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                item.return_type
-            ),
+            detail: item.source_import.clone(),
         }));
         symbols.sort_by(|left, right| {
             left.kind
@@ -498,6 +503,14 @@ dependencies:
         assert_eq!(
             report.package_symbol_index[0].source_import,
             "database.postgres"
+        );
+        assert!(
+            report
+                .symbols
+                .iter()
+                .any(|symbol| symbol.kind == "dependency"
+                    && symbol.name == "postgres"
+                    && symbol.detail == "database.postgres")
         );
         assert!(report.package_diagnostics.is_empty());
     }

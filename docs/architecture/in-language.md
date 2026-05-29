@@ -17,7 +17,7 @@ Workflow entry points (flags, sample path, CI script) stay in the repo [README](
 What `in-cli/src/in_lang_parse.rs` implements today:
 
 - Top-level **`package name;`** and **`module name;`** — accepted as dotted identity facts for agent and graph consumers. At most one package and one module declaration may appear in a source file. `in agent` and `in graph` expose them in the `effects` list as `package:<name>` and `module:<name>`. `in graph --json` reports `package_identity`, and `in package --json` reports `source_identity` for source paths, comparing `.in` facts to the nearest `inauguration.package`. They do not install dependencies or change Core IR names yet.
-- Top-level **`use name;`** — accepted as semantic package import facts. `in graph --json`, `in package --json`, and `in agent` report semantic imports for `.in` source paths, resolving each import against the nearest `inauguration.package` dependency by exact key or final dotted segment. Resolved imports create package symbol-index facts such as `symbol:dependency:postgres`; unresolved imports produce `INPKG001` warnings. They do not install dependencies, load extensions, or change code generation yet.
+- Top-level **`use name;`** — accepted as semantic package import facts. `in graph --json`, `in package --json`, and `in agent` report semantic imports for `.in` source paths, resolving each import against the nearest `inauguration.package` dependency by exact key or final dotted segment. Resolved imports create package symbol-index facts such as `symbol:dependency:postgres` and appear in `in graph --symbols` as dependency symbols; unresolved imports produce `INPKG001` warnings. They do not install dependencies, load extensions, or change code generation yet.
 - Top-level **`import path;`** — accepted as agent-facing source dependency facts. Local relative `.in` imports such as `import "./lib.in";` merge imported declarations into the parsed Core IR module when reading a file. `in agent` exposes imports in the `effects` list as `import:<path>`.
 - Standard imports **`std.io`**, **`std.fs`**, **`std.http`**, **`std.json`**, **`std.process`**, and **`std.cli`** synthesize bounded extern-style Core IR declarations for `print`, `read_file`, `write_file`, `http_get`, `json_parse`, `json_stringify`, `process_run`, `arg_count`, and `arg`, with capability requirements checked by `in agent`.
 - Top-level **`capability name;`** — accepted as explicit outside-world capability facts. `in agent` exposes them in the `capabilities` list.
@@ -55,7 +55,7 @@ module hyperchat.main;
 use database.postgres;
 ```
 
-With `postgres` declared in `inauguration.package`, reports include `status: "resolved"` and `symbol:dependency:postgres`. An undeclared import such as `use database.mysql;` reports `INPKG001` with `severity: "warning"` and does not create a symbol-index entry.
+With `postgres` declared in `inauguration.package`, reports include `status: "resolved"`, `symbol:dependency:postgres`, and a graph dependency symbol named `postgres`. An undeclared import such as `use database.mysql;` reports `INPKG001` with `severity: "warning"` and does not create a symbol-index entry.
 
 See [orchestration-compiler.md](orchestration-compiler.md) for the command/status contract.
 

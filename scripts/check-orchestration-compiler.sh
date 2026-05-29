@@ -302,6 +302,31 @@ require(
 require(data.get("diagnostics") == [], "package report unexpectedly had diagnostics")
 PY
 
+echo "check package graph semantic import symbols"
+package_graph_json="$tmp_dir/package-graph.json"
+"${in_cmd[@]}" graph --path apps/package-sample/main.in --json > "$package_graph_json"
+python3 - "$package_graph_json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+data = json.loads(Path(sys.argv[1]).read_text())
+
+def require(condition, message):
+    if not condition:
+        raise SystemExit(message)
+
+symbols = {
+    (symbol.get("kind"), symbol.get("name"), symbol.get("detail"))
+    for symbol in data.get("symbols") or []
+}
+require(
+    ("dependency", "postgres", "database.postgres") in symbols,
+    "package graph missing postgres dependency symbol",
+)
+require(data.get("package_diagnostics") == [], "package graph unexpectedly had diagnostics")
+PY
+
 echo "check unresolved package semantic import"
 missing_package_json="$tmp_dir/package-missing-import.json"
 "${in_cmd[@]}" package --path apps/package-sample/missing-import.in --json > "$missing_package_json"

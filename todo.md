@@ -87,9 +87,9 @@
 - [ ] Unify `.in` identity with the package graph.
   - `idea.md` wants one semantic package graph: package identity, targets, dependencies, capabilities, extensions, indexing, graph invalidation, and semantic imports.
   - First identity slice landed: when a `.in` source declares `package` / `module`, `in graph --json` and `in package --json` report `package_identity` / `source_identity` with stable status and reason codes for match, missing manifest, mismatch, undeclared, unreadable, and non-`.in` sources.
-  - Semantic import binding slice landed: top-level `.in` `use database.postgres;` facts parse, resolve against nearest `inauguration.package` dependencies by exact key or dotted suffix, create package symbol-index facts, and emit `INPKG001` warnings for unresolved imports without dependency installation or extension loading.
+  - Semantic import binding slice landed: top-level `.in` `use database.postgres;` facts parse, resolve against nearest `inauguration.package` dependencies by exact key or dotted suffix, create package symbol-index facts, appear in `in graph --symbols` as dependency symbols, and emit `INPKG001` warnings for unresolved imports without dependency installation or extension loading.
   - Current limitation: `.in package`, `module`, and `use` facts do not affect Core IR names, code generation, dependency installation, or extension loading.
-  - Next slice: let resolved dependency symbol-index entries participate in `.in` imported-symbol lookup without crossing the no-install/no-extension-load boundary.
+  - Next slice: use resolved dependency symbols for source-semantic `.in` name diagnostics without crossing the no-install/no-extension-load boundary.
 
 - [x] Build a language-compatibility ladder.
   - Level 0: route extension or magic line to a known `ParserId`.
