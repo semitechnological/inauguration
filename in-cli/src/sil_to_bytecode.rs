@@ -169,7 +169,7 @@ fn parse_struct_init_payload(rest: &str) -> (String, Vec<(String, String)>) {
 fn is_builtin_function(name: &str) -> bool {
     matches!(
         name,
-        "print" | "print_int" | "print_string" | "to_int" | "to_string" | "len"
+        "print" | "print_int" | "print_string" | "to_int" | "to_string" | "len" | "throw_error"
     )
 }
 

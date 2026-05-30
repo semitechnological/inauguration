@@ -15,6 +15,7 @@ pub struct BytecodeVM {
     pub frames: Vec<CallFrame>,
     pub module: BytecodeModule,
     pub globals: HashMap<String, Value>,
+    pub error_state: Option<Value>,
 }
 
 impl BytecodeVM {
@@ -24,13 +25,18 @@ impl BytecodeVM {
             frames: Vec::new(),
             module,
             globals: HashMap::new(),
+            error_state: None,
         }
     }
 
     /// Run the bytecode program.
     pub fn run(&mut self) -> Result<Value, String> {
         let entry = self.module.entry_point.clone();
-        self.call_function(&entry, vec![])
+        let result = self.call_function(&entry, vec![]);
+        if let Some(ref err) = self.error_state {
+            return Err(format!("uncaught exception: {}", err.to_string_display()));
+        }
+        result
     }
 
     /// Call a user-defined function.
@@ -57,6 +63,10 @@ impl BytecodeVM {
         self.execute_function(&func)?;
         self.frames.pop();
 
+        if self.error_state.is_some() {
+            return Ok(Value::Nil);
+        }
+
         Ok(if self.stack.is_empty() {
             Value::Nil
         } else {
@@ -73,7 +83,7 @@ impl BytecodeVM {
             let frame = &self.frames[frame_idx];
             let ip = frame.ip;
 
-            if ip >= func.instructions.len() {
+            if ip >= func.instructions.len() || self.error_state.is_some() {
                 break;
             }
 
@@ -245,7 +255,7 @@ impl BytecodeVM {
     }
 
     /// Call a built-in function.
-    fn call_builtin(&self, name: &str, args: Vec<Value>) -> Result<Value, String> {
+    fn call_builtin(&mut self, name: &str, args: Vec<Value>) -> Result<Value, String> {
         match name {
             "print" => {
                 for arg in args {
@@ -286,6 +296,14 @@ impl BytecodeVM {
                 } else {
                     Ok(Value::Int(0))
                 }
+            }
+            "throw_error" => {
+                let err_val = args
+                    .into_iter()
+                    .next()
+                    .unwrap_or(Value::String("unhandled exception".to_string()));
+                self.error_state = Some(err_val);
+                Ok(Value::Nil)
             }
             _ => Err(format!("unknown builtin: {}", name)),
         }
