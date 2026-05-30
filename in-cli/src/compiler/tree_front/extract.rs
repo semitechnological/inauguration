@@ -47,9 +47,7 @@ fn dispatch(id: ParserId, path: &Path, src: &str) -> Result<UnifiedModule, Strin
             extract_fn_nodes(b, r, &["function_definition"], c_like_function_decl)
         }),
         ParserId::Cpp | ParserId::ObjCpp => {
-            parse_lang(tree_sitter_cpp::LANGUAGE.into(), src, |b, r| {
-                extract_fn_nodes(b, r, &["function_definition"], c_like_function_decl)
-            })
+            parse_lang(tree_sitter_cpp::LANGUAGE.into(), src, extract_cpp_with_classes)
         }
         ParserId::ObjC => parse_lang(tree_sitter_objc::LANGUAGE.into(), src, |b, r| {
             extract_fn_nodes(
@@ -865,6 +863,95 @@ fn ast_args(src: &[u8], args: Node<'_>, shape: AstShape) -> Option<Vec<Expr>> {
     Some(out)
 }
 
+fn extract_cpp_with_classes(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
+    let mut decls = Vec::new();
+
+    let mut class_nodes = Vec::new();
+    collect_kinds(root, &["class_specifier", "struct_specifier"], &mut class_nodes);
+    for c in class_nodes {
+        if let Some(d) = cpp_class_decl(src, c) {
+            decls.push(d);
+        }
+    }
+
+    let mut func_nodes = Vec::new();
+    collect_kinds(root, &["function_definition"], &mut func_nodes);
+    for f in func_nodes {
+        let is_class_method = f
+            .parent()
+            .map_or(false, |p| p.kind() == "field_declaration_list");
+        if !is_class_method {
+            if let Some(d) = c_like_function_decl(src, f) {
+                decls.push(d);
+            }
+        }
+    }
+
+    Ok(decls)
+}
+
+fn cpp_class_decl<'a>(src: &[u8], class_node: Node<'a>) -> Option<Decl> {
+    let name_n = class_node.child_by_field_name("name")?;
+    let name = node_txt(src, name_n).trim().to_string();
+    let extends = cpp_base_class(src, class_node);
+    let (fields, methods) = cpp_class_body(src, class_node);
+    Some(Decl::Class {
+        name,
+        fields,
+        methods,
+        visibility: Visibility::Pub,
+        extends,
+        implements: vec![],
+    })
+}
+
+fn cpp_base_class<'a>(src: &[u8], class_node: Node<'a>) -> Option<String> {
+    let bases = class_node
+        .child_by_field_name("bases")
+        .or_else(|| first_named(class_node, "base_class_clause"))?;
+    let first = first_named(bases, "type_identifier")
+        .or_else(|| first_named(bases, "identifier"))?;
+    Some(node_txt(src, first).trim().to_string())
+}
+
+fn cpp_class_body<'a>(src: &[u8], class_node: Node<'a>) -> (Vec<(String, Typ)>, Vec<Decl>) {
+    let body = match class_node.child_by_field_name("body") {
+        Some(b) => b,
+        None => return (Vec::new(), Vec::new()),
+    };
+
+    let mut fields = Vec::new();
+    let mut field_nodes = Vec::new();
+    collect_kinds(body, &["field_declaration"], &mut field_nodes);
+    for f in field_nodes {
+        let field_type = f
+            .child_by_field_name("type")
+            .map(|t| Typ::Named(node_txt(src, t).trim().to_string()))
+            .unwrap_or(Typ::Named("int".into()));
+        let decl = f.child_by_field_name("declarator");
+        if let Some(decl) = decl {
+            let name_node =
+                named_descendant(decl, "field_identifier")
+                    .or_else(|| named_descendant(decl, "identifier"));
+            if let Some(name_n) = name_node {
+                let field_name = node_txt(src, name_n).trim().to_string();
+                fields.push((field_name, field_type));
+            }
+        }
+    }
+
+    let mut methods = Vec::new();
+    let mut method_nodes = Vec::new();
+    collect_kinds(body, &["function_definition"], &mut method_nodes);
+    for m in method_nodes {
+        if let Some(d) = c_like_function_decl(src, m) {
+            methods.push(d);
+        }
+    }
+
+    (fields, methods)
+}
+
 pub(super) fn extract_fn_nodes<'a>(
     src: &[u8],
     root: Node<'a>,
@@ -878,8 +965,8 @@ pub(super) fn extract_fn_nodes<'a>(
 
 fn c_like_fn_name<'a>(src: &[u8], func_def: Node<'a>) -> Option<String> {
     let declarator = named_descendant(func_def, "function_declarator")?;
-    let id = named_descendant(declarator, "identifier")
-        .or_else(|| named_descendant(declarator, "field_identifier"))?;
+    let id = named_descendant(declarator, "field_identifier")
+        .or_else(|| named_descendant(declarator, "identifier"))?;
     Some(normalize_entry(node_txt(src, id).trim()))
 }
 
@@ -999,7 +1086,10 @@ fn c_one_parameter(src: &[u8], pd: Node<'_>, idx: usize) -> Option<(String, Typ)
     }
     let ty = c_typ_from_decl_specifier_text(ty_text);
     let name = decl
-        .and_then(|d| named_descendant(d, "identifier"))
+        .and_then(|d| {
+            named_descendant(d, "field_identifier")
+                .or_else(|| named_descendant(d, "identifier"))
+        })
         .map(|id| node_txt(src, id).trim().to_string())
         .filter(|n| !n.is_empty())
         .unwrap_or_else(|| format!("arg{idx}"));
@@ -1502,7 +1592,33 @@ fn java_class_body<'a>(src: &[u8], class_node: Node<'a>) -> (Vec<(String, Typ)>,
         }
     }
 
+    let mut ctor_nodes = Vec::new();
+    collect_kinds(body, &["constructor_declaration"], &mut ctor_nodes);
+    for c in ctor_nodes {
+        if let Some(d) = java_constructor(src, c) {
+            methods.push(d);
+        }
+    }
+
     (fields, methods)
+}
+
+fn java_constructor<'a>(src: &[u8], c: Node<'a>) -> Option<Decl> {
+    let fp = named_descendant(c, "formal_parameters")?;
+    let parent = fp.parent()?;
+    let name_n = parent.child_by_field_name("name")?;
+    let name = normalize_entry(node_txt(src, name_n).trim());
+    let params = java_formals(src, fp);
+    let body = c
+        .child_by_field_name("body")
+        .map(|b| java_body(src, b))
+        .unwrap_or_default();
+    Some(Decl::Function {
+        name,
+        params,
+        ret: Typ::Void,
+        body,
+    })
 }
 
 fn java_interface_methods<'a>(src: &[u8], iface_node: Node<'a>) -> Vec<MethodSig> {
@@ -1715,27 +1831,157 @@ fn find_field_deep<'a>(n: Node<'a>, field: &str) -> Option<Node<'a>> {
 }
 
 fn extract_csharp(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
-    extract_fn_nodes(src, root, &["method_declaration"], |src, n| {
-        let name_n = n.child_by_field_name("name")?;
-        let name = normalize_entry(node_txt(src, name_n).trim());
-        let ret = n
+    let mut decls = Vec::new();
+
+    let mut class_nodes = Vec::new();
+    collect_kinds(root, &["class_declaration"], &mut class_nodes);
+    for c in class_nodes {
+        if let Some(d) = csharp_class_decl(src, c) {
+            decls.push(d);
+        }
+    }
+
+    let mut iface_nodes = Vec::new();
+    collect_kinds(root, &["interface_declaration"], &mut iface_nodes);
+    for i in iface_nodes {
+        if let Some(d) = csharp_interface_decl(src, i) {
+            decls.push(d);
+        }
+    }
+
+    let mut method_nodes = Vec::new();
+    collect_kinds(root, &["method_declaration"], &mut method_nodes);
+    for n in method_nodes {
+        if let Some(d) = csharp_method(src, n) {
+            decls.push(d);
+        }
+    }
+
+    Ok(decls)
+}
+
+fn csharp_method<'a>(src: &[u8], n: Node<'a>) -> Option<Decl> {
+    let name_n = n.child_by_field_name("name")?;
+    let name = normalize_entry(node_txt(src, name_n).trim());
+    let ret = n
+        .child_by_field_name("returns")
+        .map(|t| Typ::Named(node_txt(src, t).trim().to_string()))
+        .unwrap_or(Typ::Void);
+    let plist = n.child_by_field_name("parameters")?;
+    let params = csharp_params(src, plist);
+    let body = n
+        .child_by_field_name("body")
+        .or_else(|| first_named(n, "block"))
+        .map(|b| csharp_body(src, b))
+        .unwrap_or_default();
+    Some(Decl::Function {
+        name,
+        params,
+        ret,
+        body,
+    })
+}
+
+fn csharp_class_decl<'a>(src: &[u8], class_node: Node<'a>) -> Option<Decl> {
+    let name_n = class_node.child_by_field_name("name")?;
+    let name = node_txt(src, name_n).trim().to_string();
+    let extends = class_node
+        .child_by_field_name("bases")
+        .and_then(|b| first_named(b, "identifier"))
+        .or_else(|| {
+            class_node
+                .child_by_field_name("bases")
+                .and_then(|b| first_named(b, "type_identifier"))
+        })
+        .map(|n| node_txt(src, n).trim().to_string());
+    let (fields, methods) = csharp_class_body(src, class_node);
+    Some(Decl::Class {
+        name,
+        fields,
+        methods,
+        visibility: Visibility::Internal,
+        extends,
+        implements: vec![],
+    })
+}
+
+fn csharp_interface_decl<'a>(src: &[u8], iface_node: Node<'a>) -> Option<Decl> {
+    let name_n = iface_node.child_by_field_name("name")?;
+    let name = node_txt(src, name_n).trim().to_string();
+    let methods = csharp_iface_methods(src, iface_node);
+    Some(Decl::Interface {
+        name,
+        methods,
+        visibility: Visibility::Internal,
+    })
+}
+
+fn csharp_class_body<'a>(src: &[u8], class_node: Node<'a>) -> (Vec<(String, Typ)>, Vec<Decl>) {
+    let body = match class_node.child_by_field_name("body") {
+        Some(b) => b,
+        None => return (Vec::new(), Vec::new()),
+    };
+
+    let mut fields = Vec::new();
+    let mut field_nodes = Vec::new();
+    collect_kinds(body, &["field_declaration"], &mut field_nodes);
+    for f in field_nodes {
+        let mut var_decls = Vec::new();
+        collect_kinds(f, &["variable_declaration"], &mut var_decls);
+        for vd in var_decls {
+            let field_type = vd
+                .child_by_field_name("type")
+                .map(|t| Typ::Named(node_txt(src, t).trim().to_string()))
+                .unwrap_or(Typ::Named("object".into()));
+            let mut var_decs = Vec::new();
+            collect_kinds(vd, &["variable_declarator"], &mut var_decs);
+            for vdec in var_decs {
+                if let Some(name_n) = vdec.child_by_field_name("name") {
+                    let field_name = node_txt(src, name_n).trim().to_string();
+                    fields.push((field_name, field_type.clone()));
+                }
+            }
+        }
+    }
+
+    let mut methods = Vec::new();
+    let mut method_nodes = Vec::new();
+    collect_kinds(body, &["method_declaration"], &mut method_nodes);
+    for m in method_nodes {
+        if let Some(d) = csharp_method(src, m) {
+            methods.push(d);
+        }
+    }
+
+    (fields, methods)
+}
+
+fn csharp_iface_methods<'a>(src: &[u8], iface_node: Node<'a>) -> Vec<MethodSig> {
+    let body = match iface_node.child_by_field_name("body") {
+        Some(b) => b,
+        None => return Vec::new(),
+    };
+
+    let mut sigs = Vec::new();
+    let mut hits = Vec::new();
+    collect_kinds(body, &["method_declaration"], &mut hits);
+    for m in hits {
+        let name_n = match m.child_by_field_name("name") {
+            Some(n) => n,
+            None => continue,
+        };
+        let name = node_txt(src, name_n).trim().to_string();
+        let ret = m
             .child_by_field_name("returns")
             .map(|t| Typ::Named(node_txt(src, t).trim().to_string()))
             .unwrap_or(Typ::Void);
-        let plist = n.child_by_field_name("parameters")?;
-        let params = csharp_params(src, plist);
-        let body = n
-            .child_by_field_name("body")
-            .or_else(|| first_named(n, "block"))
-            .map(|b| csharp_body(src, b))
-            .unwrap_or_default();
-        Some(Decl::Function {
-            name,
-            params,
-            ret,
-            body,
-        })
-    })
+        let params = match m.child_by_field_name("parameters") {
+            Some(plist) => csharp_params(src, plist),
+            None => vec![],
+        };
+        sigs.push(MethodSig { name, params, ret });
+    }
+    sigs
 }
 
 fn csharp_params<'a>(src: &[u8], plist: Node<'a>) -> Vec<(String, Typ)> {
@@ -3649,6 +3895,224 @@ class Child extends Parent implements Runnable, Serializable {
         let (extends, implements) = class;
         assert_eq!(extends, Some("Parent".to_string()));
         assert_eq!(implements, vec!["Runnable".to_string(), "Serializable".to_string()]);
+    }
+
+    #[test]
+    fn cpp_class_declarations_extract_with_fields_and_methods() {
+        let src = r#"
+class Calculator {
+public:
+    int value;
+    int answer() const { return 42; }
+    int add(int x) { value = value + x; return value; }
+};
+"#;
+        let m = parse_lang(
+            tree_sitter_cpp::LANGUAGE.into(),
+            src,
+            extract_cpp_with_classes,
+        )
+        .expect("ok");
+
+        let class = m
+            .decls
+            .iter()
+            .find_map(|d| match d {
+                Decl::Class { name, fields, methods, .. } if name == "Calculator" => {
+                    Some((fields.clone(), methods.clone()))
+                }
+                _ => None,
+            })
+            .expect("Calculator class");
+        let (fields, methods) = class;
+        assert_eq!(fields, vec![("value".into(), Typ::Named("int".into()))]);
+        assert_eq!(methods.len(), 2);
+        assert!(
+            methods
+                .iter()
+                .any(|d| matches!(d, Decl::Function { name, .. } if name == "answer")),
+            "{methods:?}"
+        );
+        assert!(
+            methods
+                .iter()
+                .any(|d| matches!(d, Decl::Function { name, .. } if name == "add")),
+            "{methods:?}"
+        );
+    }
+
+    #[test]
+    fn cpp_class_with_base_class_extracts_extends() {
+        let src = r#"
+class Child : public Parent {
+public:
+    void method() {}
+};
+"#;
+        let m = parse_lang(
+            tree_sitter_cpp::LANGUAGE.into(),
+            src,
+            extract_cpp_with_classes,
+        )
+        .expect("ok");
+
+        let extends_val = m
+            .decls
+            .iter()
+            .find_map(|d| match d {
+                Decl::Class { name, extends, .. } if name == "Child" => extends.clone(),
+                _ => None,
+            })
+            .expect("Child class extends");
+        assert_eq!(extends_val, "Parent");
+    }
+
+    #[test]
+    fn cpp_top_level_functions_still_extracted_with_class_extractor() {
+        let src = r#"
+class Helper {
+public:
+    int get() { return 1; }
+};
+
+int answer() {
+    return 42;
+}
+"#;
+        let m = parse_lang(
+            tree_sitter_cpp::LANGUAGE.into(),
+            src,
+            extract_cpp_with_classes,
+        )
+        .expect("ok");
+
+        assert!(
+            m.decls
+                .iter()
+                .any(|d| matches!(d, Decl::Class { name, .. } if name == "Helper")),
+            "{m:?}"
+        );
+        assert!(
+            m.decls
+                .iter()
+                .any(|d| matches!(d, Decl::Function { name, .. } if name == "answer")),
+            "{m:?}"
+        );
+    }
+
+    #[test]
+    fn java_constructors_extracted_as_functions() {
+        let src = r#"
+class Counter {
+    private int count;
+    Counter() {
+        count = 0;
+    }
+    Counter(int start) {
+        count = start;
+    }
+    int getValue() { return count; }
+}
+"#;
+        let m = parse_lang(
+            tree_sitter_java::LANGUAGE.into(),
+            src,
+            extract_java_with_classes,
+        )
+        .expect("ok");
+
+        let methods = m
+            .decls
+            .iter()
+            .find_map(|d| match d {
+                Decl::Class { name, methods: mtds, .. } if name == "Counter" => Some(mtds.clone()),
+                _ => None,
+            })
+            .expect("Counter class");
+        assert_eq!(methods.len(), 3);
+        assert!(methods.iter().any(|d| matches!(d, Decl::Function { name, .. } if name == "Counter")));
+        assert!(methods.iter().any(|d| matches!(d, Decl::Function { name, .. } if name == "getValue")));
+
+        let ctor = methods
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, params, .. } if name == "Counter" && params.len() == 1));
+        assert!(ctor.is_some(), "expected parameterized constructor");
+    }
+
+    #[test]
+    fn csharp_class_declarations_extract_with_fields_and_methods() {
+        let src = r#"
+class Accumulator {
+    private int total;
+    public int Add(int value) {
+        total = total + value;
+        return total;
+    }
+    public void Reset() { total = 0; }
+}
+"#;
+        let m = parse_lang(
+            tree_sitter_c_sharp::LANGUAGE.into(),
+            src,
+            extract_csharp,
+        )
+        .expect("ok");
+
+        let class = m
+            .decls
+            .iter()
+            .find_map(|d| match d {
+                Decl::Class { name, fields, methods: mtds, .. } if name == "Accumulator" => {
+                    Some((fields.clone(), mtds.clone()))
+                }
+                _ => None,
+            })
+            .expect("Accumulator class");
+        let (fields, methods) = class;
+        assert_eq!(fields, vec![("total".into(), Typ::Named("int".into()))]);
+        assert_eq!(methods.len(), 2);
+        assert!(methods
+            .iter()
+            .any(|d| matches!(d, Decl::Function { name, .. } if name == "Add")));
+        assert!(methods
+            .iter()
+            .any(|d| matches!(d, Decl::Function { name, .. } if name == "Reset")));
+
+        let flat_add = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "Add"));
+        assert!(flat_add.is_some(), "methods also extracted as flat functions");
+    }
+
+    #[test]
+    fn csharp_interface_declarations_extract_with_method_sigs() {
+        let src = r#"
+interface IResettable {
+    void Reset();
+    int GetValue();
+}
+"#;
+        let m = parse_lang(
+            tree_sitter_c_sharp::LANGUAGE.into(),
+            src,
+            extract_csharp,
+        )
+        .expect("ok");
+
+        let iface = m
+            .decls
+            .iter()
+            .find_map(|d| match d {
+                Decl::Interface { name, methods, .. } if name == "IResettable" => {
+                    Some(methods.clone())
+                }
+                _ => None,
+            })
+            .expect("IResettable interface");
+        assert_eq!(iface.len(), 2);
+        assert!(iface.iter().any(|s| s.name == "Reset" && s.ret == Typ::Named("void".into())));
+        assert!(iface.iter().any(|s| s.name == "GetValue" && s.ret == Typ::Named("int".into())));
     }
 
     #[test]
