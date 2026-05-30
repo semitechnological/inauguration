@@ -583,6 +583,9 @@ fn parse_expr(s: &str) -> Expr {
     if let Some(inner) = strip_enclosing_parens(s) {
         return parse_expr(inner);
     }
+    if let Some(closure) = try_parse_closure_expr(s) {
+        return closure;
+    }
     for ops in [
         &["||"][..],
         &["&&"][..],
@@ -630,6 +633,9 @@ fn parse_expr(s: &str) -> Expr {
     }
     if s.len() >= 2 && s.starts_with('"') && s.ends_with('"') {
         return Expr::StringLit(s[1..s.len() - 1].to_string());
+    }
+    if let Some(closure) = try_parse_closure_expr(s) {
+        return closure;
     }
     if s.starts_with('[') && s.ends_with(']') {
         let inner = &s[1..s.len() - 1];
@@ -711,6 +717,72 @@ fn parse_expr(s: &str) -> Expr {
     Expr::Ident(s.to_string())
 }
 
+fn try_parse_closure_expr(s: &str) -> Option<Expr> {
+    let s = trim(s);
+    let rest = s.strip_prefix("fn")?;
+    if !rest.starts_with('(') && !rest.starts_with(" (") {
+        return None;
+    }
+    let rest = trim(rest);
+    let rest = &rest[1..];
+    let mut paren = 1i32;
+    let mut in_string = false;
+    let mut escape = false;
+    let mut close_idx = None;
+    for (i, c) in rest.char_indices() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        if in_string {
+            if c == '\\' {
+                escape = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => in_string = true,
+            '(' => paren += 1,
+            ')' => {
+                paren -= 1;
+                if paren == 0 {
+                    close_idx = Some(i);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let close_idx = close_idx?;
+    let param_blob = trim(&rest[..close_idx]);
+    let params = if param_blob.is_empty() {
+        Vec::new()
+    } else {
+        split_and_trim(',', param_blob)
+            .into_iter()
+            .map(|t| parse_param(&t))
+            .collect()
+    };
+    let tail = trim(&rest[close_idx + 1..]);
+    let body_start = tail.find('{')?;
+    let type_text = trim(&tail[..body_start]);
+    let ret = if let Some(rest) = type_text.strip_prefix("->").or_else(|| type_text.strip_prefix("- >")) {
+        parse_in_type(trim(rest))
+    } else {
+        Typ::Void
+    };
+    let body_rest = &tail[body_start..];
+    let body_inner = brace_content_after_open(body_rest, 0)?;
+    let body = parse_function_body(body_inner).ok()?;
+    Some(Expr::Closure {
+        params,
+        ret,
+        body,
+    })
+}
+
 fn strip_enclosing_parens(s: &str) -> Option<&str> {
     let s = trim(s);
     if !(s.starts_with('(') && s.ends_with(')')) {
@@ -782,6 +854,9 @@ fn find_top_level_binary_op<'a>(s: &str, ops: &[&'a str]) -> Option<(&'a str, us
             _ if depth == 0 => {
                 for op in ops {
                     if s[i..].starts_with(op) {
+                        if *op == "-" && s[i + 1..].starts_with('>') {
+                            continue;
+                        }
                         matches.push((*op, i));
                     }
                 }
@@ -981,6 +1056,9 @@ fn split_function_statements(body: &str) -> Vec<String> {
                 depth -= 1;
                 if depth == 0 {
                     if body[i + 1..].trim_start().starts_with("else") {
+                        continue;
+                    }
+                    if body[i + 1..].trim_start().starts_with("catch") {
                         continue;
                     }
                     if body[i + 1..].trim_start().starts_with('.') {
@@ -1219,6 +1297,77 @@ fn parse_match_arms(inner: &str) -> Result<Vec<crate::core_ir::MatchArm>, String
     Ok(arms)
 }
 
+fn parse_throw_stmt(s: &str) -> Result<Stmt, String> {
+    let rest = trim(s)
+        .strip_prefix("throw")
+        .ok_or_else(|| ".in: internal throw parse".to_string())?;
+    let rest = trim(rest);
+    if rest.is_empty() {
+        return Err(".in: `throw` needs an expression".into());
+    }
+    Ok(Stmt::Throw(parse_expr(rest)))
+}
+
+fn parse_try_stmt(s: &str) -> Result<Stmt, String> {
+    let rest = trim(s)
+        .strip_prefix("try ")
+        .or_else(|| trim(s).strip_prefix("try{"))
+        .or_else(|| {
+            if trim(s) == "try" {
+                Some("")
+            } else {
+                None
+            }
+        })
+        .ok_or_else(|| ".in: internal try parse".to_string())?;
+    if trim(s).starts_with("try{") {
+        let rest = format!("{{{rest}");
+        let rest_str = rest.as_str();
+        return parse_try_stmt_inner(rest_str);
+    }
+    let rest = trim(rest);
+    if !rest.starts_with('{') {
+        return Err(".in: `try` needs `{` body".into());
+    }
+    parse_try_stmt_inner(rest)
+}
+
+fn parse_try_stmt_inner(rest: &str) -> Result<Stmt, String> {
+    let (body_inner, close) = brace_content_bounds_after_open(rest, 0)
+        .ok_or_else(|| ".in: unclosed `try` body".to_string())?;
+    let mut catches = Vec::new();
+    let mut pos = close + 1;
+    while pos < rest.len() {
+        let tail = trim(&rest[pos..]);
+        let Some(catch_rest) = tail.strip_prefix("catch") else {
+            break;
+        };
+        let catch_rest = trim(catch_rest);
+        if catch_rest.is_empty() {
+            break;
+        }
+        let open_rel = catch_rest
+            .find('{')
+            .ok_or_else(|| ".in: `catch` needs `{` body".to_string())?;
+        let pattern = trim(&catch_rest[..open_rel]);
+        if pattern.is_empty() {
+            return Err(".in: `catch` pattern missing".into());
+        }
+        let abs_open = pos + rest[pos..].find('{').expect("catch open brace");
+        let (catch_inner, catch_close) = brace_content_bounds_after_open(rest, abs_open)
+            .ok_or_else(|| ".in: unclosed `catch` body".to_string())?;
+        catches.push(crate::core_ir::CatchArm {
+            pattern: pattern.to_string(),
+            body: parse_function_body(catch_inner)?,
+        });
+        pos = catch_close + 1;
+    }
+    Ok(Stmt::Try {
+        body: parse_function_body(body_inner)?,
+        catches,
+    })
+}
+
 fn parse_stmt_line(line: &str) -> Result<Stmt, String> {
     let s = trim(line);
     if s.is_empty() {
@@ -1235,6 +1384,14 @@ fn parse_stmt_line(line: &str) -> Result<Stmt, String> {
     }
     if s.starts_with("match ") {
         return parse_match_stmt(s);
+    }
+    if s.starts_with("try ") || s.starts_with("try{") || s == "try" {
+        return parse_try_stmt(s);
+    }
+    if s.starts_with("throw")
+        && (s.len() == 5 || s.chars().nth(5).is_some_and(|c| c.is_whitespace()))
+    {
+        return parse_throw_stmt(s);
     }
     if s.starts_with("return")
         && (s.len() == 6 || s.chars().nth(6).is_some_and(|c| c.is_whitespace()))
@@ -1646,6 +1803,7 @@ fn duplicate_top_level_names(module: &UnifiedModule) -> Vec<String> {
         match d {
             Decl::Struct { name, .. } => names.push(name.clone()),
             Decl::Function { name, .. } => names.push(name.clone()),
+            Decl::Class { .. } | Decl::Interface { .. } => {}
         }
     }
     let mut seen = HashSet::new();
@@ -1723,6 +1881,7 @@ fn validate_expr_shapes(
             }
             Ok(())
         }
+        Expr::Closure { .. } => Ok(()),
     }
 }
 
@@ -1780,6 +1939,19 @@ fn validate_stmt_types(
             for arm in arms {
                 for nested in &arm.body {
                     validate_stmt_types(fn_name, structs, struct_fields, nested)?;
+                }
+            }
+        }
+        Stmt::Throw(expr) => {
+            validate_expr_shapes(fn_name, struct_fields, expr)?;
+        }
+        Stmt::Try { body, catches } => {
+            for stmt in body {
+                validate_stmt_types(fn_name, structs, struct_fields, stmt)?;
+            }
+            for catch in catches {
+                for stmt in &catch.body {
+                    validate_stmt_types(fn_name, structs, struct_fields, stmt)?;
                 }
             }
         }
@@ -1870,6 +2042,17 @@ fn desugar_method_calls_in_body(
                 }
             }
             Stmt::Return(None) => {}
+            Stmt::Throw(expr) => {
+                desugar_method_calls_in_expr(expr, env, structs, fn_rets);
+            }
+            Stmt::Try { body, catches } => {
+                let mut try_env = env.clone();
+                desugar_method_calls_in_body(body, &mut try_env, structs, fn_rets);
+                for catch in catches {
+                    let mut catch_env = env.clone();
+                    desugar_method_calls_in_body(&mut catch.body, &mut catch_env, structs, fn_rets);
+                }
+            }
         }
     }
 }
@@ -1915,6 +2098,10 @@ fn desugar_method_calls_in_expr(
             }
         }
         Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Ident(_) => {}
+        Expr::Closure { body, .. } => {
+            let mut closure_env = env.clone();
+            desugar_method_calls_in_body(body, &mut closure_env, structs, fn_rets);
+        }
     }
 }
 
@@ -1970,6 +2157,7 @@ fn infer_in_expr_type(
                 None
             }
         }
+        Expr::Closure { .. } => None,
     }
 }
 
@@ -2054,6 +2242,7 @@ fn validate_module(module: &UnifiedModule, require_main: bool) -> Result<(), Str
                     validate_stmt_types(name, &struct_set, &struct_fields, st)?;
                 }
             }
+            Decl::Class { .. } | Decl::Interface { .. } => {}
         }
     }
 
@@ -3097,9 +3286,152 @@ fn main() -> void
             &body[1],
             Stmt::Match { scrutinee, arms }
                 if matches!(scrutinee, Expr::Ident(name) if name == "tag")
-                    && arms.len() == 2
+                    &&             arms.len() == 2
                     && arms[0].pattern == "1"
                     && arms[1].pattern == "_"
         ));
+    }
+
+    #[test]
+    fn fn_body_parses_throw_statement() {
+        let src = r#"
+fn fail(msg: String) -> void {
+  throw msg;
+}
+fn main() -> void
+"#;
+        let m = parse_in_source(src).expect("ok");
+        let body = match m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "fail"))
+        {
+            Some(Decl::Function { body, .. }) => body,
+            _ => panic!("fail"),
+        };
+        assert!(matches!(
+            &body[0],
+            Stmt::Throw(Expr::Ident(name)) if name == "msg"
+        ));
+    }
+
+    #[test]
+    fn fn_body_parses_try_catch_statement() {
+        let src = r#"
+fn protect() -> void {
+  try {
+    let n = 0;
+    n = n + 1;
+  } catch e {
+    n = 0;
+  }
+  return;
+}
+fn main() -> void
+"#;
+        let m = parse_in_source(src).expect("ok");
+        let body = match m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "protect"))
+        {
+            Some(Decl::Function { body, .. }) => body,
+            _ => panic!("protect"),
+        };
+        assert!(matches!(&body[0], Stmt::Try { body: try_body, catches }
+            if try_body.len() == 2 && catches.len() == 1 && catches[0].pattern == "e"));
+    }
+
+    #[test]
+    fn fn_body_parses_try_with_multiple_catch_arms() {
+        let src = r#"
+fn handler() -> void {
+  try {
+    let n = 0;
+  } catch e {
+    n = 1;
+  } catch _ {
+    n = 2;
+  }
+  return;
+}
+fn main() -> void
+"#;
+        let m = parse_in_source(src).expect("ok");
+        let body = match m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "handler"))
+        {
+            Some(Decl::Function { body, .. }) => body,
+            _ => panic!("handler"),
+        };
+        assert!(matches!(&body[0], Stmt::Try { catches, .. }
+            if catches.len() == 2 && catches[0].pattern == "e" && catches[1].pattern == "_"));
+    }
+
+    #[test]
+    fn fn_body_parses_closure_expression() {
+        let src = r#"
+fn main() -> void {
+  let add = fn(a: Int, b: Int) -> Int { return a + b; };
+  return;
+}
+"#;
+        let m = parse_in_source(src).expect("ok");
+        let body = match m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+        {
+            Some(Decl::Function { body, .. }) => body,
+            _ => panic!("main"),
+        };
+        assert!(matches!(
+            &body[0],
+            Stmt::Let(name, None, Expr::Closure { params, ret, body: closure_body })
+                if name == "add"
+                    && params.len() == 2
+                    && matches!(ret, Typ::Int)
+                    && closure_body.len() == 1
+        ));
+    }
+
+    #[test]
+    fn closure_without_return_type_defaults_to_void() {
+        let src = r#"
+fn main() -> void {
+  let f = fn() { return; };
+  return;
+}
+"#;
+        let m = parse_in_source(src).expect("ok");
+        let body = match m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+        {
+            Some(Decl::Function { body, .. }) => body,
+            _ => panic!("main"),
+        };
+        assert!(matches!(
+            &body[0],
+            Stmt::Let(name, None, Expr::Closure { ret, .. })
+                if name == "f" && matches!(ret, Typ::Void)
+        ));
+    }
+
+    #[test]
+    fn throw_without_expression_rejected() {
+        let src = "fn f() -> void { throw; return; }\nfn main() -> void\n";
+        let err = parse_in_source(src).expect_err("throw without expr");
+        assert!(err.contains("throw"), "{err}");
+    }
+
+    #[test]
+    fn try_without_catch_body_rejected() {
+        let src = "fn f() -> void { try { return; } catch { } return; }\nfn main() -> void\n";
+        let err = parse_in_source(src).expect_err("catch without pattern");
+        assert!(err.contains("catch"), "{err}");
     }
 }
