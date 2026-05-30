@@ -4,6 +4,287 @@ use crate::core_ir::{Decl, Typ, UnifiedModule};
 use crate::core_ir::{Expr, Stmt};
 use std::collections::{HashMap, HashSet};
 
+fn desugar_module(module: &mut UnifiedModule) {
+    let mut method_map: HashMap<String, String> = HashMap::new();
+    let mut new_decls: Vec<Decl> = Vec::new();
+
+    for decl in std::mem::take(&mut module.decls) {
+        match decl {
+            Decl::Class {
+                name,
+                fields,
+                methods,
+                ..
+            } => {
+                new_decls.push(Decl::Struct {
+                    name: name.clone(),
+                    fields: fields.clone(),
+                });
+                for method in methods {
+                    if let Decl::Function {
+                        name: method_name,
+                        params,
+                        ret,
+                        body,
+                    } = method
+                    {
+                        let mangled = format!("{}_{}", name, method_name);
+                        method_map.insert(method_name, mangled.clone());
+                        let mut new_params =
+                            vec![("self".to_string(), Typ::Named(name.clone()))];
+                        new_params.extend(params);
+                        new_decls.push(Decl::Function {
+                            name: mangled,
+                            params: new_params,
+                            ret,
+                            body,
+                        });
+                    }
+                }
+            }
+            Decl::Interface { .. } => {}
+            other => new_decls.push(other),
+        }
+    }
+
+    let mut closure_counter = 0usize;
+    let mut extra_decls: Vec<Decl> = Vec::new();
+    for decl in &mut new_decls {
+        if let Decl::Function { body, .. } = decl {
+            desugar_closures_in_body(body, &mut closure_counter, &mut extra_decls);
+            if !method_map.is_empty() {
+                rewrite_method_calls_in_body(body, &method_map);
+            }
+        }
+    }
+    new_decls.extend(extra_decls);
+
+    module.decls = new_decls;
+}
+
+fn desugar_closures_in_body(
+    body: &mut [Stmt],
+    counter: &mut usize,
+    extra_decls: &mut Vec<Decl>,
+) {
+    for stmt in body {
+        match stmt {
+            Stmt::Let(_, _, e)
+            | Stmt::Assign(_, e)
+            | Stmt::Return(Some(e))
+            | Stmt::Expr(e) => {
+                desugar_closures_in_expr(e, counter, extra_decls);
+            }
+            Stmt::IndexAssign { base, index, value } => {
+                desugar_closures_in_expr(base, counter, extra_decls);
+                desugar_closures_in_expr(index, counter, extra_decls);
+                desugar_closures_in_expr(value, counter, extra_decls);
+            }
+            Stmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                desugar_closures_in_expr(cond, counter, extra_decls);
+                desugar_closures_in_body(then_body, counter, extra_decls);
+                desugar_closures_in_body(else_body, counter, extra_decls);
+            }
+            Stmt::Loop { cond, body, .. } => {
+                if let Some(c) = cond {
+                    desugar_closures_in_expr(c, counter, extra_decls);
+                }
+                desugar_closures_in_body(body, counter, extra_decls);
+            }
+            Stmt::Match { scrutinee, arms } => {
+                desugar_closures_in_expr(scrutinee, counter, extra_decls);
+                for arm in arms {
+                    desugar_closures_in_body(&mut arm.body, counter, extra_decls);
+                }
+            }
+            Stmt::Return(None) => {}
+            Stmt::Throw(e) => {
+                desugar_closures_in_expr(e, counter, extra_decls);
+            }
+            Stmt::Try { body, catches } => {
+                desugar_closures_in_body(body, counter, extra_decls);
+                for catch in catches {
+                    desugar_closures_in_body(&mut catch.body, counter, extra_decls);
+                }
+            }
+        }
+    }
+}
+
+fn desugar_closures_in_expr(
+    expr: &mut Expr,
+    counter: &mut usize,
+    extra_decls: &mut Vec<Decl>,
+) {
+    match expr {
+        Expr::Closure {
+            params,
+            ret,
+            body,
+        } => {
+            let id = *counter;
+            *counter += 1;
+            let fn_name = format!("__closure_{id}");
+            let caps_name = format!("{fn_name}_captures");
+            let closure_params = std::mem::take(params);
+            let closure_ret = ret.clone();
+            let closure_body = std::mem::take(body);
+            extra_decls.push(Decl::Struct {
+                name: caps_name.clone(),
+                fields: vec![],
+            });
+            extra_decls.push(Decl::Function {
+                name: fn_name,
+                params: closure_params,
+                ret: closure_ret,
+                body: closure_body,
+            });
+            *expr = Expr::StructInit {
+                name: caps_name,
+                fields: vec![],
+            };
+        }
+        Expr::Unary { expr: inner, .. } => {
+            desugar_closures_in_expr(inner, counter, extra_decls)
+        }
+        Expr::Binary { lhs, rhs, .. } => {
+            desugar_closures_in_expr(lhs, counter, extra_decls);
+            desugar_closures_in_expr(rhs, counter, extra_decls);
+        }
+        Expr::StructInit { fields, .. } => {
+            for (_, field_expr) in fields {
+                desugar_closures_in_expr(field_expr, counter, extra_decls);
+            }
+        }
+        Expr::Field { base, .. } => {
+            desugar_closures_in_expr(base, counter, extra_decls);
+        }
+        Expr::ArrayLit(items) => {
+            for item in items {
+                desugar_closures_in_expr(item, counter, extra_decls);
+            }
+        }
+        Expr::Index { base, index } => {
+            desugar_closures_in_expr(base, counter, extra_decls);
+            desugar_closures_in_expr(index, counter, extra_decls);
+        }
+        Expr::Call { callee, args } => {
+            desugar_closures_in_expr(callee, counter, extra_decls);
+            for arg in args {
+                desugar_closures_in_expr(arg, counter, extra_decls);
+            }
+        }
+        Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Ident(_) => {}
+    }
+}
+
+fn rewrite_method_calls_in_body(body: &mut [Stmt], method_map: &HashMap<String, String>) {
+    for stmt in body {
+        match stmt {
+            Stmt::Let(_, _, e)
+            | Stmt::Assign(_, e)
+            | Stmt::Return(Some(e))
+            | Stmt::Expr(e) => {
+                rewrite_method_calls_in_expr(e, method_map);
+            }
+            Stmt::IndexAssign { base, index, value } => {
+                rewrite_method_calls_in_expr(base, method_map);
+                rewrite_method_calls_in_expr(index, method_map);
+                rewrite_method_calls_in_expr(value, method_map);
+            }
+            Stmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                rewrite_method_calls_in_expr(cond, method_map);
+                rewrite_method_calls_in_body(then_body, method_map);
+                rewrite_method_calls_in_body(else_body, method_map);
+            }
+            Stmt::Loop { cond, body, .. } => {
+                if let Some(c) = cond {
+                    rewrite_method_calls_in_expr(c, method_map);
+                }
+                rewrite_method_calls_in_body(body, method_map);
+            }
+            Stmt::Match { scrutinee, arms } => {
+                rewrite_method_calls_in_expr(scrutinee, method_map);
+                for arm in arms {
+                    rewrite_method_calls_in_body(&mut arm.body, method_map);
+                }
+            }
+            Stmt::Return(None) => {}
+            Stmt::Throw(e) => {
+                rewrite_method_calls_in_expr(e, method_map);
+            }
+            Stmt::Try { body, catches } => {
+                rewrite_method_calls_in_body(body, method_map);
+                for catch in catches {
+                    rewrite_method_calls_in_body(&mut catch.body, method_map);
+                }
+            }
+        }
+    }
+}
+
+fn rewrite_method_calls_in_expr(expr: &mut Expr, method_map: &HashMap<String, String>) {
+    match expr {
+        Expr::Call { callee, args } => {
+            for arg in args.iter_mut() {
+                rewrite_method_calls_in_expr(arg, method_map);
+            }
+            if let Expr::Field { base, name } = callee.as_mut() {
+                if let Some(mangled) = method_map.get(name) {
+                    let new_args: Vec<Expr> = std::iter::once(*std::mem::replace(
+                        base,
+                        Box::new(Expr::IntLit(0)),
+                    ))
+                    .chain(args.drain(..))
+                    .collect();
+                    *callee = Box::new(Expr::Ident(mangled.clone()));
+                    *args = new_args;
+                } else {
+                    rewrite_method_calls_in_expr(base, method_map);
+                }
+            } else {
+                rewrite_method_calls_in_expr(callee, method_map);
+            }
+        }
+        Expr::Unary { expr: inner, .. } => {
+            rewrite_method_calls_in_expr(inner, method_map);
+        }
+        Expr::Binary { lhs, rhs, .. } => {
+            rewrite_method_calls_in_expr(lhs, method_map);
+            rewrite_method_calls_in_expr(rhs, method_map);
+        }
+        Expr::StructInit { fields, .. } => {
+            for (_, field_expr) in fields {
+                rewrite_method_calls_in_expr(field_expr, method_map);
+            }
+        }
+        Expr::Field { base, .. } => {
+            rewrite_method_calls_in_expr(base, method_map);
+        }
+        Expr::ArrayLit(items) => {
+            for item in items {
+                rewrite_method_calls_in_expr(item, method_map);
+            }
+        }
+        Expr::Index { base, index } => {
+            rewrite_method_calls_in_expr(base, method_map);
+            rewrite_method_calls_in_expr(index, method_map);
+        }
+        Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Ident(_) => {}
+        Expr::Closure { body, .. } => {
+            rewrite_method_calls_in_body(body, method_map);
+        }
+    }
+}
+
 fn lower_expr(
     e: &Expr,
     env: &HashMap<String, usize>,
@@ -311,7 +592,15 @@ fn collect_stmt_reads(st: &Stmt, reads: &mut HashSet<String>) {
             }
         }
         Stmt::Return(None) => {}
-        Stmt::Throw(_) | Stmt::Try { .. } => {}
+        Stmt::Throw(e) => {
+            collect_expr_reads(e, reads);
+        }
+        Stmt::Try { body, catches } => {
+            collect_body_reads(body, reads);
+            for arm in catches {
+                collect_body_reads(&arm.body, reads);
+            }
+        }
     }
 }
 
@@ -557,7 +846,18 @@ fn lower_stmts_with_env(
                 }
                 return out;
             }
-            Stmt::Throw(_) | Stmt::Try { .. } => {
+            Stmt::Throw(e) => {
+                let val_id = lower_expr(e, env, direct_env, ssa, &mut out);
+                out.push_str(&format!("builtin_call \"throw_error\" %{val_id}\n"));
+                if finish_with_return {
+                    let id = *ssa;
+                    *ssa += 1;
+                    out.push_str(&format!("%{id} = integer_literal $Builtin.Int64, 0\n"));
+                    out.push_str(&format!("bb1:\nreturn %{id} : $Builtin.Int64\n"));
+                }
+                return out;
+            }
+            Stmt::Try { .. } => {
                 return out;
             }
         }
@@ -598,6 +898,8 @@ pub(crate) fn lower_to_textual_sil_with_main_helper_refs(module: &UnifiedModule)
 }
 
 fn lower_to_textual_sil_inner(module: &UnifiedModule, synthesize_main_helper_refs: bool) -> String {
+    let mut module = module.clone();
+    desugar_module(&mut module);
     let mut fn_names: Vec<String> = module
         .decls
         .iter()
@@ -613,7 +915,7 @@ fn lower_to_textual_sil_inner(module: &UnifiedModule, synthesize_main_helper_ref
         if *name == "main" {
             continue;
         }
-        let Some(Decl::Function { params, body, .. }) = find_fn(module, name) else {
+        let Some(Decl::Function { params, body, .. }) = find_fn(&module, name) else {
             continue;
         };
         sil.push_str(&format!("sil @{name}\nbb0:\n"));
@@ -638,7 +940,7 @@ fn lower_to_textual_sil_inner(module: &UnifiedModule, synthesize_main_helper_ref
             ));
         }
     }
-    if let Some(Decl::Function { params, body, .. }) = find_fn(module, "main") {
+    if let Some(Decl::Function { params, body, .. }) = find_fn(&module, "main") {
         if body.is_empty() {
             let ret = ssa;
             sil.push_str(&format!("%{ret} = integer_literal $Builtin.Int64, 0\n"));
@@ -902,5 +1204,113 @@ mod tests {
         assert!(sil.contains("builtin_binop \"==\""));
         assert!(sil.contains("cond_br"));
         assert!(sil.contains("bb_match_end_"));
+    }
+
+    #[test]
+    fn desugar_class_one_method() {
+        let module = UnifiedModule {
+            identity: Default::default(),
+            decls: vec![
+                Decl::Class {
+                    name: "Point".into(),
+                    fields: vec![("x".into(), Typ::Int), ("y".into(), Typ::Int)],
+                    methods: vec![Decl::Function {
+                        name: "sum".into(),
+                        params: vec![],
+                        ret: Typ::Int,
+                        body: vec![Stmt::Return(Some(Expr::IntLit(0)))],
+                    }],
+                    visibility: crate::core_ir::Visibility::Pub,
+                    extends: None,
+                    implements: vec![],
+                },
+            ],
+        };
+        let sil = lower_to_textual_sil(&module, "App");
+        assert!(sil.contains("sil @Point_sum"), "should contain mangled function");
+        assert!(
+            !sil.lines().any(|l| l.trim() == "sil @Point"),
+            "struct should not appear as sil function"
+        );
+    }
+
+    #[test]
+    fn desugar_class_two_methods() {
+        let module = UnifiedModule {
+            identity: Default::default(),
+            decls: vec![
+                Decl::Class {
+                    name: "Point".into(),
+                    fields: vec![("x".into(), Typ::Int), ("y".into(), Typ::Int)],
+                    methods: vec![
+                        Decl::Function {
+                            name: "sum".into(),
+                            params: vec![],
+                            ret: Typ::Int,
+                            body: vec![Stmt::Return(Some(Expr::IntLit(0)))],
+                        },
+                        Decl::Function {
+                            name: "scale".into(),
+                            params: vec![("factor".into(), Typ::Int)],
+                            ret: Typ::Int,
+                            body: vec![Stmt::Return(Some(Expr::IntLit(0)))],
+                        },
+                    ],
+                    visibility: crate::core_ir::Visibility::Pub,
+                    extends: None,
+                    implements: vec![],
+                },
+            ],
+        };
+        let sil = lower_to_textual_sil(&module, "App");
+        assert!(sil.contains("sil @Point_sum"), "should contain Point_sum");
+        assert!(sil.contains("sil @Point_scale"), "should contain Point_scale");
+    }
+
+    #[test]
+    fn desugar_method_call_rewrite() {
+        let module = UnifiedModule {
+            identity: Default::default(),
+            decls: vec![
+                Decl::Class {
+                    name: "Point".into(),
+                    fields: vec![("x".into(), Typ::Int)],
+                    methods: vec![Decl::Function {
+                        name: "move_x".into(),
+                        params: vec![("dx".into(), Typ::Int)],
+                        ret: Typ::Int,
+                        body: vec![Stmt::Return(Some(Expr::IntLit(0)))],
+                    }],
+                    visibility: crate::core_ir::Visibility::Pub,
+                    extends: None,
+                    implements: vec![],
+                },
+                Decl::Function {
+                    name: "main".into(),
+                    params: vec![],
+                    ret: Typ::Void,
+                    body: vec![
+                        Stmt::Let("obj".into(), None, Expr::StructInit {
+                            name: "Point".into(),
+                            fields: vec![("x".into(), Expr::IntLit(1))],
+                        }),
+                        Stmt::Expr(Expr::Call {
+                            callee: Box::new(Expr::Field {
+                                base: Box::new(Expr::Ident("obj".into())),
+                                name: "move_x".into(),
+                            }),
+                            args: vec![Expr::IntLit(5)],
+                        }),
+                    ],
+                },
+            ],
+        };
+        let sil = lower_to_textual_sil(&module, "App");
+        assert!(sil.contains("function_ref @Point_move_x"), "should rewrite to Point_move_x");
+        assert!(sil.contains("sil @Point_move_x"), "should emit Point_move_x function");
+        assert!(
+            !sil.lines().any(|l| l.trim() == "sil @Point"),
+            "struct should not emit as function"
+        );
     }
 }
