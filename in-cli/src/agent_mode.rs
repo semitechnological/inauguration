@@ -825,6 +825,7 @@ fn summarize_core_ir(module: &UnifiedModule) -> CoreIrSummary {
                         .collect(),
                 });
             }
+            Decl::Class { .. } | Decl::Interface { .. } => {}
         }
     }
     CoreIrSummary {
@@ -979,6 +980,7 @@ fn collect_dependency_symbol_calls_from_stmt<'a>(
             }
         }
         Stmt::Return(None) => {}
+        Stmt::Throw(_) | Stmt::Try { .. } => {}
     }
 }
 
@@ -1028,6 +1030,7 @@ fn collect_dependency_symbol_calls_from_expr<'a>(
             }
         }
         Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Ident(_) => {}
+        Expr::Closure { .. } => {}
     }
 }
 

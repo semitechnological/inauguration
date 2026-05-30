@@ -57,6 +57,7 @@ fn format_decl(decl: &Decl, out: &mut String) {
             format_body(body, 1, out);
             out.push('}');
         }
+        Decl::Class { .. } | Decl::Interface { .. } => {}
     }
 }
 
@@ -181,6 +182,7 @@ fn format_stmt(stmt: &Stmt, depth: usize, out: &mut String) {
             out.push_str(&indent);
             out.push_str("}\n");
         }
+        Stmt::Throw(_) | Stmt::Try { .. } => {}
     }
 }
 
@@ -235,6 +237,7 @@ fn format_expr(expr: &Expr) -> String {
             out.push(')');
             out
         }
+        Expr::Closure { .. } => "closure".to_string()
     }
 }
 

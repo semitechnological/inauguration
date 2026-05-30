@@ -808,6 +808,7 @@ fn check_expr_calls(
             }
         }
         Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Ident(_) => {}
+        Expr::Closure { .. } => {}
     }
 }
 
@@ -857,6 +858,7 @@ fn check_stmt_calls(
             }
         }
         Stmt::Return(None) => {}
+        Stmt::Throw(_) | Stmt::Try { .. } => {}
     }
 }
 
@@ -950,11 +952,12 @@ fn check_expr_names(
                                 string_of_type(&actual)
                             ),
                         });
-                    }
-                }
+            }
+            }
             }
         }
         Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => {}
+        Expr::Closure { .. } => {}
     }
 }
 
@@ -1009,6 +1012,7 @@ fn infer_expr_type(
                 None
             }
         }
+        Expr::Closure { .. } => None,
     }
 }
 
@@ -1165,6 +1169,7 @@ fn check_stmt_names(
                 });
             }
         }
+        Stmt::Throw(_) | Stmt::Try { .. } => {}
     }
 }
 
