@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Typ {
     Int,
     String,
@@ -44,6 +44,11 @@ pub enum Expr {
         callee: Box<Expr>,
         args: Vec<Expr>,
     },
+    Closure {
+        params: Vec<(String, Typ)>,
+        ret: Typ,
+        body: Vec<Stmt>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,6 +75,11 @@ pub enum Stmt {
         scrutinee: Expr,
         arms: Vec<MatchArm>,
     },
+    Throw(Expr),
+    Try {
+        body: Vec<Stmt>,
+        catches: Vec<CatchArm>,
+    },
     /// Evaluated for side effects (e.g. `.in` expression statements).
     Expr(Expr),
 }
@@ -85,6 +95,32 @@ pub enum LoopKind {
 pub struct MatchArm {
     pub pattern: String,
     pub body: Vec<Stmt>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatchArm {
+    pub pattern: String,
+    pub body: Vec<Stmt>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Visibility {
+    Pub,
+    Private,
+    Internal,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Import {
+    pub path: String,
+    pub alias: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MethodSig {
+    pub name: String,
+    pub params: Vec<(String, Typ)>,
+    pub ret: Typ,
 }
 
 /// Single-module view produced by language fronts before lowering to textual SIL.
@@ -156,5 +192,18 @@ pub enum Decl {
         params: Vec<(String, Typ)>,
         ret: Typ,
         body: Vec<Stmt>,
+    },
+    Class {
+        name: String,
+        fields: Vec<(String, Typ)>,
+        methods: Vec<Decl>,
+        visibility: Visibility,
+        extends: Option<String>,
+        implements: Vec<String>,
+    },
+    Interface {
+        name: String,
+        methods: Vec<MethodSig>,
+        visibility: Visibility,
     },
 }

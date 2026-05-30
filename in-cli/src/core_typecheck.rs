@@ -67,6 +67,7 @@ fn collect_module_facts(module: &UnifiedModule) -> Result<ModuleFacts<'_>, Strin
                 }
                 functions.insert(name.as_str(), FunctionSig { params, ret });
             }
+            Decl::Class { .. } | Decl::Interface { .. } => {}
         }
     }
 
@@ -202,6 +203,7 @@ fn check_stmt(
             }
             Ok(())
         }
+        Stmt::Throw(_) | Stmt::Try { .. } => Ok(())
     }
 }
 
@@ -213,6 +215,7 @@ fn check_expr(
 ) -> Result<(), String> {
     match expr {
         Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => Ok(()),
+        Expr::Closure { .. } => Ok(()),
         Expr::Ident(name) => {
             if env.contains_key(name) {
                 Ok(())
@@ -418,6 +421,7 @@ fn expr_type(
             }
             Ok(None)
         }
+        Expr::Closure { .. } => Ok(None),
     }
 }
 
