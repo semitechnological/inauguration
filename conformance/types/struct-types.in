@@ -1,6 +1,9 @@
-// conformance/types/struct-types.in
-// Tests: struct declaration and initialization
-// Expected: parse ok, struct fields typed correctly
+// @expect parse: ok
+// @expect has-struct: Point
+// @expect has-struct: Labeled
+// @expect has-function: make_point
+// @expect has-call-edge: make_point
+// @expect bytecode: executes
 
 struct Point {
   Int x

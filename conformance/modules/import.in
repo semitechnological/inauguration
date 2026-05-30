@@ -1,6 +1,7 @@
-// conformance/modules/import.in
-// Tests: package/module/import declarations
-// Expected: parse ok, module identity captured
+// @expect parse: ok
+// @expect has-effect: package:conformance
+// @expect has-effect: module:conformance.imports
+// @expect has-function: main
 
 package conformance;
 module conformance.imports;

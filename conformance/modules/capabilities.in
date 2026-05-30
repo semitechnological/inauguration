@@ -1,6 +1,7 @@
-// conformance/modules/capabilities.in
-// Tests: capability declarations
-// Expected: parse ok, capabilities captured
+// @expect parse: ok
+// @expect has-effect: package:conformance
+// @expect has-effect: module:conformance.caps
+// @expect has-function: main
 
 package conformance;
 module conformance.caps;

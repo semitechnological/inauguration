@@ -1,6 +1,5 @@
-// conformance/packages/no-manifest.in
-// Tests: source without explicit package/module
-// Expected: parse ok, identity defaults to not_declared
+// @expect parse: ok
+// @expect has-function: main
 
 fn main() -> void {
   return;

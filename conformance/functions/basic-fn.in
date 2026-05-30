@@ -1,6 +1,8 @@
-// conformance/functions/basic-fn.in
-// Tests: function declaration, call, return
-// Expected: parse ok, graph shows answer and main symbols
+// @expect parse: ok
+// @expect has-function: answer
+// @expect has-function: main
+// @expect has-call-edge: answer
+// @expect bytecode: executes
 
 fn answer() -> Int {
   return 42;

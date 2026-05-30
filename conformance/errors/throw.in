@@ -1,12 +1,6 @@
-// conformance/errors/throw.in
-// Status: DESIGN — Stmt::Throw exists in Core IR but .in parser
-// does not yet emit throw syntax.
-//
-// Expected syntax (once implemented):
-//   throw "something went wrong";
-//   throw 42;
-//
-// Expected lowering: throw unwinds to nearest enclosing catch.
+// @expect parse: ok
+// Status: DESIGN — throw not yet supported by .in parser.
+// Falls back to struct + function pattern.
 
 struct Error {
   String message

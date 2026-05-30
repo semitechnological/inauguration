@@ -1,6 +1,8 @@
-// conformance/types/named-types.in
-// Tests: named (custom) type usage
-// Expected: parse ok, type resolution succeeds
+// @expect parse: ok
+// @expect has-struct: Name
+// @expect has-function: full_name
+// @expect has-call-edge: full_name
+// @expect bytecode: executes
 
 struct Name {
   String first
@@ -13,5 +15,6 @@ fn full_name(n: Name) -> String {
 
 fn main() -> void {
   let n: Name = Name { first: "hello", last: "world" };
+  let s: String = full_name(n);
   return;
 }

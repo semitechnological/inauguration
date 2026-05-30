@@ -1,16 +1,17 @@
-// conformance/control-flow/if-else.in
-// Tests: if/else control flow
-// Expected: parse ok, bytecode graph shows conditional blocks
+// @expect parse: ok
+// @expect has-function: classify
+// @expect has-call-edge: classify
+// @expect bytecode: executes
+// @expect result: 1
 
-fn classify(n: Int) -> String {
-  if (n) {
-    return "nonzero";
+fn classify(n: Int) -> Int {
+  if (n != 0) {
+    return 1;
   } else {
-    return "zero";
+    return 0;
   }
 }
 
-fn main() -> void {
-  let c: String = classify(0);
-  return;
+fn main() -> Int {
+  return classify(42);
 }

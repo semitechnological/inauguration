@@ -1,6 +1,7 @@
-// conformance/types/arrays.in
-// Tests: array literal and indexing
-// Expected: parse ok, graph shows array types
+// @expect parse: ok
+// @expect has-function: first_elem
+// @expect has-function: main
+// @expect bytecode: executes
 
 fn first_elem() -> Int {
   let xs: [Int] = [1, 2, 3];

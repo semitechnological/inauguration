@@ -1,16 +1,6 @@
-// conformance/classes/class-basic.in
+// @expect parse: ok
 // Status: DESIGN — Decl::Class exists in Core IR but .in parser
-// does not yet emit it (class syntax not implemented in parser).
-//
-// Expected syntax (once implemented):
-//   class Dog {
-//     Int age
-//     fn bark() -> String { return "woof"; }
-//   }
-//
-// Expected lowering: Class desugars to Struct + mangled functions.
-//   Dog → Struct { name: "Dog", fields: [("age", Int)] }
-//   Dog.bark() → Dog_bark(p)
+// does not yet emit class syntax. Falls back to struct + mangled fn.
 
 struct Dog {
   Int age

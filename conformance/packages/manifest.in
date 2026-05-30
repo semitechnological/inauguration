@@ -1,6 +1,6 @@
-// conformance/packages/manifest.in
-// Tests: package/module identity with manifest
-// Expected: parse ok, identity fields set
+// @expect parse: ok
+// @expect has-effect: package:inaug.conformance
+// @expect has-function: main
 
 package inaug.conformance;
 module inaug.conformance.packages;

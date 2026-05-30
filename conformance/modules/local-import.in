@@ -1,6 +1,7 @@
-// conformance/modules/local-import.in
-// Tests: import declaration parsing
-// Expected: parse ok, import captured in surface info
+// @expect parse: ok
+// @expect has-effect: package:conformance
+// @expect has-import: std.io
+// @expect has-function: main
 
 package conformance;
 module conformance.local;

@@ -1,15 +1,16 @@
-// conformance/control-flow/loop.in
-// Tests: loop control flow (while with condition)
-// Expected: parse ok
+// @expect parse: ok
+// @expect has-function: countdown
+// @expect bytecode: executes
+// @expect result: 0
 
 fn countdown(n: Int) -> Int {
   let c: Int = n;
-  while (c) {
+  while (c > 0) {
     c = c - 1;
   }
   return c;
 }
 
-fn main() -> void {
-  return;
+fn main() -> Int {
+  return countdown(5);
 }

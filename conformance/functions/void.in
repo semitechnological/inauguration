@@ -1,6 +1,6 @@
-// conformance/functions/void.in
-// Tests: void return type
-// Expected: parse ok
+// @expect parse: ok
+// @expect has-function: nop
+// @expect bytecode: executes
 
 fn nop() -> void {
   return;

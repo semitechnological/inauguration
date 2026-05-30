@@ -1,13 +1,6 @@
-// conformance/classes/class-methods.in
-// Status: DESIGN — Class method syntax not yet wired in .in parser.
-// Multiple methods on a single class, exercised via struct + mangled fn.
-//
-// Expected syntax (once implemented):
-//   class Calculator {
-//     Int value
-//     fn add(n: Int) -> Int { return this.value + n; }
-//     fn sub(n: Int) -> Int { return this.value - n; }
-//   }
+// @expect parse: ok
+// Status: DESIGN — class method syntax not yet wired in .in parser.
+// Falls back to struct + mangled fn pattern.
 
 struct Calculator {
   Int value

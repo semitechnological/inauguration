@@ -1,6 +1,6 @@
-// conformance/runtime/runtime-stub.in
+// @expect parse: ok
 // Status: STUB — runtime services are Wave 4-5 design.
-// Current VM has 6 builtins: print, print_int, print_string, to_int, to_string, len.
+// Parse-only fixture for parser validation.
 
 fn main() -> void {
   return;

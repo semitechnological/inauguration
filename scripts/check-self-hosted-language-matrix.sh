@@ -4,6 +4,7 @@ set -euo pipefail
 # Self-hosted language matrix gate.
 # Runs each mandatory language example through the owned pipeline:
 #   in build, in graph --json, in agent, in backend --target bytecode --json
+# Plus compile-bytecode and execute-bytecode for languages with bytecode support.
 # Fails if any mandatory language requires an external compiler/runtime.
 # Skips languages gracefully when their sample file doesn't exist.
 
@@ -14,29 +15,33 @@ IN_CMD=("${IN_BIN:-in}")
 POLYGLOT_DIR="apps/polyglot-sample"
 
 # Language -> sample file mapping (mandatory languages only).
-# Each entry: "lang|sample_path|extra_env"
+# Each entry: "lang|sample_path|extra_env|has_bytecode"
+# has_bytecode: "1" if the language front lowers to .in Core IR directly
 declare -a LANGS=(
-  "in|sample.in|"
-  "icore|sample.icore|"
-  "c|sample.c|"
-  "cpp|sample.cpp|"
-  "objc|sample.m|"           # no sample exists → skipped gracefully
-  "objcpp|sample.mm|"        # no sample exists → skipped gracefully
-  "java|Sample.java|"
-  "kotlin|Sample.kt|"
-  "cs|Program.cs|"
-  "swift|sample.swift|IN_NATIVE_SWIFT_SIL=only"
-  "rust|sample.rs|"
-  "go|sample.go|"
-  "v|sample.v|"
-  "js|sample.js|"
-  "ts|sample.ts|"
-  "python|sample.py|"
+  "in|sample.in||1"
+  "icore|sample.icore||1"
+  "c|sample.c||1"
+  "cpp|sample.cpp||1"
+  "go|sample.go||1"
+  "v|sample.v||1"
+  "objc|sample.m||0"           # no sample exists → skipped gracefully
+  "objcpp|sample.mm||0"         # no sample exists → skipped gracefully
+  "java|Sample.java||0"         # type mapping not yet bytecode-ready
+  "kotlin|Sample.kt||0"
+  "cs|Program.cs||0"
+  "swift|sample.swift|IN_NATIVE_SWIFT_SIL=only|0"
+  "rust|sample.rs||0"
+  "js|sample.js||0"
+  "ts|sample.ts||0"
+  "python|sample.py||0"
 )
 
 FAILED=0
 SKIPPED=0
 PASSED=0
+BC_PASSED=0
+BC_FAILED=0
+BC_SKIPPED=0
 
 check_json_no_external() {
   local json_path="$1"
@@ -80,6 +85,7 @@ run_matrix_for_lang() {
   local lang="$1"
   local sample_file="$2"
   local extra_env="$3"
+  local has_bytecode="$4"
 
   local path="$POLYGLOT_DIR/$sample_file"
 
@@ -137,6 +143,25 @@ run_matrix_for_lang() {
     fi
   fi
 
+  # 5. Bytecode execution (self-hosted backend, only for languages that lower to Core IR directly)
+  if [[ "$has_bytecode" == "1" ]]; then
+    local bc_tmp
+    bc_tmp="$(mktemp "${TMPDIR:-/tmp}/in-matrix-bc-${lang}.XXXXXX")"
+    if "${IN_CMD[@]}" compile-bytecode --out "$bc_tmp" "$path" >/dev/null 2>&1; then
+      if "${IN_CMD[@]}" run-bytecode "$bc_tmp" >/dev/null 2>&1; then
+        echo "  bytecode [$lang]: compile + execute ok"
+        BC_PASSED=$((BC_PASSED + 1))
+      else
+        echo "  bytecode [$lang]: execute failed"
+        BC_FAILED=$((BC_FAILED + 1))
+      fi
+    else
+      echo "  bytecode [$lang]: compile failed"
+      BC_FAILED=$((BC_FAILED + 1))
+    fi
+    rm -f "$bc_tmp"
+  fi
+
   rm -f "$tmp_json"
 
   if [[ "$status" == "PASS" ]]; then
@@ -153,8 +178,8 @@ echo "=== self-hosted language matrix ==="
 echo ""
 
 for entry in "${LANGS[@]}"; do
-  IFS='|' read -r lang sample_file extra_env <<<"$entry"
-  run_matrix_for_lang "$lang" "$sample_file" "$extra_env"
+  IFS='|' read -r lang sample_file extra_env has_bytecode <<<"$entry"
+  run_matrix_for_lang "$lang" "$sample_file" "$extra_env" "$has_bytecode"
 done
 
 echo ""
@@ -162,6 +187,10 @@ echo "=== matrix summary ==="
 echo "PASS:  $PASSED"
 echo "SKIP:  $SKIPPED"
 echo "FAIL:  $FAILED"
+echo ""
+echo "Bytecode execution:"
+echo "  supported: $BC_PASSED"
+echo "  failed:    $BC_FAILED"
 
 if [[ $FAILED -gt 0 ]]; then
   echo ""

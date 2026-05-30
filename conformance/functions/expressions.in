@@ -1,6 +1,9 @@
-// conformance/functions/expressions.in
-// Tests: expression statements, binary ops, field access
-// Expected: parse ok, graph shows call edges
+// @expect parse: ok
+// @expect has-function: calc
+// @expect has-struct: Point
+// @expect has-call-edge: calc
+// @expect bytecode: executes
+// @expect result: 7
 
 struct Point {
   Int x

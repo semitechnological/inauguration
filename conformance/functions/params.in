@@ -1,6 +1,10 @@
-// conformance/functions/params.in
-// Tests: function parameters
-// Expected: parse ok, graph shows params with correct types
+// @expect parse: ok
+// @expect has-function: add
+// @expect has-function: greet
+// @expect has-call-edge: add
+// @expect has-call-edge: greet
+// @expect bytecode: executes
+// @expect result: 3
 
 fn add(a: Int, b: Int) -> Int {
   return a + b;
@@ -10,8 +14,8 @@ fn greet(name: String) -> String {
   return "Hello";
 }
 
-fn main() -> void {
+fn main() -> Int {
   let sum: Int = add(1, 2);
   let msg: String = greet("world");
-  return;
+  return add(1, 2);
 }

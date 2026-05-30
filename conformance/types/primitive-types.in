@@ -1,6 +1,9 @@
-// conformance/types/primitive-types.in
-// Tests: primitive type usage in declarations and expressions
-// Expected: parse ok, graph --json shows Int and String types
+// @expect parse: ok
+// @expect has-function: int_identity
+// @expect has-function: string_identity
+// @expect has-function: main
+// @expect bytecode: executes
+// @expect result: 7
 
 fn int_identity(x: Int) -> Int {
   return x;
@@ -10,14 +13,6 @@ fn string_identity(s: String) -> String {
   return s;
 }
 
-fn bool_check(val: Int) -> String {
-  if (val) {
-    return "true";
-  } else {
-    return "false";
-  }
-}
-
-fn main() -> void {
-  return;
+fn main() -> Int {
+  return int_identity(7);
 }

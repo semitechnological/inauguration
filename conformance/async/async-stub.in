@@ -1,7 +1,6 @@
-// conformance/async/async-stub.in
+// @expect parse: ok
 // Status: STUB — async features are Wave 3 design.
-// Decl::Function has is_async field for metadata.
-// Full async lowering (state machines, task scheduling) is future work.
+// Parse-only fixture for parser validation.
 
 fn slow_op() -> Int {
   return 42;

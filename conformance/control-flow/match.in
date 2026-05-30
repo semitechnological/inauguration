@@ -1,22 +1,17 @@
-// conformance/control-flow/match.in
-// Tests: match/pattern-matching control flow
-// Expected: parse ok
+// @expect parse: ok
+// @expect has-function: grade
+// @expect has-call-edge: grade
+// bytecode result not verified: match return lowering is WIP in bytecode backend
 
-fn grade(n: Int) -> String {
+fn grade(n: Int) -> Int {
   match n {
-    1 -> {
-      return "one";
-    }
-    2 -> {
-      return "two";
-    }
-    _ -> {
-      return "many";
-    }
+    1 -> { return 1; }
+    2 -> { return 2; }
+    _ -> { return 0; }
   }
 }
 
 fn main() -> void {
-  let g: String = grade(1);
+  let g: Int = grade(1);
   return;
 }
