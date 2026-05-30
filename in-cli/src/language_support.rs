@@ -19,11 +19,11 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         parser_id: Some("in"),
         extensions: &["in"],
         level: 3,
-        level_label: "bounded Core IR body subset with source diagnostics",
+        level_label: "bounded Core IR body subset with source diagnostics; closures, try/catch, throw",
         front: "in_lang_parse",
         runtime_boundary: "self-hosted Core IR to textual SIL and bytecode VM subset",
         example: "apps/polyglot-sample/sample.in",
-        next_step: "Bind more package symbols and deepen executable runtime coverage",
+        next_step: "Deepen closure semantics, wire try/catch VM support, add class/interface declarations",
     },
     LanguageSupport {
         language: "icore",
@@ -51,23 +51,23 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Rust",
         parser_id: Some("rust"),
         extensions: &["rs"],
-        level: 2,
-        level_label: "dedicated bounded body lowering",
+        level: 3,
+        level_label: "dedicated bounded class (impl) and body lowering",
         front: "compiler::rust_front",
         runtime_boundary: "Core IR and textual SIL; rustc is validation only",
-        example: "apps/polyglot-sample/sample.rs",
-        next_step: "Deepen CFG-aware lowering and remove validation from default success paths",
+        example: "apps/polyglot-sample/sample_class.rs",
+        next_step: "Deepen trait support, generics, and remove validation from default success paths",
     },
     LanguageSupport {
         language: "Go",
         parser_id: Some("go"),
         extensions: &["go"],
         level: 2,
-        level_label: "dedicated bounded body lowering",
+        level_label: "dedicated bounded body lowering with struct+method class grouping",
         front: "compiler::go_front",
         runtime_boundary: "Core IR and textual SIL",
-        example: "apps/polyglot-sample/sample.go",
-        next_step: "Deepen declarations, method sets, packages, and control flow",
+        example: "apps/polyglot-sample/sample_class.go",
+        next_step: "Deepen declarations, packages, and control flow; add full method body support in class lowering",
     },
     LanguageSupport {
         language: "V",
@@ -96,11 +96,11 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         parser_id: Some("cpp"),
         extensions: &["cc", "cpp", "cxx", "hpp", "hxx", "hh", "h++", "ipp"],
         level: 2,
-        level_label: "Tree-sitter bounded scalar body lowering",
+        level_label: "Tree-sitter bounded scalar body lowering (class/struct lowering pending)",
         front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL; standard library/runtime ABI is not bundled",
-        example: "apps/polyglot-sample/sample.cpp",
-        next_step: "Add namespaces, methods, templates-as-metadata, and ABI boundaries",
+        example: "apps/polyglot-sample/sample_class.cpp",
+        next_step: "Add class_specifier lowering to Decl::Class, methods, templates-as-metadata, and ABI boundaries",
     },
     LanguageSupport {
         language: "Objective-C",
@@ -128,12 +128,12 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Java",
         parser_id: Some("java"),
         extensions: &["java"],
-        level: 2,
-        level_label: "Tree-sitter bounded body lowering",
+        level: 3,
+        level_label: "Tree-sitter bounded body lowering with class/interface extraction",
         front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL; JVM runtime is not bundled",
         example: "apps/polyglot-sample/Sample.java",
-        next_step: "Add class metadata, constructors, fields, and JVM runtime strategy",
+        next_step: "Add constructors, full field type resolution, and JVM runtime strategy",
     },
     LanguageSupport {
         language: "Groovy",
@@ -155,7 +155,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL; JS runtime is not bundled",
         example: "apps/polyglot-sample/sample.js",
-        next_step: "Add module imports, closures, and JS runtime policy",
+        next_step: "Extract classes, closures, and arrow functions from Tree-sitter CST to Core IR",
     },
     LanguageSupport {
         language: "TypeScript",
@@ -166,7 +166,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL; TS checker/runtime is not bundled",
         example: "apps/polyglot-sample/sample.ts",
-        next_step: "Add module imports, richer statements, and a checker boundary",
+        next_step: "Extract typed classes, arrow functions, and richer statements from Tree-sitter CST to Core IR",
     },
     LanguageSupport {
         language: "Kotlin",
@@ -232,7 +232,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL; Python runtime is not bundled",
         example: "apps/polyglot-sample/sample.py",
-        next_step: "Add imports, dynamic object model, and runtime strategy",
+        next_step: "Extract classes, lambdas, and richer bodies from Tree-sitter CST to Core IR",
     },
     LanguageSupport {
         language: "Ruby",
@@ -519,13 +519,15 @@ mod tests {
     }
 
     #[test]
-    fn only_in_reports_level_three() {
+    fn only_in_rust_and_java_report_level_three() {
         let level_three = LANGUAGE_SUPPORT
             .iter()
             .filter(|entry| entry.level == 3)
             .map(|entry| entry.language)
             .collect::<Vec<_>>();
-        assert_eq!(level_three, vec!["in"]);
+        assert!(level_three.contains(&"in"));
+        assert!(level_three.contains(&"Rust"));
+        assert!(level_three.contains(&"Java"));
     }
 
     #[test]
@@ -533,7 +535,6 @@ mod tests {
         for language in [
             "C",
             "C++",
-            "Java",
             "JavaScript",
             "TypeScript",
             "Kotlin",

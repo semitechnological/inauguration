@@ -1,0 +1,21 @@
+// .in v0.3: try/catch and throw
+fn dangerous(can_fail: Bool) -> Int {
+  if can_fail == true {
+    throw 99;
+  }
+  return 0;
+}
+
+fn guarded() -> Int {
+  try {
+    let result = dangerous(true);
+    return result;
+  } catch e {
+    return e;
+  }
+}
+
+fn main() -> void {
+  let out = guarded();
+  return;
+}

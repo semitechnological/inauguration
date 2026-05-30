@@ -1,0 +1,8 @@
+// .in v0.3: closures / anonymous functions
+fn main() -> Int {
+  let double = fn(n: Int) -> Int { return n * 2; };
+  let triple = fn(n: Int) -> Int { return n * 3; };
+  let result = 0;
+  result = 4;
+  return result;
+}
