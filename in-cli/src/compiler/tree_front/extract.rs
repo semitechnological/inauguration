@@ -3,7 +3,7 @@
 //! statement, no locals); other languages remain mostly signature-only until their extractors grow.
 
 use super::ruby::extract_ruby;
-use crate::core_ir::{Decl, UnifiedModule};
+use crate::core_ir::{Decl, MethodSig, UnifiedModule, Visibility};
 use crate::core_ir::{Expr, Stmt, Typ};
 use crate::parser_registry::ParserId;
 use std::collections::HashSet;
@@ -62,7 +62,7 @@ fn dispatch(id: ParserId, path: &Path, src: &str) -> Result<UnifiedModule, Strin
         ParserId::Java => parse_lang(
             tree_sitter_java::LANGUAGE.into(),
             src,
-            extract_java_style_methods,
+            extract_java_with_classes,
         ),
         ParserId::Kotlin => parse_lang(tree_sitter_kotlin_ng::LANGUAGE.into(), src, extract_kotlin),
         ParserId::Scala => parse_lang(tree_sitter_scala::LANGUAGE.into(), src, extract_scala),
@@ -173,10 +173,13 @@ fn dedup_fns(decls: Vec<Decl>) -> Vec<Decl> {
     let mut seen = HashSet::new();
     let mut out = Vec::new();
     for d in decls {
-        if let Decl::Function { name, .. } = &d
-            && seen.insert(name.clone())
-        {
-            out.push(d);
+        match &d {
+            Decl::Function { name, .. } => {
+                if seen.insert(name.clone()) {
+                    out.push(d);
+                }
+            }
+            _ => out.push(d),
         }
     }
     out
@@ -1351,6 +1354,184 @@ fn extract_java_style_methods(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, S
         }
     }
     Ok(decls)
+}
+
+fn extract_java_with_classes(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
+    let mut decls = Vec::new();
+
+    let mut class_nodes = Vec::new();
+    collect_kinds(root, &["class_declaration"], &mut class_nodes);
+    for c in class_nodes {
+        if let Some(d) = java_class_decl(src, c) {
+            decls.push(d);
+        }
+    }
+
+    let mut iface_nodes = Vec::new();
+    collect_kinds(root, &["interface_declaration"], &mut iface_nodes);
+    for i in iface_nodes {
+        if let Some(d) = java_interface_decl(src, i) {
+            decls.push(d);
+        }
+    }
+
+    let mut hits = Vec::new();
+    collect_kinds(root, &["method_declaration"], &mut hits);
+    for m in hits {
+        if let Some(d) = java_method(src, m) {
+            decls.push(d);
+        }
+    }
+
+    Ok(decls)
+}
+
+fn java_visibility<'a>(src: &[u8], node: Node<'a>) -> Visibility {
+    if let Some(mods) = node.child_by_field_name("modifiers") {
+        let text = node_txt(src, mods);
+        if text.contains("public") {
+            return Visibility::Pub;
+        }
+        if text.contains("private") {
+            return Visibility::Private;
+        }
+        if text.contains("protected") {
+            return Visibility::Internal;
+        }
+    }
+    let text = node_txt(src, node);
+    if text.contains("public ") || text.starts_with("public") {
+        Visibility::Pub
+    } else if text.contains("private ") || text.starts_with("private") {
+        Visibility::Private
+    } else if text.contains("protected ") || text.starts_with("protected") {
+        Visibility::Internal
+    } else {
+        Visibility::Internal
+    }
+}
+
+fn java_class_decl<'a>(src: &[u8], class_node: Node<'a>) -> Option<Decl> {
+    let Some(name_n) = class_node.child_by_field_name("name") else {
+        return None;
+    };
+    let name = node_txt(src, name_n).trim().to_string();
+    let visibility = java_visibility(src, class_node);
+    let extends = java_extends(src, class_node);
+    let implements = java_implements(src, class_node);
+    let (fields, methods) = java_class_body(src, class_node);
+    Some(Decl::Class {
+        name,
+        fields,
+        methods,
+        visibility,
+        extends,
+        implements,
+    })
+}
+
+fn java_interface_decl<'a>(src: &[u8], iface_node: Node<'a>) -> Option<Decl> {
+    let Some(name_n) = iface_node.child_by_field_name("name") else {
+        return None;
+    };
+    let name = node_txt(src, name_n).trim().to_string();
+    let visibility = java_visibility(src, iface_node);
+    let methods = java_interface_methods(src, iface_node);
+    Some(Decl::Interface {
+        name,
+        methods,
+        visibility,
+    })
+}
+
+
+
+fn java_extends<'a>(src: &[u8], class_node: Node<'a>) -> Option<String> {
+    class_node
+        .child_by_field_name("superclass")
+        .and_then(|sc| named_descendant(sc, "type_identifier"))
+        .map(|n| node_txt(src, n).trim().to_string())
+}
+
+fn java_implements<'a>(src: &[u8], class_node: Node<'a>) -> Vec<String> {
+    let ifaces = class_node
+        .child_by_field_name("super_interfaces")
+        .or_else(|| class_node.child_by_field_name("interfaces"));
+    let Some(ifaces) = ifaces else {
+        return Vec::new();
+    };
+    let mut ids = Vec::new();
+    collect_kinds(ifaces, &["type_identifier"], &mut ids);
+    ids.into_iter()
+        .map(|n| node_txt(src, n).trim().to_string())
+        .collect()
+}
+
+fn java_class_body<'a>(src: &[u8], class_node: Node<'a>) -> (Vec<(String, Typ)>, Vec<Decl>) {
+    let body = class_node
+        .child_by_field_name("body")
+        .or_else(|| first_named(class_node, "class_body"));
+    let Some(body) = body else {
+        return (Vec::new(), Vec::new());
+    };
+
+    let mut fields = Vec::new();
+    let mut field_nodes = Vec::new();
+    collect_kinds(body, &["field_declaration"], &mut field_nodes);
+    for f in field_nodes {
+        let field_type = f
+            .child_by_field_name("type")
+            .map(|t| Typ::Named(node_txt(src, t).trim().to_string()))
+            .unwrap_or(Typ::Named("Any".into()));
+        let mut declarators = Vec::new();
+        collect_kinds(f, &["variable_declarator"], &mut declarators);
+        for var in declarators {
+            if let Some(name_n) = var.child_by_field_name("name").or_else(|| first_named(var, "identifier")) {
+                let field_name = node_txt(src, name_n).trim().to_string();
+                fields.push((field_name, field_type.clone()));
+            }
+        }
+    }
+
+    let mut methods = Vec::new();
+    let mut method_nodes = Vec::new();
+    collect_kinds(body, &["method_declaration"], &mut method_nodes);
+    for m in method_nodes {
+        if let Some(d) = java_method(src, m) {
+            methods.push(d);
+        }
+    }
+
+    (fields, methods)
+}
+
+fn java_interface_methods<'a>(src: &[u8], iface_node: Node<'a>) -> Vec<MethodSig> {
+    let body = iface_node
+        .child_by_field_name("body")
+        .or_else(|| first_named(iface_node, "interface_body"));
+    let Some(body) = body else {
+        return Vec::new();
+    };
+
+    let mut sigs = Vec::new();
+    let mut hits = Vec::new();
+    collect_kinds(body, &["method_declaration", "abstract_method_declaration"], &mut hits);
+    for m in hits {
+        if let Some(sig) = java_method_sig(src, m) {
+            sigs.push(sig);
+        }
+    }
+    sigs
+}
+
+fn java_method_sig<'a>(src: &[u8], m: Node<'a>) -> Option<MethodSig> {
+    let fp = named_descendant(m, "formal_parameters")?;
+    let parent = fp.parent()?;
+    let name_n = parent.child_by_field_name("name")?;
+    let name = node_txt(src, name_n).trim().to_string();
+    let ret = java_ret(src, m);
+    let params = java_formals(src, fp);
+    Some(MethodSig { name, params, ret })
 }
 
 fn java_method<'a>(src: &[u8], m: Node<'a>) -> Option<Decl> {
@@ -3366,6 +3547,108 @@ int main() {
             }
             _ => panic!("expected function"),
         }
+    }
+
+    #[test]
+    fn java_class_declarations_extract_with_fields_and_methods() {
+        let src = r#"
+public class Counter {
+    private int count;
+    static int answer() { return 42; }
+    public int increment() {
+        count = count + 1;
+        return count;
+    }
+}
+"#;
+        let m = parse_lang(
+            tree_sitter_java::LANGUAGE.into(),
+            src,
+            extract_java_with_classes,
+        )
+        .expect("ok");
+
+        let class = m
+            .decls
+            .iter()
+            .find_map(|d| match d {
+                Decl::Class { name, fields, methods, visibility, extends, .. }
+                    if name == "Counter" => Some((fields.clone(), methods.clone(), *visibility, extends.clone())),
+                _ => None,
+            })
+            .expect("Counter class");
+        let (fields, methods, visibility, extends) = class;
+        assert_eq!(visibility, Visibility::Pub);
+        assert!(extends.is_none());
+        assert_eq!(fields, vec![("count".into(), Typ::Named("int".into()))]);
+        assert_eq!(methods.len(), 2);
+        assert!(methods.iter().any(|d| matches!(d, Decl::Function { name, .. } if name == "answer")));
+        assert!(methods.iter().any(|d| matches!(d, Decl::Function { name, .. } if name == "increment")));
+
+        let flat_answer = m
+            .decls
+            .iter()
+            .find_map(|d| match d {
+                Decl::Function { name, body, .. } if name == "answer" => Some(body.clone()),
+                _ => None,
+            })
+            .expect("flat answer function");
+        assert_eq!(flat_answer, vec![Stmt::Return(Some(Expr::IntLit(42)))]);
+    }
+
+    #[test]
+    fn java_interface_declarations_extract_with_method_sigs() {
+        let src = r#"
+interface Printable {
+    String format();
+    int version();
+}
+"#;
+        let m = parse_lang(
+            tree_sitter_java::LANGUAGE.into(),
+            src,
+            extract_java_with_classes,
+        )
+        .expect("ok");
+
+        let iface = m
+            .decls
+            .iter()
+            .find_map(|d| match d {
+                Decl::Interface { name, methods, .. } if name == "Printable" => Some(methods.clone()),
+                _ => None,
+            })
+            .expect("Printable interface");
+        assert_eq!(iface.len(), 2);
+        assert!(iface.iter().any(|s| s.name == "format" && s.ret == Typ::Named("String".into())));
+        assert!(iface.iter().any(|s| s.name == "version" && s.ret == Typ::Named("int".into())));
+    }
+
+    #[test]
+    fn java_class_with_extends_and_implements_extracts() {
+        let src = r#"
+class Child extends Parent implements Runnable, Serializable {
+    public void run() {}
+}
+"#;
+        let m = parse_lang(
+            tree_sitter_java::LANGUAGE.into(),
+            src,
+            extract_java_with_classes,
+        )
+        .expect("ok");
+
+        let class = m
+            .decls
+            .iter()
+            .find_map(|d| match d {
+                Decl::Class { name, extends, implements, .. } if name == "Child" => Some((extends.clone(), implements.clone())),
+                _ => None,
+            })
+            .expect("Child class");
+        let (extends, implements) = class;
+        assert_eq!(extends, Some("Parent".to_string()));
+        assert_eq!(implements, vec!["Runnable".to_string(), "Serializable".to_string()]);
     }
 
     #[test]

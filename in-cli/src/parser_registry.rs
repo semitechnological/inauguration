@@ -588,9 +588,10 @@ mod tests {
     fn polyglot_java_class_without_methods_errors() {
         let path = temp_file_path("empty.java");
         std::fs::write(&path, "class X {}\n").expect("write temp");
-        let err = parse_with_resolved(ResolvedBuildParser::CoreIr(ParserId::Java), &path)
-            .expect_err("no methods");
-        assert!(matches!(err, ParserRegistryError::Msg(s) if s.contains("zero functions")));
+        let m = parse_with_resolved(ResolvedBuildParser::CoreIr(ParserId::Java), &path)
+            .expect("parse")
+            .expect("module");
+        assert!(m.decls.iter().any(|d| matches!(d, crate::core_ir::Decl::Class { name, .. } if name == "X")));
         let _ = std::fs::remove_file(&path);
     }
 
@@ -617,7 +618,16 @@ mod tests {
             .expect("module");
         let _ = std::fs::remove_file(&path);
         assert!(
-            matches!(m.decls.as_slice(), [crate::core_ir::Decl::Function { name, .. }] if name == "main")
+            m.decls.iter().any(|d| matches!(d, crate::core_ir::Decl::Class { name, .. } if name == "X")),
+            "expected class X, got {:?}", m.decls
+        );
+        let class_x = m.decls.iter().find_map(|d| match d {
+            crate::core_ir::Decl::Class { methods, .. } => Some(methods),
+            _ => None,
+        }).expect("class X methods");
+        assert!(
+            class_x.iter().any(|d| matches!(d, crate::core_ir::Decl::Function { name, .. } if name == "main")),
+            "expected main method in class"
         );
     }
 
