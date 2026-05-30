@@ -223,6 +223,7 @@ fn collect_body_strings(body: &[Stmt], values: &mut Vec<String>) {
                 }
             }
             Stmt::Return(None) => {}
+            Stmt::Throw(_) | Stmt::Try { .. } => {}
         }
     }
 }
@@ -256,7 +257,7 @@ fn collect_expr_strings(expr: &Expr, values: &mut Vec<String>) {
                 collect_expr_strings(arg, values);
             }
         }
-        Expr::IntLit(_) | Expr::BoolLit(_) | Expr::Ident(_) => {}
+        Expr::IntLit(_) | Expr::BoolLit(_) | Expr::Ident(_) | Expr::Closure { .. } => {}
     }
 }
 
@@ -360,6 +361,7 @@ fn alloc_declared_locals(
                 }
             }
             Stmt::Return(_) | Stmt::Assign(_, _) | Stmt::IndexAssign { .. } | Stmt::Expr(_) => {}
+            Stmt::Throw(_) | Stmt::Try { .. } => {}
         }
     }
     Ok(())
@@ -700,6 +702,9 @@ fn lower_stmt(
             fn_name,
             ret_typ,
         ),
+        Stmt::Throw(_) | Stmt::Try { .. } => Err(format!(
+            "native-lower: throw/try not yet supported in `{fn_name}`"
+        )),
     }
 }
 
@@ -1396,7 +1401,7 @@ fn lower_expr_into(
             pending_calls,
             fn_name,
         ),
-        Expr::StructInit { .. } | Expr::ArrayLit(_) => Err(format!(
+        Expr::StructInit { .. } | Expr::ArrayLit(_) | Expr::Closure { .. } => Err(format!(
             "native-lower: unsupported expression in `{fn_name}`"
         )),
     }
@@ -2082,7 +2087,7 @@ fn expr_contains_call(expr: &Expr) -> bool {
         Expr::Field { base, .. } => expr_contains_call(base),
         Expr::ArrayLit(items) => items.iter().any(expr_contains_call),
         Expr::Index { base, index } => expr_contains_call(base) || expr_contains_call(index),
-        Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Ident(_) => false,
+        Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Ident(_) | Expr::Closure { .. } => false,
     }
 }
 

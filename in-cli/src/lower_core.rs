@@ -165,6 +165,12 @@ fn lower_expr(
                 id
             }
         }
+        Expr::Closure { .. } => {
+            let id = *ssa;
+            *ssa += 1;
+            out.push_str(&format!("%{id} = integer_literal $Builtin.Int64, 0\n"));
+            id
+        }
     }
 }
 
@@ -269,6 +275,7 @@ fn collect_expr_reads(e: &Expr, reads: &mut HashSet<String>) {
             }
         }
         Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => {}
+        Expr::Closure { .. } => {}
     }
 }
 
@@ -304,6 +311,7 @@ fn collect_stmt_reads(st: &Stmt, reads: &mut HashSet<String>) {
             }
         }
         Stmt::Return(None) => {}
+        Stmt::Throw(_) | Stmt::Try { .. } => {}
     }
 }
 
@@ -547,6 +555,9 @@ fn lower_stmts_with_env(
                 if finish_with_return {
                     out.push_str(&format!("bb1:\nreturn %{id} : $Builtin.Int64\n"));
                 }
+                return out;
+            }
+            Stmt::Throw(_) | Stmt::Try { .. } => {
                 return out;
             }
         }
