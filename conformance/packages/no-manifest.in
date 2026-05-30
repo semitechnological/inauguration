@@ -1,0 +1,7 @@
+// conformance/packages/no-manifest.in
+// Tests: source without explicit package/module
+// Expected: parse ok, identity defaults to not_declared
+
+fn main() -> void {
+  return;
+}

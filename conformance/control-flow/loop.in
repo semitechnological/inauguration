@@ -1,0 +1,15 @@
+// conformance/control-flow/loop.in
+// Tests: loop control flow (while with condition)
+// Expected: parse ok
+
+fn countdown(n: Int) -> Int {
+  let c: Int = n;
+  while (c) {
+    c = c - 1;
+  }
+  return c;
+}
+
+fn main() -> void {
+  return;
+}

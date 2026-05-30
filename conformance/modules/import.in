@@ -1,0 +1,10 @@
+// conformance/modules/import.in
+// Tests: package/module/import declarations
+// Expected: parse ok, module identity captured
+
+package conformance;
+module conformance.imports;
+
+fn main() -> void {
+  return;
+}

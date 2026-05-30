@@ -1,0 +1,12 @@
+// conformance/functions/basic-fn.in
+// Tests: function declaration, call, return
+// Expected: parse ok, graph shows answer and main symbols
+
+fn answer() -> Int {
+  return 42;
+}
+
+fn main() -> void {
+  let a: Int = answer();
+  return;
+}

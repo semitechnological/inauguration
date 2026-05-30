@@ -1,0 +1,29 @@
+// conformance/classes/class-methods.in
+// Status: DESIGN — Class method syntax not yet wired in .in parser.
+// Multiple methods on a single class, exercised via struct + mangled fn.
+//
+// Expected syntax (once implemented):
+//   class Calculator {
+//     Int value
+//     fn add(n: Int) -> Int { return this.value + n; }
+//     fn sub(n: Int) -> Int { return this.value - n; }
+//   }
+
+struct Calculator {
+  Int value
+}
+
+fn Calculator_add(self: Calculator, n: Int) -> Int {
+  return self.value + n;
+}
+
+fn Calculator_sub(self: Calculator, n: Int) -> Int {
+  return self.value - n;
+}
+
+fn main() -> void {
+  let c: Calculator = Calculator { value: 10 };
+  let sum: Int = Calculator_add(c, 5);
+  let diff: Int = Calculator_sub(c, 3);
+  return;
+}

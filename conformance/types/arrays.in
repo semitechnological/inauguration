@@ -1,0 +1,13 @@
+// conformance/types/arrays.in
+// Tests: array literal and indexing
+// Expected: parse ok, graph shows array types
+
+fn first_elem() -> Int {
+  let xs: [Int] = [1, 2, 3];
+  return xs[0];
+}
+
+fn main() -> void {
+  let ys: [String] = ["a", "b"];
+  return;
+}

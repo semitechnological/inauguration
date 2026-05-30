@@ -1,0 +1,13 @@
+// conformance/async/async-stub.in
+// Status: STUB — async features are Wave 3 design.
+// Decl::Function has is_async field for metadata.
+// Full async lowering (state machines, task scheduling) is future work.
+
+fn slow_op() -> Int {
+  return 42;
+}
+
+fn main() -> void {
+  let result: Int = slow_op();
+  return;
+}

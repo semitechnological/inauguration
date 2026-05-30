@@ -1,0 +1,23 @@
+// conformance/types/struct-types.in
+// Tests: struct declaration and initialization
+// Expected: parse ok, struct fields typed correctly
+
+struct Point {
+  Int x
+  Int y
+}
+
+struct Labeled {
+  String name
+  Point pos
+}
+
+fn make_point(x: Int, y: Int) -> Point {
+  return Point { x: x, y: y };
+}
+
+fn main() -> void {
+  let p: Point = Point { x: 1, y: 2 };
+  let q: Point = make_point(3, 4);
+  return;
+}

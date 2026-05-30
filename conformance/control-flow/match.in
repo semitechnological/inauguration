@@ -1,0 +1,22 @@
+// conformance/control-flow/match.in
+// Tests: match/pattern-matching control flow
+// Expected: parse ok
+
+fn grade(n: Int) -> String {
+  match n {
+    1 -> {
+      return "one";
+    }
+    2 -> {
+      return "two";
+    }
+    _ -> {
+      return "many";
+    }
+  }
+}
+
+fn main() -> void {
+  let g: String = grade(1);
+  return;
+}

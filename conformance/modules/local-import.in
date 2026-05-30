@@ -1,0 +1,12 @@
+// conformance/modules/local-import.in
+// Tests: import declaration parsing
+// Expected: parse ok, import captured in surface info
+
+package conformance;
+module conformance.local;
+import std.io;
+
+fn main() -> void {
+  return;
+}
+

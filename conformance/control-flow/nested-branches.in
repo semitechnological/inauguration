@@ -1,0 +1,22 @@
+// conformance/control-flow/nested-branches.in
+// Tests: nested if/else
+// Expected: parse ok, sil shows nested cond_br
+
+fn sign(n: Int) -> Int {
+  let r: Int = 0;
+  if (n) {
+    r = 1;
+  } else {
+    r = -1;
+  }
+  if (r) {
+    return r;
+  } else {
+    return 0;
+  }
+}
+
+fn main() -> void {
+  let s: Int = sign(42);
+  return;
+}

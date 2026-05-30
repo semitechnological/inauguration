@@ -1,0 +1,23 @@
+// conformance/errors/throw.in
+// Status: DESIGN — Stmt::Throw exists in Core IR but .in parser
+// does not yet emit throw syntax.
+//
+// Expected syntax (once implemented):
+//   throw "something went wrong";
+//   throw 42;
+//
+// Expected lowering: throw unwinds to nearest enclosing catch.
+
+struct Error {
+  String message
+  Int code
+}
+
+fn fail(msg: String, code: Int) -> Error {
+  return Error { message: msg, code: code };
+}
+
+fn main() -> void {
+  let e: Error = fail("not found", 404);
+  return;
+}

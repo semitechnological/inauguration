@@ -1,0 +1,17 @@
+// conformance/functions/expressions.in
+// Tests: expression statements, binary ops, field access
+// Expected: parse ok, graph shows call edges
+
+struct Point {
+  Int x
+  Int y
+}
+
+fn calc(a: Int, b: Int) -> Int {
+  return (a + b) * 2;
+}
+
+fn main() -> Int {
+  let p: Point = Point { x: 1, y: 2 };
+  return p.x + calc(p.x, p.y);
+}

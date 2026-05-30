@@ -1,0 +1,7 @@
+// conformance/runtime/runtime-stub.in
+// Status: STUB — runtime services are Wave 4-5 design.
+// Current VM has 6 builtins: print, print_int, print_string, to_int, to_string, len.
+
+fn main() -> void {
+  return;
+}

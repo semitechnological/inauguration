@@ -1,0 +1,17 @@
+// conformance/errors/uncaught.in
+// Status: DESIGN — expected to fail when throw/catch is implemented.
+//
+// Expected behavior: uncaught throw should produce a compiler error
+// or runtime halt with error message.
+//
+// Expected syntax (once implemented):
+//   fn main() -> Int {
+//     throw "unhandled";   // no try/catch → error
+//     return 0;
+//   }
+
+fn main() -> Int {
+  let result: Int = 0;
+  // throw "unhandled";   // should fail when supported
+  return result;
+}

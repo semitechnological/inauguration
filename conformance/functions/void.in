@@ -1,0 +1,12 @@
+// conformance/functions/void.in
+// Tests: void return type
+// Expected: parse ok
+
+fn nop() -> void {
+  return;
+}
+
+fn main() -> void {
+  nop();
+  return;
+}

@@ -1,0 +1,17 @@
+// conformance/types/named-types.in
+// Tests: named (custom) type usage
+// Expected: parse ok, type resolution succeeds
+
+struct Name {
+  String first
+  String last
+}
+
+fn full_name(n: Name) -> String {
+  return n.last;
+}
+
+fn main() -> void {
+  let n: Name = Name { first: "hello", last: "world" };
+  return;
+}

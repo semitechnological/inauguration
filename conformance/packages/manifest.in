@@ -1,0 +1,10 @@
+// conformance/packages/manifest.in
+// Tests: package/module identity with manifest
+// Expected: parse ok, identity fields set
+
+package inaug.conformance;
+module inaug.conformance.packages;
+
+fn main() -> void {
+  return;
+}

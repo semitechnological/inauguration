@@ -1,0 +1,11 @@
+// conformance/modules/capabilities.in
+// Tests: capability declarations
+// Expected: parse ok, capabilities captured
+
+package conformance;
+module conformance.caps;
+capability process.stdout;
+
+fn main() -> void {
+  return;
+}

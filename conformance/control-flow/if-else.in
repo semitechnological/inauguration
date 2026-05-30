@@ -1,0 +1,16 @@
+// conformance/control-flow/if-else.in
+// Tests: if/else control flow
+// Expected: parse ok, bytecode graph shows conditional blocks
+
+fn classify(n: Int) -> String {
+  if (n) {
+    return "nonzero";
+  } else {
+    return "zero";
+  }
+}
+
+fn main() -> void {
+  let c: String = classify(0);
+  return;
+}

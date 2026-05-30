@@ -1,0 +1,25 @@
+// conformance/errors/try-catch.in
+// Status: DESIGN — Stmt::Try and CatchArm exist in Core IR but
+// .in parser does not yet emit try/catch syntax.
+//
+// Expected syntax (once implemented):
+//   try {
+//     let x: Int = dangerous();
+//   } catch "err" -> {
+//     print("caught");
+//   }
+//
+// Expected lowering: try/catch lowers to early-return patterns in SIL.
+
+fn safe_div(a: Int, b: Int) -> Int {
+  if (b) {
+    return a / b;
+  } else {
+    return -1;
+  }
+}
+
+fn main() -> void {
+  let result: Int = safe_div(10, 0);
+  return;
+}
