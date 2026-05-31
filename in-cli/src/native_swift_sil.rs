@@ -9,7 +9,7 @@
 use crate::core_ir::{Decl as IrDecl, UnifiedModule};
 use crate::swift_subset::{self, Decl, Diagnostic};
 
-fn subset_program_to_unified(program: &[Decl]) -> UnifiedModule {
+pub fn subset_program_to_unified(program: &[Decl]) -> UnifiedModule {
     let decls: Vec<IrDecl> = program
         .iter()
         .map(|d| match d {
@@ -26,6 +26,24 @@ fn subset_program_to_unified(program: &[Decl]) -> UnifiedModule {
         })
         .collect();
     UnifiedModule::new(decls)
+}
+
+pub fn parse_swift_subset_to_unified(source: &str) -> Result<UnifiedModule, String> {
+    let filtered = filter_top_level_decl_lines(source);
+    let program = swift_subset::parse(&filtered);
+    let diags: Vec<Diagnostic> = swift_subset::check(&program);
+    if !diags.is_empty() {
+        let msg = diags
+            .iter()
+            .map(|d| format!("{}: {}", d.code, d.message))
+            .collect::<Vec<_>>()
+            .join("; ");
+        return Err(format!("Swift subset rejected ({})", msg));
+    }
+    if program.is_empty() {
+        return Err("Swift subset: no supported constructs found".to_string());
+    }
+    Ok(subset_program_to_unified(&program))
 }
 
 /// Same semantics as [`crate::sil_emit`] for **`IN_NATIVE_SWIFT_SIL`**.

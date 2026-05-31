@@ -1,0 +1,8 @@
+// @expect parse: ok
+// @expect bytecode: executes
+// @expect result: 3
+
+fn main() -> Int {
+  let a: [Int] = [10, 20, 30];
+  return array_len(a);
+}

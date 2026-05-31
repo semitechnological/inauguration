@@ -169,8 +169,29 @@ fn parse_struct_init_payload(rest: &str) -> (String, Vec<(String, String)>) {
 fn is_builtin_function(name: &str) -> bool {
     matches!(
         name,
-        "print" | "print_int" | "print_string" | "to_int" | "to_string" | "len" | "throw_error"
+        "print"
+            | "print_int"
+            | "print_string"
+            | "to_int"
+            | "to_string"
+            | "len"
+            | "throw_error"
+            | "str_concat"
+            | "str_eq"
+            | "str_contains"
+            | "array_push"
+            | "array_pop"
+            | "array_len"
+            | "bool_to_int"
+            | "int_to_bool"
     )
+}
+
+fn builtin_return_count(name: &str) -> usize {
+    match name {
+        "array_pop" => 2,
+        _ => 1,
+    }
 }
 
 fn fold_int_binop(op: &str, lhs: i64, rhs: i64) -> Option<i64> {
@@ -271,6 +292,10 @@ fn parse_sil_instruction_to_bytecode(
 
     if let Some(label) = line.strip_prefix("label ").map(str::trim) {
         out.push(Instruction::Label(label.to_string()));
+        if label.starts_with("bb_try_body_") {
+            let catch_label = label.replace("bb_try_body_", "bb_try_catch_");
+            out.push(Instruction::TryEnter(catch_label));
+        }
         return Ok(out);
     }
 
@@ -524,17 +549,20 @@ fn parse_sil_instruction_to_bytecode(
                             .map(str::trim)
                             .filter(|arg| !arg.is_empty())
                             .count();
+                        let ret_count = builtin_return_count(&callee);
                         if is_builtin_function(&callee) {
-                            out.push(Instruction::CallBuiltin(callee, argc));
+                            out.push(Instruction::CallBuiltin(callee.clone(), argc));
                         } else {
-                            out.push(Instruction::CallFunction(callee, argc));
+                            out.push(Instruction::CallFunction(callee.clone(), argc));
                         }
 
-                        // Store result
                         if let Some(before_eq) = line.split('=').next() {
                             let res_reg = before_eq.trim();
                             if res_reg.starts_with('%') {
                                 store_register(res_reg, local_counter, value_map, &mut out);
+                                for _ in 1..ret_count {
+                                    out.push(Instruction::Pop);
+                                }
                                 clear_value_constants(res_reg, value_ints, value_bools);
                             }
                         }
@@ -614,6 +642,9 @@ fn parse_sil_instruction_to_bytecode(
     // br bb1 (unconditional branch)
     if line.starts_with("br ") {
         if let Some(label) = line.strip_prefix("br ").map(str::trim) {
+            if label.starts_with("bb_try_end_") {
+                out.push(Instruction::TryEnd);
+            }
             out.push(Instruction::Jump(label.to_string()));
         }
         return Ok(out);
@@ -623,6 +654,18 @@ fn parse_sil_instruction_to_bytecode(
     if line.ends_with(':') {
         let label_name = line.trim_end_matches(':').to_string();
         out.push(Instruction::Label(label_name));
+        return Ok(out);
+    }
+
+    // builtin_call "name" %arg1, %arg2, ...
+    if let Some(rest) = line.strip_prefix("builtin_call ").map(str::trim) {
+        let (name, args) = parse_quoted_op_and_args(rest);
+        for arg in &args {
+            if let Some(slot) = value_map.get(*arg) {
+                out.push(Instruction::Load(*slot));
+            }
+        }
+        out.push(Instruction::CallBuiltin(name, args.len()));
         return Ok(out);
     }
 

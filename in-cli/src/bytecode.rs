@@ -103,6 +103,10 @@ pub enum Instruction {
     Store(usize),
     /// Load from local (slot index)
     Load(usize),
+    /// Enter try region (catch label name)
+    TryEnter(String),
+    /// Exit innermost try region
+    TryEnd,
 }
 
 /// A function in bytecode form.
@@ -191,6 +195,8 @@ fn instruction_to_text(inst: &Instruction) -> String {
         Instruction::Dup => "dup".to_string(),
         Instruction::Store(slot) => format!("store {}", slot),
         Instruction::Load(slot) => format!("load {}", slot),
+        Instruction::TryEnter(label) => format!("try_enter {}", label),
+        Instruction::TryEnd => "try_end".to_string(),
     }
 }
 
@@ -414,6 +420,11 @@ fn parse_instruction(line: &str) -> Result<Instruction, String> {
                 .ok_or("parse error")?;
             Ok(Instruction::Load(slot))
         }
+        "try_enter" => {
+            let label = parts.get(1).ok_or("parse error")?.to_string();
+            Ok(Instruction::TryEnter(label))
+        }
+        "try_end" => Ok(Instruction::TryEnd),
         s if s.ends_with(':') => {
             let label = s.trim_end_matches(':').to_string();
             Ok(Instruction::Label(label))

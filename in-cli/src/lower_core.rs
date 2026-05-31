@@ -857,8 +857,29 @@ fn lower_stmts_with_env(
                 }
                 return out;
             }
-            Stmt::Try { .. } => {
-                return out;
+            Stmt::Try { body, catches } => {
+                let label_id = *ssa;
+                *ssa += 1;
+                let try_body_label = format!("bb_try_body_{label_id}");
+                let try_catch_label = format!("bb_try_catch_{label_id}");
+                let try_end_label = format!("bb_try_end_{label_id}");
+                out.push_str(&format!("br {try_body_label}\n"));
+                out.push_str(&format!("label {try_body_label}\n"));
+                let mut body_env = env.clone();
+                out.push_str(&lower_stmts_with_env(
+                    body, ssa, finish_with_return, false,
+                    &mut body_env, direct_env, force_stores,
+                ));
+                out.push_str(&format!("br {try_end_label}\n"));
+                out.push_str(&format!("label {try_catch_label}\n"));
+                for arm in catches {
+                    let mut arm_env = env.clone();
+                    out.push_str(&lower_stmts_with_env(
+                        &arm.body, ssa, finish_with_return, false,
+                        &mut arm_env, direct_env, force_stores,
+                    ));
+                }
+                out.push_str(&format!("label {try_end_label}\n"));
             }
         }
     }

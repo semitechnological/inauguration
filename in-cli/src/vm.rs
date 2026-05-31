@@ -3,10 +3,17 @@
 use crate::bytecode::{BytecodeFunction, BytecodeModule, Instruction, Value};
 use std::collections::HashMap;
 
+pub struct TryRegion {
+    pub start_ip: usize,
+    pub end_ip: usize,
+    pub catch_label: String,
+}
+
 /// Execution context for a bytecode function.
 pub struct CallFrame {
     pub locals: Vec<Value>,
-    pub ip: usize, // instruction pointer
+    pub ip: usize,
+    pub try_regions: Vec<TryRegion>,
 }
 
 /// The bytecode runtime (stack-based VM).
@@ -50,6 +57,7 @@ impl BytecodeVM {
         let mut frame = CallFrame {
             locals: vec![Value::Nil; func.local_count],
             ip: 0,
+            try_regions: Vec::new(),
         };
 
         // Load arguments into locals
@@ -83,7 +91,19 @@ impl BytecodeVM {
             let frame = &self.frames[frame_idx];
             let ip = frame.ip;
 
-            if ip >= func.instructions.len() || self.error_state.is_some() {
+            if ip >= func.instructions.len() {
+                break;
+            }
+
+            if self.error_state.is_some() {
+                let regions = &self.frames[frame_idx].try_regions;
+                if let Some(region) = regions.iter().rev().find(|r| ip >= r.start_ip && ip < r.end_ip) {
+                    let catch_label = region.catch_label.clone();
+                    let catch_ip = label_map.get(catch_label.as_str()).copied().unwrap_or(usize::MAX);
+                    self.frames[frame_idx].ip = catch_ip;
+                    self.error_state = None;
+                    continue;
+                }
                 break;
             }
 
@@ -105,8 +125,10 @@ impl BytecodeVM {
                 }
                 Instruction::CallBuiltin(builtin_name, argc) => {
                     let args = self.pop_n(argc)?;
-                    let result = self.call_builtin(&builtin_name, args)?;
-                    self.stack.push(result);
+                    let results = self.call_builtin(&builtin_name, args)?;
+                    for result in results {
+                        self.stack.push(result);
+                    }
                 }
                 Instruction::CallFunction(fn_name, argc) => {
                     // Pop arguments from stack
@@ -238,6 +260,22 @@ impl BytecodeVM {
                         return Err(format!("invalid local slot: {}", slot));
                     }
                 }
+                Instruction::TryEnter(catch_label) => {
+                    let start = self.frames[frame_idx].ip;
+                    let catch_ip = label_map
+                        .get(catch_label.as_str())
+                        .copied()
+                        .unwrap_or(usize::MAX);
+                    let region = TryRegion {
+                        start_ip: start,
+                        end_ip: catch_ip.saturating_sub(1),
+                        catch_label,
+                    };
+                    self.frames[frame_idx].try_regions.push(region);
+                }
+                Instruction::TryEnd => {
+                    self.frames[frame_idx].try_regions.pop();
+                }
             }
         }
 
@@ -254,48 +292,43 @@ impl BytecodeVM {
         Ok(vals)
     }
 
-    /// Call a built-in function.
-    fn call_builtin(&mut self, name: &str, args: Vec<Value>) -> Result<Value, String> {
-        match name {
+    /// Call a built-in function. Returns a vec of results pushed onto the stack.
+    fn call_builtin(&mut self, name: &str, args: Vec<Value>) -> Result<Vec<Value>, String> {
+        let r = match name {
             "print" => {
-                for arg in args {
+                for arg in &args {
                     print!("{}", arg.to_string_display());
                 }
                 println!();
-                Ok(Value::Nil)
+                vec![Value::Nil]
             }
             "print_int" => {
                 if let Some(arg) = args.first() {
                     print!("{}", arg.to_int());
                 }
-                Ok(Value::Nil)
+                vec![Value::Nil]
             }
             "print_string" => {
                 if let Some(arg) = args.first() {
                     print!("{}", arg.to_string_display());
                 }
-                Ok(Value::Nil)
+                vec![Value::Nil]
             }
             "to_int" => {
-                if let Some(arg) = args.first() {
-                    Ok(Value::Int(arg.to_int()))
-                } else {
-                    Ok(Value::Int(0))
-                }
+                let n = args.first().map_or(0, |a| a.to_int());
+                vec![Value::Int(n)]
             }
             "to_string" => {
-                if let Some(arg) = args.first() {
-                    Ok(Value::String(arg.to_string_display()))
-                } else {
-                    Ok(Value::String(String::new()))
-                }
+                let s = args.first().map_or(String::new(), |a| a.to_string_display());
+                vec![Value::String(s)]
             }
             "len" => {
-                if let Some(Value::String(s)) = args.first() {
-                    Ok(Value::Int(s.len() as i64))
+                let n = if let Some(Value::String(s)) = args.first() {
+                    s.len() as i64
                 } else {
-                    Ok(Value::Int(0))
-                }
+                    0
+                };
+                vec![Value::Int(n)]
             }
             "throw_error" => {
                 let err_val = args
@@ -303,10 +336,72 @@ impl BytecodeVM {
                     .next()
                     .unwrap_or(Value::String("unhandled exception".to_string()));
                 self.error_state = Some(err_val);
-                Ok(Value::Nil)
+                vec![Value::Nil]
             }
-            _ => Err(format!("unknown builtin: {}", name)),
-        }
+            "str_concat" => {
+                let mut iter = args.into_iter();
+                let a = iter.next().unwrap_or(Value::Nil).to_string_display();
+                let b = iter.next().unwrap_or(Value::Nil).to_string_display();
+                vec![Value::String(a + &b)]
+            }
+            "str_eq" => {
+                let mut iter = args.into_iter();
+                let a = iter.next().unwrap_or(Value::Nil).to_string_display();
+                let b = iter.next().unwrap_or(Value::Nil).to_string_display();
+                vec![Value::Bool(a == b)]
+            }
+            "str_contains" => {
+                let mut iter = args.into_iter();
+                let haystack = iter.next().unwrap_or(Value::Nil).to_string_display();
+                let needle = iter.next().unwrap_or(Value::Nil).to_string_display();
+                vec![Value::Bool(haystack.contains(&needle))]
+            }
+            "array_push" => {
+                let mut iter = args.into_iter();
+                let arr = iter.next().unwrap_or(Value::Nil);
+                let val = iter.next().unwrap_or(Value::Nil);
+                if let Value::Array(mut values) = arr {
+                    values.push(val);
+                    vec![Value::Array(values)]
+                } else {
+                    vec![Value::Array(vec![val])]
+                }
+            }
+            "array_pop" => {
+                let mut iter = args.into_iter();
+                let arr = iter.next().unwrap_or(Value::Nil);
+                if let Value::Array(mut values) = arr {
+                    let popped = values.pop().unwrap_or(Value::Nil);
+                    vec![Value::Array(values), popped]
+                } else {
+                    vec![Value::Array(Vec::new()), Value::Nil]
+                }
+            }
+            "array_len" => {
+                let n = match args.first() {
+                    Some(Value::Array(values)) => values.len() as i64,
+                    _ => 0,
+                };
+                vec![Value::Int(n)]
+            }
+            "bool_to_int" => {
+                let n = match args.first() {
+                    Some(Value::Bool(true)) => 1,
+                    _ => 0,
+                };
+                vec![Value::Int(n)]
+            }
+            "int_to_bool" => {
+                let b = match args.first() {
+                    Some(Value::Int(n)) => *n != 0,
+                    Some(v) => v.to_bool(),
+                    _ => false,
+                };
+                vec![Value::Bool(b)]
+            }
+            _ => return Err(format!("unknown builtin: {}", name)),
+        };
+        Ok(r)
     }
 
     /// Apply a binary operator.
@@ -451,5 +546,82 @@ mod tests {
         let mut vm = BytecodeVM::new(module);
         let result = vm.run().unwrap();
         assert_eq!(result, Value::Int(5));
+    }
+
+    #[test]
+    fn vm_try_catch_catches_throw() {
+        let mut module = BytecodeModule::new("main".to_string());
+        let func = BytecodeFunction {
+            name: "main".to_string(),
+            instructions: vec![
+                Instruction::TryEnter("catch_0".to_string()),
+                Instruction::LoadString("boom".to_string()),
+                Instruction::CallBuiltin("throw_error".to_string(), 1),
+                Instruction::TryEnd,
+                Instruction::Jump("end_0".to_string()),
+                Instruction::Label("catch_0".to_string()),
+                Instruction::LoadInt(42),
+                Instruction::Label("end_0".to_string()),
+                Instruction::Return,
+            ],
+            local_count: 0,
+        };
+        module.add_function(func);
+        let mut vm = BytecodeVM::new(module);
+        let result = vm.run().unwrap();
+        assert_eq!(result, Value::Int(42));
+    }
+
+    #[test]
+    fn vm_uncaught_throw_produces_error() {
+        let mut module = BytecodeModule::new("main".to_string());
+        let func = BytecodeFunction {
+            name: "main".to_string(),
+            instructions: vec![
+                Instruction::LoadString("unhandled".to_string()),
+                Instruction::CallBuiltin("throw_error".to_string(), 1),
+                Instruction::LoadInt(99),
+                Instruction::Return,
+            ],
+            local_count: 0,
+        };
+        module.add_function(func);
+        let mut vm = BytecodeVM::new(module);
+        assert!(vm.run().is_err());
+    }
+
+    #[test]
+    fn vm_throw_inside_nested_try_caught_by_outer() {
+        let mut module = BytecodeModule::new("main".to_string());
+        let func = BytecodeFunction {
+            name: "main".to_string(),
+            instructions: vec![
+                Instruction::TryEnter("catch_outer".to_string()),
+                Instruction::LoadInt(1),
+                Instruction::Store(0),
+                Instruction::TryEnter("catch_inner".to_string()),
+                Instruction::LoadString("nested".to_string()),
+                Instruction::CallBuiltin("throw_error".to_string(), 1),
+                Instruction::TryEnd,
+                Instruction::Jump("end_inner".to_string()),
+                Instruction::Label("catch_inner".to_string()),
+                Instruction::LoadString("rethrow".to_string()),
+                Instruction::CallBuiltin("throw_error".to_string(), 1),
+                Instruction::Label("end_inner".to_string()),
+                Instruction::TryEnd,
+                Instruction::Jump("end_outer".to_string()),
+                Instruction::Label("catch_outer".to_string()),
+                Instruction::LoadInt(7),
+                Instruction::Store(0),
+                Instruction::Label("end_outer".to_string()),
+                Instruction::Load(0),
+                Instruction::Return,
+            ],
+            local_count: 1,
+        };
+        module.add_function(func);
+        let mut vm = BytecodeVM::new(module);
+        let result = vm.run().unwrap();
+        assert_eq!(result, Value::Int(7));
     }
 }

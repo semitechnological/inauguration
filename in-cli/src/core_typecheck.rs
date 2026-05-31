@@ -46,6 +46,36 @@ struct ModuleFacts<'a> {
     structs: HashMap<&'a str, &'a [(String, Typ)]>,
 }
 
+fn is_builtin_fn(name: &str) -> bool {
+    matches!(
+        name,
+        "print"
+            | "print_int"
+            | "print_string"
+            | "to_int"
+            | "to_string"
+            | "len"
+            | "throw_error"
+            | "str_concat"
+            | "str_eq"
+            | "str_contains"
+            | "array_push"
+            | "array_pop"
+            | "array_len"
+            | "bool_to_int"
+            | "int_to_bool"
+    )
+}
+
+fn builtin_return_type(name: &str) -> Typ {
+    match name {
+        "len" | "array_len" | "bool_to_int" | "to_int" => Typ::Int,
+        "str_eq" | "str_contains" | "int_to_bool" => Typ::Bool,
+        "str_concat" | "to_string" => Typ::String,
+        _ => Typ::Void,
+    }
+}
+
 fn collect_module_facts(module: &UnifiedModule) -> Result<ModuleFacts<'_>, String> {
     let mut top_level = HashSet::new();
     let mut functions = HashMap::new();
@@ -331,6 +361,12 @@ fn check_expr(
         }
         Expr::Call { callee, args } => {
             if let Expr::Ident(name) = callee.as_ref() {
+                if is_builtin_fn(name) {
+                    for arg in args {
+                        check_expr(fn_name, arg, facts, env)?;
+                    }
+                    return Ok(());
+                }
                 let Some(sig) = facts.functions.get(name.as_str()) else {
                     return Err(format!("unresolved function call `{name}` in `{fn_name}`"));
                 };
@@ -414,10 +450,13 @@ fn expr_type(
             _ => Ok(None),
         },
         Expr::Call { callee, .. } => {
-            if let Expr::Ident(name) = callee.as_ref()
-                && let Some(sig) = facts.functions.get(name.as_str())
-            {
-                return Ok(Some(sig.ret.clone()));
+            if let Expr::Ident(name) = callee.as_ref() {
+                if is_builtin_fn(name) {
+                    return Ok(Some(builtin_return_type(name)));
+                }
+                if let Some(sig) = facts.functions.get(name.as_str()) {
+                    return Ok(Some(sig.ret.clone()));
+                }
             }
             Ok(None)
         }
