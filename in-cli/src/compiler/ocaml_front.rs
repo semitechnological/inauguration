@@ -82,6 +82,7 @@ fn parse_let_decl(item: &str) -> Result<Option<Decl>, String> {
         params,
         ret,
         body,
+        type_params: vec![],
     }))
 }
 
@@ -278,7 +279,7 @@ mod tests {
         assert_eq!(module.decls.len(), 2);
         assert!(matches!(
             &module.decls[0],
-            Decl::Function { name, params, ret, body }
+            Decl::Function { name, params, ret, body, .. }
                 if name == "helper" && params == &vec![("value".to_string(), Typ::Int)] && ret == &Typ::Int && matches!(body.as_slice(), [Stmt::Return(Some(Expr::Ident(v)))] if v == "value")
         ));
         assert!(matches!(

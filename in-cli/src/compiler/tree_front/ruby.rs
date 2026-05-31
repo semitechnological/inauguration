@@ -23,6 +23,7 @@ pub(super) fn extract_ruby(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, Stri
             params,
             ret: Typ::Void,
             body,
+            type_params: vec![],
         })
     })
 }

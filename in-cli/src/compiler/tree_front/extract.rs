@@ -4,7 +4,7 @@
 
 use super::ruby::extract_ruby;
 use crate::core_ir::{Decl, MethodSig, UnifiedModule, Visibility};
-use crate::core_ir::{Expr, Stmt, Typ};
+use crate::core_ir::{CatchArm, Expr, Stmt, Typ};
 use crate::parser_registry::ParserId;
 use std::collections::HashSet;
 use std::path::Path;
@@ -75,18 +75,18 @@ fn dispatch(id: ParserId, path: &Path, src: &str) -> Result<UnifiedModule, Strin
             src,
             extract_fsharp,
         ),
-        ParserId::Python => parse_lang(tree_sitter_python::LANGUAGE.into(), src, extract_python),
+        ParserId::Python => parse_lang(tree_sitter_python::LANGUAGE.into(), src, extract_python_with_classes),
         ParserId::Ruby => parse_lang(tree_sitter_ruby::LANGUAGE.into(), src, extract_ruby),
         ParserId::Php => parse_lang(tree_sitter_php::LANGUAGE_PHP.into(), src, extract_php),
         ParserId::Perl => parse_lang(tree_sitter_perl::LANGUAGE.into(), src, extract_perl),
         ParserId::JavaScript => parse_lang(
             tree_sitter_javascript::LANGUAGE.into(),
             src,
-            extract_js_family,
+            extract_js_with_classes,
         ),
         ParserId::TypeScript => {
             let ts_lang = typescript_lang(path);
-            parse_lang(ts_lang, src, extract_ts_family)
+            parse_lang(ts_lang, src, extract_ts_with_classes)
         }
         ParserId::Go => Err("`go` uses dedicated compiler::go_front".to_string()),
         ParserId::Rust => parse_lang(tree_sitter_rust::LANGUAGE.into(), src, extract_rust),
@@ -157,6 +157,7 @@ fn decl_fn(name: String, params: Vec<(String, Typ)>, ret: Typ) -> Decl {
         params,
         ret,
         body: vec![],
+        type_params: vec![],
     }
 }
 
@@ -245,6 +246,8 @@ struct AstShape {
     local_decl_prefixes: &'static [&'static str],
     shell_first_kinds: &'static [&'static str],
     shell_last_kinds: &'static [&'static str],
+    try_kinds: &'static [&'static str],
+    catch_kinds: &'static [&'static str],
     first_assignment_is_let: bool,
     strict_args: bool,
 }
@@ -283,6 +286,8 @@ const JAVA_AST: AstShape = AstShape {
     local_decl_prefixes: &[],
     shell_first_kinds: &[],
     shell_last_kinds: &[],
+    try_kinds: &[],
+    catch_kinds: &[],
     first_assignment_is_let: false,
     strict_args: true,
 };
@@ -307,6 +312,8 @@ const KOTLIN_AST: AstShape = AstShape {
     local_decl_prefixes: &[],
     shell_first_kinds: &["control_structure_body"],
     shell_last_kinds: &[],
+    try_kinds: &[],
+    catch_kinds: &[],
     first_assignment_is_let: false,
     strict_args: false,
 };
@@ -331,6 +338,8 @@ const CSHARP_AST: AstShape = AstShape {
     local_decl_prefixes: &[],
     shell_first_kinds: &[],
     shell_last_kinds: &[],
+    try_kinds: &[],
+    catch_kinds: &[],
     first_assignment_is_let: false,
     strict_args: false,
 };
@@ -355,6 +364,8 @@ const PYTHON_AST: AstShape = AstShape {
     local_decl_prefixes: &[],
     shell_first_kinds: &[],
     shell_last_kinds: &[],
+    try_kinds: &["try_statement"],
+    catch_kinds: &["except_clause"],
     first_assignment_is_let: true,
     strict_args: false,
 };
@@ -379,6 +390,8 @@ const JS_AST: AstShape = AstShape {
     local_decl_prefixes: &[],
     shell_first_kinds: &[],
     shell_last_kinds: &["else_clause"],
+    try_kinds: &[],
+    catch_kinds: &[],
     first_assignment_is_let: false,
     strict_args: false,
 };
@@ -403,6 +416,8 @@ const ZIG_AST: AstShape = AstShape {
     local_decl_prefixes: &["var ", "const "],
     shell_first_kinds: &["block_expression"],
     shell_last_kinds: &["labeled_statement"],
+    try_kinds: &[],
+    catch_kinds: &[],
     first_assignment_is_let: false,
     strict_args: false,
 };
@@ -435,6 +450,8 @@ const DART_AST: AstShape = AstShape {
     local_decl_prefixes: &[],
     shell_first_kinds: &["function_body"],
     shell_last_kinds: &[],
+    try_kinds: &[],
+    catch_kinds: &[],
     first_assignment_is_let: false,
     strict_args: false,
 };
@@ -515,6 +532,9 @@ fn ast_stmt(
     }
     if kind_in(stmt, shape.while_kinds) {
         return ast_while(src, stmt, shape, locals);
+    }
+    if kind_in(stmt, shape.try_kinds) {
+        return ast_try(src, stmt, shape, locals);
     }
     if kind_in(stmt, shape.call_kinds) {
         return ast_expr(src, stmt, shape).map(Stmt::Expr);
@@ -710,6 +730,40 @@ fn ast_while(
     })
 }
 
+fn ast_try(
+    src: &[u8],
+    stmt: Node<'_>,
+    shape: AstShape,
+    locals: &HashSet<String>,
+) -> Option<Stmt> {
+    let mut scoped = locals.clone();
+    let body = stmt
+        .child_by_field_name("body")
+        .or_else(|| first_body_child(stmt, shape))
+        .map(|n| ast_stmt_or_body(src, n, shape, &mut scoped))
+        .unwrap_or_default();
+    let mut catches = Vec::new();
+    for kind in shape.catch_kinds {
+        let mut found = Vec::new();
+        collect_kinds(stmt, &[*kind], &mut found);
+        for c in found {
+            let mut catch_scoped = locals.clone();
+            let pattern = first_named(c, "identifier")
+                .map(|n| node_txt(src, n).trim().to_string())
+                .unwrap_or_default();
+            let catch_body = first_body_child(c, shape)
+                .or_else(|| c.child_by_field_name("body"))
+                .map(|n| ast_stmt_or_body(src, n, shape, &mut catch_scoped))
+                .unwrap_or_default();
+            catches.push(CatchArm {
+                pattern,
+                body: catch_body,
+            });
+        }
+    }
+    Some(Stmt::Try { body, catches })
+}
+
 fn first_body_child<'a>(stmt: Node<'a>, shape: AstShape) -> Option<Node<'a>> {
     shape
         .block_kinds
@@ -902,6 +956,7 @@ fn cpp_class_decl<'a>(src: &[u8], class_node: Node<'a>) -> Option<Decl> {
         visibility: Visibility::Pub,
         extends,
         implements: vec![],
+        type_params: vec![],
     })
 }
 
@@ -985,6 +1040,7 @@ fn c_like_function_decl<'a>(src: &[u8], func_def: Node<'a>) -> Option<Decl> {
         params,
         ret,
         body,
+        type_params: vec![],
     })
 }
 
@@ -1517,6 +1573,7 @@ fn java_class_decl<'a>(src: &[u8], class_node: Node<'a>) -> Option<Decl> {
         visibility,
         extends,
         implements,
+        type_params: vec![],
     })
 }
 
@@ -1531,6 +1588,7 @@ fn java_interface_decl<'a>(src: &[u8], iface_node: Node<'a>) -> Option<Decl> {
         name,
         methods,
         visibility,
+        type_params: vec![],
     })
 }
 
@@ -1618,6 +1676,7 @@ fn java_constructor<'a>(src: &[u8], c: Node<'a>) -> Option<Decl> {
         params,
         ret: Typ::Void,
         body,
+        type_params: vec![],
     })
 }
 
@@ -1666,6 +1725,7 @@ fn java_method<'a>(src: &[u8], m: Node<'a>) -> Option<Decl> {
         params,
         ret,
         body,
+        type_params: vec![],
     })
 }
 
@@ -1755,6 +1815,7 @@ fn extract_kotlin(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
             params,
             ret,
             body,
+            type_params: vec![],
         })
     })
 }
@@ -1879,6 +1940,7 @@ fn csharp_method<'a>(src: &[u8], n: Node<'a>) -> Option<Decl> {
         params,
         ret,
         body,
+        type_params: vec![],
     })
 }
 
@@ -1902,6 +1964,7 @@ fn csharp_class_decl<'a>(src: &[u8], class_node: Node<'a>) -> Option<Decl> {
         visibility: Visibility::Internal,
         extends,
         implements: vec![],
+        type_params: vec![],
     })
 }
 
@@ -1913,6 +1976,7 @@ fn csharp_interface_decl<'a>(src: &[u8], iface_node: Node<'a>) -> Option<Decl> {
         name,
         methods,
         visibility: Visibility::Internal,
+        type_params: vec![],
     })
 }
 
@@ -2007,46 +2071,180 @@ fn csharp_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
     ast_body(src, body, CSHARP_AST)
 }
 
-fn extract_python(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
-    extract_fn_nodes(src, root, &["function_definition"], |src, n| {
-        let name_n = n.child_by_field_name("name")?;
-        let name = normalize_entry(node_txt(src, name_n).trim());
-        let ret = n
-            .child_by_field_name("return_type")
-            .or_else(|| {
-                let params = n.child_by_field_name("parameters")?;
-                let mut seen_params = false;
-                let mut w = n.walk();
-                for ch in n.named_children(&mut w) {
-                    if ch == params {
-                        seen_params = true;
-                        continue;
-                    }
-                    if seen_params && ch.kind() == "type" {
-                        return Some(ch);
-                    }
-                    if ch.kind() == "block" {
-                        break;
+fn extract_python_with_classes(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
+    let mut decls = Vec::new();
+
+    let mut class_nodes = Vec::new();
+    collect_kinds(root, &["class_definition"], &mut class_nodes);
+    for c in class_nodes {
+        if let Some(d) = python_class_decl(src, c) {
+            decls.push(d);
+        }
+    }
+
+    let mut func_nodes = Vec::new();
+    collect_kinds(root, &["function_definition"], &mut func_nodes);
+    for f in func_nodes {
+        let is_class_method = f
+            .parent()
+            .map_or(false, |p| p.kind() == "block")
+            && f
+                .parent()
+                .and_then(|p| p.parent())
+                .map_or(false, |gp| gp.kind() == "class_definition");
+        if !is_class_method {
+            if let Some(d) = python_function_decl(src, f) {
+                decls.push(d);
+            }
+        }
+    }
+
+    let mut lambda_nodes = Vec::new();
+    collect_kinds(root, &["lambda"], &mut lambda_nodes);
+    for l in lambda_nodes {
+        if let Some(parent) = l.parent()
+            && parent.kind() == "assignment"
+        {
+            let left = parent.child_by_field_name("left")
+                .or_else(|| parent.named_child(0));
+            if let Some(left_n) = left
+                && left_n.kind() == "identifier"
+            {
+                let name = normalize_entry(node_txt(src, left_n).trim());
+                let params = python_lambda_params(src, l);
+                let ret = Typ::Void;
+                let body_expr = l.named_child(l.named_child_count().saturating_sub(1) as u32);
+                let body = body_expr
+                    .and_then(|b| ast_expr(src, b, PYTHON_AST))
+                    .map(|e| vec![Stmt::Return(Some(e))])
+                    .unwrap_or_default();
+                decls.push(Decl::Function {
+                    name,
+                    params,
+                    ret,
+                    body,
+                    type_params: vec![],
+                });
+            }
+        }
+    }
+
+    Ok(decls)
+}
+
+fn python_class_decl<'a>(src: &[u8], class_node: Node<'a>) -> Option<Decl> {
+    let name_n = class_node.child_by_field_name("name")?;
+    let name = node_txt(src, name_n).trim().to_string();
+    let body = class_node.child_by_field_name("body")?;
+
+    let mut fields = Vec::new();
+    let mut methods = Vec::new();
+    let mut init_body: Option<Node> = None;
+
+    let mut body_w = body.walk();
+    for ch in body.named_children(&mut body_w) {
+        if ch.kind() == "function_definition" {
+            if let Some(d) = python_function_decl(src, ch) {
+                if let Decl::Function { name: fn_name, .. } = &d
+                    && fn_name == "__init__"
+                {
+                    init_body = ch.child_by_field_name("body")
+                        .or_else(|| first_named(ch, "block"));
+                }
+                methods.push(d);
+            }
+        }
+    }
+
+    if let Some(init) = init_body {
+        let mut assigns = Vec::new();
+        collect_kinds(init, &["expression_statement"], &mut assigns);
+        for es in assigns {
+            let mut ew = es.walk();
+            if let Some(assign) = es.named_children(&mut ew).next()
+                && assign.kind() == "assignment"
+            {
+                let left = assign.child_by_field_name("left")
+                    .or_else(|| assign.named_child(0));
+                if let Some(left_n) = left
+                    && left_n.kind() == "attribute"
+                {
+                    if let Some(obj) = left_n.child_by_field_name("object")
+                        && node_txt(src, obj).trim() == "self"
+                    {
+                        if let Some(attr) = left_n.child_by_field_name("attribute") {
+                            let field_name = node_txt(src, attr).trim().to_string();
+                            fields.push((field_name, Typ::Named("Any".into())));
+                        }
                     }
                 }
-                None
-            })
-            .map(|t| Typ::Named(node_txt(src, t).trim().to_string()))
-            .unwrap_or(Typ::Void);
-        let plist = n.child_by_field_name("parameters")?;
-        let params = simple_param_names(src, plist);
-        let body = n
-            .child_by_field_name("body")
-            .or_else(|| first_named(n, "block"))
-            .map(|b| python_body(src, b))
-            .unwrap_or_default();
-        Some(Decl::Function {
-            name,
-            params,
-            ret,
-            body,
-        })
+            }
+        }
+    }
+
+    Some(Decl::Class {
+        name,
+        fields,
+        methods,
+        visibility: Visibility::Pub,
+        extends: None,
+        implements: vec![],
+        type_params: vec![],
     })
+}
+
+fn python_function_decl<'a>(src: &[u8], n: Node<'a>) -> Option<Decl> {
+    let name_n = n.child_by_field_name("name")?;
+    let name = normalize_entry(node_txt(src, name_n).trim());
+    let ret = n
+        .child_by_field_name("return_type")
+        .or_else(|| {
+            let params = n.child_by_field_name("parameters")?;
+            let mut seen_params = false;
+            let mut w = n.walk();
+            for ch in n.named_children(&mut w) {
+                if ch == params {
+                    seen_params = true;
+                    continue;
+                }
+                if seen_params && ch.kind() == "type" {
+                    return Some(ch);
+                }
+                if ch.kind() == "block" {
+                    break;
+                }
+            }
+            None
+        })
+        .map(|t| Typ::Named(node_txt(src, t).trim().to_string()))
+        .unwrap_or(Typ::Void);
+    let plist = n.child_by_field_name("parameters")?;
+    let params = simple_param_names(src, plist);
+    let body = n
+        .child_by_field_name("body")
+        .or_else(|| first_named(n, "block"))
+        .map(|b| python_body(src, b))
+        .unwrap_or_default();
+    Some(Decl::Function {
+        name,
+        params,
+        ret,
+        body,
+        type_params: vec![],
+    })
+}
+
+fn python_lambda_params<'a>(src: &[u8], lambda_node: Node<'a>) -> Vec<(String, Typ)> {
+    let mut out = Vec::new();
+    if let Some(params) = first_named(lambda_node, "lambda_parameters") {
+        let mut w = params.walk();
+        for ch in params.named_children(&mut w) {
+            if ch.kind() == "identifier" {
+                out.push((node_txt(src, ch).trim().to_string(), Typ::Named("Any".into())));
+            }
+        }
+    }
+    out
 }
 
 fn simple_param_names<'a>(src: &[u8], plist: Node<'a>) -> Vec<(String, Typ)> {
@@ -2117,35 +2315,461 @@ fn extract_perl(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
     })
 }
 
-fn extract_js_family(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
-    extract_fn_nodes(
-        src,
+fn extract_js_with_classes(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
+    let mut decls = Vec::new();
+
+    let mut class_nodes = Vec::new();
+    collect_kinds(root, &["class_declaration"], &mut class_nodes);
+    for c in class_nodes {
+        if let Some(d) = js_class_decl(src, c) {
+            decls.push(d);
+        }
+    }
+
+    let mut func_nodes = Vec::new();
+    collect_kinds(
         root,
         &["function_declaration", "generator_function_declaration"],
-        js_function_decl,
-    )
+        &mut func_nodes,
+    );
+    for f in func_nodes {
+        if let Some(d) = js_function_decl(src, f) {
+            decls.push(d);
+        }
+    }
+
+    let mut var_nodes = Vec::new();
+    collect_kinds(
+        root,
+        &["lexical_declaration", "variable_declaration"],
+        &mut var_nodes,
+    );
+    for v in var_nodes {
+        let mut vdec_nodes = Vec::new();
+        collect_kinds(v, &["variable_declarator"], &mut vdec_nodes);
+        for vd in vdec_nodes {
+            if let Some(d) = js_var_function(src, vd) {
+                decls.push(d);
+            }
+        }
+    }
+
+    Ok(decls)
 }
 
-fn extract_ts_family(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
-    extract_fn_nodes(
-        src,
+fn js_class_decl<'a>(src: &[u8], class_node: Node<'a>) -> Option<Decl> {
+    let name_n = class_node.child_by_field_name("name")?;
+    let name = node_txt(src, name_n).trim().to_string();
+    let body = class_node.child_by_field_name("body")?;
+
+    let mut fields = Vec::new();
+    let mut methods = Vec::new();
+
+    let mut field_nodes = Vec::new();
+    collect_kinds(
+        body,
+        &["public_field_definition", "field_definition"],
+        &mut field_nodes,
+    );
+    for f in field_nodes {
+        let field_name_n = f
+            .child_by_field_name("name")
+            .or_else(|| f.child_by_field_name("property"))
+            .or_else(|| first_named(f, "property_identifier"));
+        if let Some(field_name_n) = field_name_n {
+            let field_name = node_txt(src, field_name_n).trim().to_string();
+            fields.push((field_name, Typ::Named("Any".into())));
+        }
+    }
+
+    let mut method_nodes = Vec::new();
+    collect_kinds(body, &["method_definition"], &mut method_nodes);
+    for m in method_nodes {
+        let is_constructor = m
+            .child_by_field_name("name")
+            .or_else(|| first_named(m, "property_identifier"))
+            .map_or(false, |n| node_txt(src, n).trim() == "constructor");
+        if is_constructor {
+            if let Some(ctor_fields) = js_ctor_fields(src, m) {
+                for (fname, fty) in ctor_fields {
+                    if !fields.iter().any(|(n, _)| n == &fname) {
+                        fields.push((fname, fty));
+                    }
+                }
+            }
+        }
+        if let Some(d) = js_method_decl(src, m) {
+            methods.push(d);
+        }
+    }
+
+    let extends = class_node
+        .child_by_field_name("superclass")
+        .and_then(|sc| first_named(sc, "identifier"))
+        .map(|n| node_txt(src, n).trim().to_string());
+
+    Some(Decl::Class {
+        name,
+        fields,
+        methods,
+        visibility: Visibility::Pub,
+        extends,
+        implements: vec![],
+        type_params: vec![],
+    })
+}
+
+fn js_method_decl<'a>(src: &[u8], m: Node<'a>) -> Option<Decl> {
+    let name_n = m
+        .child_by_field_name("name")
+        .or_else(|| first_named(m, "property_identifier"))?;
+    let name = node_txt(src, name_n).trim().to_string();
+    let params = js_formal_params(src, m);
+    let body = m
+        .child_by_field_name("body")
+        .map(|b| js_body(src, b))
+        .unwrap_or_default();
+    Some(Decl::Function {
+        name,
+        params,
+        ret: Typ::Void,
+        body,
+        type_params: vec![],
+    })
+}
+
+fn js_ctor_fields<'a>(src: &[u8], ctor: Node<'a>) -> Option<Vec<(String, Typ)>> {
+    let body = ctor.child_by_field_name("body")?;
+    let mut fields = Vec::new();
+    let mut assigns = Vec::new();
+    collect_kinds(body, &["assignment_expression"], &mut assigns);
+    for a in assigns {
+        let left = a.child(0).or_else(|| a.child_by_field_name("left"));
+        if let Some(left_n) = left
+            && left_n.kind() == "member_expression"
+        {
+            let obj = left_n
+                .child_by_field_name("object")
+                .or_else(|| left_n.child(0));
+            if let Some(obj_n) = obj
+                && node_txt(src, obj_n).trim() == "this"
+            {
+                if let Some(prop) = left_n.child_by_field_name("property") {
+                    let field_name = node_txt(src, prop).trim().to_string();
+                    fields.push((field_name, Typ::Named("Any".into())));
+                }
+            }
+        }
+    }
+    Some(fields)
+}
+
+fn js_var_function<'a>(src: &[u8], vd: Node<'a>) -> Option<Decl> {
+    let value = vd.child_by_field_name("value")?;
+    if value.kind() != "arrow_function" && value.kind() != "function_expression" {
+        return None;
+    }
+    let name_n = vd.child_by_field_name("name")?;
+    let name = normalize_entry(node_txt(src, name_n).trim());
+    let params = js_formal_params(src, value);
+    let body = value
+        .child_by_field_name("body")
+        .map(|b| js_body(src, b))
+        .unwrap_or_default();
+    Some(Decl::Function {
+        name,
+        params,
+        ret: Typ::Void,
+        body,
+        type_params: vec![],
+    })
+}
+
+fn js_formal_params<'a>(src: &[u8], fun: Node<'a>) -> Vec<(String, Typ)> {
+    let mut out = Vec::new();
+    let Some(plist) = fun.child_by_field_name("parameters") else {
+        return out;
+    };
+    let mut w = plist.walk();
+    for ch in plist.named_children(&mut w) {
+        if ch.kind() == "required_parameter"
+            || ch.kind() == "optional_parameter"
+            || ch.kind() == "identifier"
+        {
+            let id = first_named(ch, "identifier").unwrap_or(ch);
+            let name = node_txt(src, id).trim().to_string();
+            out.push((name, Typ::Named("Any".into())));
+        }
+    }
+    out
+}
+
+fn js_function_decl<'a>(src: &[u8], n: Node<'a>) -> Option<Decl> {
+    let name_n = n.child_by_field_name("name")?;
+    let name = normalize_entry(node_txt(src, name_n).trim());
+    let params = js_formal_params(src, n);
+    let body = n
+        .child_by_field_name("body")
+        .map(|b| js_body(src, b))
+        .unwrap_or_default();
+    Some(Decl::Function {
+        name,
+        params,
+        ret: Typ::Void,
+        body,
+        type_params: vec![],
+    })
+}
+
+fn js_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
+    ast_body(src, body, JS_AST)
+}
+
+fn extract_ts_with_classes(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
+    let mut decls = Vec::new();
+
+    let mut class_nodes = Vec::new();
+    collect_kinds(root, &["class_declaration"], &mut class_nodes);
+    for c in class_nodes {
+        if let Some(d) = ts_class_decl(src, c) {
+            decls.push(d);
+        }
+    }
+
+    let mut iface_nodes = Vec::new();
+    collect_kinds(root, &["interface_declaration"], &mut iface_nodes);
+    for i in iface_nodes {
+        if let Some(d) = ts_interface_decl(src, i) {
+            decls.push(d);
+        }
+    }
+
+    let mut hits = Vec::new();
+    collect_kinds(
         root,
         &[
             "function_declaration",
             "generator_function_declaration",
             "function_signature",
         ],
-        |src, n| {
-            if n.kind() == "function_signature" {
-                let name_n = n.child_by_field_name("name")?;
-                let name = normalize_entry(node_txt(src, name_n).trim());
-                let params = ts_params(src, n);
-                let ret = ts_return_type(src, n);
-                return Some(decl_fn(name, params, ret));
+        &mut hits,
+    );
+    for n in hits {
+        if n.kind() == "function_signature" {
+            let name_n = match n.child_by_field_name("name") {
+                Some(nm) => nm,
+                None => continue,
+            };
+            let name = normalize_entry(node_txt(src, name_n).trim());
+            let params = ts_params(src, n);
+            let ret = ts_return_type(src, n);
+            decls.push(decl_fn(name, params, ret));
+            continue;
+        }
+        let is_class_method = n
+            .parent()
+            .map_or(false, |p| p.kind() == "statement_block")
+            && n
+                .parent()
+                .and_then(|p| p.parent())
+                .map_or(false, |gp| gp.kind() == "class_declaration");
+        if !is_class_method {
+            if let Some(d) = ts_function_decl(src, n) {
+                decls.push(d);
             }
-            ts_function_decl(src, n)
-        },
-    )
+        }
+    }
+
+    let mut var_nodes = Vec::new();
+    collect_kinds(
+        root,
+        &["lexical_declaration", "variable_declaration"],
+        &mut var_nodes,
+    );
+    for v in var_nodes {
+        let mut vdec_nodes = Vec::new();
+        collect_kinds(v, &["variable_declarator"], &mut vdec_nodes);
+        for vd in vdec_nodes {
+            if let Some(d) = ts_var_function(src, vd) {
+                decls.push(d);
+            }
+        }
+    }
+
+    Ok(decls)
+}
+
+fn ts_class_decl<'a>(src: &[u8], class_node: Node<'a>) -> Option<Decl> {
+    let name_n = class_node.child_by_field_name("name")?;
+    let name = node_txt(src, name_n).trim().to_string();
+    let body = class_node.child_by_field_name("body")?;
+
+    let mut fields = Vec::new();
+    let mut methods = Vec::new();
+
+    let mut field_nodes = Vec::new();
+    collect_kinds(
+        body,
+        &["public_field_definition", "field_definition"],
+        &mut field_nodes,
+    );
+    for f in field_nodes {
+        let field_name_n = f
+            .child_by_field_name("name")
+            .or_else(|| f.child_by_field_name("property"))
+            .or_else(|| first_named(f, "property_identifier"));
+        if let Some(field_name_n) = field_name_n {
+            let field_name = node_txt(src, field_name_n).trim().to_string();
+            let field_ty = f
+                .child_by_field_name("type")
+                .and_then(|t| {
+                    if t.kind() == "type_annotation" {
+                        t.named_child(0)
+                    } else {
+                        Some(t)
+                    }
+                })
+                .map(|t| Typ::Named(node_txt(src, t).trim().to_string()))
+                .unwrap_or(Typ::Named("Any".into()));
+            fields.push((field_name, field_ty));
+        }
+    }
+
+    let mut method_nodes = Vec::new();
+    collect_kinds(body, &["method_definition", "method_signature"], &mut method_nodes);
+    for m in method_nodes {
+        let is_constructor = m
+            .child_by_field_name("name")
+            .or_else(|| first_named(m, "property_identifier"))
+            .map_or(false, |n| node_txt(src, n).trim() == "constructor");
+        if is_constructor {
+            if let Some(ctor_fields) = ts_ctor_fields(src, m) {
+                for (fname, fty) in ctor_fields {
+                    if !fields.iter().any(|(n, _)| n == &fname) {
+                        fields.push((fname, fty));
+                    }
+                }
+            }
+        }
+        if let Some(d) = ts_method_decl(src, m) {
+            methods.push(d);
+        }
+    }
+
+    let extends = class_node
+        .child_by_field_name("superclass")
+        .and_then(|sc| first_named(sc, "type_identifier").or_else(|| first_named(sc, "identifier")))
+        .map(|n| node_txt(src, n).trim().to_string());
+
+    Some(Decl::Class {
+        name,
+        fields,
+        methods,
+        visibility: Visibility::Pub,
+        extends,
+        implements: vec![],
+        type_params: vec![],
+    })
+}
+
+fn ts_method_decl<'a>(src: &[u8], m: Node<'a>) -> Option<Decl> {
+    let name_n = m
+        .child_by_field_name("name")
+        .or_else(|| first_named(m, "property_identifier"))?;
+    let name = node_txt(src, name_n).trim().to_string();
+    let params = ts_params(src, m);
+    let ret = ts_return_type(src, m);
+    let body = m
+        .child_by_field_name("body")
+        .map(|b| js_body(src, b))
+        .unwrap_or_default();
+    Some(Decl::Function {
+        name,
+        params,
+        ret,
+        body,
+        type_params: vec![],
+    })
+}
+
+fn ts_ctor_fields<'a>(src: &[u8], ctor: Node<'a>) -> Option<Vec<(String, Typ)>> {
+    let body = ctor.child_by_field_name("body")?;
+    let mut fields = Vec::new();
+    let mut assigns = Vec::new();
+    collect_kinds(body, &["assignment_expression"], &mut assigns);
+    for a in assigns {
+        let left = a.child(0).or_else(|| a.child_by_field_name("left"));
+        if let Some(left_n) = left
+            && left_n.kind() == "member_expression"
+        {
+            let obj = left_n
+                .child_by_field_name("object")
+                .or_else(|| left_n.child(0));
+            if let Some(obj_n) = obj
+                && node_txt(src, obj_n).trim() == "this"
+            {
+                if let Some(prop) = left_n.child_by_field_name("property") {
+                    let field_name = node_txt(src, prop).trim().to_string();
+                    fields.push((field_name, Typ::Named("Any".into())));
+                }
+            }
+        }
+    }
+    Some(fields)
+}
+
+fn ts_var_function<'a>(src: &[u8], vd: Node<'a>) -> Option<Decl> {
+    let value = vd.child_by_field_name("value")?;
+    if value.kind() != "arrow_function" && value.kind() != "function_expression" {
+        return None;
+    }
+    let name_n = vd.child_by_field_name("name")?;
+    let name = normalize_entry(node_txt(src, name_n).trim());
+    let params = ts_params(src, value);
+    let ret = ts_return_type(src, value);
+    let body = value
+        .child_by_field_name("body")
+        .map(|b| js_body(src, b))
+        .unwrap_or_default();
+    Some(Decl::Function {
+        name,
+        params,
+        ret,
+        body,
+        type_params: vec![],
+    })
+}
+
+fn ts_interface_decl<'a>(src: &[u8], iface_node: Node<'a>) -> Option<Decl> {
+    let name_n = iface_node.child_by_field_name("name")?;
+    let name = node_txt(src, name_n).trim().to_string();
+    let body = iface_node
+        .child_by_field_name("body")
+        .or_else(|| first_named(iface_node, "interface_body"))?;
+
+    let mut sigs = Vec::new();
+    let mut hits = Vec::new();
+    collect_kinds(body, &["method_signature"], &mut hits);
+    for m in hits {
+        if let Some(sig) = ts_method_sig(src, m) {
+            sigs.push(sig);
+        }
+    }
+
+    Some(Decl::Interface {
+        name,
+        methods: sigs,
+        visibility: Visibility::Pub,
+        type_params: vec![],
+    })
+}
+
+fn ts_method_sig<'a>(src: &[u8], m: Node<'a>) -> Option<MethodSig> {
+    let name_n = m.child_by_field_name("name")?;
+    let name = node_txt(src, name_n).trim().to_string();
+    let params = ts_params(src, m);
+    let ret = ts_return_type(src, m);
+    Some(MethodSig { name, params, ret })
 }
 
 fn ts_function_decl<'a>(src: &[u8], n: Node<'a>) -> Option<Decl> {
@@ -2160,6 +2784,7 @@ fn ts_function_decl<'a>(src: &[u8], n: Node<'a>) -> Option<Decl> {
         params: ts_params(src, n),
         ret: ts_return_type(src, n),
         body,
+        type_params: vec![],
     })
 }
 
@@ -2211,25 +2836,6 @@ fn ts_return_type(src: &[u8], n: Node<'_>) -> Typ {
         }
     }
     Typ::Void
-}
-
-fn js_function_decl<'a>(src: &[u8], n: Node<'a>) -> Option<Decl> {
-    let name_n = n.child_by_field_name("name")?;
-    let name = normalize_entry(node_txt(src, name_n).trim());
-    let body = n
-        .child_by_field_name("body")
-        .map(|b| js_body(src, b))
-        .unwrap_or_default();
-    Some(Decl::Function {
-        name,
-        params: vec![],
-        ret: Typ::Void,
-        body,
-    })
-}
-
-fn js_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
-    ast_body(src, body, JS_AST)
 }
 
 // Go uses dedicated compiler::go_front.
@@ -2299,6 +2905,7 @@ fn extract_zig(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
             params,
             ret,
             body,
+            type_params: vec![],
         })
     })
 }
@@ -2506,6 +3113,7 @@ fn extract_dart(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
                 params,
                 ret,
                 body,
+                type_params: vec![],
             })
         },
     )
@@ -2631,7 +3239,7 @@ mod tests {
         let ts_module = parse_lang(
             tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
             &repo_sample("control_flow.ts"),
-            extract_ts_family,
+            extract_ts_with_classes,
         )
         .expect("parse typescript control flow");
         assert_eq!(body_shape(main_body(&ts_module)), expected);
@@ -2897,7 +3505,7 @@ class X {
         let m = parse_lang(
             tree_sitter_javascript::LANGUAGE.into(),
             src,
-            extract_js_family,
+            extract_js_with_classes,
         )
         .expect("ok");
         let main = m
@@ -2925,7 +3533,7 @@ class X {
         let m = parse_lang(
             tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
             src,
-            extract_ts_family,
+            extract_ts_with_classes,
         )
         .expect("ok");
         let main = m
@@ -2963,7 +3571,7 @@ function main() {
         let m = parse_lang(
             tree_sitter_javascript::LANGUAGE.into(),
             src,
-            extract_js_family,
+            extract_js_with_classes,
         )
         .expect("ok");
         let main = m
@@ -3022,7 +3630,7 @@ function main(): void {
         let m = parse_lang(
             tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
             src,
-            extract_ts_family,
+            extract_ts_with_classes,
         )
         .expect("ok");
         let main = m
@@ -3051,7 +3659,7 @@ function main(): void {
         let m = parse_lang(
             tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
             src,
-            extract_ts_family,
+            extract_ts_with_classes,
         )
         .expect("ok");
         let helper = m
@@ -3215,7 +3823,7 @@ def main():
     helper(value)
     return
 "#;
-        let m = parse_lang(tree_sitter_python::LANGUAGE.into(), src, extract_python).expect("ok");
+        let m = parse_lang(tree_sitter_python::LANGUAGE.into(), src, extract_python_with_classes).expect("ok");
         let helper = m
             .decls
             .iter()
@@ -3275,7 +3883,7 @@ def main():
         value = value + 1
     return value
 "#;
-        let m = parse_lang(tree_sitter_python::LANGUAGE.into(), src, extract_python).expect("ok");
+        let m = parse_lang(tree_sitter_python::LANGUAGE.into(), src, extract_python_with_classes).expect("ok");
         let main = m
             .decls
             .iter()
@@ -4145,5 +4753,269 @@ interface IResettable {
         }
         visit(tree.root_node(), src, &mut found);
         assert!(found, "expected a return_statement in parse tree");
+    }
+
+    #[test]
+    fn js_class_extraction_produces_decl_class() {
+        let src = r#"
+class Calculator {
+    value = 0;
+    constructor(start) {
+        this.count = start;
+    }
+    add(x) {
+        return x;
+    }
+}
+"#;
+        let m = parse_lang(
+            tree_sitter_javascript::LANGUAGE.into(),
+            src,
+            extract_js_with_classes,
+        )
+        .expect("ok");
+
+        let class = m
+            .decls
+            .iter()
+            .find_map(|d| match d {
+                Decl::Class {
+                    name, fields, methods, ..
+                } if name == "Calculator" => Some((fields.clone(), methods.clone())),
+                _ => None,
+            })
+            .expect("Calculator class");
+        let (fields, methods) = class;
+        assert_eq!(fields.len(), 2); // value=0 + this.count
+        assert!(fields
+            .iter()
+            .any(|(n, _)| n == "value"));
+        assert!(fields
+            .iter()
+            .any(|(n, _)| n == "count"));
+        assert_eq!(methods.len(), 2); // constructor + add
+        assert!(methods
+            .iter()
+            .any(|d| matches!(d, Decl::Function { name, .. } if name == "constructor")));
+        assert!(methods
+            .iter()
+            .any(|d| matches!(d, Decl::Function { name, .. } if name == "add")));
+    }
+
+    #[test]
+    fn js_arrow_and_function_expr_extracted_from_vars() {
+        let src = r#"
+const add = (a, b) => { return a + b; };
+var multiply = function(a, b) { return a * b; };
+"#;
+        let m = parse_lang(
+            tree_sitter_javascript::LANGUAGE.into(),
+            src,
+            extract_js_with_classes,
+        )
+        .expect("ok");
+
+        let add_fn = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "add"));
+        assert!(add_fn.is_some(), "arrow function add not extracted: {m:?}");
+
+        let mul_fn = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "multiply"));
+        assert!(mul_fn.is_some(), "function expression multiply not extracted: {m:?}");
+    }
+
+    #[test]
+    fn ts_interface_extraction_produces_decl_interface() {
+        let src = r#"
+interface Drawable {
+    draw(): void;
+    getBounds(): Rect;
+}
+"#;
+        let m = parse_lang(
+            tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            src,
+            extract_ts_with_classes,
+        )
+        .expect("ok");
+
+        let iface = m
+            .decls
+            .iter()
+            .find_map(|d| match d {
+                Decl::Interface { name, methods, .. } if name == "Drawable" => {
+                    Some(methods.clone())
+                }
+                _ => None,
+            })
+            .expect("Drawable interface");
+        assert_eq!(iface.len(), 2);
+        assert!(iface
+            .iter()
+            .any(|s| s.name == "draw" && s.ret == Typ::Named("void".into())));
+        assert!(iface
+            .iter()
+            .any(|s| s.name == "getBounds" && s.ret == Typ::Named("Rect".into())));
+    }
+
+    #[test]
+    fn ts_class_extraction_preserves_type_annotations() {
+        let src = r#"
+class TypedCounter {
+    value: number;
+    constructor(start: number) {
+        this.value = start;
+    }
+    inc(): number {
+        return 1;
+    }
+}
+"#;
+        let m = parse_lang(
+            tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            src,
+            extract_ts_with_classes,
+        )
+        .expect("ok");
+
+        let class = m
+            .decls
+            .iter()
+            .find_map(|d| match d {
+                Decl::Class {
+                    name, fields, methods, ..
+                } if name == "TypedCounter" => Some((fields.clone(), methods.clone())),
+                _ => None,
+            })
+            .expect("TypedCounter class");
+        let (fields, methods) = class;
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0], ("value".to_string(), Typ::Named("number".to_string())));
+        assert_eq!(methods.len(), 2); // constructor + inc
+        let inc = methods
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "inc"))
+            .expect("inc method");
+        match inc {
+            Decl::Function { ret, .. } => {
+                assert_eq!(ret, &Typ::Named("number".into()));
+            }
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn python_class_extraction_produces_decl_class() {
+        let src = r#"
+class Counter:
+    def __init__(self, start: int):
+        self.value = start
+        self.label = "ok"
+    def inc(self) -> int:
+        return 1
+"#;
+        let m = parse_lang(
+            tree_sitter_python::LANGUAGE.into(),
+            src,
+            extract_python_with_classes,
+        )
+        .expect("ok");
+
+        let class = m
+            .decls
+            .iter()
+            .find_map(|d| match d {
+                Decl::Class {
+                    name, fields, methods, ..
+                } if name == "Counter" => Some((fields.clone(), methods.clone())),
+                _ => None,
+            })
+            .expect("Counter class");
+        let (fields, methods) = class;
+        assert_eq!(fields.len(), 2); // self.value + self.label
+        assert!(fields
+            .iter()
+            .any(|(n, _)| n == "value"));
+        assert!(fields
+            .iter()
+            .any(|(n, _)| n == "label"));
+        assert_eq!(methods.len(), 2); // __init__ + inc
+        assert!(methods
+            .iter()
+            .any(|d| matches!(d, Decl::Function { name, .. } if name == "__init__")));
+        assert!(methods
+            .iter()
+            .any(|d| matches!(d, Decl::Function { name, .. } if name == "inc")));
+    }
+
+    #[test]
+    fn python_lambda_extracted_as_function() {
+        let src = r#"
+double = lambda x: x * 2
+"#;
+        let m = parse_lang(
+            tree_sitter_python::LANGUAGE.into(),
+            src,
+            extract_python_with_classes,
+        )
+        .expect("ok");
+
+        let double = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "double"))
+            .expect("double lambda");
+        match double {
+            Decl::Function {
+                params, body, ..
+            } => {
+                assert_eq!(params.len(), 1);
+                assert_eq!(params[0].0, "x");
+                assert_eq!(body.len(), 1); // return x * 2
+            }
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn python_try_except_lowered_to_stmt_try() {
+        let src = r#"
+def risky(x):
+    try:
+        value = 1
+    except TypeError:
+        value = 0
+    return value
+"#;
+        let m = parse_lang(
+            tree_sitter_python::LANGUAGE.into(),
+            src,
+            extract_python_with_classes,
+        )
+        .expect("ok");
+
+        let risky = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "risky"))
+            .expect("risky function");
+        match risky {
+            Decl::Function { body, .. } => {
+                assert_eq!(body.len(), 2); // try + return
+                assert!(
+                    matches!(&body[0], Stmt::Try { .. }),
+                    "expected Stmt::Try, got {:?}",
+                    &body[0]
+                );
+                if let Stmt::Try { catches, .. } = &body[0] {
+                    assert_eq!(catches.len(), 1);
+                }
+            }
+            _ => panic!("expected function"),
+        }
     }
 }

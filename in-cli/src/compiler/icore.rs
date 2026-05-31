@@ -69,6 +69,7 @@ fn type_known(structs: &HashSet<&str>, t: &Typ) -> bool {
         Typ::Named(n) => structs.contains(n.as_str()),
         Typ::Array(item) => type_known(structs, item),
         Typ::Int | Typ::String | Typ::Bool | Typ::Void => true,
+        Typ::Generic(_) => false,
     }
 }
 
@@ -98,7 +99,7 @@ pub fn parse_icore_source(raw: &str) -> Result<UnifiedModule, String> {
                     .into_iter()
                     .map(|f| (f.name, parse_typ(&f.ty)))
                     .collect();
-                decls.push(Decl::Struct { name, fields: flds });
+                decls.push(Decl::Struct { name, fields: flds, type_params: vec![] });
             }
             IcoreDecl::Function {
                 name,
@@ -125,6 +126,7 @@ pub fn parse_icore_source(raw: &str) -> Result<UnifiedModule, String> {
                     params,
                     ret: parse_typ(&ret),
                     body,
+                    type_params: vec![],
                 });
             }
         }
@@ -352,7 +354,7 @@ fn validate_module(module: &UnifiedModule) -> Result<(), String> {
 
     for d in &module.decls {
         match d {
-            Decl::Struct { name, fields } => {
+            Decl::Struct { name, fields, .. } => {
                 for (field, ty) in fields {
                     if !type_known(&struct_names, ty) {
                         return Err(format!(

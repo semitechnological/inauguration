@@ -792,7 +792,7 @@ fn summarize_core_ir(module: &UnifiedModule) -> CoreIrSummary {
     let mut functions = Vec::new();
     for decl in &module.decls {
         match decl {
-            Decl::Struct { name, fields } => {
+            Decl::Struct { name, fields, .. } => {
                 structs.push(StructSummary {
                     name: name.clone(),
                     field_count: fields.len(),
@@ -810,6 +810,7 @@ fn summarize_core_ir(module: &UnifiedModule) -> CoreIrSummary {
                 params,
                 ret,
                 body,
+                ..
             } => {
                 functions.push(FunctionSummary {
                     name: name.clone(),
@@ -1425,6 +1426,7 @@ fn typ_label(typ: &Typ) -> String {
         Typ::Void => "Void".to_string(),
         Typ::Array(item) => format!("[{}]", typ_label(item)),
         Typ::Named(name) => name.clone(),
+        Typ::Generic(name) => name.clone(),
     }
 }
 

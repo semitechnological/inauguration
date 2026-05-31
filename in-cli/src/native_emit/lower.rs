@@ -129,6 +129,7 @@ fn collect_functions(module: &UnifiedModule) -> Result<HashMap<String, FunctionI
             params,
             ret,
             body,
+            ..
         } = decl
         else {
             continue;
@@ -157,7 +158,7 @@ fn collect_functions(module: &UnifiedModule) -> Result<HashMap<String, FunctionI
 fn entry_return_kind(ret: &Typ) -> EntryReturn {
     match ret {
         Typ::Int | Typ::Bool => EntryReturn::IntLike,
-        Typ::String | Typ::Void | Typ::Array(_) | Typ::Named(_) => EntryReturn::VoidOrReference,
+        Typ::String | Typ::Void | Typ::Array(_) | Typ::Named(_) | Typ::Generic(_) => EntryReturn::VoidOrReference,
     }
 }
 
@@ -166,7 +167,7 @@ fn collect_structs(module: &UnifiedModule) -> HashMap<String, Vec<(String, Typ)>
         .decls
         .iter()
         .filter_map(|decl| match decl {
-            Decl::Struct { name, fields } => Some((name.clone(), fields.clone())),
+            Decl::Struct { name, fields, .. } => Some((name.clone(), fields.clone())),
             _ => None,
         })
         .collect()
@@ -1951,6 +1952,7 @@ fn ensure_return_type(
             Ok(())
         }
         Typ::Array(elem) => ensure_native_array_element(elem, fn_name, "return"),
+        Typ::Generic(_) => Ok(()),
     }
 }
 
@@ -2116,6 +2118,7 @@ mod tests {
                 params: vec![],
                 ret: Typ::Int,
                 body: vec![Stmt::Return(Some(Expr::IntLit(42)))],
+            type_params: vec![],
             }],
         }
     }
@@ -2132,6 +2135,7 @@ mod tests {
                     lhs: Box::new(Expr::IntLit(lhs)),
                     rhs: Box::new(Expr::IntLit(rhs)),
                 }))],
+                type_params: vec![],
             }],
         }
     }
@@ -2186,6 +2190,7 @@ mod tests {
                     params: vec![("value".into(), Typ::Int)],
                     ret: Typ::Int,
                     body: vec![Stmt::Return(Some(Expr::Ident("value".into())))],
+                    type_params: vec![],
                 },
                 Decl::Function {
                     name: "main".into(),
@@ -2198,6 +2203,7 @@ mod tests {
                         }),
                         Stmt::Return(Some(Expr::IntLit(2))),
                     ],
+                type_params: vec![],
                 },
             ],
         };
@@ -2246,7 +2252,8 @@ mod tests {
                 name: "main".into(),
                 params: vec![],
                 ret: Typ::Int,
-                body: vec![Stmt::Return(Some(Expr::BoolLit(true)))],
+                    body: vec![Stmt::Return(Some(Expr::BoolLit(true)))],
+                type_params: vec![],
             }],
         };
 
@@ -2266,6 +2273,7 @@ mod tests {
                         op: "-".into(),
                         expr: Box::new(Expr::IntLit(7)),
                     }))],
+                    type_params: vec![],
                 },
                 Decl::Function {
                     name: "not".into(),
@@ -2275,6 +2283,7 @@ mod tests {
                         op: "!".into(),
                         expr: Box::new(Expr::IntLit(0)),
                     }))],
+                    type_params: vec![],
                 },
             ],
         };
@@ -2389,6 +2398,7 @@ fn main() -> Int {
                         },
                         Stmt::Return(Some(Expr::IntLit(1))),
                     ],
+                type_params: vec![],
                 },
                 Decl::Function {
                     name: "main".into(),
@@ -2398,6 +2408,7 @@ fn main() -> Int {
                         callee: Box::new(Expr::Ident("same".into())),
                         args: vec![Expr::StringLit("ok".into())],
                     }))],
+                    type_params: vec![],
                 },
             ],
         };
@@ -2542,6 +2553,7 @@ fn main() -> Int {
                     Stmt::Assign("x".into(), Expr::IntLit(2)),
                     Stmt::Return(Some(Expr::Ident("x".into()))),
                 ],
+                type_params: vec![],
             }],
         };
 
@@ -2565,6 +2577,7 @@ fn main() -> Int {
                     },
                     Stmt::Return(Some(Expr::Ident("x".into()))),
                 ],
+                type_params: vec![],
             }],
         };
 
@@ -2599,6 +2612,7 @@ fn main() -> Int {
                     },
                     Stmt::Return(Some(Expr::Ident("x".into()))),
                 ],
+                type_params: vec![],
             }],
         };
 
@@ -2630,6 +2644,7 @@ fn main() -> Int {
                     },
                     Stmt::Return(Some(Expr::Ident("out".into()))),
                 ],
+                type_params: vec![],
             }],
         };
 
@@ -2691,6 +2706,7 @@ fn main() -> Int {
                     params: vec![("value".into(), Typ::Int)],
                     ret: Typ::Int,
                     body: vec![Stmt::Return(Some(Expr::Ident("value".into())))],
+                    type_params: vec![],
                 },
                 Decl::Function {
                     name: "main".into(),
@@ -2732,6 +2748,7 @@ fn main() -> Int {
                             rhs: Box::new(Expr::IntLit(8)),
                         })),
                     ],
+                type_params: vec![],
                 },
             ],
         };
@@ -2983,6 +3000,7 @@ fn main() -> Int {
                         },
                         Stmt::Return(Some(Expr::IntLit(1))),
                     ],
+                type_params: vec![],
                 },
                 Decl::Function {
                     name: "main".into(),
@@ -2992,6 +3010,7 @@ fn main() -> Int {
                         callee: Box::new(Expr::Ident("same".into())),
                         args: vec![Expr::StringLit("ok".into())],
                     }))],
+                    type_params: vec![],
                 },
             ],
         };
@@ -3563,6 +3582,7 @@ fn main() -> Int {
                 body: vec![Stmt::Return(Some(Expr::ArrayLit(vec![Expr::StringLit(
                     "bad".into(),
                 )])))],
+                type_params: vec![],
             }],
         };
         match lower_module(&module, "main") {
@@ -3583,6 +3603,7 @@ fn main() -> Int {
                 )],
                 ret: Typ::Int,
                 body: vec![Stmt::Return(Some(Expr::IntLit(0)))],
+                type_params: vec![],
             }],
         };
         match lower_module(&module, "main") {
@@ -3599,6 +3620,7 @@ fn main() -> Int {
                 Decl::Struct {
                     name: "Point".into(),
                     fields: vec![("x".into(), Typ::Int)],
+                    type_params: vec![],
                 },
                 Decl::Function {
                     name: "main".into(),
@@ -3615,6 +3637,7 @@ fn main() -> Int {
                         ),
                         Stmt::Return(Some(Expr::IntLit(0))),
                     ],
+                type_params: vec![],
                 },
             ],
         };

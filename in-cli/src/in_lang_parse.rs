@@ -153,84 +153,98 @@ fn binding_decl(binding: &InExternBinding) -> Decl {
             params: vec![("text".into(), Typ::String)],
             ret: Typ::Void,
             body: Vec::new(),
+            type_params: vec![],
         },
         "read_file" => Decl::Function {
             name: binding.name.clone(),
             params: vec![("path".into(), Typ::String)],
             ret: Typ::String,
             body: Vec::new(),
+            type_params: vec![],
         },
         "write_file" => Decl::Function {
             name: binding.name.clone(),
             params: vec![("path".into(), Typ::String), ("text".into(), Typ::String)],
             ret: Typ::Void,
             body: Vec::new(),
+            type_params: vec![],
         },
         "http_get" => Decl::Function {
             name: binding.name.clone(),
             params: vec![("url".into(), Typ::String)],
             ret: Typ::String,
             body: Vec::new(),
+            type_params: vec![],
         },
         "json_parse" | "json_stringify" => Decl::Function {
             name: binding.name.clone(),
             params: vec![("text".into(), Typ::String)],
             ret: Typ::String,
             body: Vec::new(),
+            type_params: vec![],
         },
         "process_run" => Decl::Function {
             name: binding.name.clone(),
             params: vec![("command".into(), Typ::String)],
             ret: Typ::String,
             body: Vec::new(),
+            type_params: vec![],
         },
         "arg_count" => Decl::Function {
             name: binding.name.clone(),
             params: Vec::new(),
             ret: Typ::Int,
             body: Vec::new(),
+            type_params: vec![],
         },
         "arg" => Decl::Function {
             name: binding.name.clone(),
             params: vec![("index".into(), Typ::Int)],
             ret: Typ::String,
             body: Vec::new(),
+            type_params: vec![],
         },
         "env_get" => Decl::Function {
             name: binding.name.clone(),
             params: vec![("name".into(), Typ::String)],
             ret: Typ::String,
             body: Vec::new(),
+            type_params: vec![],
         },
         "env_set" => Decl::Function {
             name: binding.name.clone(),
             params: vec![("name".into(), Typ::String), ("value".into(), Typ::String)],
             ret: Typ::Void,
             body: Vec::new(),
+            type_params: vec![],
         },
         "env_has" => Decl::Function {
             name: binding.name.clone(),
             params: vec![("name".into(), Typ::String)],
             ret: Typ::Bool,
             body: Vec::new(),
+            type_params: vec![],
         },
         "path_join" => Decl::Function {
             name: binding.name.clone(),
             params: vec![("base".into(), Typ::String), ("child".into(), Typ::String)],
             ret: Typ::String,
             body: Vec::new(),
+            type_params: vec![],
         },
         "path_dirname" | "path_basename" | "path_extname" | "path_normalize" => Decl::Function {
             name: binding.name.clone(),
             params: vec![("path".into(), Typ::String)],
             ret: Typ::String,
             body: Vec::new(),
+            type_params: vec![],
         },
         _ => Decl::Function {
             name: binding.name.clone(),
             params: Vec::new(),
             ret: Typ::Void,
             body: Vec::new(),
+            type_params: vec![],
         },
     }
 }
@@ -573,6 +587,7 @@ fn parse_struct_block(block: &str) -> Result<(String, Vec<(String, Typ)>, Vec<De
             params: lowered_params,
             ret,
             body,
+            type_params: vec![],
         });
     }
     Ok((name, fields, methods))
@@ -780,6 +795,7 @@ fn try_parse_closure_expr(s: &str) -> Option<Expr> {
         params,
         ret,
         body,
+        captures: vec![],
     })
 }
 
@@ -1600,6 +1616,7 @@ fn parse_module_from_blocks(blocks: &[String]) -> Result<UnifiedModule, String> 
                 params,
                 ret,
                 body,
+                type_params: vec![],
             });
         } else if line.starts_with("extern ") {
             let binding = parse_extern_fn_block(block)?;
@@ -1624,10 +1641,11 @@ fn parse_module_from_blocks(blocks: &[String]) -> Result<UnifiedModule, String> 
                 params,
                 ret,
                 body: Vec::new(),
+                type_params: vec![],
             });
         } else if line.starts_with("struct ") {
             let (name, fields, methods) = parse_struct_block(block)?;
-            decls.push(Decl::Struct { name, fields });
+            decls.push(Decl::Struct { name, fields, type_params: vec![] });
             decls.extend(methods);
         } else {
             return Err(".in: expected top-level `fn` or `struct`".into());
@@ -1821,6 +1839,7 @@ fn type_known(structs: &HashSet<&str>, t: &Typ) -> bool {
         Typ::Named(n) => structs.contains(n.as_str()),
         Typ::Array(item) => type_known(structs, item),
         Typ::Int | Typ::String | Typ::Bool | Typ::Void => true,
+        Typ::Generic(_) => false,
     }
 }
 
@@ -1964,7 +1983,7 @@ fn desugar_method_calls(module: &mut UnifiedModule) {
         .decls
         .iter()
         .filter_map(|decl| match decl {
-            Decl::Struct { name, fields } => Some((
+            Decl::Struct { name, fields, .. } => Some((
                 name.clone(),
                 fields
                     .iter()
@@ -2207,7 +2226,7 @@ fn validate_module(module: &UnifiedModule, require_main: bool) -> Result<(), Str
         .decls
         .iter()
         .filter_map(|d| match d {
-            Decl::Struct { name, fields } => Some((
+            Decl::Struct { name, fields, .. } => Some((
                 name.clone(),
                 fields.iter().map(|(field, _)| field.clone()).collect(),
             )),
@@ -2217,7 +2236,7 @@ fn validate_module(module: &UnifiedModule, require_main: bool) -> Result<(), Str
 
     for d in &module.decls {
         match d {
-            Decl::Struct { name, fields } => {
+            Decl::Struct { name, fields, .. } => {
                 for (field, ty) in fields {
                     if !type_known(&struct_set, ty) {
                         return Err(format!(".in: unknown type in struct {name} field {field}",));
@@ -2229,6 +2248,7 @@ fn validate_module(module: &UnifiedModule, require_main: bool) -> Result<(), Str
                 params,
                 ret,
                 body,
+                ..
             } => {
                 for (param, ty) in params {
                     if !type_known(&struct_set, ty) {
@@ -2352,7 +2372,7 @@ fn main() -> void
         let m =
             parse_in_source("struct Box { Int x; String label }\nfn main() -> void\n").expect("ok");
         let st = m.decls.iter().find_map(|d| match d {
-            Decl::Struct { name, fields } if name == "Box" => Some(fields.clone()),
+            Decl::Struct { name, fields, .. } if name == "Box" => Some(fields.clone()),
             _ => None,
         });
         let fields = st.expect("struct Box");
@@ -2372,7 +2392,7 @@ fn main() -> void
 "#;
         let m = parse_in_source(src).expect("parse");
         let fields = match &m.decls[0] {
-            Decl::Struct { name, fields } if name == "Card" => fields.clone(),
+            Decl::Struct { name, fields, .. } if name == "Card" => fields.clone(),
             _ => panic!("expected Card"),
         };
         assert_eq!(fields.len(), 2);
@@ -2659,6 +2679,7 @@ fn main() -> void { read_file("x"); return; }
                 params,
                 ret,
                 body,
+                ..
             } if name == "read_file" => Some((params, ret, body)),
             _ => None,
         });
@@ -3389,7 +3410,7 @@ fn main() -> void {
         };
         assert!(matches!(
             &body[0],
-            Stmt::Let(name, None, Expr::Closure { params, ret, body: closure_body })
+            Stmt::Let(name, None, Expr::Closure { params, ret, body: closure_body, .. })
                 if name == "add"
                     && params.len() == 2
                     && matches!(ret, Typ::Int)

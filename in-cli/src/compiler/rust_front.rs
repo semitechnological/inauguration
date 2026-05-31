@@ -21,6 +21,7 @@ pub fn parse_rust_source(src: &str) -> Result<UnifiedModule, String> {
                 decls.push(Decl::Struct {
                     name: s.ident.to_string(),
                     fields: rust_struct_fields(&s.fields),
+                    type_params: vec![],
                 });
             }
             syn::Item::Fn(f) => decls.push(lower_fn(f)),
@@ -83,6 +84,7 @@ fn lower_fn(f: syn::ItemFn) -> Decl {
         params,
         ret,
         body,
+        type_params: vec![],
     }
 }
 

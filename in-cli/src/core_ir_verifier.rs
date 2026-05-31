@@ -61,6 +61,7 @@ pub fn verify_module(module: &UnifiedModule, options: &VerifyOptions) -> VerifyR
             params,
             ret,
             body,
+            ..
         } = decl
         {
             if let Err((code, reason)) = check_duplicate_param_names(name, params) {
@@ -127,7 +128,7 @@ fn collect_module_facts(module: &UnifiedModule) -> Result<ModuleFacts<'_>, (Stri
 
     for decl in &module.decls {
         match decl {
-            Decl::Struct { name, fields } => {
+            Decl::Struct { name, fields, .. } => {
                 if !top_level.insert(name.as_str()) {
                     return Err((
                         "duplicate-top-level-name".to_string(),
@@ -630,6 +631,7 @@ fn type_name(typ: &Typ) -> String {
         Typ::Void => "Void".to_string(),
         Typ::Array(item) => format!("[{}]", type_name(item)),
         Typ::Named(name) => name.clone(),
+        Typ::Generic(name) => name.clone(),
     }
 }
 
@@ -645,6 +647,7 @@ mod tests {
             params: Vec::new(),
             ret: Typ::Void,
             body,
+            type_params: vec![],
         }
     }
 
@@ -654,6 +657,7 @@ mod tests {
             params: Vec::new(),
             ret,
             body,
+            type_params: vec![],
         }
     }
 
@@ -668,6 +672,7 @@ mod tests {
             params,
             ret,
             body,
+            type_params: vec![],
         }
     }
 
@@ -679,6 +684,7 @@ mod tests {
         Decl::Struct {
             name: "Point".to_string(),
             fields: vec![("x".to_string(), Typ::Int), ("y".to_string(), Typ::Int)],
+            type_params: vec![],
         }
     }
 

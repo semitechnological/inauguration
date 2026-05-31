@@ -1325,6 +1325,7 @@ fn string_of_type(t: &Typ) -> String {
         Typ::Void => "Void".into(),
         Typ::Array(item) => format!("[{}]", string_of_type(item)),
         Typ::Named(n) => n.clone(),
+        Typ::Generic(n) => n.clone(),
     }
 }
 

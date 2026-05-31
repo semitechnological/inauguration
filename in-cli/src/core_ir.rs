@@ -10,6 +10,7 @@ pub enum Typ {
     Void,
     Array(Box<Typ>),
     Named(String),
+    Generic(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,6 +49,7 @@ pub enum Expr {
         params: Vec<(String, Typ)>,
         ret: Typ,
         body: Vec<Stmt>,
+        captures: Vec<String>,
     },
 }
 
@@ -186,12 +188,14 @@ pub enum Decl {
     Struct {
         name: String,
         fields: Vec<(String, Typ)>,
+        type_params: Vec<String>,
     },
     Function {
         name: String,
         params: Vec<(String, Typ)>,
         ret: Typ,
         body: Vec<Stmt>,
+        type_params: Vec<String>,
     },
     Class {
         name: String,
@@ -200,10 +204,12 @@ pub enum Decl {
         visibility: Visibility,
         extends: Option<String>,
         implements: Vec<String>,
+        type_params: Vec<String>,
     },
     Interface {
         name: String,
         methods: Vec<MethodSig>,
         visibility: Visibility,
+        type_params: Vec<String>,
     },
 }

@@ -21,7 +21,7 @@ fn format_module(module: &UnifiedModule) -> String {
 
 fn format_decl(decl: &Decl, out: &mut String) {
     match decl {
-        Decl::Struct { name, fields } => {
+        Decl::Struct { name, fields, .. } => {
             out.push_str("struct ");
             out.push_str(name);
             out.push_str(" {\n");
@@ -39,6 +39,7 @@ fn format_decl(decl: &Decl, out: &mut String) {
             params,
             ret,
             body,
+            ..
         } => {
             out.push_str("fn ");
             out.push_str(name);
@@ -69,6 +70,7 @@ fn format_type(typ: &Typ) -> String {
         Typ::Void => "void".into(),
         Typ::Array(item) => format!("[{}]", format_type(item)),
         Typ::Named(name) => name.clone(),
+        Typ::Generic(name) => name.clone(),
     }
 }
 

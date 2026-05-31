@@ -122,7 +122,7 @@ fn lower_type_decl(bytes: &[u8], decl: Node<'_>) -> Option<Decl> {
             }
         }
     }
-    Some(Decl::Struct { name, fields })
+    Some(Decl::Struct { name, fields, type_params: vec![] })
 }
 
 fn lower_params(bytes: &[u8], param_list: Node<'_>) -> Vec<(String, Typ)> {
@@ -202,6 +202,7 @@ fn lower_function(bytes: &[u8], fun: Node<'_>) -> Option<Decl> {
         params,
         ret,
         body,
+        type_params: vec![],
     })
 }
 
@@ -796,6 +797,7 @@ func helper(a, b int, names []string) (string) {
                     params,
                     ret,
                     body,
+                    ..
                 } if name == "helper" => Some((params, ret, body)),
                 _ => None,
             })

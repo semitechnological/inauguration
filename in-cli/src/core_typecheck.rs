@@ -21,6 +21,7 @@ pub fn typecheck_module(module: &UnifiedModule, kind: ModuleKind) -> Result<(), 
             params,
             ret,
             body,
+            ..
         } = decl
         {
             let mut env = params.iter().cloned().collect();
@@ -83,7 +84,7 @@ fn collect_module_facts(module: &UnifiedModule) -> Result<ModuleFacts<'_>, Strin
 
     for decl in &module.decls {
         match decl {
-            Decl::Struct { name, fields } => {
+            Decl::Struct { name, fields, .. } => {
                 if !top_level.insert(name.as_str()) {
                     return Err(format!("duplicate top-level name `{name}`"));
                 }
@@ -492,6 +493,7 @@ fn type_name(typ: &Typ) -> String {
         Typ::Void => "Void".to_string(),
         Typ::Array(item) => format!("[{}]", type_name(item)),
         Typ::Named(name) => name.clone(),
+        Typ::Generic(name) => name.clone(),
     }
 }
 
@@ -507,6 +509,7 @@ mod tests {
             params: Vec::new(),
             ret: Typ::Void,
             body,
+            type_params: vec![],
         }
     }
 
@@ -520,6 +523,7 @@ mod tests {
             params,
             ret: Typ::Void,
             body,
+            type_params: vec![],
         }
     }
 
@@ -529,6 +533,7 @@ mod tests {
             params: Vec::new(),
             ret,
             body,
+            type_params: vec![],
         }
     }
 
@@ -543,6 +548,7 @@ mod tests {
             params,
             ret,
             body,
+            type_params: vec![],
         }
     }
 
@@ -550,6 +556,7 @@ mod tests {
         Decl::Struct {
             name: "Point".to_string(),
             fields: vec![("x".to_string(), Typ::Int), ("y".to_string(), Typ::Int)],
+            type_params: vec![],
         }
     }
 
@@ -573,6 +580,7 @@ mod tests {
             Decl::Struct {
                 name: "Widget".to_string(),
                 fields: Vec::new(),
+                type_params: vec![],
             },
             function("Widget", Vec::new()),
             function("main", Vec::new()),

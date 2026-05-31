@@ -16,12 +16,14 @@ pub fn subset_program_to_unified(program: &[Decl]) -> UnifiedModule {
             Decl::Struct(s) => IrDecl::Struct {
                 name: s.name.clone(),
                 fields: s.fields.clone(),
+                type_params: vec![],
             },
             Decl::Function(f) => IrDecl::Function {
                 name: f.name.clone(),
                 params: f.params.clone(),
                 ret: f.ret.clone(),
                 body: f.body.clone(),
+                type_params: vec![],
             },
         })
         .collect();

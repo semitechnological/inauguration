@@ -19,6 +19,7 @@ fn desugar_module(module: &mut UnifiedModule) {
                 new_decls.push(Decl::Struct {
                     name: name.clone(),
                     fields: fields.clone(),
+                    type_params: vec![],
                 });
                 for method in methods {
                     if let Decl::Function {
@@ -26,6 +27,7 @@ fn desugar_module(module: &mut UnifiedModule) {
                         params,
                         ret,
                         body,
+                        ..
                     } = method
                     {
                         let mangled = format!("{}_{}", name, method_name);
@@ -38,6 +40,7 @@ fn desugar_module(module: &mut UnifiedModule) {
                             params: new_params,
                             ret,
                             body,
+                            type_params: vec![],
                         });
                     }
                 }
@@ -115,6 +118,138 @@ fn desugar_closures_in_body(
     }
 }
 
+fn collect_declared_vars_in_body(body: &[Stmt], out: &mut HashSet<String>) {
+    for stmt in body {
+        match stmt {
+            Stmt::Let(name, _, _) => {
+                out.insert(name.clone());
+            }
+            Stmt::If {
+                then_body, else_body, ..
+            } => {
+                collect_declared_vars_in_body(then_body, out);
+                collect_declared_vars_in_body(else_body, out);
+            }
+            Stmt::Loop { body, .. } => {
+                collect_declared_vars_in_body(body, out);
+            }
+            Stmt::Match { arms, .. } => {
+                for arm in arms {
+                    collect_declared_vars_in_body(&arm.body, out);
+                }
+            }
+            Stmt::Try { body, catches } => {
+                collect_declared_vars_in_body(body, out);
+                for catch in catches {
+                    collect_declared_vars_in_body(&catch.body, out);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_free_vars(body: &[Stmt], params: &[(String, Typ)]) -> Vec<String> {
+    let mut reads = HashSet::new();
+    collect_body_reads(body, &mut reads);
+    let mut declared = HashSet::new();
+    for (pname, _) in params {
+        declared.insert(pname.clone());
+    }
+    collect_declared_vars_in_body(body, &mut declared);
+    let mut captures: Vec<String> = reads.difference(&declared).cloned().collect();
+    captures.sort();
+    captures
+}
+
+fn rewrite_captures_in_body(body: &mut [Stmt], captures: &HashSet<String>) {
+    for stmt in body {
+        match stmt {
+            Stmt::Let(_, _, e)
+            | Stmt::Assign(_, e)
+            | Stmt::Return(Some(e))
+            | Stmt::Expr(e) => {
+                rewrite_captures_in_expr(e, captures);
+            }
+            Stmt::IndexAssign { base, index, value } => {
+                rewrite_captures_in_expr(base, captures);
+                rewrite_captures_in_expr(index, captures);
+                rewrite_captures_in_expr(value, captures);
+            }
+            Stmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                rewrite_captures_in_expr(cond, captures);
+                rewrite_captures_in_body(then_body, captures);
+                rewrite_captures_in_body(else_body, captures);
+            }
+            Stmt::Loop { cond, body, .. } => {
+                if let Some(c) = cond {
+                    rewrite_captures_in_expr(c, captures);
+                }
+                rewrite_captures_in_body(body, captures);
+            }
+            Stmt::Match { scrutinee, arms } => {
+                rewrite_captures_in_expr(scrutinee, captures);
+                for arm in arms {
+                    rewrite_captures_in_body(&mut arm.body, captures);
+                }
+            }
+            Stmt::Return(None) => {}
+            Stmt::Throw(e) => {
+                rewrite_captures_in_expr(e, captures);
+            }
+            Stmt::Try { body, catches } => {
+                rewrite_captures_in_body(body, captures);
+                for catch in catches {
+                    rewrite_captures_in_body(&mut catch.body, captures);
+                }
+            }
+        }
+    }
+}
+
+fn rewrite_captures_in_expr(expr: &mut Expr, captures: &HashSet<String>) {
+    match expr {
+        Expr::Ident(name) if captures.contains(name) => {
+            *expr = Expr::Field {
+                base: Box::new(Expr::Ident("self".into())),
+                name: std::mem::take(name),
+            };
+        }
+        Expr::Unary { expr: inner, .. } => rewrite_captures_in_expr(inner, captures),
+        Expr::Binary { lhs, rhs, .. } => {
+            rewrite_captures_in_expr(lhs, captures);
+            rewrite_captures_in_expr(rhs, captures);
+        }
+        Expr::StructInit { fields, .. } => {
+            for (_, field_expr) in fields {
+                rewrite_captures_in_expr(field_expr, captures);
+            }
+        }
+        Expr::Field { base, .. } => rewrite_captures_in_expr(base, captures),
+        Expr::ArrayLit(items) => {
+            for item in items {
+                rewrite_captures_in_expr(item, captures);
+            }
+        }
+        Expr::Index { base, index } => {
+            rewrite_captures_in_expr(base, captures);
+            rewrite_captures_in_expr(index, captures);
+        }
+        Expr::Call { callee, args } => {
+            rewrite_captures_in_expr(callee, captures);
+            for arg in args {
+                rewrite_captures_in_expr(arg, captures);
+            }
+        }
+        Expr::Ident(_) | Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => {}
+        Expr::Closure { .. } => {}
+    }
+}
+
 fn desugar_closures_in_expr(
     expr: &mut Expr,
     counter: &mut usize,
@@ -125,27 +260,42 @@ fn desugar_closures_in_expr(
             params,
             ret,
             body,
+            ..
         } => {
             let id = *counter;
             *counter += 1;
             let fn_name = format!("__closure_{id}");
             let caps_name = format!("{fn_name}_captures");
-            let closure_params = std::mem::take(params);
+            let closure_params = params.clone();
+            let captures = collect_free_vars(body, &closure_params);
+            let captures_set: HashSet<String> = captures.iter().cloned().collect();
+            rewrite_captures_in_body(body, &captures_set);
+            let caps_fields: Vec<(String, Typ)> = captures
+                .iter()
+                .map(|c| (c.clone(), Typ::Named("Any".into())))
+                .collect();
+            let mut fn_params = vec![("self".to_string(), Typ::Named(caps_name.clone()))];
+            fn_params.extend(std::mem::take(params));
             let closure_ret = ret.clone();
             let closure_body = std::mem::take(body);
             extra_decls.push(Decl::Struct {
                 name: caps_name.clone(),
-                fields: vec![],
+                fields: caps_fields,
+                type_params: vec![],
             });
             extra_decls.push(Decl::Function {
                 name: fn_name,
-                params: closure_params,
+                params: fn_params,
                 ret: closure_ret,
                 body: closure_body,
+                type_params: vec![],
             });
             *expr = Expr::StructInit {
                 name: caps_name,
-                fields: vec![],
+                fields: captures
+                    .iter()
+                    .map(|c| (c.clone(), Expr::Ident(c.clone())))
+                    .collect(),
             };
         }
         Expr::Unary { expr: inner, .. } => {
@@ -989,24 +1139,28 @@ mod tests {
                 Decl::Struct {
                     name: "S".into(),
                     fields: vec![],
+                    type_params: vec![],
                 },
                 Decl::Function {
                     name: "zeta".into(),
                     params: vec![],
                     ret: Typ::Void,
                     body: vec![],
+                    type_params: vec![],
                 },
                 Decl::Function {
                     name: "main".into(),
                     params: vec![],
                     ret: Typ::Void,
                     body: vec![],
+                    type_params: vec![],
                 },
                 Decl::Function {
                     name: "alpha".into(),
                     params: vec![],
                     ret: Typ::Void,
                     body: vec![],
+                    type_params: vec![],
                 },
             ],
         };
@@ -1034,12 +1188,14 @@ mod tests {
                         Stmt::Let("y".into(), None, Expr::IntLit(2)),
                         Stmt::Return(Some(Expr::Ident("y".into()))),
                     ],
+                    type_params: vec![],
                 },
                 Decl::Function {
                     name: "main".into(),
                     params: vec![],
                     ret: Typ::Void,
                     body: vec![],
+                    type_params: vec![],
                 },
             ],
         };
@@ -1059,6 +1215,7 @@ mod tests {
                     params: vec![],
                     ret: Typ::Void,
                     body: vec![],
+                    type_params: vec![],
                 },
                 Decl::Function {
                     name: "main".into(),
@@ -1068,6 +1225,7 @@ mod tests {
                         callee: Box::new(Expr::Ident("helper".into())),
                         args: vec![],
                     })],
+                    type_params: vec![],
                 },
             ],
         };
@@ -1088,6 +1246,7 @@ mod tests {
                     Stmt::Let("dead".into(), None, Expr::IntLit(2)),
                     Stmt::Return(Some(Expr::IntLit(3))),
                 ],
+                type_params: vec![],
             }],
         };
 
@@ -1110,6 +1269,7 @@ mod tests {
                     Stmt::Let("used".into(), None, Expr::IntLit(2)),
                     Stmt::Return(Some(Expr::Ident("used".into()))),
                 ],
+                type_params: vec![],
             }],
         };
 
@@ -1131,6 +1291,7 @@ mod tests {
                     lhs: Box::new(Expr::IntLit(2)),
                     rhs: Box::new(Expr::IntLit(3)),
                 }))],
+                type_params: vec![],
             }],
         };
 
@@ -1181,6 +1342,7 @@ mod tests {
                         }),
                     })),
                 ],
+                type_params: vec![],
             }],
         };
 
@@ -1217,6 +1379,7 @@ mod tests {
                     },
                     Stmt::Return(Some(Expr::Ident("out".into()))),
                 ],
+                type_params: vec![],
             }],
         };
 
@@ -1240,10 +1403,12 @@ mod tests {
                         params: vec![],
                         ret: Typ::Int,
                         body: vec![Stmt::Return(Some(Expr::IntLit(0)))],
+                        type_params: vec![],
                     }],
                     visibility: crate::core_ir::Visibility::Pub,
                     extends: None,
                     implements: vec![],
+                    type_params: vec![],
                 },
             ],
         };
@@ -1269,17 +1434,20 @@ mod tests {
                             params: vec![],
                             ret: Typ::Int,
                             body: vec![Stmt::Return(Some(Expr::IntLit(0)))],
+                        type_params: vec![],
                         },
                         Decl::Function {
                             name: "scale".into(),
                             params: vec![("factor".into(), Typ::Int)],
                             ret: Typ::Int,
                             body: vec![Stmt::Return(Some(Expr::IntLit(0)))],
+                        type_params: vec![],
                         },
                     ],
                     visibility: crate::core_ir::Visibility::Pub,
                     extends: None,
                     implements: vec![],
+                    type_params: vec![],
                 },
             ],
         };
@@ -1301,10 +1469,12 @@ mod tests {
                         params: vec![("dx".into(), Typ::Int)],
                         ret: Typ::Int,
                         body: vec![Stmt::Return(Some(Expr::IntLit(0)))],
+                        type_params: vec![],
                     }],
                     visibility: crate::core_ir::Visibility::Pub,
                     extends: None,
                     implements: vec![],
+                    type_params: vec![],
                 },
                 Decl::Function {
                     name: "main".into(),
@@ -1323,6 +1493,7 @@ mod tests {
                             args: vec![Expr::IntLit(5)],
                         }),
                     ],
+                    type_params: vec![],
                 },
             ],
         };
@@ -1333,5 +1504,241 @@ mod tests {
             !sil.lines().any(|l| l.trim() == "sil @Point"),
             "struct should not emit as function"
         );
+    }
+
+    #[test]
+    fn desugar_closure_captures_one_var() {
+        let module = UnifiedModule {
+            identity: Default::default(),
+            decls: vec![Decl::Function {
+                name: "main".into(),
+                params: vec![("x".into(), Typ::Int)],
+                ret: Typ::Int,
+                body: vec![
+                    Stmt::Let(
+                        "f".into(),
+                        None,
+                        Expr::Closure {
+                            params: vec![("a".into(), Typ::Int)],
+                            ret: Typ::Int,
+                            body: vec![Stmt::Return(Some(Expr::Binary {
+                                op: "+".into(),
+                                lhs: Box::new(Expr::Ident("x".into())),
+                                rhs: Box::new(Expr::IntLit(1)),
+                            }))],
+                            captures: vec![],
+                        },
+                    ),
+                ],
+                type_params: vec![],
+            }],
+        };
+        let mut module = module;
+        desugar_module(&mut module);
+        let cap_struct = module
+            .decls
+            .iter()
+            .find_map(|d| match d {
+                Decl::Struct { name, fields, .. } if name.contains("_captures") => {
+                    Some(fields.clone())
+                }
+                _ => None,
+            })
+            .expect("captures struct should exist");
+        assert!(
+            cap_struct.contains(&("x".into(), Typ::Named("Any".into()))),
+            "captures struct should have x field, got: {cap_struct:?}"
+        );
+    }
+
+    #[test]
+    fn desugar_closure_captures_two_vars() {
+        let module = UnifiedModule {
+            identity: Default::default(),
+            decls: vec![Decl::Function {
+                name: "main".into(),
+                params: vec![
+                    ("x".into(), Typ::Int),
+                    ("y".into(), Typ::Int),
+                ],
+                ret: Typ::Int,
+                body: vec![
+                    Stmt::Let(
+                        "f".into(),
+                        None,
+                        Expr::Closure {
+                            params: vec![("a".into(), Typ::Int)],
+                            ret: Typ::Int,
+                            body: vec![Stmt::Return(Some(Expr::Binary {
+                                op: "+".into(),
+                                lhs: Box::new(Expr::Ident("x".into())),
+                                rhs: Box::new(Expr::Ident("y".into())),
+                            }))],
+                            captures: vec![],
+                        },
+                    ),
+                ],
+                type_params: vec![],
+            }],
+        };
+        let mut module = module;
+        desugar_module(&mut module);
+        let cap_struct = module
+            .decls
+            .iter()
+            .find_map(|d| match d {
+                Decl::Struct { name, fields, .. } if name.contains("_captures") => {
+                    Some(fields.clone())
+                }
+                _ => None,
+            })
+            .expect("captures struct should exist");
+        assert!(
+            cap_struct.contains(&("x".into(), Typ::Named("Any".into()))),
+            "captures struct should have x field"
+        );
+        assert!(
+            cap_struct.contains(&("y".into(), Typ::Named("Any".into()))),
+            "captures struct should have y field"
+        );
+        assert_eq!(cap_struct.len(), 2);
+    }
+
+    #[test]
+    fn desugar_closure_rewrites_captured_var_to_self_field() {
+        let module = UnifiedModule {
+            identity: Default::default(),
+            decls: vec![Decl::Function {
+                name: "main".into(),
+                params: vec![("x".into(), Typ::Int)],
+                ret: Typ::Int,
+                body: vec![
+                    Stmt::Let(
+                        "f".into(),
+                        None,
+                        Expr::Closure {
+                            params: vec![("a".into(), Typ::Int)],
+                            ret: Typ::Int,
+                            body: vec![Stmt::Return(Some(Expr::Binary {
+                                op: "+".into(),
+                                lhs: Box::new(Expr::Ident("x".into())),
+                                rhs: Box::new(Expr::IntLit(1)),
+                            }))],
+                            captures: vec![],
+                        },
+                    ),
+                ],
+                type_params: vec![],
+            }],
+        };
+        let mut module = module;
+        desugar_module(&mut module);
+        let body = module
+            .decls
+            .iter()
+            .find_map(|d| match d {
+                Decl::Function { name, body, .. } if name.starts_with("__closure_") => {
+                    Some(body.clone())
+                }
+                _ => None,
+            })
+            .expect("closure function should exist");
+        let has_self_field = body.iter().any(|stmt| match stmt {
+            Stmt::Return(Some(Expr::Binary { lhs, .. })) => matches!(
+                lhs.as_ref(),
+                Expr::Field { name, .. } if name == "x"
+            ),
+            _ => false,
+        });
+        assert!(has_self_field, "captured x should be rewritten to self.x");
+    }
+
+    #[test]
+    fn desugar_closure_hidden_fn_has_self_param() {
+        let module = UnifiedModule {
+            identity: Default::default(),
+            decls: vec![Decl::Function {
+                name: "main".into(),
+                params: vec![("x".into(), Typ::Int)],
+                ret: Typ::Int,
+                body: vec![
+                    Stmt::Let(
+                        "f".into(),
+                        None,
+                        Expr::Closure {
+                            params: vec![("a".into(), Typ::Int)],
+                            ret: Typ::Int,
+                            body: vec![Stmt::Return(Some(Expr::Binary {
+                                op: "+".into(),
+                                lhs: Box::new(Expr::Ident("x".into())),
+                                rhs: Box::new(Expr::IntLit(1)),
+                            }))],
+                            captures: vec![],
+                        },
+                    ),
+                ],
+                type_params: vec![],
+            }],
+        };
+        let mut module = module;
+        desugar_module(&mut module);
+        let params = module
+            .decls
+            .iter()
+            .find_map(|d| match d {
+                Decl::Function { name, params, .. } if name.starts_with("__closure_") => {
+                    Some(params.clone())
+                }
+                _ => None,
+            })
+            .expect("closure function should exist");
+        assert_eq!(
+            params.first().map(|(n, _)| n.as_str()),
+            Some("self"),
+            "first param should be self: {params:?}"
+        );
+        assert!(
+            params.first().map(|(_, t)| matches!(t, Typ::Named(n) if n.contains("_captures"))).unwrap_or(false),
+            "self param should be the captures struct type"
+        );
+        assert_eq!(params.len(), 2, "should have self + original param a");
+    }
+
+    #[test]
+    fn desugar_closure_no_captures_empty_struct() {
+        let module = UnifiedModule {
+            identity: Default::default(),
+            decls: vec![Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![
+                    Stmt::Let(
+                        "f".into(),
+                        None,
+                        Expr::Closure {
+                            params: vec![],
+                            ret: Typ::Int,
+                            body: vec![Stmt::Return(Some(Expr::IntLit(42)))],
+                            captures: vec![],
+                        },
+                    ),
+                ],
+                type_params: vec![],
+            }],
+        };
+        let mut module = module;
+        desugar_module(&mut module);
+        let cap_struct = module
+            .decls
+            .iter()
+            .find_map(|d| match d {
+                Decl::Struct { name, fields, .. } if name.contains("_captures") => {
+                    Some(fields.clone())
+                }
+                _ => None,
+            })
+            .expect("captures struct should exist even when empty");
+        assert!(cap_struct.is_empty(), "no captures -> empty struct");
     }
 }
