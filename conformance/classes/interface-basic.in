@@ -1,0 +1,17 @@
+// @expect parse: ok
+// @expect output: hello
+
+interface Speaker {
+    fn speak() -> String
+}
+
+class Human {
+    fn speak() -> String {
+        return "hello";
+    }
+}
+
+fn main() -> String {
+    let h = Human {};
+    return h.speak();
+}

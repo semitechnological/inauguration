@@ -1,6 +1,6 @@
 //! `.in` v0.2: top-level `struct` / `fn` with multiline struct bodies and minimal `fn` bodies.
 
-use crate::core_ir::{CoreModuleIdentity, Decl, Typ, UnifiedModule};
+use crate::core_ir::{CoreModuleIdentity, Decl, MethodSig, Typ, UnifiedModule, Visibility};
 use crate::core_ir::{Expr, LoopKind, Stmt};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -279,7 +279,8 @@ pub fn split_top_level_decl_blocks(source: &str) -> Vec<String> {
                 continue;
             }
             if depth == 0
-                && (t.starts_with("fn ") || t.starts_with("struct ") || t.starts_with("extern "))
+                && (t.starts_with("fn ") || t.starts_with("struct ") || t.starts_with("extern ")
+                    || t.starts_with("class ") || t.starts_with("interface "))
             {
                 current = Some(vec![t.to_string()]);
                 depth += delta;
@@ -591,6 +592,129 @@ fn parse_struct_block(block: &str) -> Result<(String, Vec<(String, Typ)>, Vec<De
         });
     }
     Ok((name, fields, methods))
+}
+
+fn parse_class_header(header: &str) -> Result<(String, Option<String>, Vec<String>), String> {
+    let header = trim(header);
+    let mut tokens = header.split_whitespace();
+    let name = tokens.next().ok_or(".in: class name missing")?.to_string();
+    let mut extends = None;
+    let mut implements = Vec::new();
+    while let Some(token) = tokens.next() {
+        match token {
+            "extends" => {
+                if extends.is_some() {
+                    return Err(".in: duplicate `extends` in class header".into());
+                }
+                let parent = tokens.next().ok_or(".in: `extends` needs a parent class name")?;
+                extends = Some(parent.to_string());
+            }
+            "implements" => {
+                for iface in tokens.by_ref() {
+                    let clean = iface.trim_end_matches(',');
+                    if !clean.is_empty() {
+                        implements.push(clean.to_string());
+                    }
+                }
+                break;
+            }
+            _ => return Err(format!(".in: unexpected token `{token}` in class header")),
+        }
+    }
+    Ok((name, extends, implements))
+}
+
+fn parse_class_fields_inner(inner: &str) -> Result<Vec<(String, Typ)>, String> {
+    let mut fields = Vec::new();
+    for raw_seg in split_struct_field_segments(inner) {
+        let seg = strip_line_comment_outside_strings(raw_seg);
+        let seg = trim(seg);
+        if seg.is_empty() {
+            continue;
+        }
+        let (name, ty_str) = seg
+            .split_once(':')
+            .ok_or_else(|| format!(".in: invalid class field `{seg}`"))?;
+        let name = trim(name).to_string();
+        let ty = parse_in_type(trim(ty_str));
+        if name.is_empty() {
+            return Err(format!(".in: missing field name in `{seg}`"));
+        }
+        fields.push((name, ty));
+    }
+    Ok(fields)
+}
+
+fn parse_class_block(block: &str) -> Result<Decl, String> {
+    let t = trim(block);
+    let rest = t.strip_prefix("class ").ok_or_else(|| ".in: expected `class`".to_string())?;
+    let open = rest.find('{').ok_or_else(|| ".in: class must contain `{`".to_string())?;
+    let header = trim(&rest[..open]);
+    let (name, extends, implements) = parse_class_header(header)?;
+    let inner = brace_content_after_open(rest, open)
+        .ok_or_else(|| ".in: unclosed `class { ... }`".to_string())?;
+    let (field_inner, method_blocks) = extract_struct_method_blocks(inner);
+    let fields = parse_class_fields_inner(&field_inner)?;
+    let mut methods = Vec::new();
+    for method in method_blocks {
+        let (method_name, params, ret, body) = parse_fn_block(&method)?;
+        methods.push(Decl::Function {
+            name: method_name,
+            params,
+            ret,
+            body,
+            type_params: vec![],
+        });
+    }
+    Ok(Decl::Class {
+        name,
+        fields,
+        methods,
+        visibility: Visibility::Pub,
+        extends,
+        implements,
+        type_params: vec![],
+    })
+}
+
+fn parse_interface_method_sigs(inner: &str) -> Result<Vec<MethodSig>, String> {
+    let mut sigs = Vec::new();
+    for line in inner.lines() {
+        let line = trim(line).trim_end_matches(';');
+        let line = strip_line_comment_outside_strings(line);
+        let line = trim(line);
+        if line.is_empty() || line.starts_with("//") {
+            continue;
+        }
+        let rest = trim(line.strip_prefix("fn ").ok_or_else(|| {
+            format!(".in: interface body may only contain method signatures, got `{line}`")
+        })?);
+        let (name, params, ret) = parse_fn_header(rest);
+        if name.is_empty() {
+            return Err(format!(".in: interface method name missing in `{line}`"));
+        }
+        sigs.push(MethodSig { name, params, ret });
+    }
+    Ok(sigs)
+}
+
+fn parse_interface_block(block: &str) -> Result<Decl, String> {
+    let t = trim(block);
+    let rest = t.strip_prefix("interface ").ok_or_else(|| ".in: expected `interface`".to_string())?;
+    let open = rest.find('{').ok_or_else(|| ".in: interface must contain `{`".to_string())?;
+    let name = trim(&rest[..open]).to_string();
+    if name.is_empty() {
+        return Err(".in: interface name missing".into());
+    }
+    let inner = brace_content_after_open(rest, open)
+        .ok_or_else(|| ".in: unclosed `interface { ... }`".to_string())?;
+    let methods = parse_interface_method_sigs(inner)?;
+    Ok(Decl::Interface {
+        name,
+        methods,
+        visibility: Visibility::Pub,
+        type_params: vec![],
+    })
 }
 
 fn parse_expr(s: &str) -> Expr {
@@ -1647,8 +1771,12 @@ fn parse_module_from_blocks(blocks: &[String]) -> Result<UnifiedModule, String> 
             let (name, fields, methods) = parse_struct_block(block)?;
             decls.push(Decl::Struct { name, fields, type_params: vec![] });
             decls.extend(methods);
+        } else if line.starts_with("class ") {
+            decls.push(parse_class_block(block)?);
+        } else if line.starts_with("interface ") {
+            decls.push(parse_interface_block(block)?);
         } else {
-            return Err(".in: expected top-level `fn` or `struct`".into());
+            return Err(".in: expected top-level `fn`, `struct`, `class`, or `interface`".into());
         }
     }
     Ok(UnifiedModule::new(decls))
@@ -1787,7 +1915,7 @@ pub fn parse_in_surface_info(source: &str) -> Result<InSurfaceInfo, String> {
                 }
                 continue;
             }
-            if line.starts_with("fn ") || line.starts_with("struct ") {
+            if line.starts_with("fn ") || line.starts_with("struct ") || line.starts_with("class ") || line.starts_with("interface ") {
                 depth += brace_delta(raw_line);
                 if depth < 0 {
                     depth = 0;
@@ -1804,12 +1932,12 @@ pub fn parse_in_surface_info(source: &str) -> Result<InSurfaceInfo, String> {
     Ok(info)
 }
 
-fn collect_struct_names(module: &UnifiedModule) -> Vec<String> {
+fn collect_top_level_type_names(module: &UnifiedModule) -> Vec<String> {
     module
         .decls
         .iter()
         .filter_map(|d| match d {
-            Decl::Struct { name, .. } => Some(name.clone()),
+            Decl::Struct { name, .. } | Decl::Class { name, .. } => Some(name.clone()),
             _ => None,
         })
         .collect()
@@ -1819,9 +1947,10 @@ fn duplicate_top_level_names(module: &UnifiedModule) -> Vec<String> {
     let mut names = Vec::new();
     for d in &module.decls {
         match d {
-            Decl::Struct { name, .. } => names.push(name.clone()),
+            Decl::Struct { name, .. }
+            | Decl::Class { name, .. } => names.push(name.clone()),
             Decl::Function { name, .. } => names.push(name.clone()),
-            Decl::Class { .. } | Decl::Interface { .. } => {}
+            Decl::Interface { .. } => {}
         }
     }
     let mut seen = HashSet::new();
@@ -1983,7 +2112,7 @@ fn desugar_method_calls(module: &mut UnifiedModule) {
         .decls
         .iter()
         .filter_map(|decl| match decl {
-            Decl::Struct { name, fields, .. } => Some((
+            Decl::Struct { name, fields, .. } | Decl::Class { name, fields, .. } => Some((
                 name.clone(),
                 fields
                     .iter()
@@ -2205,7 +2334,7 @@ fn parse_in_module_without_validation(source: &str) -> Result<UnifiedModule, Str
 
 fn validate_module(module: &UnifiedModule, require_main: bool) -> Result<(), String> {
     if module.decls.is_empty() {
-        return Err(".in: no top-level struct or fn after filtering".into());
+        return Err(".in: no top-level struct, class, interface, or fn after filtering".into());
     }
 
     if let Some(dup) = duplicate_top_level_names(&module).first() {
@@ -2220,13 +2349,13 @@ fn validate_module(module: &UnifiedModule, require_main: bool) -> Result<(), Str
         return Err(".in: missing required `fn main`".into());
     }
 
-    let struct_names = collect_struct_names(&module);
+    let struct_names = collect_top_level_type_names(&module);
     let struct_set: HashSet<&str> = struct_names.iter().map(String::as_str).collect();
     let struct_fields: HashMap<String, Vec<String>> = module
         .decls
         .iter()
         .filter_map(|d| match d {
-            Decl::Struct { name, fields, .. } => Some((
+            Decl::Struct { name, fields, .. } | Decl::Class { name, fields, .. } => Some((
                 name.clone(),
                 fields.iter().map(|(field, _)| field.clone()).collect(),
             )),
@@ -2262,7 +2391,18 @@ fn validate_module(module: &UnifiedModule, require_main: bool) -> Result<(), Str
                     validate_stmt_types(name, &struct_set, &struct_fields, st)?;
                 }
             }
-            Decl::Class { .. } | Decl::Interface { .. } => {}
+            Decl::Class {
+                name, fields, ..
+            } => {
+                for (field, ty) in fields {
+                    if !type_known(&struct_set, ty) {
+                        return Err(format!(
+                            ".in: unknown type in class {name} field {field}"
+                        ));
+                    }
+                }
+            }
+            Decl::Interface { .. } => {}
         }
     }
 
@@ -3454,5 +3594,197 @@ fn main() -> void {
         let src = "fn f() -> void { try { return; } catch { } return; }\nfn main() -> void\n";
         let err = parse_in_source(src).expect_err("catch without pattern");
         assert!(err.contains("catch"), "{err}");
+    }
+
+    #[test]
+    fn parse_class_with_field_and_method() {
+        let src = r#"
+class Dog {
+    name: String
+    age: Int
+
+    fn bark() -> String {
+        return "woof";
+    }
+}
+fn main() -> void
+"#;
+        let m = parse_in_source(src).expect("class parse");
+        let class = m.decls.iter().find_map(|d| match d {
+            Decl::Class { name, fields, methods, .. } if name == "Dog" => Some((fields.clone(), methods.clone())),
+            _ => None,
+        });
+        let (fields, methods) = class.expect("Dog class");
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0], ("name".into(), Typ::String));
+        assert_eq!(fields[1], ("age".into(), Typ::Int));
+        assert_eq!(methods.len(), 1);
+        match &methods[0] {
+            Decl::Function { name, params, ret, body, .. } => {
+                assert_eq!(name, "bark");
+                assert!(params.is_empty());
+                assert_eq!(ret, &Typ::String);
+                assert_eq!(body.len(), 1);
+            }
+            _ => panic!("expected function method"),
+        }
+    }
+
+    #[test]
+    fn parse_class_with_extends() {
+        let src = r#"
+class Poodle extends Dog {
+    fn bark() -> String {
+        return "yap";
+    }
+}
+fn main() -> void
+"#;
+        let m = parse_in_source(src).expect("class extends parse");
+        let ext = m.decls.iter().find_map(|d| match d {
+            Decl::Class { name, extends, .. } if name == "Poodle" => Some(extends.clone()),
+            _ => None,
+        });
+        assert_eq!(ext, Some(Some("Dog".into())));
+    }
+
+    #[test]
+    fn parse_class_with_implements() {
+        let src = r#"
+class Human implements Speaker, Listener {
+    fn speak() -> String {
+        return "hello";
+    }
+}
+fn main() -> void
+"#;
+        let m = parse_in_source(src).expect("class implements parse");
+        let impls = m.decls.iter().find_map(|d| match d {
+            Decl::Class { name, implements, .. } if name == "Human" => Some(implements.clone()),
+            _ => None,
+        });
+        assert_eq!(impls, Some(vec!["Speaker".into(), "Listener".into()]));
+    }
+
+    #[test]
+    fn parse_interface_with_method_sigs() {
+        let src = r#"
+interface Animal {
+    fn speak() -> String
+    fn eat(food: String) -> Int
+}
+fn main() -> void
+"#;
+        let m = parse_in_source(src).expect("interface parse");
+        let sigs = m.decls.iter().find_map(|d| match d {
+            Decl::Interface { name, methods, .. } if name == "Animal" => Some(methods.clone()),
+            _ => None,
+        });
+        let methods = sigs.expect("Animal interface");
+        assert_eq!(methods.len(), 2);
+        assert_eq!(methods[0].name, "speak");
+        assert_eq!(methods[0].params, vec![]);
+        assert_eq!(methods[0].ret, Typ::String);
+        assert_eq!(methods[1].name, "eat");
+        assert_eq!(methods[1].params, vec![("food".into(), Typ::String)]);
+        assert_eq!(methods[1].ret, Typ::Int);
+    }
+
+    #[test]
+    fn parse_class_empty_body() {
+        let src = r#"
+class Empty {
+}
+fn main() -> void
+"#;
+        let m = parse_in_source(src).expect("empty class");
+        let info = m.decls.iter().find_map(|d| match d {
+            Decl::Class { name, fields, methods, .. } if name == "Empty" => Some((fields.clone(), methods.clone())),
+            _ => None,
+        });
+        let (fields, methods) = info.expect("Empty class");
+        assert!(fields.is_empty());
+        assert!(methods.is_empty());
+    }
+
+    #[test]
+    fn parse_class_multiple_fields() {
+        let src = r#"
+class Point {
+    x: Int
+    y: Int
+    z: Int
+}
+fn main() -> void
+"#;
+        let m = parse_in_source(src).expect("multi field class");
+        let fields = m.decls.iter().find_map(|d| match d {
+            Decl::Class { name, fields, .. } if name == "Point" => Some(fields.clone()),
+            _ => None,
+        });
+        let fields = fields.expect("Point class");
+        assert_eq!(fields.len(), 3);
+        assert_eq!(fields[0], ("x".into(), Typ::Int));
+        assert_eq!(fields[1], ("y".into(), Typ::Int));
+        assert_eq!(fields[2], ("z".into(), Typ::Int));
+    }
+
+    #[test]
+    fn class_with_extends_and_implements() {
+        let src = r#"
+class MyWidget extends BaseWidget implements Drawable, Clickable {
+    fn draw() -> void {
+        return;
+    }
+}
+fn main() -> void
+"#;
+        let m = parse_in_source(src).expect("extends+implements parse");
+        let info = m.decls.iter().find_map(|d| match d {
+            Decl::Class { name, extends, implements, .. } if name == "MyWidget" => Some((extends.clone(), implements.clone())),
+            _ => None,
+        });
+        let (extends, implements) = info.expect("MyWidget class");
+        assert_eq!(extends, Some("BaseWidget".into()));
+        assert_eq!(implements, vec!["Drawable".to_string(), "Clickable".to_string()]);
+    }
+
+    #[test]
+    fn parse_class_struct_init_accepts_class_name() {
+        let src = r#"
+class Dog {
+    name: String
+}
+fn main() -> String {
+    let d = Dog { name: "Rex" };
+    return d.name;
+}
+"#;
+        let m = parse_in_source(src).expect("class init");
+        assert!(m.decls.iter().any(|d| matches!(d, Decl::Class { name, .. } if name == "Dog")));
+    }
+
+    #[test]
+    fn class_name_duplicate_with_struct_is_rejected() {
+        let src = r#"
+class Dog {
+    name: String
+}
+struct Dog { Int x }
+fn main() -> void
+"#;
+        let err = parse_in_source(src).expect_err("class+struct dup");
+        assert!(err.contains("duplicate"), "{err}");
+    }
+
+    #[test]
+    fn interface_accepts_empty_body() {
+        let src = r#"
+interface Marker {
+}
+fn main() -> void
+"#;
+        let m = parse_in_source(src).expect("empty interface");
+        assert!(m.decls.iter().any(|d| matches!(d, Decl::Interface { name, .. } if name == "Marker")));
     }
 }

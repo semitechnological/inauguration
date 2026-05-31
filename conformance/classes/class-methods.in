@@ -1,22 +1,20 @@
 // @expect parse: ok
-// Status: DESIGN — class method syntax not yet wired in .in parser.
-// Falls back to struct + mangled fn pattern.
 
-struct Calculator {
-  Int value
-}
+class Calculator {
+    value: Int
 
-fn Calculator_add(self: Calculator, n: Int) -> Int {
-  return self.value + n;
-}
+    fn add(n: Int) -> Int {
+        return self.value + n;
+    }
 
-fn Calculator_sub(self: Calculator, n: Int) -> Int {
-  return self.value - n;
+    fn sub(n: Int) -> Int {
+        return self.value - n;
+    }
 }
 
 fn main() -> void {
-  let c: Calculator = Calculator { value: 10 };
-  let sum: Int = Calculator_add(c, 5);
-  let diff: Int = Calculator_sub(c, 3);
-  return;
+    let c = Calculator { value: 10 };
+    let sum = c.add(5);
+    let diff = c.sub(3);
+    return;
 }

@@ -1,0 +1,13 @@
+// @expect parse: ok
+// @expect has-function: main
+// @expect result: String("yes")
+
+fn main() -> String {
+  let result: String = "";
+  match "apple" {
+    "banana" { result = "no"; }
+    "apple" { result = "yes"; }
+    _ { result = "maybe"; }
+  }
+  return result;
+}

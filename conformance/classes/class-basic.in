@@ -1,18 +1,15 @@
 // @expect parse: ok
-// Status: DESIGN — Decl::Class exists in Core IR but .in parser
-// does not yet emit class syntax. Falls back to struct + mangled fn.
+// @expect output: woof
 
-struct Dog {
-  Int age
-  String breed
+class Dog {
+    name: String
+
+    fn bark() -> String {
+        return "woof";
+    }
 }
 
-fn Dog_bark(self: Dog) -> String {
-  return "woof";
-}
-
-fn main() -> void {
-  let d: Dog = Dog { age: 3, breed: "shepherd" };
-  let sound: String = Dog_bark(d);
-  return;
+fn main() -> String {
+    let d = Dog { name: "Rex" };
+    return d.bark();
 }

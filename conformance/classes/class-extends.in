@@ -1,0 +1,19 @@
+// @expect parse: ok
+// @expect output: cat
+
+class Animal {
+    fn species() -> String {
+        return "generic";
+    }
+}
+
+class Cat extends Animal {
+    fn species() -> String {
+        return "cat";
+    }
+}
+
+fn main() -> String {
+    let c = Cat {};
+    return c.species();
+}
