@@ -123,6 +123,21 @@ pub fn svc(imm16: u16) -> u32 {
     0xD400_0001 | ((imm16 as u32) << 5)
 }
 
+pub fn strb(rt: u8, rn: u8, offset: u32) -> u32 {
+    assert!(offset < 4096);
+    0x3900_0000 | (offset << 10) | ((rn as u32) << 5) | (rt as u32)
+}
+
+pub fn ldrb(rt: u8, rn: u8, offset: u32) -> u32 {
+    assert!(offset < 4096);
+    0x3940_0000 | (offset << 10) | ((rn as u32) << 5) | (rt as u32)
+}
+
+pub fn cbnz_w(rt: u8, offset_bytes: i32) -> u32 {
+    let imm19 = ((offset_bytes >> 2) as u32) & 0x7_FFFF;
+    0x3500_0000 | (imm19 << 5) | (rt as u32)
+}
+
 pub fn load_i64(rd: u8, value: i64) -> Vec<u32> {
     let uv = value as u64;
     let mut insns = vec![movz64(rd, (uv & 0xFFFF) as u16, 0)];

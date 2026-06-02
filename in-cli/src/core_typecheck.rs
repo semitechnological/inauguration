@@ -245,7 +245,7 @@ fn check_expr(
     env: &HashMap<String, Typ>,
 ) -> Result<(), String> {
     match expr {
-        Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => Ok(()),
+        Expr::IntLit(_) | Expr::FloatLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => Ok(()),
         Expr::Closure { .. } => Ok(()),
         Expr::Ident(name) => {
             if env.contains_key(name) {
@@ -410,6 +410,7 @@ fn expr_type(
 ) -> Result<Option<Typ>, String> {
     match expr {
         Expr::IntLit(_) => Ok(Some(Typ::Int)),
+        Expr::FloatLit(_) => Ok(Some(Typ::Float)),
         Expr::StringLit(_) => Ok(Some(Typ::String)),
         Expr::BoolLit(_) => Ok(Some(Typ::Bool)),
         Expr::Ident(name) => Ok(env.get(name).cloned()),
@@ -488,6 +489,7 @@ fn require_type(
 fn type_name(typ: &Typ) -> String {
     match typ {
         Typ::Int => "Int".to_string(),
+        Typ::Float => "Float".to_string(),
         Typ::String => "String".to_string(),
         Typ::Bool => "Bool".to_string(),
         Typ::Void => "Void".to_string(),

@@ -2,11 +2,22 @@
 
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct FloatVal(pub f64);
+
+impl PartialEq for FloatVal {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.to_bits() == other.0.to_bits()
+    }
+}
+impl Eq for FloatVal {}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Typ {
     Int,
     String,
     Bool,
+    Float,
     Void,
     Array(Box<Typ>),
     Named(String),
@@ -16,6 +27,7 @@ pub enum Typ {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expr {
     IntLit(i64),
+    FloatLit(FloatVal),
     StringLit(String),
     BoolLit(bool),
     Ident(String),

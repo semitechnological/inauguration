@@ -4,7 +4,7 @@
 
 use super::ruby::extract_ruby;
 use crate::core_ir::{Decl, MethodSig, UnifiedModule, Visibility};
-use crate::core_ir::{CatchArm, Expr, Stmt, Typ};
+use crate::core_ir::{CatchArm, Expr, MatchArm, Stmt, Typ};
 use crate::parser_registry::ParserId;
 use std::collections::HashSet;
 use std::path::Path;
@@ -248,6 +248,7 @@ struct AstShape {
     shell_last_kinds: &'static [&'static str],
     try_kinds: &'static [&'static str],
     catch_kinds: &'static [&'static str],
+    match_kinds: &'static [&'static str],
     first_assignment_is_let: bool,
     strict_args: bool,
 }
@@ -288,6 +289,7 @@ const JAVA_AST: AstShape = AstShape {
     shell_last_kinds: &[],
     try_kinds: &[],
     catch_kinds: &[],
+    match_kinds: &[],
     first_assignment_is_let: false,
     strict_args: true,
 };
@@ -314,6 +316,7 @@ const KOTLIN_AST: AstShape = AstShape {
     shell_last_kinds: &[],
     try_kinds: &[],
     catch_kinds: &[],
+    match_kinds: &[],
     first_assignment_is_let: false,
     strict_args: false,
 };
@@ -340,6 +343,7 @@ const CSHARP_AST: AstShape = AstShape {
     shell_last_kinds: &[],
     try_kinds: &[],
     catch_kinds: &[],
+    match_kinds: &[],
     first_assignment_is_let: false,
     strict_args: false,
 };
@@ -366,6 +370,7 @@ const PYTHON_AST: AstShape = AstShape {
     shell_last_kinds: &[],
     try_kinds: &["try_statement"],
     catch_kinds: &["except_clause"],
+    match_kinds: &[],
     first_assignment_is_let: true,
     strict_args: false,
 };
@@ -392,6 +397,7 @@ const JS_AST: AstShape = AstShape {
     shell_last_kinds: &["else_clause"],
     try_kinds: &[],
     catch_kinds: &[],
+    match_kinds: &[],
     first_assignment_is_let: false,
     strict_args: false,
 };
@@ -418,6 +424,7 @@ const ZIG_AST: AstShape = AstShape {
     shell_last_kinds: &["labeled_statement"],
     try_kinds: &[],
     catch_kinds: &[],
+    match_kinds: &[],
     first_assignment_is_let: false,
     strict_args: false,
 };
@@ -452,6 +459,7 @@ const DART_AST: AstShape = AstShape {
     shell_last_kinds: &[],
     try_kinds: &[],
     catch_kinds: &[],
+    match_kinds: &[],
     first_assignment_is_let: false,
     strict_args: false,
 };
@@ -478,6 +486,7 @@ const PHPAST: AstShape = AstShape {
     shell_last_kinds: &[],
     try_kinds: &[],
     catch_kinds: &[],
+    match_kinds: &[],
     first_assignment_is_let: false,
     strict_args: false,
 };
@@ -504,6 +513,7 @@ const LUAAST: AstShape = AstShape {
     shell_last_kinds: &[],
     try_kinds: &[],
     catch_kinds: &[],
+    match_kinds: &[],
     first_assignment_is_let: false,
     strict_args: false,
 };
@@ -530,6 +540,7 @@ const SCALAAST: AstShape = AstShape {
     shell_last_kinds: &[],
     try_kinds: &["try_expression"],
     catch_kinds: &["catch_clause"],
+    match_kinds: &["match_expression"],
     first_assignment_is_let: false,
     strict_args: false,
 };
@@ -556,6 +567,7 @@ const FSHAST: AstShape = AstShape {
     shell_last_kinds: &[],
     try_kinds: &[],
     catch_kinds: &[],
+    match_kinds: &[],
     first_assignment_is_let: false,
     strict_args: false,
 };
@@ -582,6 +594,7 @@ const ERLANGAST: AstShape = AstShape {
     shell_last_kinds: &[],
     try_kinds: &[],
     catch_kinds: &[],
+    match_kinds: &[],
     first_assignment_is_let: false,
     strict_args: false,
 };
@@ -608,6 +621,7 @@ const ELIXIRAST: AstShape = AstShape {
     shell_last_kinds: &[],
     try_kinds: &[],
     catch_kinds: &[],
+    match_kinds: &[],
     first_assignment_is_let: false,
     strict_args: false,
 };
@@ -634,6 +648,7 @@ const JULIAAST: AstShape = AstShape {
     shell_last_kinds: &[],
     try_kinds: &["try_statement"],
     catch_kinds: &["catch_clause"],
+    match_kinds: &[],
     first_assignment_is_let: false,
     strict_args: false,
 };
@@ -660,6 +675,7 @@ const RAST: AstShape = AstShape {
     shell_last_kinds: &[],
     try_kinds: &[],
     catch_kinds: &[],
+    match_kinds: &[],
     first_assignment_is_let: false,
     strict_args: false,
 };
@@ -686,6 +702,7 @@ const PERLAST: AstShape = AstShape {
     shell_last_kinds: &[],
     try_kinds: &[],
     catch_kinds: &[],
+    match_kinds: &[],
     first_assignment_is_let: false,
     strict_args: false,
 };
@@ -770,6 +787,9 @@ fn ast_stmt(
     }
     if kind_in(stmt, shape.try_kinds) {
         return ast_try(src, stmt, shape, locals);
+    }
+    if kind_in(stmt, shape.match_kinds) {
+        return ast_match(src, stmt, shape, locals);
     }
     if kind_in(stmt, shape.call_kinds) {
         return ast_expr(src, stmt, shape).map(Stmt::Expr);
@@ -1010,6 +1030,44 @@ fn ast_try(
         }
     }
     Some(Stmt::Try { body, catches })
+}
+
+fn ast_match(
+    src: &[u8],
+    stmt: Node<'_>,
+    shape: AstShape,
+    locals: &HashSet<String>,
+) -> Option<Stmt> {
+    let mut scrutinee = None;
+    {
+        let mut w = stmt.walk();
+        for ch in stmt.named_children(&mut w) {
+            if !kind_in(ch, shape.match_kinds) && !kind_in(ch, &["case_clause"]) {
+                if scrutinee.is_none() {
+                    scrutinee = ast_expr(src, ch, shape);
+                }
+            }
+        }
+    }
+    let scrutinee = scrutinee?;
+    let mut case_nodes = Vec::new();
+    collect_kinds(stmt, &["case_clause"], &mut case_nodes);
+    let mut arms = Vec::new();
+    for c in case_nodes {
+        let mut scoped = locals.clone();
+        let pattern = c
+            .child_by_field_name("pattern")
+            .map(|p| node_txt(src, p).trim().to_string())
+            .unwrap_or_default();
+        let body = c
+            .child_by_field_name("body")
+            .or_else(|| c.child_by_field_name("consequence"))
+            .or_else(|| first_body_child(c, shape))
+            .map(|n| ast_stmt_or_body(src, n, shape, &mut scoped))
+            .unwrap_or_default();
+        arms.push(MatchArm { pattern, body });
+    }
+    Some(Stmt::Match { scrutinee, arms })
 }
 
 fn first_body_child<'a>(stmt: Node<'a>, shape: AstShape) -> Option<Node<'a>> {

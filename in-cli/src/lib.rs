@@ -12,6 +12,7 @@ pub mod core_ir;
 pub mod core_ir_verifier;
 pub mod core_typecheck;
 pub mod extension_registry;
+pub mod typecheck;
 pub mod external_guard;
 pub mod graph_report;
 pub mod hotreload;

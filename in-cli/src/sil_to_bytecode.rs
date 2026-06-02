@@ -1,6 +1,7 @@
 //! Lower SIL to bytecode for execution or JIT compilation.
 
-use crate::bytecode::{BytecodeFunction, BytecodeModule, Instruction};
+use crate::bytecode::{BytecodeFunction, BytecodeModule, CmpOp, Instruction};
+use crate::core_ir::FloatVal;
 use crate::hybrid_sil::SilArtifact;
 use std::collections::HashMap;
 
@@ -476,6 +477,29 @@ fn parse_sil_instruction_to_bytecode(
         return Ok(out);
     }
 
+    // %0 = float_literal $Builtin.FPIEEE64, 3.14
+    if line.contains("=") && line.contains("float_literal") {
+        if let Some(before_eq) = line.split('=').next() {
+            let reg = before_eq.trim();
+            if reg.starts_with('%') {
+                if let Some(rest) = line.split('=').nth(1) {
+                    let rest = rest.trim();
+                    if let Some(f_str) = rest.strip_prefix("float_literal $Builtin.FPIEEE64,") {
+                        if let Ok(f) = f_str.trim().parse::<f64>() {
+                            out.push(Instruction::LoadFloat(FloatVal(f)));
+                            let slot = *local_counter;
+                            *local_counter += 1;
+                            value_map.insert(reg.to_string(), slot);
+                            clear_value_constants(reg, value_ints, value_bools);
+                            out.push(Instruction::Store(slot));
+                            return Ok(out);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // %0 = integer_literal $Builtin.Int64, 42
     if line.contains("=") && line.contains("integer_literal") {
         if let Some(before_eq) = line.split('=').next() {
@@ -504,6 +528,14 @@ fn parse_sil_instruction_to_bytecode(
     if let Some(rest) = line.strip_prefix("integer_literal $Builtin.Int64,") {
         if let Ok(n) = rest.trim().parse::<i64>() {
             out.push(Instruction::LoadInt(n));
+            return Ok(out);
+        }
+    }
+
+    // float_literal $Builtin.FPIEEE64, 3.14 (standalone)
+    if let Some(rest) = line.strip_prefix("float_literal $Builtin.FPIEEE64,") {
+        if let Ok(f) = rest.trim().parse::<f64>() {
+            out.push(Instruction::LoadFloat(FloatVal(f)));
             return Ok(out);
         }
     }

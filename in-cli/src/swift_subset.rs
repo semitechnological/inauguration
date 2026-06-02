@@ -59,6 +59,7 @@ fn brace_delta(line: &str) -> i32 {
 fn parse_type(s: &str) -> Typ {
     match trim(s) {
         "Int" => Typ::Int,
+        "Float" => Typ::Float,
         "String" => Typ::String,
         "Bool" => Typ::Bool,
         "Void" => Typ::Void,
@@ -732,7 +733,7 @@ pub fn parse(source: &str) -> Program {
 }
 
 fn builtin_type(t: &Typ) -> bool {
-    matches!(t, Typ::Int | Typ::String | Typ::Bool | Typ::Void)
+    matches!(t, Typ::Int | Typ::Float | Typ::String | Typ::Bool | Typ::Void)
 }
 
 fn type_known(known: &HashSet<&str>, t: &Typ) -> bool {
@@ -807,7 +808,7 @@ fn check_expr_calls(
                 check_expr_calls(owner, arg, fn_set, diagnostics);
             }
         }
-        Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Ident(_) => {}
+        Expr::IntLit(_) | Expr::FloatLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Ident(_) => {}
         Expr::Closure { .. } => {}
     }
 }
@@ -956,7 +957,7 @@ fn check_expr_names(
             }
             }
         }
-        Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => {}
+        Expr::IntLit(_) | Expr::FloatLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => {}
         Expr::Closure { .. } => {}
     }
 }
@@ -969,6 +970,7 @@ fn infer_expr_type(
 ) -> Option<Typ> {
     match expr {
         Expr::IntLit(_) => Some(Typ::Int),
+        Expr::FloatLit(_) => Some(Typ::Float),
         Expr::StringLit(_) => Some(Typ::String),
         Expr::BoolLit(_) => Some(Typ::Bool),
         Expr::Ident(name) => env.get(name).cloned(),
@@ -1320,6 +1322,7 @@ struct Artifact<'a> {
 fn string_of_type(t: &Typ) -> String {
     match t {
         Typ::Int => "Int".into(),
+        Typ::Float => "Float".into(),
         Typ::String => "String".into(),
         Typ::Bool => "Bool".into(),
         Typ::Void => "Void".into(),

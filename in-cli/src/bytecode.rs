@@ -3,13 +3,24 @@
 //! Bytecode is a minimal intermediate representation that SIL can lower to,
 //! enabling code generation without external compilers or complex backends.
 
-use crate::core_ir::ModuleIdentityReport;
+use crate::core_ir::{FloatVal, ModuleIdentityReport};
 use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CmpOp {
+    Eq,
+    Ne,
+    Lt,
+    Gt,
+    Le,
+    Ge,
+}
 
 /// Runtime value on the stack.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Value {
     Int(i64),
+    Float(FloatVal),
     Bool(bool),
     String(String),
     Struct {
@@ -24,6 +35,7 @@ impl Value {
     pub fn to_int(&self) -> i64 {
         match self {
             Value::Int(n) => *n,
+            Value::Float(FloatVal(f)) => *f as i64,
             Value::Bool(b) => {
                 if *b {
                     1
@@ -41,6 +53,7 @@ impl Value {
     pub fn to_bool(&self) -> bool {
         match self {
             Value::Int(n) => *n != 0,
+            Value::Float(FloatVal(f)) => *f != 0.0,
             Value::Bool(b) => *b,
             Value::String(s) => !s.is_empty(),
             Value::Struct { .. } => true,
@@ -49,9 +62,28 @@ impl Value {
         }
     }
 
+    pub fn to_float(&self) -> f64 {
+        match self {
+            Value::Float(FloatVal(f)) => *f,
+            Value::Int(n) => *n as f64,
+            Value::Bool(b) => {
+                if *b {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+            Value::String(_) => 0.0,
+            Value::Struct { .. } => 0.0,
+            Value::Array(_) => 0.0,
+            Value::Nil => 0.0,
+        }
+    }
+
     pub fn to_string_display(&self) -> String {
         match self {
             Value::Int(n) => n.to_string(),
+            Value::Float(FloatVal(f)) => f.to_string(),
             Value::Bool(b) => b.to_string(),
             Value::String(s) => s.clone(),
             Value::Struct { name, .. } => name.clone(),
@@ -66,6 +98,8 @@ impl Value {
 pub enum Instruction {
     /// Load integer constant onto stack
     LoadInt(i64),
+    /// Load float constant onto stack
+    LoadFloat(FloatVal),
     /// Load string constant onto stack
     LoadString(String),
     /// Load boolean constant onto stack
@@ -80,6 +114,12 @@ pub enum Instruction {
     Return,
     /// Binary operation: pop 2 values, apply op, push result
     BinOp(String),
+    /// Float binary operations
+    FAdd,
+    FSub,
+    FMul,
+    FDiv,
+    FCmp(CmpOp),
     /// Unary operation: pop 1 value, apply op, push result
     UnOp(String),
     StructInit(String, Vec<String>),
@@ -172,6 +212,7 @@ pub fn module_to_text(module: &BytecodeModule) -> String {
 fn instruction_to_text(inst: &Instruction) -> String {
     match inst {
         Instruction::LoadInt(n) => format!("load_int {}", n),
+        Instruction::LoadFloat(f) => format!("load_float {}", f.0),
         Instruction::LoadString(s) => format!("load_string {:?}", s),
         Instruction::LoadBool(b) => format!("load_bool {}", b),
         Instruction::LoadNil => "load_nil".to_string(),
@@ -179,6 +220,11 @@ fn instruction_to_text(inst: &Instruction) -> String {
         Instruction::CallFunction(name, argc) => format!("call {} {}", name, argc),
         Instruction::Return => "return".to_string(),
         Instruction::BinOp(op) => format!("binop {}", op),
+        Instruction::FAdd => "fadd".to_string(),
+        Instruction::FSub => "fsub".to_string(),
+        Instruction::FMul => "fmul".to_string(),
+        Instruction::FDiv => "fdiv".to_string(),
+        Instruction::FCmp(op) => format!("fcmp {:?}", op),
         Instruction::UnOp(op) => format!("unop {}", op),
         Instruction::StructInit(name, fields) => {
             format!("struct_init {} {}", name, fields.join(","))
@@ -327,6 +373,13 @@ fn parse_instruction(line: &str) -> Result<Instruction, String> {
                 .ok_or("parse error")?;
             Ok(Instruction::LoadInt(n))
         }
+        "load_float" => {
+            let f = parts
+                .get(1)
+                .and_then(|s| s.parse::<f64>().ok())
+                .ok_or("parse error")?;
+            Ok(Instruction::LoadFloat(FloatVal(f)))
+        }
         "load_bool" => {
             let b = parts
                 .get(1)
@@ -352,6 +405,23 @@ fn parse_instruction(line: &str) -> Result<Instruction, String> {
             Ok(Instruction::CallFunction(name, argc))
         }
         "return" => Ok(Instruction::Return),
+        "fadd" => Ok(Instruction::FAdd),
+        "fsub" => Ok(Instruction::FSub),
+        "fmul" => Ok(Instruction::FMul),
+        "fdiv" => Ok(Instruction::FDiv),
+        "fcmp" => {
+            let op_str = parts.get(1).ok_or("parse error")?;
+            let op = match *op_str {
+                "Eq" => CmpOp::Eq,
+                "Ne" => CmpOp::Ne,
+                "Lt" => CmpOp::Lt,
+                "Gt" => CmpOp::Gt,
+                "Le" => CmpOp::Le,
+                "Ge" => CmpOp::Ge,
+                _ => return Err(format!("unknown cmp op: {}", op_str)),
+            };
+            Ok(Instruction::FCmp(op))
+        }
         "binop" => {
             let op = parts.get(1).ok_or("parse error")?.to_string();
             Ok(Instruction::BinOp(op))

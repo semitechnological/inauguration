@@ -345,7 +345,7 @@ fn check_expr(
     call_edges: &mut Vec<(String, String)>,
 ) -> Result<(), (String, String)> {
     match expr {
-        Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => Ok(()),
+        Expr::IntLit(_) | Expr::FloatLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => Ok(()),
         Expr::Closure { .. } => Ok(()),
         Expr::Ident(name) => {
             if env.contains_key(name) {
@@ -550,6 +550,7 @@ fn check_struct_init(
 fn expr_type(expr: &Expr, facts: &ModuleFacts<'_>, env: &HashMap<String, Typ>) -> Option<Typ> {
     match expr {
         Expr::IntLit(_) => Some(Typ::Int),
+        Expr::FloatLit(_) => Some(Typ::Float),
         Expr::StringLit(_) => Some(Typ::String),
         Expr::BoolLit(_) => Some(Typ::Bool),
         Expr::Ident(name) => env.get(name).cloned(),
@@ -626,6 +627,7 @@ fn require_type(
 fn type_name(typ: &Typ) -> String {
     match typ {
         Typ::Int => "Int".to_string(),
+        Typ::Float => "Float".to_string(),
         Typ::String => "String".to_string(),
         Typ::Bool => "Bool".to_string(),
         Typ::Void => "Void".to_string(),

@@ -1,6 +1,6 @@
 //! `.in` v0.2: top-level `struct` / `fn` with multiline struct bodies and minimal `fn` bodies.
 
-use crate::core_ir::{CoreModuleIdentity, Decl, MethodSig, Typ, UnifiedModule, Visibility};
+use crate::core_ir::{CoreModuleIdentity, Decl, FloatVal, MethodSig, Typ, UnifiedModule, Visibility};
 use crate::core_ir::{Expr, LoopKind, Stmt};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -331,6 +331,7 @@ fn parse_in_type(s: &str) -> Typ {
     }
     match s {
         "Int" => Typ::Int,
+        "Float" => Typ::Float,
         "String" => Typ::String,
         "Bool" => Typ::Bool,
         "Void" => Typ::Void,
@@ -769,6 +770,11 @@ fn parse_expr(s: &str) -> Expr {
     }
     if let Ok(n) = s.parse::<i64>() {
         return Expr::IntLit(n);
+    }
+    if s.contains('.') {
+        if let Ok(f) = s.parse::<f64>() {
+            return Expr::FloatLit(FloatVal(f));
+        }
     }
     if s.len() >= 2 && s.starts_with('"') && s.ends_with('"') {
         return Expr::StringLit(s[1..s.len() - 1].to_string());
@@ -1972,7 +1978,7 @@ fn type_known(structs: &HashSet<&str>, t: &Typ) -> bool {
     match t {
         Typ::Named(n) => structs.contains(n.as_str()),
         Typ::Array(item) => type_known(structs, item),
-        Typ::Int | Typ::String | Typ::Bool | Typ::Void => true,
+        Typ::Int | Typ::Float | Typ::String | Typ::Bool | Typ::Void => true,
         Typ::Generic(_) => false,
     }
 }
@@ -1983,7 +1989,7 @@ fn validate_expr_shapes(
     expr: &Expr,
 ) -> Result<(), String> {
     match expr {
-        Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Ident(_) => Ok(()),
+        Expr::IntLit(_) | Expr::FloatLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Ident(_) => Ok(()),
         Expr::Unary { expr, .. } => validate_expr_shapes(fn_name, structs, expr),
         Expr::Binary { lhs, rhs, .. } => {
             validate_expr_shapes(fn_name, structs, lhs)?;
@@ -2250,7 +2256,7 @@ fn desugar_method_calls_in_expr(
                 *callee = Box::new(Expr::Ident(format!("{struct_name}_{method}")));
             }
         }
-        Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Ident(_) => {}
+        Expr::IntLit(_) | Expr::FloatLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Ident(_) => {}
         Expr::Closure { body, .. } => {
             let mut closure_env = env.clone();
             desugar_method_calls_in_body(body, &mut closure_env, structs, fn_rets);
@@ -2266,6 +2272,7 @@ fn infer_in_expr_type(
 ) -> Option<Typ> {
     match expr {
         Expr::IntLit(_) => Some(Typ::Int),
+        Expr::FloatLit(_) => Some(Typ::Float),
         Expr::StringLit(_) => Some(Typ::String),
         Expr::BoolLit(_) => Some(Typ::Bool),
         Expr::Ident(name) => env.get(name).cloned(),

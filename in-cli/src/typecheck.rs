@@ -300,7 +300,7 @@ impl TypeChecker {
         errors: &mut Vec<TypeError>,
     ) {
         match expr {
-            Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Closure { .. } => {}
+            Expr::IntLit(_) | Expr::FloatLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Closure { .. } => {}
             Expr::Ident(name) => {
                 if !env.contains_key(name) {
                     errors.push(TypeError::UndefinedVariable {
@@ -513,6 +513,7 @@ impl TypeChecker {
     ) -> Option<Typ> {
         match expr {
             Expr::IntLit(_) => Some(Typ::Int),
+            Expr::FloatLit(_) => Some(Typ::Float),
             Expr::StringLit(_) => Some(Typ::String),
             Expr::BoolLit(_) => Some(Typ::Bool),
             Expr::Ident(name) => env.get(name).cloned(),

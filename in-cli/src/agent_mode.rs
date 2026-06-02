@@ -1030,7 +1030,7 @@ fn collect_dependency_symbol_calls_from_expr<'a>(
                 collect_dependency_symbol_calls_from_expr(arg, symbols, functions, out);
             }
         }
-        Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Ident(_) => {}
+        Expr::IntLit(_) | Expr::FloatLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Ident(_) => {}
         Expr::Closure { .. } => {}
     }
 }
@@ -1421,6 +1421,7 @@ fn stmt_count(stmts: &[Stmt]) -> usize {
 fn typ_label(typ: &Typ) -> String {
     match typ {
         Typ::Int => "Int".to_string(),
+        Typ::Float => "Float".to_string(),
         Typ::String => "String".to_string(),
         Typ::Bool => "Bool".to_string(),
         Typ::Void => "Void".to_string(),

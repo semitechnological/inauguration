@@ -65,6 +65,7 @@ fn format_decl(decl: &Decl, out: &mut String) {
 fn format_type(typ: &Typ) -> String {
     match typ {
         Typ::Int => "Int".into(),
+        Typ::Float => "Float".into(),
         Typ::String => "String".into(),
         Typ::Bool => "Bool".into(),
         Typ::Void => "void".into(),
@@ -191,6 +192,7 @@ fn format_stmt(stmt: &Stmt, depth: usize, out: &mut String) {
 fn format_expr(expr: &Expr) -> String {
     match expr {
         Expr::IntLit(n) => n.to_string(),
+        Expr::FloatLit(f) => f.0.to_string(),
         Expr::StringLit(value) => format!("{value:?}"),
         Expr::BoolLit(value) => value.to_string(),
         Expr::Ident(name) => name.clone(),

@@ -245,7 +245,7 @@ fn rewrite_captures_in_expr(expr: &mut Expr, captures: &HashSet<String>) {
                 rewrite_captures_in_expr(arg, captures);
             }
         }
-        Expr::Ident(_) | Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => {}
+        Expr::Ident(_) | Expr::IntLit(_) | Expr::FloatLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => {}
         Expr::Closure { .. } => {}
     }
 }
@@ -328,7 +328,7 @@ fn desugar_closures_in_expr(
                 desugar_closures_in_expr(arg, counter, extra_decls);
             }
         }
-        Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Ident(_) => {}
+        Expr::IntLit(_) | Expr::FloatLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Ident(_) => {}
     }
 }
 
@@ -428,7 +428,7 @@ fn rewrite_method_calls_in_expr(expr: &mut Expr, method_map: &HashMap<String, St
             rewrite_method_calls_in_expr(base, method_map);
             rewrite_method_calls_in_expr(index, method_map);
         }
-        Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Ident(_) => {}
+        Expr::IntLit(_) | Expr::FloatLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Ident(_) => {}
         Expr::Closure { body, .. } => {
             rewrite_method_calls_in_body(body, method_map);
         }
@@ -447,6 +447,12 @@ fn lower_expr(
             let id = *ssa;
             *ssa += 1;
             out.push_str(&format!("%{id} = integer_literal $Builtin.Int64, {n}\n"));
+            id
+        }
+        Expr::FloatLit(f) => {
+            let id = *ssa;
+            *ssa += 1;
+            out.push_str(&format!("%{id} = float_literal $Builtin.FPIEEE64, {}\n", f.0));
             id
         }
         Expr::BoolLit(b) => {
@@ -705,7 +711,7 @@ fn collect_expr_reads(e: &Expr, reads: &mut HashSet<String>) {
                 collect_expr_reads(arg, reads);
             }
         }
-        Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => {}
+        Expr::IntLit(_) | Expr::FloatLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => {}
         Expr::Closure { .. } => {}
     }
 }

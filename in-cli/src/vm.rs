@@ -1,6 +1,7 @@
 //! Bytecode VM: executes compiled bytecode programs.
 
-use crate::bytecode::{BytecodeFunction, BytecodeModule, Instruction, Value};
+use crate::bytecode::{BytecodeFunction, BytecodeModule, CmpOp, Instruction, Value};
+use crate::core_ir::FloatVal;
 use std::collections::HashMap;
 
 pub struct TryRegion {
@@ -114,6 +115,9 @@ impl BytecodeVM {
                 Instruction::LoadInt(n) => {
                     self.stack.push(Value::Int(n));
                 }
+                Instruction::LoadFloat(f) => {
+                    self.stack.push(Value::Float(f));
+                }
                 Instruction::LoadString(s) => {
                     self.stack.push(Value::String(s));
                 }
@@ -146,6 +150,42 @@ impl BytecodeVM {
                     let lhs = self.stack.pop().ok_or("stack underflow")?;
                     let result = self.apply_binop(&op, lhs, rhs)?;
                     self.stack.push(result);
+                }
+                Instruction::FAdd => {
+                    let rhs = self.stack.pop().ok_or("stack underflow")?.to_float();
+                    let lhs = self.stack.pop().ok_or("stack underflow")?.to_float();
+                    self.stack.push(Value::Float(FloatVal(lhs + rhs)));
+                }
+                Instruction::FSub => {
+                    let rhs = self.stack.pop().ok_or("stack underflow")?.to_float();
+                    let lhs = self.stack.pop().ok_or("stack underflow")?.to_float();
+                    self.stack.push(Value::Float(FloatVal(lhs - rhs)));
+                }
+                Instruction::FMul => {
+                    let rhs = self.stack.pop().ok_or("stack underflow")?.to_float();
+                    let lhs = self.stack.pop().ok_or("stack underflow")?.to_float();
+                    self.stack.push(Value::Float(FloatVal(lhs * rhs)));
+                }
+                Instruction::FDiv => {
+                    let rhs = self.stack.pop().ok_or("stack underflow")?.to_float();
+                    let lhs = self.stack.pop().ok_or("stack underflow")?.to_float();
+                    if rhs == 0.0 {
+                        return Err("float division by zero".to_string());
+                    }
+                    self.stack.push(Value::Float(FloatVal(lhs / rhs)));
+                }
+                Instruction::FCmp(op) => {
+                    let rhs = self.stack.pop().ok_or("stack underflow")?.to_float();
+                    let lhs = self.stack.pop().ok_or("stack underflow")?.to_float();
+                    let result = match op {
+                        CmpOp::Eq => lhs == rhs,
+                        CmpOp::Ne => lhs != rhs,
+                        CmpOp::Lt => lhs < rhs,
+                        CmpOp::Gt => lhs > rhs,
+                        CmpOp::Le => lhs <= rhs,
+                        CmpOp::Ge => lhs >= rhs,
+                    };
+                    self.stack.push(Value::Bool(result));
                 }
                 Instruction::UnOp(op) => {
                     let val = self.stack.pop().ok_or("stack underflow")?;
@@ -413,6 +453,27 @@ impl BytecodeVM {
             "||" => return Ok(Value::Bool(lhs.to_bool() || rhs.to_bool())),
             _ => {}
         }
+        if matches!(lhs, Value::Float(_)) || matches!(rhs, Value::Float(_)) {
+            let l = lhs.to_float();
+            let r = rhs.to_float();
+            return match op {
+                "+" => Ok(Value::Float(FloatVal(l + r))),
+                "-" => Ok(Value::Float(FloatVal(l - r))),
+                "*" => Ok(Value::Float(FloatVal(l * r))),
+                "/" => {
+                    if r == 0.0 {
+                        Err("float division by zero".to_string())
+                    } else {
+                        Ok(Value::Float(FloatVal(l / r)))
+                    }
+                }
+                "<" => Ok(Value::Bool(l < r)),
+                ">" => Ok(Value::Bool(l > r)),
+                "<=" => Ok(Value::Bool(l <= r)),
+                ">=" => Ok(Value::Bool(l >= r)),
+                _ => Err(format!("unknown float binop: {}", op)),
+            };
+        }
         let l = lhs.to_int();
         let r = rhs.to_int();
         match op {
@@ -623,5 +684,24 @@ mod tests {
         let mut vm = BytecodeVM::new(module);
         let result = vm.run().unwrap();
         assert_eq!(result, Value::Int(7));
+    }
+
+    #[test]
+    fn vm_float_add() {
+        let mut module = BytecodeModule::new("main".to_string());
+        let func = BytecodeFunction {
+            name: "main".to_string(),
+            instructions: vec![
+                Instruction::LoadFloat(FloatVal(1.5)),
+                Instruction::LoadFloat(FloatVal(2.5)),
+                Instruction::FAdd,
+                Instruction::Return,
+            ],
+            local_count: 0,
+        };
+        module.add_function(func);
+        let mut vm = BytecodeVM::new(module);
+        let result = vm.run().unwrap();
+        assert_eq!(result, Value::Float(FloatVal(4.0)));
     }
 }

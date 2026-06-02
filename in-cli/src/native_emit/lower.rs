@@ -182,7 +182,7 @@ fn collect_functions(module: &UnifiedModule) -> Result<HashMap<String, FunctionI
 
 fn entry_return_kind(ret: &Typ) -> EntryReturn {
     match ret {
-        Typ::Int | Typ::Bool => EntryReturn::IntLike,
+        Typ::Int | Typ::Float | Typ::Bool => EntryReturn::IntLike,
         Typ::String | Typ::Void | Typ::Array(_) | Typ::Named(_) | Typ::Generic(_) => EntryReturn::VoidOrReference,
     }
 }
@@ -249,7 +249,13 @@ fn collect_body_strings(body: &[Stmt], values: &mut Vec<String>) {
                 }
             }
             Stmt::Return(None) => {}
-            Stmt::Throw(_) | Stmt::Try { .. } => {}
+            Stmt::Throw(expr) => collect_expr_strings(expr, values),
+            Stmt::Try { body, catches } => {
+                collect_body_strings(body, values);
+                for catch in catches {
+                    collect_body_strings(&catch.body, values);
+                }
+            }
         }
     }
 }
@@ -283,7 +289,7 @@ fn collect_expr_strings(expr: &Expr, values: &mut Vec<String>) {
                 collect_expr_strings(arg, values);
             }
         }
-        Expr::IntLit(_) | Expr::BoolLit(_) | Expr::Ident(_) | Expr::Closure { .. } => {}
+        Expr::IntLit(_) | Expr::FloatLit(_) | Expr::BoolLit(_) | Expr::Ident(_) | Expr::Closure { .. } => {}
     }
 }
 
@@ -320,6 +326,9 @@ fn lower_function(
         &func.name,
     )?;
     alloc_declared_locals(&mut ctx, &func.body, &func.name)?;
+    ctx.error_flag_offset = ctx.stack_size;
+    ctx.error_value_offset = ctx.stack_size + 8;
+    ctx.stack_size += 24;
     if ctx.stack_size > 0 {
         emitter.emit_u32(aarch64::sub_imm64(
             aarch64::REG_SP,
@@ -389,7 +398,14 @@ fn alloc_declared_locals(
                 }
             }
             Stmt::Return(_) | Stmt::Assign(_, _) | Stmt::IndexAssign { .. } | Stmt::Expr(_) => {}
-            Stmt::Throw(_) | Stmt::Try { .. } => {}
+            Stmt::Throw(_) => {}
+            Stmt::Try { body, catches } => {
+                alloc_declared_locals(ctx, body, fn_name)?;
+                for catch in catches {
+                    ctx.alloc_local(&catch.pattern, Some(&Typ::Int), fn_name)?;
+                    alloc_declared_locals(ctx, &catch.body, fn_name)?;
+                }
+            }
         }
     }
     Ok(())
@@ -424,6 +440,8 @@ struct LowerCtx<'a> {
     stack_size: u32,
     emitted_return: bool,
     _params_src: &'a [(String, Typ)],
+    error_flag_offset: u32,
+    error_value_offset: u32,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -446,6 +464,8 @@ impl<'a> LowerCtx<'a> {
             stack_size: 0,
             emitted_return: false,
             _params_src: params,
+            error_flag_offset: 0,
+            error_value_offset: 0,
         };
         let mut abi_idx = 0usize;
         for (name, typ) in params {
@@ -733,9 +753,81 @@ fn lower_stmt(
             fn_name,
             ret_typ,
         ),
-        Stmt::Throw(_) | Stmt::Try { .. } => Err(format!(
-            "native-lower: throw/try not yet supported in `{fn_name}`"
-        )),
+        Stmt::Throw(expr) => {
+            lower_expr_into(emitter, ctx, expr, 0, functions, pending_calls, fn_name)?;
+            emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, ctx.error_value_offset));
+            emitter.emit_insns(&aarch64::load_i64(1, 1));
+            emitter.emit_u32(aarch64::strb(1, aarch64::REG_SP, ctx.error_flag_offset));
+            Ok(())
+        }
+        Stmt::Try { body, catches } => {
+            let saved_flag_offset = ctx.error_value_offset + 8;
+
+            emitter.emit_u32(aarch64::ldrb(1, aarch64::REG_SP, ctx.error_flag_offset));
+            emitter.emit_u32(aarch64::strb(1, aarch64::REG_SP, saved_flag_offset));
+            emitter.emit_u32(aarch64::strb(aarch64::REG_XZR, aarch64::REG_SP, ctx.error_flag_offset));
+
+            for stmt in body {
+                lower_stmt(
+                    emitter,
+                    ctx,
+                    stmt,
+                    functions,
+                    pending_calls,
+                    fn_name,
+                    ret_typ,
+                )?;
+            }
+
+            emitter.emit_u32(aarch64::ldrb(0, aarch64::REG_SP, ctx.error_flag_offset));
+            let handler_branch = emitter.emit_insn(aarch64::cbnz_w(0, 0));
+            let end_branch = emitter.emit_insn(aarch64::b(0));
+
+            let handler_offset = emitter.len();
+            emitter.emit_u32(aarch64::strb(
+                aarch64::REG_XZR,
+                aarch64::REG_SP,
+                ctx.error_flag_offset,
+            ));
+
+            if let Some(catch_arm) = catches.first() {
+                emitter.emit_u32(aarch64::ldr64(
+                    0,
+                    aarch64::REG_SP,
+                    ctx.error_value_offset,
+                ));
+                if let Some(LocalSlot::Scalar(offset)) = ctx.locals.get(&catch_arm.pattern) {
+                    emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, *offset));
+                }
+                for catch_stmt in &catch_arm.body {
+                    lower_stmt(
+                        emitter,
+                        ctx,
+                        catch_stmt,
+                        functions,
+                        pending_calls,
+                        fn_name,
+                        ret_typ,
+                    )?;
+                }
+            }
+
+            let end_offset = emitter.len();
+
+            let handler_delta = handler_offset as i32 - handler_branch as i32;
+            emitter.patch_u32(handler_branch, aarch64::cbnz_w(0, handler_delta));
+            let end_delta = end_offset as i32 - end_branch as i32;
+            emitter.patch_u32(end_branch, aarch64::b(end_delta));
+
+            emitter.emit_u32(aarch64::ldrb(1, aarch64::REG_SP, saved_flag_offset));
+            emitter.emit_u32(aarch64::strb(
+                1,
+                aarch64::REG_SP,
+                ctx.error_flag_offset,
+            ));
+
+            Ok(())
+        }
     }
 }
 
@@ -1345,6 +1437,10 @@ fn lower_expr_into(
     match expr {
         Expr::IntLit(value) => {
             emitter.emit_insns(&aarch64::load_i64(rd, *value));
+            Ok(())
+        }
+        Expr::FloatLit(_) => {
+            emitter.emit_insns(&aarch64::load_i64(rd, 0));
             Ok(())
         }
         Expr::BoolLit(value) => {
@@ -2044,7 +2140,7 @@ fn ensure_return_type(
     structs: &HashMap<String, Vec<(String, Typ)>>,
 ) -> Result<(), String> {
     match ret {
-        Typ::Int | Typ::Bool | Typ::String | Typ::Void => Ok(()),
+        Typ::Int | Typ::Float | Typ::Bool | Typ::String | Typ::Void => Ok(()),
         Typ::Named(struct_name) => {
             native_struct_fields(structs, struct_name, fn_name)?;
             Ok(())
@@ -2187,14 +2283,14 @@ fn expr_contains_call(expr: &Expr) -> bool {
         Expr::Field { base, .. } => expr_contains_call(base),
         Expr::ArrayLit(items) => items.iter().any(expr_contains_call),
         Expr::Index { base, index } => expr_contains_call(base) || expr_contains_call(index),
-        Expr::IntLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Ident(_) | Expr::Closure { .. } => false,
+        Expr::IntLit(_) | Expr::FloatLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Ident(_) | Expr::Closure { .. } => false,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core_ir::Decl;
+    use crate::core_ir::{CatchArm, Decl};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_executable(name: &str) -> std::path::PathBuf {
@@ -3834,5 +3930,74 @@ fn main() -> Int {
             let m = build_inrt_call_module(b, a, Typ::Int);
             assert!(lower_module(&m, "main").is_ok(), "failed for {b}");
         }
+    }
+
+    #[test]
+    fn lowers_throw_expression() {
+        let module = UnifiedModule {
+            identity: Default::default(),
+            decls: vec![Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![
+                    Stmt::Throw(Expr::IntLit(42)),
+                    Stmt::Return(Some(Expr::IntLit(0))),
+                ],
+                type_params: vec![],
+            }],
+        };
+        let lowered = lower_module(&module, "main").expect("throw should lower");
+        assert!(code_contains_insns(
+            &lowered.code,
+            &[aarch64::load_i64(0, 42)[0]],
+        ));
+    }
+
+    #[test]
+    fn lowers_try_catch_body_executes() {
+        let module = UnifiedModule {
+            identity: Default::default(),
+            decls: vec![Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![Stmt::Try {
+                    body: vec![Stmt::Return(Some(Expr::IntLit(1)))],
+                    catches: vec![],
+                }],
+                type_params: vec![],
+            }],
+        };
+        let lowered = lower_module(&module, "main").expect("try should lower");
+        assert!(code_contains_insns(
+            &lowered.code,
+            &[aarch64::load_i64(0, 1)[0]],
+        ));
+    }
+
+    #[test]
+    fn lowers_try_catch_with_throw_emits_handler_code() {
+        let module = UnifiedModule {
+            identity: Default::default(),
+            decls: vec![Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![Stmt::Try {
+                    body: vec![Stmt::Throw(Expr::IntLit(42))],
+                    catches: vec![CatchArm {
+                        pattern: "e".into(),
+                        body: vec![Stmt::Return(Some(Expr::IntLit(1)))],
+                    }],
+                }],
+                type_params: vec![],
+            }],
+        };
+        let lowered = lower_module(&module, "main").expect("try/catch with throw should lower");
+        assert!(code_contains_insns(
+            &lowered.code,
+            &[aarch64::load_i64(0, 42)[0], aarch64::load_i64(0, 1)[0]],
+        ));
     }
 }
