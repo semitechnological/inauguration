@@ -11,6 +11,8 @@ struct CachedOwnedCompileReport {
     path: String,
     module_id: String,
     #[serde(default)]
+    package_name: Option<String>,
+    #[serde(default)]
     module_identity: Option<crate::core_ir::ModuleIdentityReport>,
     target: String,
     entry: Option<String>,
@@ -44,6 +46,7 @@ impl From<&OwnedCompileReport> for CachedOwnedCompileReport {
             path: report.path.clone(),
             module_id: report.module_id.clone(),
             module_identity: report.module_identity.clone(),
+            package_name: report.package_name.clone(),
             target: report.target.clone(),
             entry: report.entry.clone(),
             frontend_level: report.frontend_level.to_string(),
@@ -78,6 +81,7 @@ impl From<CachedOwnedCompileReport> for OwnedCompileReport {
             path: cached.path,
             module_id: cached.module_id,
             module_identity: cached.module_identity,
+            package_name: cached.package_name,
             target: cached.target,
             entry: cached.entry,
             frontend_level: leak_static(cached.frontend_level),
@@ -228,6 +232,7 @@ mod tests {
             owned: true,
             path: "sample.in".to_string(),
             module_id: "App".to_string(),
+            package_name: None,
             module_identity: Some(crate::core_ir::ModuleIdentityReport {
                 package: Some("agents.video".to_string()),
                 module: Some("agents.video.main".to_string()),

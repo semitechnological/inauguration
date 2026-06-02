@@ -37,6 +37,8 @@ pub struct OwnedCompileReport {
     pub owned: bool,
     pub path: String,
     pub module_id: String,
+    #[serde(default)]
+    pub package_name: Option<String>,
     pub module_identity: Option<ModuleIdentityReport>,
     pub target: String,
     pub entry: Option<String>,
@@ -131,6 +133,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
                 path: request.path.display().to_string(),
                 module_id: request.module_id.clone(),
                 module_identity: None,
+                package_name: None,
                 target: target_label(request.target).to_string(),
                 entry: request.entry.clone(),
                 frontend_level: "unsupported",
@@ -191,6 +194,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         path: request.path.display().to_string(),
         module_id: request.module_id.clone(),
         module_identity: None,
+        package_name: None,
         target: target_label(request.target).to_string(),
         entry: request.entry.clone(),
         frontend_level: "unsupported",
@@ -265,11 +269,22 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
     };
 
     // Resolve multi-file imports for .in sources
+    let mut pkg_entry: Option<String> = None;
     if request.path.extension().map_or(false, |e| e == "in") {
         let source_dir = request.path.parent().map(PathBuf::from).unwrap_or_default();
         let mut import_resolver = crate::module_resolver::ModuleResolver::new();
-        import_resolver.add_search_path(source_dir);
+        import_resolver.add_search_path(source_dir.clone());
         import_resolver.add_search_path(PathBuf::from("."));
+
+        // Check for package manifest to set name and dependency search paths
+        if let Some(pkg) = crate::package::PackageManifest::find_in_dir(&source_dir) {
+            report.package_name = Some(pkg.name.clone());
+            pkg_entry = Some(pkg.entry.clone());
+            for dep in &pkg.dependencies {
+                import_resolver.add_search_path(PathBuf::from(dep));
+            }
+        }
+
         match import_resolver.resolve_imports(&source) {
             Ok(imported) => {
                 for imp in imported {
@@ -282,13 +297,17 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         }
     }
 
+    // Lower module: desugar classes to structs before typecheck
+    crate::lower_core::desugar_module(&mut module);
+
     report.frontend_level = "core-ir-direct";
     report.module_identity = Some(module.identity_report(&request.module_id));
     report.parsed_function_count = count_functions(&module);
 
+    let effective_entry = request.entry.clone().or(pkg_entry);
     let verify_opts = core_ir_verifier::VerifyOptions {
-        entry: request.entry.clone(),
-        require_entry: request.entry.as_deref() == Some("main"),
+        entry: effective_entry.clone(),
+        require_entry: effective_entry.as_deref() == Some("main"),
     };
     let verify_report = core_ir_verifier::verify_module(&module, &verify_opts);
     if !verify_report.ok {

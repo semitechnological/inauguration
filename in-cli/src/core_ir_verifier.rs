@@ -137,6 +137,16 @@ fn collect_module_facts(module: &UnifiedModule) -> Result<ModuleFacts<'_>, (Stri
                 }
                 structs.insert(name.as_str(), fields.as_slice());
             }
+            Decl::Class { name, fields, .. } => {
+                // Register class fields as struct schema for verification
+                if !top_level.insert(name.as_str()) {
+                    return Err((
+                        "duplicate-top-level-name".to_string(),
+                        format!("duplicate top-level name `{name}`"),
+                    ));
+                }
+                structs.insert(name.as_str(), fields.as_slice());
+            }
             Decl::Function {
                 name, params, ret, ..
             } => {
@@ -148,7 +158,7 @@ fn collect_module_facts(module: &UnifiedModule) -> Result<ModuleFacts<'_>, (Stri
                 }
                 functions.insert(name.as_str(), FunctionSig { params, ret });
             }
-            Decl::Class { .. } | Decl::Interface { .. } => {}
+            Decl::Interface { .. } => {}
         }
     }
 

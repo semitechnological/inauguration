@@ -4,7 +4,7 @@ use crate::core_ir::{Decl, MatchPattern, Typ, UnifiedModule};
 use crate::core_ir::{Expr, Stmt};
 use std::collections::{HashMap, HashSet};
 
-fn desugar_module(module: &mut UnifiedModule) {
+pub fn desugar_module(module: &mut UnifiedModule) {
     let mut method_map: HashMap<String, String> = HashMap::new();
     let mut new_decls: Vec<Decl> = Vec::new();
 
@@ -1263,6 +1263,7 @@ fn lower_to_textual_sil_inner(module: &UnifiedModule, synthesize_main_helper_ref
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core_ir::MethodSig;
     use crate::core_ir::Typ;
     use crate::core_ir::{Expr, Stmt};
 
@@ -1972,5 +1973,168 @@ mod tests {
         assert!(sil.contains("index_access"), "should emit index_access for tuple pattern");
         assert!(sil.contains("store_var x"), "should store x binding");
         assert!(sil.contains("builtin_binop"), "should emit comparisons");
+    }
+
+    #[test]
+    fn desugar_class_implements_interface() {
+        let module = UnifiedModule {
+            identity: Default::default(),
+            decls: vec![
+                Decl::Interface {
+                    name: "Drawable".into(),
+                    methods: vec![MethodSig {
+                        name: "draw".into(),
+                        params: vec![],
+                        ret: Typ::Int,
+                    }],
+                    visibility: crate::core_ir::Visibility::Pub,
+                    type_params: vec![],
+                },
+                Decl::Class {
+                    name: "Circle".into(),
+                    fields: vec![("radius".into(), Typ::Int)],
+                    methods: vec![Decl::Function {
+                        name: "draw".into(),
+                        params: vec![],
+                        ret: Typ::Int,
+                        body: vec![Stmt::Return(Some(Expr::IntLit(42)))],
+                        type_params: vec![],
+                    }],
+                    visibility: crate::core_ir::Visibility::Pub,
+                    extends: None,
+                    implements: vec!["Drawable".into()],
+                    type_params: vec![],
+                },
+            ],
+        };
+        let sil = lower_to_textual_sil(&module, "App");
+        assert!(sil.contains("sil @Circle_draw"), "should emit Circle_draw for interface method");
+        assert!(
+            !sil.lines().any(|l| l.trim() == "sil @Drawable"),
+            "interface should not appear as SIL function"
+        );
+    }
+
+    #[test]
+    fn desugar_interface_method_call() {
+        let module = UnifiedModule {
+            identity: Default::default(),
+            decls: vec![
+                Decl::Interface {
+                    name: "Drawable".into(),
+                    methods: vec![MethodSig {
+                        name: "draw".into(),
+                        params: vec![],
+                        ret: Typ::Int,
+                    }],
+                    visibility: crate::core_ir::Visibility::Pub,
+                    type_params: vec![],
+                },
+                Decl::Class {
+                    name: "Circle".into(),
+                    fields: vec![("radius".into(), Typ::Int)],
+                    methods: vec![Decl::Function {
+                        name: "draw".into(),
+                        params: vec![],
+                        ret: Typ::Int,
+                        body: vec![Stmt::Return(Some(Expr::IntLit(42)))],
+                        type_params: vec![],
+                    }],
+                    visibility: crate::core_ir::Visibility::Pub,
+                    extends: None,
+                    implements: vec!["Drawable".into()],
+                    type_params: vec![],
+                },
+                Decl::Function {
+                    name: "main".into(),
+                    params: vec![],
+                    ret: Typ::Void,
+                    body: vec![
+                        Stmt::Let(
+                            "d".into(),
+                            Some(Typ::Named("Drawable".into())),
+                            Expr::StructInit {
+                                name: "Circle".into(),
+                                fields: vec![("radius".into(), Expr::IntLit(5))],
+                            },
+                        ),
+                        Stmt::Expr(Expr::Call {
+                            callee: Box::new(Expr::Field {
+                                base: Box::new(Expr::Ident("d".into())),
+                                name: "draw".into(),
+                            }),
+                            args: vec![],
+                        }),
+                    ],
+                    type_params: vec![],
+                },
+            ],
+        };
+        let sil = lower_to_textual_sil(&module, "App");
+        assert!(
+            sil.contains("function_ref @Circle_draw"),
+            "should dispatch to Circle_draw for interface method call"
+        );
+        assert!(sil.contains("sil @Circle_draw"), "should emit Circle_draw");
+        assert!(
+            sil.contains("sil @main"),
+            "should emit main"
+        );
+    }
+
+    #[test]
+    fn desugar_interface_param_not_rewritten() {
+        let module = UnifiedModule {
+            identity: Default::default(),
+            decls: vec![
+                Decl::Interface {
+                    name: "Drawable".into(),
+                    methods: vec![MethodSig {
+                        name: "draw".into(),
+                        params: vec![],
+                        ret: Typ::Int,
+                    }],
+                    visibility: crate::core_ir::Visibility::Pub,
+                    type_params: vec![],
+                },
+                Decl::Class {
+                    name: "Circle".into(),
+                    fields: vec![("radius".into(), Typ::Int)],
+                    methods: vec![Decl::Function {
+                        name: "draw".into(),
+                        params: vec![],
+                        ret: Typ::Int,
+                        body: vec![Stmt::Return(Some(Expr::IntLit(42)))],
+                        type_params: vec![],
+                    }],
+                    visibility: crate::core_ir::Visibility::Pub,
+                    extends: None,
+                    implements: vec!["Drawable".into()],
+                    type_params: vec![],
+                },
+                Decl::Function {
+                    name: "handle".into(),
+                    params: vec![("d".into(), Typ::Named("Drawable".into()))],
+                    ret: Typ::Void,
+                    body: vec![
+                        Stmt::Expr(Expr::Call {
+                            callee: Box::new(Expr::Field {
+                                base: Box::new(Expr::Ident("d".into())),
+                                name: "draw".into(),
+                            }),
+                            args: vec![],
+                        }),
+                    ],
+                    type_params: vec![],
+                },
+            ],
+        };
+        let sil = lower_to_textual_sil(&module, "App");
+        // For now, interface methods are NOT dispatched (would require full type inference)
+        // The test verifies we don't incorrectly rewrite unknown interface calls
+        assert!(
+            !sil.contains("apply @Circle_draw"),
+            "interface method on unknown concrete type should not be rewritten to class method"
+        );
     }
 }

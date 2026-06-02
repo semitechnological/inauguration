@@ -19,11 +19,13 @@ pub fn compile_source_path(
     parser: ParserCli,
 ) -> Result<BytecodeCompileOutput, String> {
     let resolved = parser_registry::resolve_parser_id(path, parser);
-    let Some(module) =
+    let Some(mut module) =
         parser_registry::parse_with_resolved(resolved, path).map_err(|err| err.to_string())?
     else {
         return Err("bytecode compiler requires a Core IR frontend; Swift SIL emit is not supported by this path".to_string());
     };
+    // Desugar classes to structs before typecheck
+    crate::lower_core::desugar_module(&mut module);
     core_typecheck::typecheck_executable(&module)?;
 
     if std::env::var("IN_TYPECHECK").is_ok() {

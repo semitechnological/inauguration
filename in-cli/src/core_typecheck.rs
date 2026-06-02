@@ -36,15 +36,15 @@ pub fn typecheck_executable(module: &UnifiedModule) -> Result<(), String> {
     typecheck_module(module, ModuleKind::Executable)
 }
 
-#[derive(Debug, Clone, Copy)]
-struct FunctionSig<'a> {
-    params: &'a [(String, Typ)],
-    ret: &'a Typ,
+#[derive(Debug, Clone)]
+struct FunctionSig {
+    params: Vec<(String, Typ)>,
+    ret: Typ,
 }
 
-struct ModuleFacts<'a> {
-    functions: HashMap<&'a str, FunctionSig<'a>>,
-    structs: HashMap<&'a str, &'a [(String, Typ)]>,
+struct ModuleFacts {
+    functions: HashMap<String, FunctionSig>,
+    structs: HashMap<String, Vec<(String, Typ)>>,
 }
 
 fn is_builtin_fn(name: &str) -> bool {
@@ -77,7 +77,7 @@ fn builtin_return_type(name: &str) -> Typ {
     }
 }
 
-fn collect_module_facts(module: &UnifiedModule) -> Result<ModuleFacts<'_>, String> {
+fn collect_module_facts(module: &UnifiedModule) -> Result<ModuleFacts, String> {
     let mut top_level = HashSet::new();
     let mut functions = HashMap::new();
     let mut structs = HashMap::new();
@@ -85,20 +85,46 @@ fn collect_module_facts(module: &UnifiedModule) -> Result<ModuleFacts<'_>, Strin
     for decl in &module.decls {
         match decl {
             Decl::Struct { name, fields, .. } => {
-                if !top_level.insert(name.as_str()) {
+                if !top_level.insert(name.clone()) {
                     return Err(format!("duplicate top-level name `{name}`"));
                 }
-                structs.insert(name.as_str(), fields.as_slice());
+                structs.insert(name.clone(), fields.clone());
+            }
+            Decl::Class { name, fields, methods, .. } => {
+                // Register class fields as struct schema
+                if !top_level.insert(name.clone()) {
+                    return Err(format!("duplicate top-level name `{name}`"));
+                }
+                structs.insert(name.clone(), fields.clone());
+                
+                // Register mangled methods for class
+                for method in methods {
+                    if let Decl::Function {
+                        name: method_name,
+                        params,
+                        ret,
+                        ..
+                    } = method
+                    {
+                        let mangled = format!("{}_{}", name, method_name);
+                        if !top_level.insert(mangled.clone()) {
+                            return Err(format!("duplicate top-level name `{mangled}`"));
+                        }
+                        let mut new_params = vec![("self".to_string(), Typ::Named(name.clone()))];
+                        new_params.extend(params.iter().cloned());
+                        functions.insert(mangled, FunctionSig { params: new_params, ret: ret.clone() });
+                    }
+                }
             }
             Decl::Function {
                 name, params, ret, ..
             } => {
-                if !top_level.insert(name.as_str()) {
+                if !top_level.insert(name.clone()) {
                     return Err(format!("duplicate top-level name `{name}`"));
                 }
-                functions.insert(name.as_str(), FunctionSig { params, ret });
+                functions.insert(name.clone(), FunctionSig { params: params.clone(), ret: ret.clone() });
             }
-            Decl::Class { .. } | Decl::Interface { .. } => {}
+            Decl::Interface { .. } => {}
         }
     }
 
@@ -109,7 +135,7 @@ fn check_stmts(
     fn_name: &str,
     fn_ret: &Typ,
     stmts: &[Stmt],
-    facts: &ModuleFacts<'_>,
+    facts: &ModuleFacts,
     env: &mut HashMap<String, Typ>,
 ) -> Result<(), String> {
     for stmt in stmts {
@@ -122,7 +148,7 @@ fn check_stmt(
     fn_name: &str,
     fn_ret: &Typ,
     stmt: &Stmt,
-    facts: &ModuleFacts<'_>,
+    facts: &ModuleFacts,
     env: &mut HashMap<String, Typ>,
 ) -> Result<(), String> {
     match stmt {
@@ -241,7 +267,7 @@ fn check_stmt(
 fn check_expr(
     fn_name: &str,
     expr: &Expr,
-    facts: &ModuleFacts<'_>,
+    facts: &ModuleFacts,
     env: &HashMap<String, Typ>,
 ) -> Result<(), String> {
     match expr {
@@ -310,7 +336,7 @@ fn check_expr(
                     ));
                 }
             }
-            for (field, _) in *schema {
+            for (field, _) in schema {
                 if !seen.contains(field.as_str()) {
                     return Err(format!("missing field `{field}` for struct `{name}`"));
                 }
@@ -405,7 +431,7 @@ fn check_expr(
 
 fn expr_type(
     expr: &Expr,
-    facts: &ModuleFacts<'_>,
+    facts: &ModuleFacts,
     env: &HashMap<String, Typ>,
 ) -> Result<Option<Typ>, String> {
     match expr {
@@ -471,7 +497,7 @@ fn require_type(
     context: &str,
     expected: &Typ,
     expr: &Expr,
-    facts: &ModuleFacts<'_>,
+    facts: &ModuleFacts,
     env: &HashMap<String, Typ>,
 ) -> Result<(), String> {
     if let Some(actual) = expr_type(expr, facts, env)?

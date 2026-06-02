@@ -468,14 +468,40 @@ fn parse_struct_decl(block: &str) -> StructDecl {
 fn parse_enum_decl(block: &str) -> StructDecl {
     let line = strip_leading_access_modifiers(trim(block));
     let rest = line.strip_prefix("enum ").unwrap_or(line);
-    let name = if let Some(open) = rest.find('{') {
-        trim(rest[..open].split(':').next().unwrap_or(&rest[..open])).to_string()
+    let (name, body) = if let Some(open) = rest.find('{') {
+        let n = trim(&rest[..open]);
+        let body_content = extract_braced_body(rest, open).unwrap_or("");
+        (n.to_string(), body_content)
     } else {
-        trim(rest.split(':').next().unwrap_or(rest)).to_string()
+        (trim(rest).to_string(), "")
     };
+    
+    let mut fields = vec![("_tag".into(), Typ::Int)];
+    
+    // Parse cases with associated values: "case success(Int)" -> payload field
+    for case_line in split_body_statements(body) {
+        let case_line = trim(&case_line);
+        if let Some(after_case) = case_line.strip_prefix("case ") {
+            if let Some(paren) = after_case.find('(') {
+                let case_name = trim(&after_case[..paren]);
+                let after_paren = &after_case[paren + 1..];
+                if let Some(close) = after_paren.find(')') {
+                    let payload_types = trim(&after_paren[..close]);
+                    let payload_type = if !payload_types.is_empty() {
+                        parse_type(payload_types)
+                    } else {
+                        Typ::Void
+                    };
+                    let payload_field = format!("{}_{}_payload", name, case_name);
+                    fields.push((payload_field, payload_type));
+                }
+            }
+        }
+    }
+    
     StructDecl {
         name,
-        fields: vec![("_tag".into(), Typ::Int)],
+        fields,
         methods: vec![],
         parent: None,
     }
@@ -728,6 +754,72 @@ fn parse_while_stmt(s: &str) -> Option<Stmt> {
     })
 }
 
+fn parse_switch_stmt(s: &str) -> Option<Stmt> {
+    let rest = trim(s.strip_prefix("switch ")?);
+    let open = rest.find('{')?;
+    let scrutinee = trim(&rest[..open]);
+    if scrutinee.is_empty() {
+        return None;
+    }
+    let close = matching_brace_index(rest, open)?;
+    let body = &rest[open + 1..close];
+    
+    let mut arms = Vec::new();
+    let lines: Vec<&str> = body.lines().collect();
+    let mut i = 0;
+    while i < lines.len() {
+        let line = trim(lines[i]);
+        if line.is_empty() || line.starts_with("//") {
+            i += 1;
+            continue;
+        }
+        if let Some(case_rest) = line.strip_prefix("case ") {
+            // Parse pattern: ".success(let val):" or ".success(let val)"
+            if let Some(dot) = case_rest.find('.') {
+                let after_dot = trim(&case_rest[dot + 1..]);
+                // Find case name and binding
+                let (case_name, binding) = if let Some(paren) = after_dot.find('(') {
+                    let name = trim(&after_dot[..paren]);
+                    let after_paren = trim(&after_dot[paren + 1..]);
+                    let binding = after_paren.trim_end_matches(')').trim().strip_prefix("let ").unwrap_or("");
+                    (name, binding)
+                } else {
+                    (after_dot.trim_end_matches(':'), "")
+                };
+                let binding_str = if binding.is_empty() { "_" } else { binding };
+                let pattern = format!("Result {{ _tag: {}, Result_{}_payload: {} }}", 
+                    arms.len(), case_name, binding_str);
+                // Body is on next line(s) until next case or end
+                i += 1;
+                let mut case_body_lines = Vec::new();
+                while i < lines.len() {
+                    let next = trim(lines[i]);
+                    if next.is_empty() || next.starts_with("//") || next.starts_with("case ") {
+                        break;
+                    }
+                    case_body_lines.push(next);
+                    i += 1;
+                }
+                let case_body = if case_body_lines.is_empty() {
+                    vec![]
+                } else {
+                    parse_body(&case_body_lines.join("\n"))
+                };
+                arms.push(MatchArm { pattern, body: case_body });
+            } else {
+                i += 1;
+            }
+        } else {
+            i += 1;
+        }
+    }
+    
+    Some(Stmt::Match {
+        scrutinee: parse_expr(scrutinee),
+        arms,
+    })
+}
+
 fn parse_stmt(s: &str) -> Option<Stmt> {
     let s = trim(s);
     if s.is_empty() {
@@ -735,6 +827,9 @@ fn parse_stmt(s: &str) -> Option<Stmt> {
     }
     if s.starts_with("while ") {
         return parse_while_stmt(s);
+    }
+    if s.starts_with("switch ") {
+        return parse_switch_stmt(s);
     }
     if s.starts_with("if ") {
         return parse_if_stmt(s);
@@ -2076,6 +2171,104 @@ func main() -> Void
                 assert!(s.methods.is_empty());
             }
             _ => panic!("expected struct"),
+        }
+    }
+
+    #[test]
+    fn parse_enum_with_associated_values() {
+        let program = parse(
+            r#"
+enum Result {
+    case success(Int)
+    case failure(String)
+}
+func main() -> Void
+"#,
+        );
+        assert_eq!(program.len(), 2);
+        match &program[0] {
+            Decl::Struct(s) => {
+                assert_eq!(s.name, "Result");
+                assert_eq!(
+                    s.fields,
+                    vec![
+                        ("_tag".into(), Typ::Int),
+                        ("Result_success_payload".into(), Typ::Int),
+                        ("Result_failure_payload".into(), Typ::String),
+                    ]
+                );
+                assert!(s.methods.is_empty());
+            }
+            _ => panic!("expected struct from enum"),
+        }
+    }
+
+    #[test]
+    fn parse_enum_case_construction() {
+        let program = parse(
+            r#"
+enum Result {
+    case success(Int)
+    case failure(String)
+}
+func test() -> Void {
+    let r = Result.success(42)
+}
+"#,
+        );
+        assert_eq!(program.len(), 2);
+        match &program[1] {
+            Decl::Function(f) => {
+                assert_eq!(f.body.len(), 1);
+                match &f.body[0] {
+                    Stmt::Let(name, _typ, expr) => {
+                        assert_eq!(name, "r");
+                        // Result.success(42) parses as a call expression
+                        assert!(matches!(expr, Expr::Call { callee, .. } if matches!(callee.as_ref(), Expr::Ident(_))));
+                    }
+                    _ => panic!("expected Let, got {:?}", f.body[0]),
+                }
+            }
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn parse_enum_switch_pattern() {
+        let program = parse(
+            r#"
+enum Result {
+    case success(Int)
+    case failure(String)
+}
+func test(r: Result) -> Void {
+    switch r {
+    case .success(let val):
+        print(val)
+    case .failure(let msg):
+        print(msg)
+    }
+}
+"#,
+        );
+        assert_eq!(program.len(), 2);
+        match &program[1] {
+            Decl::Function(f) => {
+                assert_eq!(f.body.len(), 1);
+                match &f.body[0] {
+                    Stmt::Match { scrutinee, arms } => {
+                        assert!(matches!(scrutinee, Expr::Ident(name) if name == "r"));
+                        assert_eq!(arms.len(), 2);
+                        // Just verify patterns contain the right case names
+                        assert!(arms[0].pattern.contains("success"));
+                        assert!(arms[1].pattern.contains("failure"));
+                        assert_eq!(arms[0].body.len(), 1);
+                        assert_eq!(arms[1].body.len(), 1);
+                    }
+                    _ => panic!("expected Match"),
+                }
+            }
+            _ => panic!("expected function"),
         }
     }
 }
