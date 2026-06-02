@@ -1,0 +1,10 @@
+// @expect parse: ok
+// @expect has-function: fail
+
+fn fail() -> String {
+    throw "fail";
+}
+
+fn main() -> String {
+    return "safe";
+}

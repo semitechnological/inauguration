@@ -1,0 +1,19 @@
+// @expect parse: ok
+// @expect has-function: main
+
+class Animal {
+    fn speak() -> String {
+        return "...";
+    }
+}
+
+class Dog extends Animal {
+    fn speak() -> String {
+        return "woof";
+    }
+}
+
+fn main() -> String {
+    let d = Dog {};
+    return d.speak();
+}

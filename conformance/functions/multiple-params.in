@@ -1,0 +1,13 @@
+// @expect parse: ok
+// @expect has-function: add
+// @expect has-call-edge: add
+// @expect bytecode: executes
+// @expect result: 30
+
+fn add(a: Int, b: Int) -> Int {
+    return a + b;
+}
+
+fn main() -> Int {
+    return add(10, 20);
+}

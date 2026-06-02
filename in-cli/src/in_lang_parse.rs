@@ -1418,10 +1418,16 @@ fn parse_match_arms(inner: &str) -> Result<Vec<crate::core_ir::MatchArm>, String
             .find('{')
             .ok_or_else(|| ".in: match arm needs `{` body".to_string())?;
         let open = pos + rel_open;
-        let pattern = trim(&inner[pos..open]).trim_end_matches(':').trim();
+        let mut pattern = trim(&inner[pos..open]).trim_end_matches(':').trim().to_string();
+        if pattern.ends_with("->") {
+            pattern = pattern[..pattern.len() - 2].trim().to_string();
+        }
         if pattern.is_empty() {
             return Err(".in: match arm pattern missing".into());
         }
+        crate::core_ir::MatchPattern::parse(&pattern).map_err(|_| {
+            format!(".in: unknown pattern `{pattern}` in match arm")
+        })?;
         let (body_inner, close) = brace_content_bounds_after_open(inner, open)
             .ok_or_else(|| ".in: unclosed match arm body".to_string())?;
         arms.push(crate::core_ir::MatchArm {
@@ -3876,5 +3882,111 @@ fn main() -> void
 "#;
         let m = parse_in_source(src).expect("empty interface");
         assert!(m.decls.iter().any(|d| matches!(d, Decl::Interface { name, .. } if name == "Marker")));
+    }
+
+    #[test]
+    fn parse_struct_pattern_shorthand_and_literal() {
+        use crate::core_ir::MatchPattern;
+        let pat = MatchPattern::parse("Point { x, y: 0 }").expect("parse struct pattern");
+        assert_eq!(
+            pat,
+            MatchPattern::StructPat {
+                name: "Point".into(),
+                fields: vec![
+                    ("x".into(), MatchPattern::IdentPat("x".into())),
+                    ("y".into(), MatchPattern::IntPat(0)),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn parse_struct_pattern_wild_field() {
+        use crate::core_ir::MatchPattern;
+        let pat = MatchPattern::parse("Point { x: _, y }").expect("parse struct with wild field");
+        assert_eq!(
+            pat,
+            MatchPattern::StructPat {
+                name: "Point".into(),
+                fields: vec![
+                    ("x".into(), MatchPattern::WildPat),
+                    ("y".into(), MatchPattern::IdentPat("y".into())),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn parse_tuple_pattern() {
+        use crate::core_ir::MatchPattern;
+        let pat = MatchPattern::parse("(1, 2, 3)").expect("parse tuple pattern");
+        assert_eq!(
+            pat,
+            MatchPattern::TuplePat(vec![
+                MatchPattern::IntPat(1),
+                MatchPattern::IntPat(2),
+                MatchPattern::IntPat(3),
+            ])
+        );
+    }
+
+    #[test]
+    fn parse_tuple_pattern_with_wild() {
+        use crate::core_ir::MatchPattern;
+        let pat = MatchPattern::parse("(x, _)").expect("parse tuple wild pattern");
+        assert_eq!(
+            pat,
+            MatchPattern::TuplePat(vec![
+                MatchPattern::IdentPat("x".into()),
+                MatchPattern::WildPat,
+            ])
+        );
+    }
+
+    #[test]
+    fn parse_array_pattern() {
+        use crate::core_ir::MatchPattern;
+        let pat = MatchPattern::parse("[a, b, ..]").expect("parse array pattern");
+        assert_eq!(
+            pat,
+            MatchPattern::ArrayPat(vec![
+                MatchPattern::IdentPat("a".into()),
+                MatchPattern::IdentPat("b".into()),
+                MatchPattern::RestPat,
+            ])
+        );
+    }
+
+    #[test]
+    fn parse_array_pattern_literals() {
+        use crate::core_ir::MatchPattern;
+        let pat = MatchPattern::parse("[1, 2, 3]").expect("parse array literal pattern");
+        assert_eq!(
+            pat,
+            MatchPattern::ArrayPat(vec![
+                MatchPattern::IntPat(1),
+                MatchPattern::IntPat(2),
+                MatchPattern::IntPat(3),
+            ])
+        );
+    }
+
+    #[test]
+    fn parse_match_pattern_literals() {
+        use crate::core_ir::MatchPattern;
+        assert_eq!(MatchPattern::parse("42").unwrap(), MatchPattern::IntPat(42));
+        assert_eq!(
+            MatchPattern::parse("\"hello\"").unwrap(),
+            MatchPattern::StringPat("hello".into())
+        );
+        assert_eq!(MatchPattern::parse("true").unwrap(), MatchPattern::BoolPat(true));
+        assert_eq!(MatchPattern::parse("false").unwrap(), MatchPattern::BoolPat(false));
+        assert_eq!(MatchPattern::parse("_").unwrap(), MatchPattern::WildPat);
+        assert_eq!(MatchPattern::parse("else").unwrap(), MatchPattern::WildPat);
+        assert_eq!(MatchPattern::parse("..").unwrap(), MatchPattern::RestPat);
+        assert_eq!(
+            MatchPattern::parse("my_var").unwrap(),
+            MatchPattern::IdentPat("my_var".into())
+        );
     }
 }

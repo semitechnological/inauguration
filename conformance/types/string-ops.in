@@ -1,0 +1,8 @@
+// @expect parse: ok
+// @expect has-function: main
+// bytecode not verified: str_len is a runtime intrinsic not available in bytecode
+
+fn main() -> Int {
+    let s = "hello";
+    return str_len(s);
+}

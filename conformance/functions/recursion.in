@@ -1,0 +1,15 @@
+// @expect parse: ok
+// @expect has-function: fact
+// @expect has-call-edge: fact
+// bytecode not verified: recursion lowering is WIP in bytecode backend
+
+fn fact(n: Int) -> Int {
+    if n <= 1 {
+        return 1;
+    }
+    return n * fact(n - 1);
+}
+
+fn main() -> Int {
+    return fact(5);
+}

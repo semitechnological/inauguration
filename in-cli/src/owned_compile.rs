@@ -222,7 +222,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
     };
 
     let resolved = parser_registry::resolve_parser_id(&request.path, request.parser);
-    let module = match parser_registry::parse_with_resolved(resolved, &request.path) {
+    let mut module = match parser_registry::parse_with_resolved(resolved, &request.path) {
         Ok(Some(module)) => module,
         Ok(None) => {
             if request.path.extension().map_or(false, |e| e == "swift") {
@@ -263,6 +263,24 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
             return finalize_report(&mut report, started, &cwd, &frontend_hash);
         }
     };
+
+    // Resolve multi-file imports for .in sources
+    if request.path.extension().map_or(false, |e| e == "in") {
+        let source_dir = request.path.parent().map(PathBuf::from).unwrap_or_default();
+        let mut import_resolver = crate::module_resolver::ModuleResolver::new();
+        import_resolver.add_search_path(source_dir);
+        import_resolver.add_search_path(PathBuf::from("."));
+        match import_resolver.resolve_imports(&source) {
+            Ok(imported) => {
+                for imp in imported {
+                    module.decls.extend(imp.decls);
+                }
+            }
+            Err(e) => {
+                eprintln!("[import] warning: {e}");
+            }
+        }
+    }
 
     report.frontend_level = "core-ir-direct";
     report.module_identity = Some(module.identity_report(&request.module_id));

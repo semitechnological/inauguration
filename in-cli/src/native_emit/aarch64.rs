@@ -138,6 +138,30 @@ pub fn cbnz_w(rt: u8, offset_bytes: i32) -> u32 {
     0x3500_0000 | (imm19 << 5) | (rt as u32)
 }
 
+pub fn fmov_from_gp(rd_v: u8, rn_x: u8) -> u32 {
+    0x1E27_0000 | ((rn_x as u32) << 5) | (rd_v as u32)
+}
+
+pub fn fmov_to_gp(rd_x: u8, rn_v: u8) -> u32 {
+    0x1E26_0000 | ((rn_v as u32) << 16) | (rd_x as u32)
+}
+
+pub fn fadd_s(rd: u8, rn: u8, rm: u8) -> u32 {
+    0x1E20_2A00 | ((rm as u32) << 16) | ((rn as u32) << 5) | (rd as u32)
+}
+
+pub fn fsub_s(rd: u8, rn: u8, rm: u8) -> u32 {
+    0x1E20_3A00 | ((rm as u32) << 16) | ((rn as u32) << 5) | (rd as u32)
+}
+
+pub fn fmul_s(rd: u8, rn: u8, rm: u8) -> u32 {
+    0x1E20_0800 | ((rm as u32) << 16) | ((rn as u32) << 5) | (rd as u32)
+}
+
+pub fn fdiv_s(rd: u8, rn: u8, rm: u8) -> u32 {
+    0x1E20_1800 | ((rm as u32) << 16) | ((rn as u32) << 5) | (rd as u32)
+}
+
 pub fn load_i64(rd: u8, value: i64) -> Vec<u32> {
     let uv = value as u64;
     let mut insns = vec![movz64(rd, (uv & 0xFFFF) as u16, 0)];

@@ -1,6 +1,6 @@
 //! Lower [`crate::core_ir::UnifiedModule`] to textual SIL matching `native_swift_sil` stubs.
 
-use crate::core_ir::{Decl, Typ, UnifiedModule};
+use crate::core_ir::{Decl, MatchPattern, Typ, UnifiedModule};
 use crate::core_ir::{Expr, Stmt};
 use std::collections::{HashMap, HashSet};
 
@@ -772,26 +772,152 @@ fn future_reads(body: &[Stmt], idx: usize) -> HashSet<String> {
     reads
 }
 
-fn is_default_match_pattern(pattern: &str) -> bool {
-    matches!(
-        pattern.trim().trim_end_matches(':'),
-        "_" | "else" | "default" | "case else" | "case default"
-    )
-}
-
-fn match_pattern_expr(pattern: &str) -> Option<Expr> {
-    let trimmed = pattern.trim().trim_end_matches(':').trim();
-    let trimmed = trimmed.strip_prefix("case ").unwrap_or(trimmed).trim();
-    if trimmed == "true" {
-        return Some(Expr::BoolLit(true));
+/// Recursively check a pattern against a value, emitting SIL code.
+/// Branches to `success_label` on match, `fail_label` on mismatch.
+/// Returns variable bindings from IdentPats.
+fn lower_pattern_into(
+    pattern: &MatchPattern,
+    value_id: usize,
+    success_label: &str,
+    fail_label: &str,
+    ssa: &mut usize,
+    out: &mut String,
+) -> Vec<(String, usize)> {
+    match pattern {
+        MatchPattern::IntPat(n) => {
+            let pat_id = *ssa;
+            *ssa += 1;
+            out.push_str(&format!("%{pat_id} = integer_literal $Builtin.Int64, {n}\n"));
+            let cmp_id = *ssa;
+            *ssa += 1;
+            out.push_str(&format!(
+                "%{cmp_id} = builtin_binop \"==\" %{value_id}, %{pat_id}\n"
+            ));
+            out.push_str(&format!("cond_br %{cmp_id}, {success_label}, {fail_label}\n"));
+            vec![]
+        }
+        MatchPattern::BoolPat(b) => {
+            let pat_id = *ssa;
+            *ssa += 1;
+            out.push_str(&format!("%{pat_id} = bool_literal {b}\n"));
+            let cmp_id = *ssa;
+            *ssa += 1;
+            out.push_str(&format!(
+                "%{cmp_id} = builtin_binop \"==\" %{value_id}, %{pat_id}\n"
+            ));
+            out.push_str(&format!("cond_br %{cmp_id}, {success_label}, {fail_label}\n"));
+            vec![]
+        }
+        MatchPattern::StringPat(s) => {
+            let pat_id = *ssa;
+            *ssa += 1;
+            out.push_str(&format!("%{pat_id} = string_literal {s:?}\n"));
+            let cmp_id = *ssa;
+            *ssa += 1;
+            out.push_str(&format!(
+                "%{cmp_id} = builtin_binop \"==\" %{value_id}, %{pat_id}\n"
+            ));
+            out.push_str(&format!("cond_br %{cmp_id}, {success_label}, {fail_label}\n"));
+            vec![]
+        }
+        MatchPattern::WildPat | MatchPattern::RestPat => {
+            out.push_str(&format!("br {success_label}\n"));
+            vec![]
+        }
+        MatchPattern::IdentPat(name) => {
+            out.push_str(&format!("br {success_label}\n"));
+            vec![(name.clone(), value_id)]
+        }
+        MatchPattern::TuplePat(pats) => {
+            let mut bindings = Vec::new();
+            for (i, subpat) in pats.iter().enumerate() {
+                let idx_id = *ssa;
+                *ssa += 1;
+                out.push_str(&format!(
+                    "%{idx_id} = integer_literal $Builtin.Int64, {i}\n"
+                ));
+                let elem_id = *ssa;
+                *ssa += 1;
+                out.push_str(&format!(
+                    "%{elem_id} = index_access %{value_id}, %{idx_id}\n"
+                ));
+                let sub_success = if i + 1 == pats.len() {
+                    success_label.to_string()
+                } else {
+                    format!("{success_label}_tup_{i}")
+                };
+                bindings.extend(lower_pattern_into(
+                    subpat, elem_id, &sub_success, fail_label, ssa, out,
+                ));
+                if i + 1 < pats.len() {
+                    out.push_str(&format!("label {sub_success}\n"));
+                }
+            }
+            bindings
+        }
+        MatchPattern::StructPat { name: _, fields } => {
+            let mut bindings = Vec::new();
+            for (i, (field_name, subpat)) in fields.iter().enumerate() {
+                let field_id = *ssa;
+                *ssa += 1;
+                out.push_str(&format!(
+                    "%{field_id} = field_access %{value_id} {field_name}\n"
+                ));
+                let sub_success = if i + 1 == fields.len() {
+                    success_label.to_string()
+                } else {
+                    format!("{success_label}_st_{i}")
+                };
+                bindings.extend(lower_pattern_into(
+                    subpat, field_id, &sub_success, fail_label, ssa, out,
+                ));
+                if i + 1 < fields.len() {
+                    out.push_str(&format!("label {sub_success}\n"));
+                }
+            }
+            bindings
+        }
+        MatchPattern::ArrayPat(pats) => {
+            let mut bindings = Vec::new();
+            for (i, subpat) in pats.iter().enumerate() {
+                match subpat {
+                    MatchPattern::RestPat => {
+                        if i + 1 == pats.len() {
+                            out.push_str(&format!("br {success_label}\n"));
+                        } else {
+                            let sub_success = format!("{success_label}_arr_rest_{i}");
+                            out.push_str(&format!("br {sub_success}\n"));
+                            out.push_str(&format!("label {sub_success}\n"));
+                        }
+                    }
+                    _ => {
+                        let idx_id = *ssa;
+                        *ssa += 1;
+                        out.push_str(&format!(
+                            "%{idx_id} = integer_literal $Builtin.Int64, {i}\n"
+                        ));
+                        let elem_id = *ssa;
+                        *ssa += 1;
+                        out.push_str(&format!(
+                            "%{elem_id} = index_access %{value_id}, %{idx_id}\n"
+                        ));
+                        let sub_success = if i + 1 == pats.len() {
+                            success_label.to_string()
+                        } else {
+                            format!("{success_label}_arr_{i}")
+                        };
+                        bindings.extend(lower_pattern_into(
+                            subpat, elem_id, &sub_success, fail_label, ssa, out,
+                        ));
+                        if i + 1 < pats.len() {
+                            out.push_str(&format!("label {sub_success}\n"));
+                        }
+                    }
+                }
+            }
+            bindings
+        }
     }
-    if trimmed == "false" {
-        return Some(Expr::BoolLit(false));
-    }
-    if trimmed.len() >= 2 && trimmed.starts_with('"') && trimmed.ends_with('"') {
-        return Some(Expr::StringLit(trimmed[1..trimmed.len() - 1].to_string()));
-    }
-    trimmed.parse::<i64>().ok().map(Expr::IntLit)
 }
 
 /// Emit `bb0` instructions (params + statements). If `finish_with_return`, append `bb1` + `return`.
@@ -940,25 +1066,28 @@ fn lower_stmts_with_env(
                 let end_label = format!("bb_match_end_{label_id}");
                 let mut default_arm = None;
                 for arm in arms {
-                    if is_default_match_pattern(&arm.pattern) {
+                    let pattern = MatchPattern::parse(&arm.pattern).unwrap_or(MatchPattern::WildPat);
+                    if pattern == MatchPattern::WildPat {
                         default_arm = Some(arm);
                         continue;
                     }
-                    let Some(pattern_expr) = match_pattern_expr(&arm.pattern) else {
-                        continue;
-                    };
                     let next_label = format!("bb_match_next_{label_id}_{}", *ssa);
                     let arm_label = format!("bb_match_arm_{label_id}_{}", *ssa);
-                    let pattern_id = lower_expr(&pattern_expr, env, direct_env, ssa, &mut out);
-                    let cmp_id = *ssa;
-                    *ssa += 1;
-                    out.push_str(&format!(
-                        "%{cmp_id} = builtin_binop \"==\" %{scrutinee_id}, %{pattern_id}\n"
-                    ));
-                    out.push_str(&format!("cond_br %{cmp_id}, {arm_label}, {next_label}\n"));
+                    let bindings = lower_pattern_into(
+                        &pattern,
+                        scrutinee_id,
+                        &arm_label,
+                        &next_label,
+                        ssa,
+                        &mut out,
+                    );
                     out.push_str(&format!("label {arm_label}\n"));
                     out.push_str("// match.arm\n");
                     let mut arm_env = env.clone();
+                    for (name, id) in &bindings {
+                        arm_env.insert(name.clone(), *id);
+                        out.push_str(&format!("store_var {name} %{id}\n"));
+                    }
                     out.push_str(&lower_stmts_with_env(
                         &arm.body,
                         ssa,
@@ -1746,5 +1875,102 @@ mod tests {
             })
             .expect("captures struct should exist even when empty");
         assert!(cap_struct.is_empty(), "no captures -> empty struct");
+    }
+
+    #[test]
+    fn lower_struct_match_pattern() {
+        let module = UnifiedModule {
+            identity: Default::default(),
+            decls: vec![Decl::Function {
+                name: "main".into(),
+                params: vec![("p".into(), Typ::Named("Point".into()))],
+                ret: Typ::Int,
+                body: vec![Stmt::Match {
+                    scrutinee: Expr::Ident("p".into()),
+                    arms: vec![
+                        crate::core_ir::MatchArm {
+                            pattern: "Point { x, y: 0 }".into(),
+                            body: vec![Stmt::Return(Some(Expr::Ident("x".into())))],
+                        },
+                        crate::core_ir::MatchArm {
+                            pattern: "_".into(),
+                            body: vec![Stmt::Return(Some(Expr::IntLit(-1)))],
+                        },
+                    ],
+                }],
+                type_params: vec![],
+            }],
+        };
+        let sil = lower_to_textual_sil(&module, "App");
+        assert!(sil.contains("field_access"), "should emit field_access for struct pattern");
+        assert!(sil.contains("builtin_binop"), "should emit comparison for field");
+        assert!(sil.contains("store_var x"), "should store x binding");
+        assert!(sil.contains("bb_match_arm_"), "should have arm labels");
+        assert!(sil.contains("bb_match_end_"), "should have end label");
+    }
+
+    #[test]
+    fn lower_array_match_pattern() {
+        let module = UnifiedModule {
+            identity: Default::default(),
+            decls: vec![Decl::Function {
+                name: "main".into(),
+                params: vec![("arr".into(), Typ::Array(Box::new(Typ::Int)))],
+                ret: Typ::Int,
+                body: vec![Stmt::Match {
+                    scrutinee: Expr::Ident("arr".into()),
+                    arms: vec![
+                        crate::core_ir::MatchArm {
+                            pattern: "[1, 2, 3]".into(),
+                            body: vec![Stmt::Return(Some(Expr::IntLit(100)))],
+                        },
+                        crate::core_ir::MatchArm {
+                            pattern: "[a, b, ..]".into(),
+                            body: vec![Stmt::Return(Some(Expr::Ident("a".into())))],
+                        },
+                        crate::core_ir::MatchArm {
+                            pattern: "_".into(),
+                            body: vec![Stmt::Return(Some(Expr::IntLit(0)))],
+                        },
+                    ],
+                }],
+                type_params: vec![],
+            }],
+        };
+        let sil = lower_to_textual_sil(&module, "App");
+        assert!(sil.contains("index_access"), "should emit index_access for array pattern");
+        assert!(sil.contains("builtin_binop"), "should emit comparisons");
+        assert!(sil.contains("store_var a"), "should store a binding");
+        assert!(sil.contains("store_var b"), "should store b binding");
+    }
+
+    #[test]
+    fn lower_tuple_match_pattern() {
+        let module = UnifiedModule {
+            identity: Default::default(),
+            decls: vec![Decl::Function {
+                name: "main".into(),
+                params: vec![("pair".into(), Typ::Named("Tuple".into()))],
+                ret: Typ::Int,
+                body: vec![Stmt::Match {
+                    scrutinee: Expr::Ident("pair".into()),
+                    arms: vec![
+                        crate::core_ir::MatchArm {
+                            pattern: "(0, 0)".into(),
+                            body: vec![Stmt::Return(Some(Expr::IntLit(10)))],
+                        },
+                        crate::core_ir::MatchArm {
+                            pattern: "(x, _)".into(),
+                            body: vec![Stmt::Return(Some(Expr::Ident("x".into())))],
+                        },
+                    ],
+                }],
+                type_params: vec![],
+            }],
+        };
+        let sil = lower_to_textual_sil(&module, "App");
+        assert!(sil.contains("index_access"), "should emit index_access for tuple pattern");
+        assert!(sil.contains("store_var x"), "should store x binding");
+        assert!(sil.contains("builtin_binop"), "should emit comparisons");
     }
 }

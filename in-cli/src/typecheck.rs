@@ -1,4 +1,4 @@
-use crate::core_ir::{Decl, Expr, MethodSig, Stmt, Typ, UnifiedModule};
+use crate::core_ir::{Decl, Expr, MatchPattern, MethodSig, Stmt, Typ, UnifiedModule};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -404,6 +404,9 @@ impl TypeChecker {
                 }
                 for arm in arms {
                     let mut env_arm = env.clone();
+                    if let Ok(pattern) = MatchPattern::parse(&arm.pattern) {
+                        self.check_match_pattern(fn_name, &pattern, facts, &mut env_arm, errors);
+                    }
                     self.check_stmts(fn_name, fn_ret, &arm.body, facts, &mut env_arm, errors);
                 }
             }
@@ -690,6 +693,58 @@ impl TypeChecker {
                 }
             }
             Expr::Closure { ret, .. } => Some(ret.clone()),
+        }
+    }
+}
+
+impl TypeChecker {
+    fn check_match_pattern(
+        &self,
+        _fn_name: &str,
+        pattern: &MatchPattern,
+        facts: &Facts,
+        env: &mut HashMap<String, Typ>,
+        errors: &mut Vec<TypeError>,
+    ) {
+        match pattern {
+            MatchPattern::StructPat { name, fields } => {
+                let schema = match facts.structs.get(name) {
+                    Some(s) => s,
+                    None => {
+                        errors.push(TypeError::StructNotFound {
+                            name: name.clone(),
+                        });
+                        return;
+                    }
+                };
+                for (field_name, subpat) in fields {
+                    if !schema.iter().any(|(f, _)| f == field_name) {
+                        errors.push(TypeError::UnknownField {
+                            struct_name: name.clone(),
+                            field: field_name.clone(),
+                        });
+                    }
+                    self.check_match_pattern(_fn_name, subpat, facts, env, errors);
+                }
+            }
+            MatchPattern::IdentPat(var_name) => {
+                env.insert(var_name.clone(), Typ::Generic("inferred".into()));
+            }
+            MatchPattern::TuplePat(pats) => {
+                for subpat in pats {
+                    self.check_match_pattern(_fn_name, subpat, facts, env, errors);
+                }
+            }
+            MatchPattern::ArrayPat(pats) => {
+                for subpat in pats {
+                    self.check_match_pattern(_fn_name, subpat, facts, env, errors);
+                }
+            }
+            MatchPattern::IntPat(_)
+            | MatchPattern::StringPat(_)
+            | MatchPattern::BoolPat(_)
+            | MatchPattern::WildPat
+            | MatchPattern::RestPat => {}
         }
     }
 }

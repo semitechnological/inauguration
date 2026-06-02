@@ -106,6 +106,127 @@ pub enum LoopKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MatchPattern {
+    IntPat(i64),
+    StringPat(String),
+    BoolPat(bool),
+    WildPat,
+    IdentPat(String),
+    RestPat,
+    TuplePat(Vec<MatchPattern>),
+    StructPat {
+        name: String,
+        fields: Vec<(String, MatchPattern)>,
+    },
+    ArrayPat(Vec<MatchPattern>),
+}
+
+fn trim_match_pat(s: &str) -> &str {
+    s.trim()
+}
+
+fn split_match_pat_args(inner: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut start = 0usize;
+    let mut depth = 0i32;
+    for (i, c) in inner.char_indices() {
+        match c {
+            '(' | '{' | '[' => depth += 1,
+            ')' | '}' | ']' => depth -= 1,
+            ',' if depth == 0 => {
+                let arg = trim_match_pat(&inner[start..i]);
+                if !arg.is_empty() {
+                    out.push(arg.to_string());
+                }
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    let tail = trim_match_pat(&inner[start..]);
+    if !tail.is_empty() {
+        out.push(tail.to_string());
+    }
+    out
+}
+
+impl MatchPattern {
+    pub fn parse(s: &str) -> Result<Self, String> {
+        let s = trim_match_pat(s).trim_end_matches(':').trim();
+        let s = s.strip_prefix("case ").unwrap_or(s).trim();
+        if s.is_empty() {
+            return Err(".in: empty pattern".into());
+        }
+        if s == "_" || s == "else" || s == "default" {
+            return Ok(MatchPattern::WildPat);
+        }
+        if s == ".." {
+            return Ok(MatchPattern::RestPat);
+        }
+        if s == "true" {
+            return Ok(MatchPattern::BoolPat(true));
+        }
+        if s == "false" {
+            return Ok(MatchPattern::BoolPat(false));
+        }
+        if let Ok(n) = s.parse::<i64>() {
+            return Ok(MatchPattern::IntPat(n));
+        }
+        if s.len() >= 2 && s.starts_with('"') && s.ends_with('"') {
+            return Ok(MatchPattern::StringPat(s[1..s.len() - 1].to_string()));
+        }
+        if s.starts_with('(') && s.ends_with(')') {
+            let inner = &s[1..s.len() - 1];
+            let parts = split_match_pat_args(inner);
+            let pats: Result<Vec<_>, _> = parts.iter().map(|p| MatchPattern::parse(p)).collect();
+            return Ok(MatchPattern::TuplePat(pats?));
+        }
+        if s.starts_with('[') && s.ends_with(']') {
+            let inner = &s[1..s.len() - 1];
+            let parts = split_match_pat_args(inner);
+            let pats: Result<Vec<_>, _> = parts.iter().map(|p| MatchPattern::parse(p)).collect();
+            return Ok(MatchPattern::ArrayPat(pats?));
+        }
+        if let Some(open) = s.find('{') {
+            if s.ends_with('}') {
+                let name = trim_match_pat(&s[..open]);
+                if !name.is_empty()
+                    && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                {
+                    let inner = &s[open + 1..s.len() - 1];
+                    let field_strs = split_match_pat_args(inner);
+                    let mut fields = Vec::new();
+                    for f in field_strs {
+                        if let Some((field_name, field_pat)) = f.split_once(':') {
+                            let fn_trim = trim_match_pat(field_name);
+                            let fp_trim = trim_match_pat(field_pat);
+                            if fn_trim.is_empty() {
+                                return Err(format!(".in: empty field name in struct pattern `{s}`"));
+                            }
+                            fields.push((fn_trim.to_string(), MatchPattern::parse(fp_trim)?));
+                        } else {
+                            let fn_trim = trim_match_pat(&f);
+                            if fn_trim.is_empty() {
+                                return Err(format!(".in: empty field name in struct pattern `{s}`"));
+                            }
+                            fields.push((fn_trim.to_string(), MatchPattern::IdentPat(fn_trim.to_string())));
+                        }
+                    }
+                    return Ok(MatchPattern::StructPat {
+                        name: name.to_string(),
+                        fields,
+                    });
+                }
+            }
+        }
+        if s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            return Ok(MatchPattern::IdentPat(s.to_string()));
+        }
+        Err(format!(".in: unknown pattern `{s}`"))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MatchArm {
     pub pattern: String,
     pub body: Vec<Stmt>,

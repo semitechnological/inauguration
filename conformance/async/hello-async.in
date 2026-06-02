@@ -1,0 +1,6 @@
+// @expect parse: ok
+// Status: STUB — async features are Wave 3 design.
+
+fn main() -> String {
+    return "hello";
+}

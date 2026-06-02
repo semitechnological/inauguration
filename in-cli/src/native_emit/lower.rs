@@ -1705,6 +1705,37 @@ fn lower_unary(
     }
 }
 
+fn lower_float_binary(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    op: &str,
+    lhs: &Expr,
+    rhs: &Expr,
+    rd: u8,
+    functions: &HashMap<String, FunctionInfo>,
+    pending_calls: &mut Vec<PendingCall>,
+    fn_name: &str,
+) -> Result<(), String> {
+    lower_expr_into(emitter, ctx, lhs, rd, functions, pending_calls, fn_name)?;
+    let rhs_reg = if rd == 1 { 2 } else { 1 };
+    lower_expr_into(emitter, ctx, rhs, rhs_reg, functions, pending_calls, fn_name)?;
+    emitter.emit_u32(aarch64::fmov_from_gp(rd, rd));
+    emitter.emit_u32(aarch64::fmov_from_gp(rhs_reg, rhs_reg));
+    match op {
+        "+" => emitter.emit_u32(aarch64::fadd_s(rd, rd, rhs_reg)),
+        "-" => emitter.emit_u32(aarch64::fsub_s(rd, rd, rhs_reg)),
+        "*" => emitter.emit_u32(aarch64::fmul_s(rd, rd, rhs_reg)),
+        "/" => emitter.emit_u32(aarch64::fdiv_s(rd, rd, rhs_reg)),
+        _ => {
+            return Err(format!(
+                "native-lower: unsupported float op `{op}` in `{fn_name}`"
+            ));
+        }
+    }
+    emitter.emit_u32(aarch64::fmov_to_gp(rd, rd));
+    Ok(())
+}
+
 fn lower_binary(
     emitter: &mut CodeEmitter,
     ctx: &mut LowerCtx<'_>,
@@ -1716,6 +1747,11 @@ fn lower_binary(
     pending_calls: &mut Vec<PendingCall>,
     fn_name: &str,
 ) -> Result<(), String> {
+    let is_float = matches!(expr_type(lhs), Some(Typ::Float) | Some(Typ::Float))
+        || matches!(expr_type(rhs), Some(Typ::Float));
+    if is_float {
+        return lower_float_binary(emitter, ctx, op, lhs, rhs, rd, functions, pending_calls, fn_name);
+    }
     lower_expr_into(emitter, ctx, lhs, rd, functions, pending_calls, fn_name)?;
     let lhs_reg = rd;
     let rhs_reg = if rd == 1 { 2 } else { 1 };
@@ -2265,6 +2301,7 @@ fn array_item_matches(expected: &Typ, actual: &Typ) -> bool {
 fn expr_type(expr: &Expr) -> Option<Typ> {
     match expr {
         Expr::IntLit(_) => Some(Typ::Int),
+        Expr::FloatLit(_) => Some(Typ::Float),
         Expr::BoolLit(_) => Some(Typ::Bool),
         Expr::StringLit(_) => Some(Typ::String),
         Expr::ArrayLit(items) => Some(Typ::Array(Box::new(
@@ -4001,6 +4038,23 @@ fn main() -> Int {
         ));
     }
 
+    fn return_float_binary_module(op: &str, lhs: f64, rhs: f64) -> UnifiedModule {
+        UnifiedModule {
+            identity: Default::default(),
+            decls: vec![Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Float,
+                body: vec![Stmt::Return(Some(Expr::Binary {
+                    op: op.into(),
+                    lhs: Box::new(Expr::FloatLit(FloatVal(lhs))),
+                    rhs: Box::new(Expr::FloatLit(FloatVal(rhs))),
+                }))],
+                type_params: vec![],
+            }],
+        }
+    }
+
     #[test]
     fn lowers_float_literal_as_bit_pattern() {
         let module = UnifiedModule {
@@ -4015,5 +4069,35 @@ fn main() -> Int {
         };
         let lowered = lower_module(&module, "main").expect("float should lower");
         assert!(lowered.code.len() > ENTRY_STUB_SIZE as usize);
+    }
+
+    #[test]
+    fn lowers_float_add_instruction() {
+        let module = return_float_binary_module("+", 3.0, 4.0);
+        let lowered = lower_module(&module, "main").expect("float add should lower");
+        assert!(code_contains_insn(&lowered.code, aarch64::fadd_s(0, 0, 1)));
+        assert!(code_contains_insn(&lowered.code, aarch64::fmov_from_gp(0, 0)));
+        assert!(code_contains_insn(&lowered.code, aarch64::fmov_to_gp(0, 0)));
+    }
+
+    #[test]
+    fn lowers_float_mul_instruction() {
+        let module = return_float_binary_module("*", 2.0, 3.0);
+        let lowered = lower_module(&module, "main").expect("float mul should lower");
+        assert!(code_contains_insn(&lowered.code, aarch64::fmul_s(0, 0, 1)));
+    }
+
+    #[test]
+    fn lowers_float_sub_instruction() {
+        let module = return_float_binary_module("-", 5.0, 2.0);
+        let lowered = lower_module(&module, "main").expect("float sub should lower");
+        assert!(code_contains_insn(&lowered.code, aarch64::fsub_s(0, 0, 1)));
+    }
+
+    #[test]
+    fn lowers_float_div_instruction() {
+        let module = return_float_binary_module("/", 10.0, 2.0);
+        let lowered = lower_module(&module, "main").expect("float div should lower");
+        assert!(code_contains_insn(&lowered.code, aarch64::fdiv_s(0, 0, 1)));
     }
 }

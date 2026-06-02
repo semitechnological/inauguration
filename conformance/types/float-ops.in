@@ -1,0 +1,6 @@
+// @expect parse: ok
+
+fn main() -> Float {
+    let x: Float = 2.0;
+    return x * 3.0;
+}

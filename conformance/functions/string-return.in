@@ -1,0 +1,11 @@
+// @expect parse: ok
+// @expect has-function: greet
+// @expect has-call-edge: greet
+
+fn greet(name: String) -> String {
+    return "hello " + name;
+}
+
+fn main() -> String {
+    return greet("world");
+}

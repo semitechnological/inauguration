@@ -1,0 +1,11 @@
+// @expect parse: ok
+// @expect bytecode: executes
+// @expect result: String("error!")
+
+fn main() -> String {
+    try {
+        throw "error!";
+    } catch (e) {
+        return "error!";
+    }
+}
