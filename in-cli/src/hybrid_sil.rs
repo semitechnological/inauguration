@@ -29,6 +29,16 @@ pub struct SilAnalysisReport {
     pub call_edges: Vec<(String, String)>,
 }
 
+impl SilAnalysisReport {
+    pub fn callers_of(&self, callee: &str) -> Vec<String> {
+        self.call_edges
+            .iter()
+            .filter(|(_, c)| c == callee)
+            .map(|(caller, _)| caller.clone())
+            .collect()
+    }
+}
+
 fn parse_sil_function_header(line: &str) -> Option<String> {
     if !line.starts_with("sil ") {
         return None;

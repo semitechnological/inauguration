@@ -132,7 +132,7 @@ pub fn patch_id_for(path: &str) -> String {
 }
 
 pub fn plan_patch(path: &str, changed_symbols: &[String]) -> ReloadPatch {
-    plan_patch_with_sil_graph(path, changed_symbols, None)
+    plan_patch_with_sil_graph(path, changed_symbols, None, false)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -228,6 +228,22 @@ impl SilGraphDetail {
             .iter()
             .any(|symbol| self.callees.contains(symbol))
     }
+
+    fn callers_of(&self, callee: &str) -> Vec<String> {
+        self.call_edges
+            .iter()
+            .filter(|(_, c)| c == callee)
+            .map(|(caller, _)| caller.clone())
+            .collect()
+    }
+
+    fn changed_symbol_is_called_by_view_body(&self, changed_symbols: &[String]) -> bool {
+        changed_symbols.iter().any(|symbol| {
+            self.callers_of(symbol)
+                .iter()
+                .any(|caller| caller.contains("body"))
+        })
+    }
 }
 
 fn is_app_entry_path(path: &str) -> bool {
@@ -240,10 +256,15 @@ fn is_app_entry_path(path: &str) -> bool {
 }
 
 /// Plan reload patch shape. When **`sil_call_edges`** is **`Some(n)`** with **`n > 0`** (subset SIL had `function_ref` edges) and the path is not the canonical **`App.swift`** entrypoint (basename only, not `*App.swift`), **`FullModule`** downgrades to **`ViewBody`** so preview can try hot patch instead of forced restart.
+///
+/// When `callee_driven` is true (`IN_SIL_CALLEE_DRIVEN_HOTRELOAD=1`), the downgrade only
+/// applies when a changed symbol is called by a view body function (caller name contains
+/// "body"). Without this flag, any callee presence triggers the downgrade.
 pub fn plan_patch_with_sil_graph(
     path: &str,
     changed_symbols: &[String],
     sil_graph: Option<&SilGraphDetail>,
+    callee_driven: bool,
 ) -> ReloadPatch {
     let mut patch_type = if changed_symbols.iter().any(|s| s.contains("body")) {
         PatchType::ViewBody
@@ -252,11 +273,15 @@ pub fn plan_patch_with_sil_graph(
     } else {
         PatchType::FullModule
     };
-    if matches!(patch_type, PatchType::FullModule)
-        && sil_graph.is_some_and(|graph| graph.has_changed_callee(changed_symbols))
-        && !is_app_entry_path(path)
-    {
-        patch_type = PatchType::ViewBody;
+    if matches!(patch_type, PatchType::FullModule) && !is_app_entry_path(path) {
+        let should_upgrade = if callee_driven {
+            sil_graph.is_some_and(|graph| graph.changed_symbol_is_called_by_view_body(changed_symbols))
+        } else {
+            sil_graph.is_some_and(|graph| graph.has_changed_callee(changed_symbols))
+        };
+        if should_upgrade {
+            patch_type = PatchType::ViewBody;
+        }
     }
     let compatible = !is_app_entry_path(path) && !matches!(patch_type, PatchType::FullModule);
     ReloadPatch {
@@ -264,6 +289,12 @@ pub fn plan_patch_with_sil_graph(
         patch_type,
         compatible,
     }
+}
+
+fn sil_callee_driven_hotreload_enabled() -> bool {
+    std::env::var("IN_SIL_CALLEE_DRIVEN_HOTRELOAD")
+        .ok()
+        .is_some_and(|value| parse_env_bool_like_in(&value))
 }
 
 pub fn symbols_for_path(path: &str) -> Vec<String> {
@@ -727,7 +758,8 @@ async fn emit_patch(
         )
     };
     let sil_call_edges = sil_graph.edge_count();
-    let patch = plan_patch_with_sil_graph(target, symbols, Some(&sil_graph));
+    let callee_driven = sil_callee_driven_hotreload_enabled();
+    let patch = plan_patch_with_sil_graph(target, symbols, Some(&sil_graph), callee_driven);
     let (patch, mut reason) = apply_restart_supervisor(patch, compile_check.ok);
     reason = format!("{reason}|{}", sil_graph.reason_tag());
     if let Some(n) = sil_call_edges {
@@ -831,6 +863,7 @@ mod tests {
             "Sources/Helper.swift",
             &["helper".to_string()],
             Some(&graph),
+            false,
         );
         assert_eq!(p.patch_type, PatchType::ViewBody);
         assert!(p.compatible);
@@ -844,7 +877,7 @@ mod tests {
         let graph =
             SilGraphDetail::from_call_edges(vec![("main".to_string(), "helper".to_string())]);
         let p =
-            plan_patch_with_sil_graph("Sources/Helper.swift", &["other".to_string()], Some(&graph));
+            plan_patch_with_sil_graph("Sources/Helper.swift", &["other".to_string()], Some(&graph), false);
         assert_eq!(p.patch_type, PatchType::FullModule);
         assert!(!p.compatible);
     }
@@ -854,7 +887,7 @@ mod tests {
         let graph =
             SilGraphDetail::from_call_edges(vec![("main".to_string(), "helper".to_string())]);
         let p =
-            plan_patch_with_sil_graph("Sources/App.swift", &["helper".to_string()], Some(&graph));
+            plan_patch_with_sil_graph("Sources/App.swift", &["helper".to_string()], Some(&graph), false);
         assert_eq!(p.patch_type, PatchType::FullModule);
         assert!(!p.compatible);
     }
@@ -867,6 +900,7 @@ mod tests {
             "Sources/SampleApp.swift",
             &["helper".to_string()],
             Some(&graph),
+            false,
         );
         assert_eq!(p.patch_type, PatchType::ViewBody);
         assert!(p.compatible);
@@ -879,6 +913,7 @@ mod tests {
             "Sources/Helper.swift",
             &["helper".to_string()],
             Some(&graph),
+            false,
         );
         assert_eq!(p.patch_type, PatchType::FullModule);
         assert!(!p.compatible);
@@ -1157,5 +1192,50 @@ mod tests {
         assert!(line.contains("ContentView.swift"));
         let _ = tokio::fs::remove_file(&socket_path).await;
         let _ = tokio::fs::remove_file(&metrics_path).await;
+    }
+
+    #[test]
+    fn callee_driven_upgrades_view_body_when_called_by_body_function() {
+        let graph = SilGraphDetail::from_call_edges(vec![(
+            "body".to_string(),
+            "state".to_string(),
+        )]);
+        let p = plan_patch_with_sil_graph(
+            "Sources/StateManager.swift",
+            &["state".to_string()],
+            Some(&graph),
+            true,
+        );
+        assert_eq!(p.patch_type, PatchType::ViewBody);
+        assert!(p.compatible);
+    }
+
+    #[test]
+    fn callee_driven_does_not_upgrade_for_non_body_caller() {
+        let graph = SilGraphDetail::from_call_edges(vec![(
+            "main".to_string(),
+            "util".to_string(),
+        )]);
+        let p = plan_patch_with_sil_graph(
+            "Sources/Util.swift",
+            &["util".to_string()],
+            Some(&graph),
+            true,
+        );
+        assert_eq!(p.patch_type, PatchType::FullModule);
+        assert!(!p.compatible);
+    }
+
+    #[test]
+    fn callee_driven_no_false_upgrade_with_empty_graph() {
+        let graph = SilGraphDetail::from_call_edges(vec![]);
+        let p = plan_patch_with_sil_graph(
+            "Sources/Empty.swift",
+            &["nothing".to_string()],
+            Some(&graph),
+            true,
+        );
+        assert_eq!(p.patch_type, PatchType::FullModule);
+        assert!(!p.compatible);
     }
 }
