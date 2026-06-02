@@ -1,6 +1,6 @@
 //! Core IR → AArch64 lowering for the owned native subset.
 
-use crate::core_ir::{Decl, Expr, Stmt, Typ, UnifiedModule};
+use crate::core_ir::{Decl, Expr, FloatVal, Stmt, Typ, UnifiedModule};
 use crate::inrt;
 use crate::inrt::{is_inrt_builtin, inrt_builtin_param_slots};
 #[cfg(test)]
@@ -1439,8 +1439,8 @@ fn lower_expr_into(
             emitter.emit_insns(&aarch64::load_i64(rd, *value));
             Ok(())
         }
-        Expr::FloatLit(_) => {
-            emitter.emit_insns(&aarch64::load_i64(rd, 0));
+        Expr::FloatLit(FloatVal(val)) => {
+            emitter.emit_insns(&aarch64::load_i64(rd, val.to_bits() as i64));
             Ok(())
         }
         Expr::BoolLit(value) => {
@@ -3999,5 +3999,21 @@ fn main() -> Int {
             &lowered.code,
             &[aarch64::load_i64(0, 42)[0], aarch64::load_i64(0, 1)[0]],
         ));
+    }
+
+    #[test]
+    fn lowers_float_literal_as_bit_pattern() {
+        let module = UnifiedModule {
+            identity: Default::default(),
+            decls: vec![Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Float,
+                body: vec![Stmt::Return(Some(Expr::FloatLit(FloatVal(3.14))))],
+                type_params: vec![],
+            }],
+        };
+        let lowered = lower_module(&module, "main").expect("float should lower");
+        assert!(lowered.code.len() > ENTRY_STUB_SIZE as usize);
     }
 }

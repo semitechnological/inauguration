@@ -1,4 +1,4 @@
-use crate::core_ir::{Decl, Expr, Stmt, Typ, UnifiedModule};
+use crate::core_ir::{Decl, Expr, MethodSig, Stmt, Typ, UnifiedModule};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -34,6 +34,21 @@ pub enum TypeError {
     IndexNotInt {
         expr: String,
     },
+    MissingInterfaceMethod {
+        class_name: String,
+        interface_name: String,
+        method_name: String,
+    },
+    InterfaceMethodSigMismatch {
+        class_name: String,
+        interface_name: String,
+        method_name: String,
+        detail: String,
+    },
+    InterfaceNotFound {
+        class_name: String,
+        interface_name: String,
+    },
 }
 
 pub struct TypeChecker;
@@ -51,6 +66,8 @@ impl TypeChecker {
     pub fn check_module(&self, module: &UnifiedModule) -> Result<(), Vec<TypeError>> {
         let mut errors = Vec::new();
         let facts = self.collect_facts(module);
+
+        self.check_interface_conformance(module, &mut errors);
 
         for decl in &module.decls {
             match decl {
@@ -135,6 +152,109 @@ impl TypeChecker {
         Facts {
             functions,
             structs,
+        }
+    }
+
+    fn check_interface_conformance(
+        &self,
+        module: &UnifiedModule,
+        errors: &mut Vec<TypeError>,
+    ) {
+        let interfaces: HashMap<String, Vec<MethodSig>> = module
+            .decls
+            .iter()
+            .filter_map(|decl| match decl {
+                Decl::Interface { name, methods, .. } => Some((name.clone(), methods.clone())),
+                _ => None,
+            })
+            .collect();
+
+        for decl in &module.decls {
+            if let Decl::Class {
+                name: class_name,
+                methods,
+                extends,
+                implements,
+                ..
+            } = decl
+            {
+                for iface_name in implements {
+                    self.check_class_against_interface(
+                        class_name, iface_name, methods, &interfaces, errors,
+                    );
+                }
+
+                if let Some(parent) = extends {
+                    if interfaces.contains_key(parent) {
+                        self.check_class_against_interface(
+                            class_name, parent, methods, &interfaces, errors,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    fn check_class_against_interface(
+        &self,
+        class_name: &str,
+        iface_name: &str,
+        class_methods: &[Decl],
+        interfaces: &HashMap<String, Vec<MethodSig>>,
+        errors: &mut Vec<TypeError>,
+    ) {
+        let iface_methods = match interfaces.get(iface_name) {
+            Some(m) => m,
+            None => {
+                errors.push(TypeError::InterfaceNotFound {
+                    class_name: class_name.to_string(),
+                    interface_name: iface_name.to_string(),
+                });
+                return;
+            }
+        };
+
+        for iface_method in iface_methods {
+            let class_method = class_methods.iter().find(|decl| match decl {
+                Decl::Function { name, .. } if name == &iface_method.name => true,
+                _ => false,
+            });
+
+            match class_method {
+                None => {
+                    errors.push(TypeError::MissingInterfaceMethod {
+                        class_name: class_name.to_string(),
+                        interface_name: iface_name.to_string(),
+                        method_name: iface_method.name.clone(),
+                    });
+                }
+                Some(Decl::Function { params, ret, .. }) => {
+                    if params.len() != iface_method.params.len() {
+                        errors.push(TypeError::InterfaceMethodSigMismatch {
+                            class_name: class_name.to_string(),
+                            interface_name: iface_name.to_string(),
+                            method_name: iface_method.name.clone(),
+                            detail: format!(
+                                "parameter count mismatch: expected {}, got {}",
+                                iface_method.params.len(),
+                                params.len()
+                            ),
+                        });
+                    }
+                    if !is_conservative_match(&iface_method.ret, ret) {
+                        errors.push(TypeError::InterfaceMethodSigMismatch {
+                            class_name: class_name.to_string(),
+                            interface_name: iface_name.to_string(),
+                            method_name: iface_method.name.clone(),
+                            detail: format!(
+                                "return type mismatch: expected {:?}, got {:?}",
+                                iface_method.ret, ret
+                            ),
+                        });
+                    }
+                }
+                _ => {}
+            }
         }
     }
 
@@ -588,7 +708,7 @@ fn is_conservative_match(expected: &Typ, actual: &Typ) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core_ir::{Decl, Expr, LoopKind, Stmt, Typ, UnifiedModule};
+    use crate::core_ir::{Decl, Expr, LoopKind, MethodSig, Stmt, Typ, UnifiedModule, Visibility};
 
     fn function(name: &str, ret: Typ, params: Vec<(String, Typ)>, body: Vec<Stmt>) -> Decl {
         Decl::Function {
@@ -1009,5 +1129,171 @@ mod tests {
         TypeChecker::new()
             .check_module(&m)
             .expect("bool && bool should pass");
+    }
+
+    #[test]
+    fn test_class_implements_interface() {
+        let m = module(vec![
+            Decl::Interface {
+                name: "Drawable".into(),
+                methods: vec![MethodSig {
+                    name: "draw".into(),
+                    params: vec![],
+                    ret: Typ::Void,
+                }],
+                visibility: Visibility::Pub,
+                type_params: vec![],
+            },
+            Decl::Class {
+                name: "Circle".into(),
+                fields: vec![],
+                methods: vec![function("draw", Typ::Void, vec![], vec![])],
+                visibility: Visibility::Pub,
+                extends: None,
+                implements: vec!["Drawable".into()],
+                type_params: vec![],
+            },
+        ]);
+        TypeChecker::new()
+            .check_module(&m)
+            .expect("class implementing interface should pass");
+    }
+
+    #[test]
+    fn test_class_missing_interface_method() {
+        let m = module(vec![
+            Decl::Interface {
+                name: "Drawable".into(),
+                methods: vec![MethodSig {
+                    name: "draw".into(),
+                    params: vec![],
+                    ret: Typ::Void,
+                }],
+                visibility: Visibility::Pub,
+                type_params: vec![],
+            },
+            Decl::Class {
+                name: "Circle".into(),
+                fields: vec![],
+                methods: vec![],
+                visibility: Visibility::Pub,
+                extends: None,
+                implements: vec!["Drawable".into()],
+                type_params: vec![],
+            },
+        ]);
+        let err = TypeChecker::new()
+            .check_module(&m)
+            .expect_err("class missing interface method should fail");
+        assert!(
+            err.iter().any(|e| matches!(
+                e,
+                TypeError::MissingInterfaceMethod {
+                    class_name,
+                    interface_name,
+                    method_name,
+                } if class_name == "Circle"
+                    && interface_name == "Drawable"
+                    && method_name == "draw"
+            )),
+            "expected MissingInterfaceMethod, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_class_wrong_param_count() {
+        let m = module(vec![
+            Decl::Interface {
+                name: "Drawable".into(),
+                methods: vec![MethodSig {
+                    name: "draw".into(),
+                    params: vec![("x".into(), Typ::Int)],
+                    ret: Typ::Void,
+                }],
+                visibility: Visibility::Pub,
+                type_params: vec![],
+            },
+            Decl::Class {
+                name: "Circle".into(),
+                fields: vec![],
+                methods: vec![function("draw", Typ::Void, vec![], vec![])],
+                visibility: Visibility::Pub,
+                extends: None,
+                implements: vec!["Drawable".into()],
+                type_params: vec![],
+            },
+        ]);
+        let err = TypeChecker::new()
+            .check_module(&m)
+            .expect_err("class wrong param count should fail");
+        assert!(
+            err.iter().any(|e| matches!(
+                e,
+                TypeError::InterfaceMethodSigMismatch {
+                    class_name,
+                    interface_name,
+                    method_name,
+                    detail,
+                } if class_name == "Circle"
+                    && interface_name == "Drawable"
+                    && method_name == "draw"
+                    && detail.contains("parameter count")
+            )),
+            "expected InterfaceMethodSigMismatch for params, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_class_extends_implicit_implements() {
+        let m = module(vec![
+            Decl::Interface {
+                name: "Shape".into(),
+                methods: vec![MethodSig {
+                    name: "area".into(),
+                    params: vec![],
+                    ret: Typ::Float,
+                }],
+                visibility: Visibility::Pub,
+                type_params: vec![],
+            },
+            Decl::Class {
+                name: "Circle".into(),
+                fields: vec![],
+                methods: vec![function("area", Typ::Float, vec![], vec![])],
+                visibility: Visibility::Pub,
+                extends: Some("Shape".into()),
+                implements: vec![],
+                type_params: vec![],
+            },
+        ]);
+        TypeChecker::new()
+            .check_module(&m)
+            .expect("class extending interface should pass");
+    }
+
+    #[test]
+    fn test_interface_not_found() {
+        let m = module(vec![Decl::Class {
+            name: "Circle".into(),
+            fields: vec![],
+            methods: vec![],
+            visibility: Visibility::Pub,
+            extends: None,
+            implements: vec!["UnknownIface".into()],
+            type_params: vec![],
+        }]);
+        let err = TypeChecker::new()
+            .check_module(&m)
+            .expect_err("class implementing unknown interface should fail");
+        assert!(
+            err.iter().any(|e| matches!(
+                e,
+                TypeError::InterfaceNotFound {
+                    class_name,
+                    interface_name,
+                } if class_name == "Circle" && interface_name == "UnknownIface"
+            )),
+            "expected InterfaceNotFound, got: {err:?}"
+        );
     }
 }

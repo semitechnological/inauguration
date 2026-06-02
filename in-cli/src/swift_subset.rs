@@ -16,6 +16,8 @@ pub struct FnDecl {
 pub struct StructDecl {
     pub name: String,
     pub fields: Vec<(String, Typ)>,
+    pub methods: Vec<FnDecl>,
+    pub parent: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -387,6 +389,8 @@ fn parse_struct_line(line: &str) -> StructDecl {
         return StructDecl {
             name: raw.to_string(),
             fields: Vec::new(),
+            methods: vec![],
+            parent: None,
         };
     };
     let name = trim(&raw[..open]).to_string();
@@ -395,11 +399,13 @@ fn parse_struct_line(line: &str) -> StructDecl {
         return StructDecl {
             name,
             fields: Vec::new(),
+            methods: vec![],
+            parent: None,
         };
     };
     let inner = trim(&after[..close]);
     let fields = parse_struct_field_list(inner);
-    StructDecl { name, fields }
+    StructDecl { name, fields, methods: vec![], parent: None }
 }
 
 fn parse_struct_field_list(inner: &str) -> Vec<(String, Typ)> {
@@ -415,10 +421,70 @@ fn parse_struct_field_list(inner: &str) -> Vec<(String, Typ)> {
         .collect()
 }
 
+fn parse_struct_decl(block: &str) -> StructDecl {
+    let line = strip_leading_access_modifiers(trim(block));
+    let rest = line.strip_prefix("struct ").unwrap_or(line);
+    let (header, body) = if let Some(open) = rest.find('{') {
+        (trim(&rest[..open]), extract_braced_body(rest, open).unwrap_or(""))
+    } else {
+        (rest.trim(), "")
+    };
+    let (name, parent) = if let Some((n, p)) = header.split_once(':') {
+        (trim(n).to_string(), Some(trim(p).to_string()))
+    } else {
+        (trim(header).to_string(), None)
+    };
+    let mut fields = Vec::new();
+    let mut methods = Vec::new();
+    if !body.is_empty() {
+        let body_trimmed = trim(body);
+        if body_trimmed.contains("var ") || body_trimmed.contains("func ") {
+            for stmt in split_body_statements(body) {
+                let stmt = trim(&stmt);
+                if stmt.is_empty() {
+                    continue;
+                }
+                if stmt.starts_with("var ") {
+                    let after_var = trim(&stmt[4..]);
+                    if let Some((n, t)) = after_var.split_once(':') {
+                        fields.push((trim(n).to_string(), parse_type(t)));
+                    }
+                } else if stmt.starts_with("func ") {
+                    methods.push(parse_func_block(stmt));
+                }
+            }
+        } else {
+            fields = parse_struct_field_list(trim(body));
+        }
+    }
+    StructDecl {
+        name,
+        fields,
+        methods,
+        parent,
+    }
+}
+
+fn parse_enum_decl(block: &str) -> StructDecl {
+    let line = strip_leading_access_modifiers(trim(block));
+    let rest = line.strip_prefix("enum ").unwrap_or(line);
+    let name = if let Some(open) = rest.find('{') {
+        trim(rest[..open].split(':').next().unwrap_or(&rest[..open])).to_string()
+    } else {
+        trim(rest.split(':').next().unwrap_or(rest)).to_string()
+    };
+    StructDecl {
+        name,
+        fields: vec![("_tag".into(), Typ::Int)],
+        methods: vec![],
+        parent: None,
+    }
+}
+
 fn starts_top_level_decl(line: &str) -> bool {
     let line = strip_leading_access_modifiers(line);
     let line = strip_leading_func_effect_keywords(line);
-    line.starts_with("func ") || line.starts_with("struct ")
+    line.starts_with("func ") || line.starts_with("struct ") || line.starts_with("enum ")
 }
 
 fn split_top_level_decl_blocks(source: &str) -> Vec<String> {
@@ -726,7 +792,9 @@ pub fn parse(source: &str) -> Program {
         if line.starts_with("func ") {
             acc.push(Decl::Function(parse_func_block(line)));
         } else if line.starts_with("struct ") {
-            acc.push(Decl::Struct(parse_struct_line(line)));
+            acc.push(Decl::Struct(parse_struct_decl(line)));
+        } else if line.starts_with("enum ") {
+            acc.push(Decl::Struct(parse_enum_decl(line)));
         }
     }
     acc
@@ -1878,6 +1946,136 @@ func add() -> Int {
                 assert!(matches!(&f.body[2], Stmt::Return(Some(Expr::Ident(name))) if name == "x"));
             }
             _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn parse_struct_with_fields() {
+        let program = parse(
+            r#"
+struct Foo {
+    var x: Int
+    var y: String
+}
+func main() -> Void
+"#,
+        );
+        assert_eq!(program.len(), 2);
+        match &program[0] {
+            Decl::Struct(s) => {
+                assert_eq!(s.name, "Foo");
+                assert_eq!(s.fields, vec![("x".into(), Typ::Int), ("y".into(), Typ::String)]);
+                assert!(s.methods.is_empty());
+                assert_eq!(s.parent, None);
+            }
+            _ => panic!("expected struct"),
+        }
+    }
+
+    #[test]
+    fn parse_struct_with_method() {
+        let program = parse(
+            r#"
+struct Foo {
+    var x: Int
+    func bar() -> Int {
+        return 42
+    }
+}
+func main() -> Void
+"#,
+        );
+        assert_eq!(program.len(), 2);
+        match &program[0] {
+            Decl::Struct(s) => {
+                assert_eq!(s.name, "Foo");
+                assert_eq!(s.fields, vec![("x".into(), Typ::Int)]);
+                assert_eq!(s.methods.len(), 1);
+                assert_eq!(s.methods[0].name, "bar");
+                assert_eq!(s.methods[0].ret, Typ::Int);
+                assert_eq!(s.methods[0].body.len(), 1);
+                assert!(matches!(
+                    &s.methods[0].body[0],
+                    Stmt::Return(Some(Expr::IntLit(42)))
+                ));
+            }
+            _ => panic!("expected struct"),
+        }
+    }
+
+    #[test]
+    fn parse_struct_self_field_access() {
+        let program = parse(
+            r#"
+struct Foo {
+    var x: Int
+    func bar() -> Int {
+        return self.x
+    }
+}
+func main() -> Void
+"#,
+        );
+        assert_eq!(program.len(), 2);
+        match &program[0] {
+            Decl::Struct(s) => {
+                assert_eq!(s.fields, vec![("x".into(), Typ::Int)]);
+                assert_eq!(s.methods.len(), 1);
+                assert_eq!(s.methods[0].name, "bar");
+                assert!(matches!(
+                    &s.methods[0].body[0],
+                    Stmt::Return(Some(Expr::Field {
+                        base,
+                        name,
+                    })) if matches!(base.as_ref(), Expr::Ident(id) if id == "self") && name == "x"
+                ));
+            }
+            _ => panic!("expected struct"),
+        }
+    }
+
+    #[test]
+    fn parse_enum_declaration() {
+        let program = parse(
+            r#"
+enum Color {
+    case red
+    case green
+    case blue
+}
+func main() -> Void
+"#,
+        );
+        assert_eq!(program.len(), 2);
+        match &program[0] {
+            Decl::Struct(s) => {
+                assert_eq!(s.name, "Color");
+                assert_eq!(s.fields, vec![("_tag".into(), Typ::Int)]);
+                assert!(s.methods.is_empty());
+            }
+            _ => panic!("expected struct from enum"),
+        }
+    }
+
+    #[test]
+    fn parse_struct_inheritance() {
+        let program = parse(
+            r#"
+struct Foo: Bar {
+    var x: Int
+}
+func main() -> Void
+"#,
+        );
+        assert_eq!(program.len(), 2);
+        match &program[0] {
+            Decl::Struct(s) => {
+                assert_eq!(s.name, "Foo");
+                assert_eq!(s.parent, Some("Bar".to_string()));
+                assert_eq!(s.fields, vec![("x".into(), Typ::Int)]);
+                assert!(s.methods.is_empty());
+            }
+            _ => panic!("expected struct"),
         }
     }
 }

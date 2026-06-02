@@ -164,7 +164,7 @@ fn starts_top_level_decl(line: &str) -> bool {
         4,
     );
     let line = strip_leading_keyword(line, &["async", "throws", "reasync", "nonisolated"], 4);
-    line.starts_with("func ") || line.starts_with("struct ")
+    line.starts_with("func ") || line.starts_with("struct ") || line.starts_with("enum ")
 }
 
 fn starts_top_level_struct(line: &str) -> bool {

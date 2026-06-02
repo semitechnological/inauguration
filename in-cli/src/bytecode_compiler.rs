@@ -25,6 +25,19 @@ pub fn compile_source_path(
         return Err("bytecode compiler requires a Core IR frontend; Swift SIL emit is not supported by this path".to_string());
     };
     core_typecheck::typecheck_executable(&module)?;
+
+    if std::env::var("IN_TYPECHECK").is_ok() {
+        let strict = std::env::var("IN_TYPECHECK").as_deref() == Ok("strict");
+        if let Err(errors) = crate::typecheck::TypeChecker::new().check_module(&module) {
+            for err in &errors {
+                eprintln!("[typecheck] {:?}", err);
+            }
+            if strict {
+                return Err("typecheck-failed".to_string());
+            }
+        }
+    }
+
     let identity = module.identity_report(module_id);
     let sil = crate::compiler::driver::lower_unified_module(&module, &identity.effective_module_id);
     let artifact = crate::hybrid_sil::parse_textual_sil(&sil);
