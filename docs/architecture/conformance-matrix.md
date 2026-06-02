@@ -40,8 +40,8 @@ Feature support at the Core IR level (data structures exist), but frontends vary
 | `Decl::Class` | ❌ parser TODO | ✅ | ✅ | ✅ | ❌ | ❌ |
 | `Decl::Interface` | ❌ parser TODO | ❌ | ❌ | ❌ | ❌ | ❌ |
 | `Expr::Closure` | ✅ (expression) | ❌ | ❌ | ❌ | ❌ | ❌ |
-| `Stmt::Throw` | ❌ parser TODO | ❌ | ❌ | ❌ | ❌ | ❌ |
-| `Stmt::Try` | ❌ parser TODO | ❌ | ❌ | ❌ | ❌ | ❌ |
+| `Stmt::Throw` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| `Stmt::Try` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | `Import` | ✅ (surface) | ❌ | ❌ | ❌ | ❌ | ❌ |
 
 ## Conformance fixture coverage
@@ -52,7 +52,7 @@ Feature support at the Core IR level (data structures exist), but frontends vary
 | `conformance/control-flow/` | 4 | ✅ Runs — if/else, loop, match, nested branches |
 | `conformance/functions/` | 4 | ✅ Runs — basic fn, params, expressions, void |
 | `conformance/classes/` | 2 | ⚠️ DESIGN — struct+fn pattern, class syntax not yet in parser |
-| `conformance/errors/` | 3 | ⚠️ DESIGN — try/catch/throw stubs, safe fallback patterns |
+| `conformance/errors/` | 3 | ✅ Runs — throw-basic, try-catch, uncaught |
 | `conformance/modules/` | 3 | ✅ Runs — package, capabilities, local import |
 | `conformance/async/` | 1 | 📋 STUB — Wave 3 design |
 | `conformance/runtime/` | 1 | 📋 STUB — Waves 4-5 design |

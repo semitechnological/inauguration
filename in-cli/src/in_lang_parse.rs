@@ -1489,7 +1489,12 @@ fn parse_try_stmt_inner(rest: &str) -> Result<Stmt, String> {
         let open_rel = catch_rest
             .find('{')
             .ok_or_else(|| ".in: `catch` needs `{` body".to_string())?;
-        let pattern = trim(&catch_rest[..open_rel]);
+        let raw_pattern = trim(&catch_rest[..open_rel]);
+        let pattern = raw_pattern
+            .strip_prefix('(')
+            .and_then(|rest| rest.strip_suffix(')'))
+            .map(str::trim)
+            .unwrap_or(raw_pattern);
         if pattern.is_empty() {
             return Err(".in: `catch` pattern missing".into());
         }
@@ -3594,6 +3599,84 @@ fn main() -> void {
         let src = "fn f() -> void { try { return; } catch { } return; }\nfn main() -> void\n";
         let err = parse_in_source(src).expect_err("catch without pattern");
         assert!(err.contains("catch"), "{err}");
+    }
+
+    #[test]
+    fn parse_throw_expr() {
+        let src = r#"
+fn fail() -> void {
+    throw "something went wrong";
+    return;
+}
+fn main() -> void
+"#;
+        let m = parse_in_source(src).expect("ok");
+        let body = match m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "fail"))
+        {
+            Some(Decl::Function { body, .. }) => body,
+            _ => panic!("fail"),
+        };
+        assert!(matches!(
+            &body[0],
+            Stmt::Throw(Expr::StringLit(s)) if s == "something went wrong"
+        ));
+    }
+
+    #[test]
+    fn parse_try_catch() {
+        let src = r#"
+fn handle() -> void {
+    try {
+        throw "bad";
+    } catch (e) {
+        return;
+    }
+    return;
+}
+fn main() -> void
+"#;
+        let m = parse_in_source(src).expect("ok");
+        let body = match m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "handle"))
+        {
+            Some(Decl::Function { body, .. }) => body,
+            _ => panic!("handle"),
+        };
+        assert!(matches!(&body[0], Stmt::Try { body: try_body, catches }
+            if try_body.len() == 1 && catches.len() == 1 && catches[0].pattern == "e"));
+    }
+
+    #[test]
+    fn parse_try_with_multiple_stmts() {
+        let src = r#"
+fn protect() -> void {
+    try {
+        let a = 1;
+        let b = 2;
+        let c = a + b;
+    } catch (e) {
+        let a = 0;
+    }
+    return;
+}
+fn main() -> void
+"#;
+        let m = parse_in_source(src).expect("ok");
+        let body = match m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "protect"))
+        {
+            Some(Decl::Function { body, .. }) => body,
+            _ => panic!("protect"),
+        };
+        assert!(matches!(&body[0], Stmt::Try { body: try_body, catches }
+            if try_body.len() == 3 && catches.len() == 1));
     }
 
     #[test]

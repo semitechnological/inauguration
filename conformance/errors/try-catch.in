@@ -1,16 +1,19 @@
 // @expect parse: ok
-// Status: DESIGN — try/catch not yet supported by .in parser.
-// Falls back to simple conditional pattern.
+// @expect bytecode: executes
+// @expect result: String("negative")
 
-fn safe_div(a: Int, b: Int) -> Int {
-  if (b != 0) {
-    return a / b;
-  } else {
-    return -1;
-  }
+fn might_fail(x: Int) -> void {
+    if (x < 0) {
+        throw "negative";
+    }
+    return;
 }
 
-fn main() -> void {
-  let result: Int = safe_div(10, 0);
-  return;
+fn main() -> String {
+    try {
+        might_fail(-1);
+    } catch (e) {
+        return "negative";
+    }
+    return "ok";
 }

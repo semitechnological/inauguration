@@ -1,7 +1,6 @@
 // @expect parse: ok
-// Status: DESIGN — uncaught throw should fail, but throw not yet supported.
-// Currently a parse-only stub.
+// @expect has-function: main
 
-fn main() -> Int {
-  return 0;
+fn main() -> void {
+    throw "unhandled error";
 }

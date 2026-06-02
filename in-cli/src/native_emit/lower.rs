@@ -2,6 +2,9 @@
 
 use crate::core_ir::{Decl, Expr, Stmt, Typ, UnifiedModule};
 use crate::inrt;
+use crate::inrt::{is_inrt_builtin, inrt_builtin_param_slots};
+#[cfg(test)]
+use crate::inrt::INRT_BUILTINS;
 use crate::native_emit::aarch64::{self, CodeEmitter, REG_FP};
 use crate::native_emit::macho::{self, MachOExecutable};
 use std::collections::HashMap;
@@ -11,6 +14,7 @@ pub const TARGET_TRIPLE: &str = "aarch64-apple-darwin";
 
 const ENTRY_STUB_SIZE: u32 = 16;
 
+#[derive(Debug)]
 struct LoweredModule {
     code: Vec<u8>,
 }
@@ -22,6 +26,11 @@ enum EntryReturn {
 }
 
 struct PendingCall {
+    site: u32,
+    target: String,
+}
+
+struct PendingInrtCall {
     site: u32,
     target: String,
 }
@@ -78,6 +87,7 @@ fn lower_module(module: &UnifiedModule, entry: &str) -> Result<LoweredModule, St
     emitter.bytes.resize(ENTRY_STUB_SIZE as usize, 0);
     let mut function_offsets = HashMap::new();
     let mut pending_calls = Vec::new();
+    let mut pending_inrt_calls = Vec::new();
     let mut pending_static_arrays = Vec::new();
     let mut names: Vec<String> = functions.keys().cloned().collect();
     names.sort();
@@ -93,6 +103,7 @@ fn lower_module(module: &UnifiedModule, entry: &str) -> Result<LoweredModule, St
             &structs,
             &strings,
             &mut pending_calls,
+            &mut pending_inrt_calls,
             &mut pending_static_arrays,
         )?;
     }
@@ -106,6 +117,20 @@ fn lower_module(module: &UnifiedModule, entry: &str) -> Result<LoweredModule, St
     }
 
     append_static_arrays(&mut emitter, pending_static_arrays);
+
+    if !pending_inrt_calls.is_empty() {
+        let (runtime_blob, runtime_offsets) = inrt::build_runtime_blob();
+        let runtime_base = emitter.len();
+        emitter.bytes.extend_from_slice(&runtime_blob);
+        for call in &pending_inrt_calls {
+            let fn_offset = *runtime_offsets
+                .get(call.target.as_str())
+                .ok_or_else(|| format!("native-lower: unresolved inrt call target `{}`", call.target))?;
+            let target_abs = runtime_base + fn_offset;
+            let offset = target_abs as i32 - call.site as i32;
+            emitter.patch_u32(call.site, aarch64::bl(offset));
+        }
+    }
 
     let entry_fn_offset = *function_offsets
         .get(entry)
@@ -277,6 +302,7 @@ fn lower_function(
     structs: &HashMap<String, Vec<(String, Typ)>>,
     strings: &HashMap<String, i64>,
     pending_calls: &mut Vec<PendingCall>,
+    pending_inrt_calls: &mut Vec<PendingInrtCall>,
     pending_static_arrays: &mut Vec<PendingStaticArray>,
 ) -> Result<(), String> {
     ensure_return_type(&func.ret, &func.name, structs)?;
@@ -290,6 +316,7 @@ fn lower_function(
         structs,
         strings,
         pending_static_arrays,
+        pending_inrt_calls,
         &func.name,
     )?;
     alloc_declared_locals(&mut ctx, &func.body, &func.name)?;
@@ -393,6 +420,7 @@ struct LowerCtx<'a> {
     structs: &'a HashMap<String, Vec<(String, Typ)>>,
     strings: &'a HashMap<String, i64>,
     pending_static_arrays: &'a mut Vec<PendingStaticArray>,
+    pending_inrt_calls: &'a mut Vec<PendingInrtCall>,
     stack_size: u32,
     emitted_return: bool,
     _params_src: &'a [(String, Typ)],
@@ -404,6 +432,7 @@ impl<'a> LowerCtx<'a> {
         structs: &'a HashMap<String, Vec<(String, Typ)>>,
         strings: &'a HashMap<String, i64>,
         pending_static_arrays: &'a mut Vec<PendingStaticArray>,
+        pending_inrt_calls: &'a mut Vec<PendingInrtCall>,
         fn_name: &str,
     ) -> Result<Self, String> {
         let mut ctx = Self {
@@ -413,6 +442,7 @@ impl<'a> LowerCtx<'a> {
             structs,
             strings,
             pending_static_arrays,
+            pending_inrt_calls,
             stack_size: 0,
             emitted_return: false,
             _params_src: params,
@@ -1716,6 +1746,9 @@ fn lower_call(
             "native-lower: unsupported call callee in `{fn_name}`"
         ));
     };
+    if is_inrt_builtin(target) {
+        return lower_inrt_call(emitter, ctx, target, args, rd, fn_name);
+    }
     if !functions.contains_key(target) {
         return Err(format!(
             "native-lower: call to unknown function `{target}` from `{fn_name}`"
@@ -1755,6 +1788,71 @@ fn lower_call(
     pending_calls.push(PendingCall {
         site: call_site,
         target: target.clone(),
+    });
+
+    if rd != 0 {
+        emitter.emit_u32(aarch64::mov_reg64(rd, 0));
+    }
+    Ok(())
+}
+
+fn lower_inrt_call(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    target: &str,
+    args: &[Expr],
+    rd: u8,
+    fn_name: &str,
+) -> Result<(), String> {
+    let expected = inrt_builtin_param_slots(target).ok_or_else(|| {
+        format!("native-lower: unknown inrt builtin `{target}` in `{fn_name}`")
+    })?;
+    if args.len() != expected {
+        return Err(format!(
+            "native-lower: inrt call arity mismatch for `{target}` in `{fn_name}` (expected {expected} arg(s), got {})",
+            args.len()
+        ));
+    }
+
+    for (i, arg) in args.iter().enumerate() {
+        let reg = i as u8;
+        match arg {
+            Expr::IntLit(v) => {
+                emitter.emit_insns(&aarch64::load_i64(reg, *v));
+            }
+            Expr::BoolLit(v) => {
+                emitter.emit_insns(&aarch64::load_i64(reg, i64::from(*v)));
+            }
+            Expr::StringLit(v) => {
+                let id = ctx.string_id(v);
+                emitter.emit_insns(&aarch64::load_i64(reg, id));
+            }
+            Expr::Ident(name) => {
+                if let Some(&param_reg) = ctx.params.get(name) {
+                    if reg != param_reg {
+                        emitter.emit_u32(aarch64::mov_reg64(reg, param_reg));
+                    }
+                } else if let Some(LocalSlot::Scalar(offset)) = ctx.locals.get(name) {
+                    emitter.emit_u32(aarch64::ldr64(reg, aarch64::REG_SP, *offset));
+                } else {
+                    return Err(format!(
+                        "native-lower: unsupported inrt call arg `{name}` in `{fn_name}`"
+                    ));
+                }
+            }
+            _ => {
+                return Err(format!(
+                    "native-lower: unsupported inrt call arg expression in `{fn_name}`"
+                ));
+            }
+        }
+    }
+
+    let call_site = emitter.len();
+    emitter.emit_u32(aarch64::bl(0));
+    ctx.pending_inrt_calls.push(PendingInrtCall {
+        site: call_site,
+        target: target.to_string(),
     });
 
     if rd != 0 {
@@ -3644,6 +3742,97 @@ fn main() -> Int {
         match lower_module(&module, "main") {
             Ok(_) => panic!("expected lowering failure"),
             Err(err) => assert!(err.contains("native-array-aggregate-unsupported")),
+        }
+    }
+
+    fn code_contains_insns(code: &[u8], insns: &[u32]) -> bool {
+        let words: Vec<u32> = code.chunks_exact(4).map(|b| u32::from_le_bytes(b.try_into().unwrap())).collect();
+        for insn in insns { if !words.contains(insn) { return false; } }
+        true
+    }
+
+    fn build_inrt_call_module(target: &str, args: Vec<Expr>, ret: Typ) -> UnifiedModule {
+        UnifiedModule { identity: Default::default(), decls: vec![Decl::Function {
+            name: "main".into(), params: vec![], ret,
+            body: vec![Stmt::Return(Some(Expr::Call { callee: Box::new(Expr::Ident(target.to_string())), args }))],
+            type_params: vec![],
+        }]}
+    }
+
+    #[test] fn inrt_call_emits_bl_placeholder() {
+        let m = build_inrt_call_module("__inrt_str_len", vec![Expr::StringLit("x".into())], Typ::Int);
+        let lowered = lower_module(&m, "main").expect("lower");
+        assert!(lowered.code.len() > ENTRY_STUB_SIZE as usize + 4);
+        let words: Vec<u32> = lowered.code.chunks_exact(4).filter_map(|b| b.try_into().ok()).map(u32::from_le_bytes).collect();
+        let has_bl = words.iter().any(|w| (*w >> 26) == 0b100101);
+        assert!(has_bl, "expected at least one bl instruction in lowered code");
+    }
+
+    #[test] fn lowers_array_load_on_aarch64() {
+        let m = build_inrt_call_module("__inrt_array_load", vec![Expr::IntLit(0x1000), Expr::IntLit(2)], Typ::Int);
+        let lowered = lower_module(&m, "main").expect("lower");
+        assert!(!lowered.code.is_empty());
+    }
+
+    #[test] fn lowers_array_store_on_aarch64() {
+        let m = build_inrt_call_module("__inrt_array_store", vec![Expr::IntLit(0x2000), Expr::IntLit(1), Expr::IntLit(42)], Typ::Int);
+        lower_module(&m, "main").expect("lower");
+    }
+
+    #[test] fn lowers_string_concat_on_aarch64() {
+        let m = build_inrt_call_module("__inrt_str_concat", vec![Expr::StringLit("hello".into()), Expr::StringLit("world".into())], Typ::String);
+        let lowered = lower_module(&m, "main").expect("lower");
+        assert!(lowered.code.len() > ENTRY_STUB_SIZE as usize);
+    }
+
+    #[test] fn lowers_str_len_on_aarch64() {
+        let m = build_inrt_call_module("__inrt_str_len", vec![Expr::StringLit("test".into())], Typ::Int);
+        let lowered = lower_module(&m, "main").expect("lower");
+        assert!(lowered.code.len() > ENTRY_STUB_SIZE as usize);
+    }
+
+    #[test] fn lowers_array_len_on_aarch64() {
+        let m = build_inrt_call_module("__inrt_array_len", vec![Expr::IntLit(0x3000)], Typ::Int);
+        lower_module(&m, "main").expect("lower");
+    }
+
+    #[test] fn lowers_array_push_on_aarch64() {
+        let m = build_inrt_call_module("__inrt_array_push", vec![Expr::IntLit(0x4000), Expr::IntLit(7)], Typ::Int);
+        lower_module(&m, "main").expect("lower");
+    }
+
+    #[test] fn lowers_str_substr_on_aarch64() {
+        let m = build_inrt_call_module("__inrt_str_substr", vec![Expr::StringLit("abcdef".into()), Expr::IntLit(2), Expr::IntLit(3)], Typ::String);
+        lower_module(&m, "main").expect("lower");
+    }
+
+    #[test] fn inrt_call_emits_runtime_blob_at_end() {
+        let m = build_inrt_call_module("__inrt_str_len", vec![Expr::StringLit("hello".into())], Typ::Int);
+        let lowered = lower_module(&m, "main").expect("lower");
+        let (blob, _) = inrt::build_runtime_blob();
+        assert!(lowered.code.len() > blob.len() + ENTRY_STUB_SIZE as usize);
+    }
+
+    #[test] fn rejects_inrt_call_with_wrong_arity() {
+        let m = build_inrt_call_module("__inrt_str_len", vec![Expr::IntLit(1), Expr::IntLit(2)], Typ::Int);
+        assert!(lower_module(&m, "main").unwrap_err().contains("arity mismatch"));
+    }
+
+    #[test] fn lowers_inrt_call_with_ident_arg() {
+        let m = UnifiedModule { identity: Default::default(), decls: vec![Decl::Function {
+            name: "main".into(), params: vec![("s".into(), Typ::String)], ret: Typ::Int,
+            body: vec![Stmt::Return(Some(Expr::Call { callee: Box::new(Expr::Ident("__inrt_str_len".to_string())), args: vec![Expr::Ident("s".into())] }))],
+            type_params: vec![],
+        }]};
+        lower_module(&m, "main").expect("lower");
+    }
+
+    #[test] fn all_inrt_builtins_can_be_called() {
+        for b in INRT_BUILTINS {
+            let s = inrt::inrt_builtin_param_slots(b).unwrap_or(0);
+            let a: Vec<Expr> = (0..s).map(|i| Expr::IntLit(i as i64)).collect();
+            let m = build_inrt_call_module(b, a, Typ::Int);
+            assert!(lower_module(&m, "main").is_ok(), "failed for {b}");
         }
     }
 }

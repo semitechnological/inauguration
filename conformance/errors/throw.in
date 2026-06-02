@@ -1,17 +1,19 @@
 // @expect parse: ok
-// Status: DESIGN — throw not yet supported by .in parser.
-// Falls back to struct + function pattern.
+// @expect bytecode: executes
+// @expect result: String("ok")
 
-struct Error {
-  String message
-  Int code
+fn might_fail(x: Int) -> void {
+    if (x < 0) {
+        throw "negative";
+    }
+    return;
 }
 
-fn fail(msg: String, code: Int) -> Error {
-  return Error { message: msg, code: code };
-}
-
-fn main() -> void {
-  let e: Error = fail("not found", 404);
-  return;
+fn main() -> String {
+    try {
+        might_fail(1);
+    } catch (e) {
+        return "negative";
+    }
+    return "ok";
 }

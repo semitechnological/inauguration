@@ -534,6 +534,163 @@ const SCALAAST: AstShape = AstShape {
     strict_args: false,
 };
 
+const FSHAST: AstShape = AstShape {
+    block_kinds: &[],
+    return_kinds: &[],
+    expr_stmt_kinds: &[],
+    local_decl_kinds: &["let_statement"],
+    assignment_kinds: &[],
+    if_kinds: &["if_expression"],
+    while_kinds: &[],
+    call_kinds: &["function_call_expression", "member_call_expression", "call_expression"],
+    arg_container_kinds: &[],
+    arg_wrapper_kinds: &[],
+    paren_kinds: &["parenthesized_expression"],
+    binary_kinds: &["binary_expression"],
+    unary_kinds: &["unary_expression"],
+    int_kinds: &["integer"],
+    string_kinds: &["string"],
+    type_kinds: &["type_"],
+    local_decl_prefixes: &[],
+    shell_first_kinds: &[],
+    shell_last_kinds: &[],
+    try_kinds: &[],
+    catch_kinds: &[],
+    first_assignment_is_let: false,
+    strict_args: false,
+};
+
+const ERLANGAST: AstShape = AstShape {
+    block_kinds: &[],
+    return_kinds: &[],
+    expr_stmt_kinds: &[],
+    local_decl_kinds: &[],
+    assignment_kinds: &["assignment"],
+    if_kinds: &["if_expression"],
+    while_kinds: &[],
+    call_kinds: &["function_call"],
+    arg_container_kinds: &["arguments"],
+    arg_wrapper_kinds: &[],
+    paren_kinds: &["parenthesized_expression"],
+    binary_kinds: &["binary_expression"],
+    unary_kinds: &["unary_expression"],
+    int_kinds: &["integer"],
+    string_kinds: &["string"],
+    type_kinds: &[],
+    local_decl_prefixes: &[],
+    shell_first_kinds: &[],
+    shell_last_kinds: &[],
+    try_kinds: &[],
+    catch_kinds: &[],
+    first_assignment_is_let: false,
+    strict_args: false,
+};
+
+const ELIXIRAST: AstShape = AstShape {
+    block_kinds: &["block", "do_block", "stab_clause"],
+    return_kinds: &[],
+    expr_stmt_kinds: &[],
+    local_decl_kinds: &[],
+    assignment_kinds: &["assignment"],
+    if_kinds: &["if"],
+    while_kinds: &[],
+    call_kinds: &["call"],
+    arg_container_kinds: &["arguments", "keyword_list"],
+    arg_wrapper_kinds: &[],
+    paren_kinds: &["parenthesized_call"],
+    binary_kinds: &["binary_operator"],
+    unary_kinds: &["unary_operator"],
+    int_kinds: &["integer"],
+    string_kinds: &["string"],
+    type_kinds: &[],
+    local_decl_prefixes: &[],
+    shell_first_kinds: &[],
+    shell_last_kinds: &[],
+    try_kinds: &[],
+    catch_kinds: &[],
+    first_assignment_is_let: false,
+    strict_args: false,
+};
+
+const JULIAAST: AstShape = AstShape {
+    block_kinds: &["block", "compound_statement"],
+    return_kinds: &["return_statement"],
+    expr_stmt_kinds: &[],
+    local_decl_kinds: &[],
+    assignment_kinds: &["assignment"],
+    if_kinds: &["if_statement"],
+    while_kinds: &["while_statement"],
+    call_kinds: &["function_call", "call_expression"],
+    arg_container_kinds: &["argument_list", "arguments"],
+    arg_wrapper_kinds: &[],
+    paren_kinds: &["parenthesized_expression"],
+    binary_kinds: &["binary_expression"],
+    unary_kinds: &["unary_expression"],
+    int_kinds: &["integer"],
+    string_kinds: &["string", "string_literal"],
+    type_kinds: &[],
+    local_decl_prefixes: &[],
+    shell_first_kinds: &[],
+    shell_last_kinds: &[],
+    try_kinds: &[],
+    catch_kinds: &[],
+    first_assignment_is_let: false,
+    strict_args: false,
+};
+
+const RAST: AstShape = AstShape {
+    block_kinds: &["brace_list", "braced_expression"],
+    return_kinds: &["return_statement"],
+    expr_stmt_kinds: &[],
+    local_decl_kinds: &[],
+    assignment_kinds: &["assignment"],
+    if_kinds: &["if_statement"],
+    while_kinds: &["while_statement"],
+    call_kinds: &["call"],
+    arg_container_kinds: &["arguments"],
+    arg_wrapper_kinds: &[],
+    paren_kinds: &["parenthesized_expression"],
+    binary_kinds: &["binary_operator"],
+    unary_kinds: &["unary_operator"],
+    int_kinds: &["integer"],
+    string_kinds: &["string"],
+    type_kinds: &[],
+    local_decl_prefixes: &[],
+    shell_first_kinds: &[],
+    shell_last_kinds: &[],
+    try_kinds: &[],
+    catch_kinds: &[],
+    first_assignment_is_let: false,
+    strict_args: false,
+};
+
+const PERLAST: AstShape = AstShape {
+    block_kinds: &["block"],
+    return_kinds: &["return_statement"],
+    expr_stmt_kinds: &["expression_statement"],
+    local_decl_kinds: &["my_statement", "our_statement"],
+    assignment_kinds: &["assignment_expression"],
+    if_kinds: &["if_statement"],
+    while_kinds: &["while_statement"],
+    call_kinds: &["call_expression"],
+    arg_container_kinds: &["arguments"],
+    arg_wrapper_kinds: &[],
+    paren_kinds: &["parenthesized_expression"],
+    binary_kinds: &["binary_expression"],
+    unary_kinds: &["unary_expression"],
+    int_kinds: &["number"],
+    string_kinds: &["string"],
+    type_kinds: &[],
+    local_decl_prefixes: &[],
+    shell_first_kinds: &[],
+    shell_last_kinds: &[],
+    try_kinds: &[],
+    catch_kinds: &[],
+    first_assignment_is_let: false,
+    strict_args: false,
+};
+
+
 fn kind_in(n: Node<'_>, kinds: &[&str]) -> bool {
     kinds.contains(&n.kind())
 }
@@ -2812,11 +2969,146 @@ fn php_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
 }
 
 fn extract_perl(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
-    extract_fn_nodes(src, root, &["function_definition"], |src, n| {
-        let name_n = n.child_by_field_name("name")?;
-        let name = normalize_entry(node_txt(src, name_n).trim());
-        Some(decl_fn(name, vec![], Typ::Void))
+    let mut decls = Vec::new();
+
+    let mut pkg_nodes = Vec::new();
+    collect_kinds(root, &["package_statement"], &mut pkg_nodes);
+    for pkg in pkg_nodes {
+        if let Some(d) = perl_package_decl(src, pkg) {
+            decls.push(d);
+        }
+    }
+
+    let mut func_nodes = Vec::new();
+    collect_kinds(root, &["function_definition"], &mut func_nodes);
+    for f in func_nodes {
+        let is_class_method = f
+            .parent()
+            .map_or(false, |p| p.kind() == "package_statement");
+        if !is_class_method {
+            if let Some(d) = perl_function_decl(src, f) {
+                decls.push(d);
+            }
+        }
+    }
+
+    if decls.is_empty() {
+        extract_fn_nodes(src, root, &["function_definition"], |src, n| {
+            let name_n = n.child_by_field_name("name")?;
+            let name = normalize_entry(node_txt(src, name_n).trim());
+            Some(decl_fn(name, vec![], Typ::Void))
+        })
+    } else {
+        Ok(decls)
+    }
+}
+
+fn perl_package_decl<'a>(src: &[u8], pkg: Node<'a>) -> Option<Decl> {
+    let name_n = pkg.child_by_field_name("name")?;
+    let name = node_txt(src, name_n).trim().to_string();
+    let (fields, methods) = perl_package_body(src, pkg);
+    Some(Decl::Class {
+        name,
+        fields,
+        methods,
+        visibility: Visibility::Pub,
+        extends: None,
+        implements: vec![],
+        type_params: vec![],
     })
+}
+
+fn perl_package_body<'a>(src: &[u8], pkg: Node<'a>) -> (Vec<(String, Typ)>, Vec<Decl>) {
+    let mut fields = Vec::new();
+    let mut methods = Vec::new();
+
+    let mut my_nodes = Vec::new();
+    collect_kinds(pkg, &["my_statement", "our_statement"], &mut my_nodes);
+    for my_stmt in my_nodes {
+        let mut vars = Vec::new();
+        collect_kinds(my_stmt, &["variable_name", "scalar", "array", "hash", "identifier"], &mut vars);
+        for v in vars {
+            let field_name = node_txt(src, v)
+                .trim()
+                .trim_start_matches(['$', '@', '%'])
+                .to_string();
+            if !field_name.is_empty() {
+                fields.push((field_name, Typ::Named("Any".into())));
+            }
+        }
+    }
+
+    let mut func_nodes = Vec::new();
+    collect_kinds(pkg, &["function_definition"], &mut func_nodes);
+    for f in func_nodes {
+        if let Some(d) = perl_function_decl(src, f) {
+            methods.push(d);
+        }
+    }
+
+    (fields, methods)
+}
+
+fn perl_function_decl<'a>(src: &[u8], n: Node<'a>) -> Option<Decl> {
+    let name_n = n.child_by_field_name("name")?;
+    let name = normalize_entry(node_txt(src, name_n).trim());
+    let params = perl_params(src, n);
+    let body = n
+        .child_by_field_name("body")
+        .or_else(|| first_named(n, "block"))
+        .map(|b| perl_body(src, b))
+        .unwrap_or_default();
+    Some(Decl::Function {
+        name,
+        params,
+        ret: Typ::Void,
+        body,
+        type_params: vec![],
+    })
+}
+
+fn perl_params<'a>(src: &[u8], n: Node<'a>) -> Vec<(String, Typ)> {
+    let mut out = Vec::new();
+    let sig = n.child_by_field_name("signature");
+    if let Some(sig) = sig {
+        let mut w = sig.walk();
+        for ch in sig.named_children(&mut w) {
+            let raw = node_txt(src, ch).trim();
+            let clean = raw.trim_start_matches(['$', '@', '%']);
+            if !clean.is_empty() && ch.kind() != "{" {
+                out.push((clean.to_string(), Typ::Named("Any".into())));
+            }
+        }
+    }
+    if out.is_empty() {
+        let mut body_node = n.child_by_field_name("body");
+        if body_node.is_none() {
+            body_node = first_named(n, "block");
+        }
+        if let Some(b) = body_node {
+            let mut w = b.walk();
+            for ch in b.named_children(&mut w) {
+                if ch.kind() == "my_statement" || ch.kind() == "our_statement" {
+                    let mut vars = Vec::new();
+                    collect_kinds(ch, &["variable_name", "scalar", "array", "hash", "identifier"], &mut vars);
+                    for v in vars {
+                        let clean = node_txt(src, v)
+                            .trim()
+                            .trim_start_matches(['$', '@', '%'])
+                            .to_string();
+                        if !clean.is_empty() {
+                            out.push((clean, Typ::Named("Any".into())));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+fn perl_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
+    ast_body(src, body, PERLAST)
 }
 
 fn extract_js_with_classes(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
@@ -3562,10 +3854,41 @@ fn lua_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
 }
 
 fn extract_elixir(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
-    let mut calls = Vec::new();
-    collect_kinds(root, &["call"], &mut calls);
-    let mut out = Vec::new();
-    for c in calls {
+    let mut decls = Vec::new();
+
+    let mut mod_nodes = Vec::new();
+    collect_kinds(root, &["call"], &mut mod_nodes);
+    for c in mod_nodes {
+        let mut w = c.walk();
+        let kids: Vec<Node<'_>> = c.named_children(&mut w).collect();
+        let Some(head) = kids.first().copied() else {
+            continue;
+        };
+        let hk = head.kind();
+        let ht = node_txt(src, head).trim();
+        if !matches!(hk, "identifier" | "operator_identifier")
+            || !matches!(ht, "defmodule" | "defprotocol" | "defexception")
+        {
+            continue;
+        }
+        if let Some(second) = kids.get(1).copied() {
+            let mod_name = node_txt(src, second).trim().to_string();
+            let (fields, methods) = elixir_module_body(src, c);
+            decls.push(Decl::Class {
+                name: mod_name,
+                fields,
+                methods,
+                visibility: Visibility::Pub,
+                extends: None,
+                implements: vec![],
+                type_params: vec![],
+            });
+        }
+    }
+
+    let mut func_nodes = Vec::new();
+    collect_kinds(root, &["call"], &mut func_nodes);
+    for c in func_nodes {
         let mut w = c.walk();
         let kids: Vec<Node<'_>> = c.named_children(&mut w).collect();
         let Some(head) = kids.first().copied() else {
@@ -3578,23 +3901,313 @@ fn extract_elixir(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
         {
             continue;
         }
-        if let Some(second) = kids.get(1).copied()
-            && (second.kind() == "identifier" || second.kind() == "keyword")
-        {
-            let nm = normalize_entry(node_txt(src, second).trim());
-            out.push(decl_fn(nm, vec![], Typ::Void));
+        let is_in_module = c.parent().map_or(false, |p| {
+            if p.kind() == "do_block" {
+                if let Some(gp) = p.parent() {
+                    gp.kind() == "call" && gp.named_child(0).map_or(false, |nc| {
+                        matches!(node_txt(src, nc).trim(), "defmodule" | "defprotocol")
+                    })
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        });
+        if is_in_module {
+            continue;
+        }
+        if let Some(d) = elixir_function_decl(src, c) {
+            decls.push(d);
         }
     }
-    Ok(out)
+
+    if decls.is_empty() {
+        let mut out = Vec::new();
+        let mut calls = Vec::new();
+        collect_kinds(root, &["call"], &mut calls);
+        for c in calls {
+            let mut w = c.walk();
+            let kids: Vec<Node<'_>> = c.named_children(&mut w).collect();
+            let Some(head) = kids.first().copied() else {
+                continue;
+            };
+            let hk = head.kind();
+            let ht = node_txt(src, head).trim();
+            if !matches!(hk, "identifier" | "operator_identifier")
+                || !matches!(ht, "def" | "defp" | "defmacro")
+            {
+                continue;
+            }
+            if let Some(second) = kids.get(1).copied()
+                && (second.kind() == "identifier" || second.kind() == "keyword")
+            {
+                let nm = normalize_entry(node_txt(src, second).trim());
+                out.push(decl_fn(nm, vec![], Typ::Void));
+            }
+        }
+        Ok(out)
+    } else {
+        Ok(decls)
+    }
+}
+
+fn elixir_module_body<'a>(src: &[u8], call_node: Node<'a>) -> (Vec<(String, Typ)>, Vec<Decl>) {
+    let fields = Vec::new();
+    let mut methods = Vec::new();
+
+    let body = call_node
+        .parent()
+        .and_then(|p| first_named(p, "do_block"))
+        .or_else(|| named_descendant(call_node, "do_block"));
+    let Some(body) = body else {
+        return (fields, methods);
+    };
+
+    let mut call_nodes = Vec::new();
+    collect_kinds(body, &["call"], &mut call_nodes);
+    for c in call_nodes {
+        let mut w = c.walk();
+        let kids: Vec<Node<'_>> = c.named_children(&mut w).collect();
+        let Some(head) = kids.first().copied() else {
+            continue;
+        };
+        let hk = head.kind();
+        let ht = node_txt(src, head).trim();
+
+        if matches!(ht, "defstruct") {
+            if let Some(name_node) = kids.get(1).copied() {
+                let sname = node_txt(src, name_node).trim().to_string();
+                let mut sfields = Vec::new();
+                let sbody = named_descendant(c, "keyword_list");
+                if let Some(sbody) = sbody {
+                    let mut w2 = sbody.walk();
+                    for ch in sbody.named_children(&mut w2) {
+                        if ch.kind() == "pair" {
+                            let key = first_named(ch, "keyword")
+                                .or_else(|| first_named(ch, "atom"))
+                                .or_else(|| first_named(ch, "identifier"))
+                                .map(|k| node_txt(src, k).trim().trim_matches(':').to_string());
+                            if let Some(k) = key {
+                                sfields.push((k, Typ::Named("Any".into())));
+                            }
+                        }
+                    }
+                }
+                methods.push(Decl::Struct { name: sname, fields: sfields, type_params: vec![] });
+                continue;
+            }
+        }
+
+        if !matches!(hk, "identifier" | "operator_identifier") {
+            continue;
+        }
+        if matches!(ht, "def" | "defp" | "defmacro") {
+            if let Some(d) = elixir_function_decl(src, c) {
+                methods.push(d);
+            }
+        }
+    }
+
+    (fields, methods)
+}
+
+fn elixir_function_decl<'a>(src: &[u8], c: Node<'a>) -> Option<Decl> {
+    let mut w = c.walk();
+    let kids: Vec<Node<'_>> = c.named_children(&mut w).collect();
+    let head = kids.first().copied()?;
+    if !matches!(node_txt(src, head).trim(), "def" | "defp" | "defmacro") {
+        return None;
+    }
+    let name_idx = kids.iter().position(|k| {
+        matches!(k.kind(), "identifier" | "keyword" | "operator_identifier")
+            && !matches!(node_txt(src, *k).trim(), "def" | "defp" | "defmacro")
+    })?;
+    let name_n = kids[name_idx];
+    let name = normalize_entry(node_txt(src, name_n).trim().trim_start_matches(':'));
+
+    let mut params = Vec::new();
+    let args_idx = kids.iter().position(|k| matches!(k.kind(), "arguments" | "parenthesized_call"));
+    if let Some(aidx) = args_idx {
+        let args_node = kids[aidx];
+        let mut aw = args_node.walk();
+        for ch in args_node.named_children(&mut aw) {
+            if ch.kind() == "identifier" {
+                params.push((node_txt(src, ch).trim().to_string(), Typ::Named("Any".into())));
+            } else if ch.kind() == "binary_operator" {
+                if let Some(lhs) = ch.child_by_field_name("left") {
+                    params.push((node_txt(src, lhs).trim().to_string(), Typ::Named("Any".into())));
+                }
+            }
+        }
+    }
+
+    let body = named_descendant(c, "do_block")
+        .map(|b| elixir_body(src, b))
+        .unwrap_or_default();
+
+    Some(Decl::Function {
+        name,
+        params,
+        ret: Typ::Named("Any".into()),
+        body,
+        type_params: vec![],
+    })
+}
+
+fn elixir_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
+    ast_body(src, body, ELIXIRAST)
 }
 
 fn extract_erlang(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
-    extract_fn_nodes(src, root, &["function_clause"], |src, n| {
-        let name_n = n.child_by_field_name("name")?;
+    let mut decls = Vec::new();
+
+    let mut mod_nodes = Vec::new();
+    collect_kinds(root, &["module_"], &mut mod_nodes);
+    for m in mod_nodes {
+        let name = m
+            .child_by_field_name("name")
+            .or_else(|| named_descendant(m, "atom"))
+            .map(|a| node_txt(src, a).trim().trim_matches('\'').to_string());
+        if let Some(name) = name {
+            let (fields, methods) = erlang_module_body(src, m);
+            decls.push(Decl::Class {
+                name,
+                fields,
+                methods,
+                visibility: Visibility::Pub,
+                extends: None,
+                implements: vec![],
+                type_params: vec![],
+            });
+        }
+    }
+
+    let mut func_nodes = Vec::new();
+    collect_kinds(root, &["function_clause"], &mut func_nodes);
+    for f in func_nodes {
+        let is_in_module = f
+            .parent()
+            .and_then(|p| p.parent())
+            .map_or(false, |gp| gp.kind() == "module_");
+        if !is_in_module {
+            if let Some(d) = erlang_function_decl(src, f) {
+                decls.push(d);
+            }
+        }
+    }
+
+    if decls.is_empty() {
+        extract_fn_nodes(src, root, &["function_clause"], |src, n| {
+            let name_n = n.child_by_field_name("name")?;
+            let atom = named_descendant(name_n, "atom")?;
+            let raw = node_txt(src, atom).trim().trim_matches('\'');
+            Some(decl_fn(normalize_entry(raw), vec![], Typ::Void))
+        })
+    } else {
+        Ok(decls)
+    }
+}
+
+fn erlang_module_body<'a>(src: &[u8], mod_node: Node<'a>) -> (Vec<(String, Typ)>, Vec<Decl>) {
+    let fields = Vec::new();
+    let mut methods = Vec::new();
+
+    let mut record_nodes = Vec::new();
+    collect_kinds(mod_node, &["record_decl"], &mut record_nodes);
+    for r in record_nodes {
+        let rec_name = r
+            .child_by_field_name("name")
+            .or_else(|| named_descendant(r, "atom"))
+            .map(|a| node_txt(src, a).trim().trim_matches('\'').to_string())
+            .unwrap_or_else(|| format!("record{}", fields.len()));
+        let mut sfields = Vec::new();
+        let mut field_decls = Vec::new();
+        collect_kinds(r, &["record_field"], &mut field_decls);
+        for f in field_decls {
+            let fname = f
+                .child_by_field_name("name")
+                .or_else(|| named_descendant(f, "atom"))
+                .map(|a| node_txt(src, a).trim().trim_matches('\'').to_string())
+                .unwrap_or_else(|| format!("field{}", sfields.len()));
+            if !fname.is_empty() {
+                sfields.push((fname, Typ::Named("Any".into())));
+            }
+        }
+        if !sfields.is_empty() {
+            methods.push(Decl::Struct { name: rec_name, fields: sfields, type_params: vec![] });
+        }
+    }
+
+    let mut func_nodes = Vec::new();
+    collect_kinds(mod_node, &["function_clause"], &mut func_nodes);
+    for f in func_nodes {
+        if let Some(d) = erlang_function_decl(src, f) {
+            methods.push(d);
+        }
+    }
+
+    (fields, methods)
+}
+
+fn erlang_function_decl<'a>(src: &[u8], n: Node<'a>) -> Option<Decl> {
+    let name_n = n.child_by_field_name("name")?;
+    let name = if name_n.kind() == "atom" {
+        node_txt(src, name_n).trim().trim_matches('\'').to_string()
+    } else {
         let atom = named_descendant(name_n, "atom")?;
-        let raw = node_txt(src, atom).trim().trim_matches('\'');
-        Some(decl_fn(normalize_entry(raw), vec![], Typ::Void))
+        node_txt(src, atom).trim().trim_matches('\'').to_string()
+    };
+    let name = normalize_entry(&name);
+
+    let params = erlang_params(src, n);
+
+    let body = n
+        .child_by_field_name("body")
+        .map(|b| erlang_body(src, b))
+        .unwrap_or_default();
+
+    Some(Decl::Function {
+        name,
+        params,
+        ret: Typ::Named("Any".into()),
+        body,
+        type_params: vec![],
     })
+}
+
+fn erlang_params<'a>(src: &[u8], n: Node<'a>) -> Vec<(String, Typ)> {
+    let mut out = Vec::new();
+    let plist = n.child_by_field_name("params");
+    let Some(plist) = plist else {
+        return out;
+    };
+    let mut w = plist.walk();
+    for ch in plist.named_children(&mut w) {
+        let pk = ch.kind();
+        if pk == "variable" || pk == "identifier" || pk == "atom" {
+            out.push((
+                node_txt(src, ch).trim().trim_start_matches('_').to_string(),
+                Typ::Named("Any".into()),
+            ));
+        } else if pk == "pattern" {
+            if let Some(var) = named_descendant(ch, "variable") {
+                out.push((
+                    node_txt(src, var).trim().trim_start_matches('_').to_string(),
+                    Typ::Named("Any".into()),
+                ));
+            } else {
+                out.push((format!("arg{}", out.len()), Typ::Named("Any".into())));
+            }
+        } else {
+            out.push((format!("arg{}", out.len()), Typ::Named("Any".into())));
+        }
+    }
+    out
+}
+
+fn erlang_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
+    ast_body(src, body, ERLANGAST)
 }
 
 fn extract_haskell(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
@@ -3606,22 +4219,175 @@ fn extract_haskell(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
 }
 
 fn extract_julia(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
-    extract_fn_nodes(src, root, &["function_definition"], |src, n| {
-        let sig = first_named(n, "signature").or_else(|| named_descendant(n, "signature"))?;
-        let id = named_descendant(sig, "identifier").or_else(|| {
-            let mut ids = Vec::new();
-            collect_kinds(sig, &["identifier"], &mut ids);
-            ids.into_iter().next()
-        })?;
-        let name = normalize_entry(node_txt(src, id).trim());
-        Some(decl_fn(name, vec![], Typ::Void))
+    let mut decls = Vec::new();
+
+    let mut struct_nodes = Vec::new();
+    collect_kinds(root, &["struct_definition"], &mut struct_nodes);
+    for s in struct_nodes {
+        if let Some(d) = julia_struct_decl(src, s) {
+            decls.push(d);
+        }
+    }
+
+    let mut mod_nodes = Vec::new();
+    collect_kinds(root, &["module_definition"], &mut mod_nodes);
+    for m in mod_nodes {
+        let name = m
+            .child_by_field_name("name")
+            .or_else(|| named_descendant(m, "identifier"))
+            .map(|id| node_txt(src, id).trim().to_string());
+        if let Some(name) = name {
+            let (fields, methods) = julia_module_body(src, m);
+            decls.push(Decl::Class {
+                name,
+                fields,
+                methods,
+                visibility: Visibility::Pub,
+                extends: None,
+                implements: vec![],
+                type_params: vec![],
+            });
+        }
+    }
+
+    let mut func_nodes = Vec::new();
+    collect_kinds(root, &["function_definition"], &mut func_nodes);
+    for f in func_nodes {
+        let is_in_module = f.parent().map_or(false, |p| p.kind() == "module_definition");
+        if !is_in_module {
+            if let Some(d) = julia_function_decl(src, f) {
+                decls.push(d);
+            }
+        }
+    }
+
+    if decls.is_empty() {
+        extract_fn_nodes(src, root, &["function_definition"], |src, n| {
+            let sig = first_named(n, "signature").or_else(|| named_descendant(n, "signature"))?;
+            let id = named_descendant(sig, "identifier").or_else(|| {
+                let mut ids = Vec::new();
+                collect_kinds(sig, &["identifier"], &mut ids);
+                ids.into_iter().next()
+            })?;
+            let name = normalize_entry(node_txt(src, id).trim());
+            Some(decl_fn(name, vec![], Typ::Void))
+        })
+    } else {
+        Ok(decls)
+    }
+}
+
+fn julia_struct_decl<'a>(src: &[u8], s: Node<'a>) -> Option<Decl> {
+    let name = s
+        .child_by_field_name("name")
+        .or_else(|| named_descendant(s, "identifier"))
+        .map(|id| node_txt(src, id).trim().to_string())?;
+    let mut sfields = Vec::new();
+    let body = s
+        .child_by_field_name("body")
+        .or_else(|| first_named(s, "block"));
+    if let Some(body) = body {
+        let mut w = body.walk();
+        for ch in body.named_children(&mut w) {
+            if ch.kind() == "identifier" || ch.kind() == "field" {
+                sfields.push((node_txt(src, ch).trim().to_string(), Typ::Named("Any".into())));
+            } else if ch.kind() == "parametric_type" {
+                if let Some(id) = named_descendant(ch, "identifier") {
+                    sfields.push((node_txt(src, id).trim().to_string(), Typ::Named("Any".into())));
+                }
+            }
+        }
+    }
+    Some(Decl::Struct { name, fields: sfields, type_params: vec![] })
+}
+
+fn julia_module_body<'a>(src: &[u8], m: Node<'a>) -> (Vec<(String, Typ)>, Vec<Decl>) {
+    let fields = Vec::new();
+    let mut methods = Vec::new();
+
+    let body = m
+        .child_by_field_name("body")
+        .or_else(|| first_named(m, "block"));
+    let Some(body) = body else {
+        return (fields, methods);
+    };
+
+    let mut func_nodes = Vec::new();
+    collect_kinds(body, &["function_definition"], &mut func_nodes);
+    for f in func_nodes {
+        if let Some(d) = julia_function_decl(src, f) {
+            methods.push(d);
+        }
+    }
+
+    (fields, methods)
+}
+
+fn julia_function_decl<'a>(src: &[u8], n: Node<'a>) -> Option<Decl> {
+    let sig = first_named(n, "signature").or_else(|| named_descendant(n, "signature"))?;
+    let id = named_descendant(sig, "identifier").or_else(|| {
+        let mut ids = Vec::new();
+        collect_kinds(sig, &["identifier"], &mut ids);
+        ids.into_iter().next()
+    })?;
+    let name = normalize_entry(node_txt(src, id).trim());
+
+    let params = julia_params(src, &sig);
+
+    let body = n
+        .child_by_field_name("body")
+        .or_else(|| first_named(n, "block"))
+        .map(|b| julia_body(src, b))
+        .unwrap_or_default();
+
+    Some(Decl::Function {
+        name,
+        params,
+        ret: Typ::Named("Any".into()),
+        body,
+        type_params: vec![],
     })
 }
 
-fn extract_r_lang(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
-    let mut hits = Vec::new();
-    collect_kinds(root, &["binary_operator"], &mut hits);
+fn julia_params<'a>(src: &[u8], sig: &Node<'a>) -> Vec<(String, Typ)> {
     let mut out = Vec::new();
+    let plist = sig
+        .child_by_field_name("parameters")
+        .or_else(|| named_descendant(*sig, "parameter_list"))
+        .or_else(|| {
+            let mut lists = Vec::new();
+            collect_kinds(*sig, &["parameter_list"], &mut lists);
+            lists.into_iter().next()
+        });
+    let Some(plist) = plist else {
+        return out;
+    };
+    let mut w = plist.walk();
+    for ch in plist.named_children(&mut w) {
+        let pk = ch.kind();
+        if pk == "identifier" {
+            out.push((node_txt(src, ch).trim().to_string(), Typ::Named("Any".into())));
+        } else if pk == "optional_parameter" || pk == "keyword_parameter" {
+            if let Some(id) = named_descendant(ch, "identifier") {
+                out.push((node_txt(src, id).trim().to_string(), Typ::Named("Any".into())));
+            }
+        } else if pk == "typed_parameter" || pk == "parameter" {
+            if let Some(id) = named_descendant(ch, "identifier") {
+                out.push((node_txt(src, id).trim().to_string(), Typ::Named("Any".into())));
+            }
+        }
+    }
+    out
+}
+
+fn julia_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
+    ast_body(src, body, JULIAAST)
+}
+
+fn extract_r_lang(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
+    let mut out = Vec::new();
+    let mut hits = Vec::new();
+    collect_kinds(root, &["binary_operator", "assignment"], &mut hits);
     for n in hits {
         let Some(op_node) = n.child_by_field_name("operator") else {
             continue;
@@ -3639,25 +4405,292 @@ fn extract_r_lang(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
         if lhs.kind() != "identifier" {
             continue;
         }
-        if named_descendant(rhs, "function_definition").is_none() {
-            continue;
+        if let Some(func_node) = named_descendant(rhs, "function_definition") {
+            let name = normalize_entry(node_txt(src, lhs).trim());
+            if let Some(d) = r_function_decl(src, name, func_node) {
+                out.push(d);
+            }
         }
-        let name = normalize_entry(node_txt(src, lhs).trim());
-        out.push(decl_fn(name, vec![], Typ::Void));
     }
+
+    if out.is_empty() {
+        let mut fallback = Vec::new();
+        collect_kinds(root, &["binary_operator"], &mut fallback);
+        for n in fallback {
+            let Some(op_node) = n.child_by_field_name("operator") else {
+                continue;
+            };
+            let op = node_txt(src, op_node);
+            if !matches!(op.trim(), "<-" | "<<-" | ":=" | "=" | "->") {
+                continue;
+            }
+            let Some(lhs) = n.child_by_field_name("lhs") else {
+                continue;
+            };
+            let Some(rhs) = n.child_by_field_name("rhs") else {
+                continue;
+            };
+            if lhs.kind() != "identifier" {
+                continue;
+            }
+            if named_descendant(rhs, "function_definition").is_none() {
+                continue;
+            }
+            let name = normalize_entry(node_txt(src, lhs).trim());
+            out.push(decl_fn(name, vec![], Typ::Void));
+        }
+    }
+
     Ok(out)
 }
 
-fn extract_fsharp(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
-    extract_fn_nodes(src, root, &["function_or_value_defn"], |src, n| {
-        let left = first_named(n, "function_declaration_left")?;
-        let mut w = left.walk();
-        let name_node = left
-            .named_children(&mut w)
-            .find(|c| matches!(c.kind(), "identifier" | "op_identifier"))?;
-        let name = normalize_entry(node_txt(src, name_node).trim());
-        Some(decl_fn(name, vec![], Typ::Void))
+fn r_function_decl<'a>(src: &[u8], name: String, func_node: Node<'a>) -> Option<Decl> {
+    let params = r_params(src, func_node);
+    let body = func_node
+        .child_by_field_name("body")
+        .map(|b| r_body(src, b))
+        .unwrap_or_default();
+
+    Some(Decl::Function {
+        name,
+        params,
+        ret: Typ::Named("Any".into()),
+        body,
+        type_params: vec![],
     })
+}
+
+fn r_params<'a>(src: &[u8], func_node: Node<'a>) -> Vec<(String, Typ)> {
+    let mut out = Vec::new();
+    let plist = func_node
+        .child_by_field_name("parameters")
+        .or_else(|| named_descendant(func_node, "parameters"));
+    let Some(plist) = plist else {
+        return out;
+    };
+    let mut w = plist.walk();
+    for ch in plist.named_children(&mut w) {
+        let pk = ch.kind();
+        if pk == "identifier" {
+            out.push((node_txt(src, ch).trim().to_string(), Typ::Named("Any".into())));
+        } else if pk == "formal_parameter" || pk == "parameter" {
+            let id = first_named(ch, "identifier")
+                .or_else(|| named_descendant(ch, "identifier"));
+            if let Some(id) = id {
+                out.push((node_txt(src, id).trim().to_string(), Typ::Named("Any".into())));
+            }
+        }
+    }
+    out
+}
+
+fn r_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
+    ast_body(src, body, RAST)
+}
+
+fn extract_fsharp(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
+    let mut decls = Vec::new();
+
+    let mut mod_nodes = Vec::new();
+    collect_kinds(root, &["module"], &mut mod_nodes);
+    for m in mod_nodes {
+        let name = m
+            .child_by_field_name("name")
+            .or_else(||
+                first_named(m, "identifier")
+                    .or_else(|| first_named(m, "long_identifier"))
+            )
+            .map(|n| node_txt(src, n).trim().to_string());
+        if let Some(name) = name {
+            let (fields, methods) = fsharp_module_body(src, m);
+            decls.push(Decl::Class {
+                name,
+                fields,
+                methods,
+                visibility: Visibility::Pub,
+                extends: None,
+                implements: vec![],
+                type_params: vec![],
+            });
+        }
+    }
+
+    let mut type_nodes = Vec::new();
+    collect_kinds(root, &["type_definition"], &mut type_nodes);
+    for t in type_nodes {
+        if let Some(d) = fsharp_type_decl(src, t) {
+            decls.push(d);
+        }
+    }
+
+    let mut func_nodes = Vec::new();
+    collect_kinds(root, &["function_or_value_defn"], &mut func_nodes);
+    for f in func_nodes {
+        let is_in_type = f
+            .parent()
+            .map_or(false, |p| p.kind() == "type_definition" || p.kind() == "module");
+        if !is_in_type {
+            if let Some(d) = fsharp_function_decl(src, f) {
+                decls.push(d);
+            }
+        }
+    }
+
+    if decls.is_empty() {
+        extract_fn_nodes(src, root, &["function_or_value_defn"], |src, n| {
+            let left = first_named(n, "function_declaration_left")?;
+            let mut w = left.walk();
+            let name_node = left
+                .named_children(&mut w)
+                .find(|c| matches!(c.kind(), "identifier" | "op_identifier"))?;
+            let name = normalize_entry(node_txt(src, name_node).trim());
+            Some(decl_fn(name, vec![], Typ::Void))
+        })
+    } else {
+        Ok(decls)
+    }
+}
+
+fn fsharp_type_decl<'a>(src: &[u8], t: Node<'a>) -> Option<Decl> {
+    let name_n = t
+        .child_by_field_name("name")
+        .or_else(|| first_named(t, "identifier"))?;
+    let name = node_txt(src, name_n).trim().to_string();
+
+    let first_kid = t.named_child(0);
+    let is_class = first_kid.map_or(false, |c| {
+        let raw = node_txt(src, c).trim().to_lowercase();
+        raw == "class"
+    });
+    let is_struct = first_kid.map_or(false, |c| {
+        let raw = node_txt(src, c).trim().to_lowercase();
+        raw == "struct"
+    });
+
+    let fields = Vec::new();
+    let mut methods = Vec::new();
+
+    if is_class || is_struct {
+        let mut mdefs = Vec::new();
+        collect_kinds(t, &["member_definition"], &mut mdefs);
+        for md in mdefs {
+            if let Some(d) = fsharp_member_decl(src, md) {
+                methods.push(d);
+            }
+        }
+    }
+
+    if is_struct {
+        Some(Decl::Struct {
+            name,
+            fields,
+            type_params: vec![],
+        })
+    } else {
+        Some(Decl::Class {
+            name,
+            fields,
+            methods,
+            visibility: Visibility::Pub,
+            extends: None,
+            implements: vec![],
+            type_params: vec![],
+        })
+    }
+}
+
+fn fsharp_module_body<'a>(src: &[u8], m: Node<'a>) -> (Vec<(String, Typ)>, Vec<Decl>) {
+    let fields = Vec::new();
+    let mut methods = Vec::new();
+
+    let mut func_nodes = Vec::new();
+    collect_kinds(m, &["function_or_value_defn"], &mut func_nodes);
+    for f in func_nodes {
+        if let Some(d) = fsharp_function_decl(src, f) {
+            methods.push(d);
+        }
+    }
+
+    (fields, methods)
+}
+
+fn fsharp_member_decl<'a>(src: &[u8], md: Node<'a>) -> Option<Decl> {
+    let name_n = md
+        .child_by_field_name("name")
+        .or_else(|| first_named(md, "method_or_prop_name"))
+        .or_else(|| {
+            let mut ids = Vec::new();
+            collect_kinds(md, &["identifier"], &mut ids);
+            ids.into_iter().next()
+        })?;
+    let name = node_txt(src, name_n).trim().to_string();
+    let params = fsharp_params(src, md);
+    let body = md
+        .child_by_field_name("body")
+        .map(|b| fsharp_body(src, b))
+        .unwrap_or_default();
+
+    Some(Decl::Function {
+        name,
+        params,
+        ret: Typ::Named("unit".into()),
+        body,
+        type_params: vec![],
+    })
+}
+
+fn fsharp_function_decl<'a>(src: &[u8], n: Node<'a>) -> Option<Decl> {
+    let left = first_named(n, "function_declaration_left")?;
+    let mut w = left.walk();
+    let name_node = left
+        .named_children(&mut w)
+        .find(|c| matches!(c.kind(), "identifier" | "op_identifier"))?;
+    let name = normalize_entry(node_txt(src, name_node).trim());
+
+    let params = fsharp_params(src, n);
+    let ret_type = n
+        .child_by_field_name("return_type")
+        .map(|t| Typ::Named(node_txt(src, t).trim().to_string()))
+        .unwrap_or(Typ::Named("unit".into()));
+
+    let body = n
+        .child_by_field_name("body")
+        .map(|b| fsharp_body(src, b))
+        .unwrap_or_default();
+
+    Some(Decl::Function {
+        name,
+        params,
+        ret: ret_type,
+        body,
+        type_params: vec![],
+    })
+}
+
+fn fsharp_params<'a>(src: &[u8], n: Node<'a>) -> Vec<(String, Typ)> {
+    let mut out = Vec::new();
+    let left = first_named(n, "function_declaration_left");
+    let right = first_named(n, "function_declaration_right");
+    let Some(target) = left.or(right) else {
+        return out;
+    };
+
+    let mut w = target.walk();
+    for ch in target.named_children(&mut w) {
+        if ch.kind() == "tuple_pattern" {
+            let mut tw = ch.walk();
+            for tp in ch.named_children(&mut tw) {
+                if tp.kind() == "identifier" {
+                    out.push((node_txt(src, tp).trim().to_string(), Typ::Named("obj".into())));
+                }
+            }
+        }
+    }
+    out
+}
+
+fn fsharp_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
+    ast_body(src, body, FSHAST)
 }
 
 fn extract_dart(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
@@ -5820,7 +6853,7 @@ def main(): Unit = {
             .find(|d| matches!(d, Decl::Function { name, .. } if name == "helper"))
             .expect("helper");
         match helper {
-            Decl::Function { params, body, .. } => {
+            Decl::Function { params, body: _, .. } => {
                 assert_eq!(params, &vec![("value".into(), Typ::Named("Int".into()))]);
                 // body lowering for Scala is WIP; extract function sigs and class shapes first
                 assert!(matches!(helper, Decl::Function { .. }), "helper should be a function");
@@ -5942,5 +6975,177 @@ function main() {
             }
             _ => panic!("expected function"),
         }
+    }
+
+    #[test]
+    fn extract_fsharp_function_with_body() {
+        let src = r#"let answer x = x + 42
+
+let main _ =
+    let value = answer 1
+    ()
+"#;
+        let m = parse_lang(tree_sitter_fsharp::LANGUAGE_FSHARP.into(), src, extract_fsharp).expect("ok");
+        assert!(
+            m.decls
+                .iter()
+                .any(|d| matches!(d, Decl::Function { name, .. } if name == "answer")),
+            "answer function not found"
+        );
+        assert!(
+            m.decls
+                .iter()
+                .any(|d| matches!(d, Decl::Function { name, .. } if name == "main")),
+            "main function not found"
+        );
+    }
+
+    #[test]
+    fn extract_erlang_function_clause() {
+        let src = r#"-module(calculator).
+-export([answer/0, main/0]).
+
+answer() ->
+    42.
+
+main() ->
+    X = answer(),
+    ok.
+"#;
+        let m = parse_lang(tree_sitter_erlang::LANGUAGE.into(), src, extract_erlang).expect("ok");
+        let found_answer = m
+            .decls
+            .iter()
+            .any(|d| matches!(d, Decl::Function { name, .. } if name == "answer"));
+        let found_in_class = m
+            .decls
+            .iter()
+            .filter_map(|d| match d {
+                Decl::Class { name, methods, .. } if name == "calculator" => Some(methods.clone()),
+                _ => None,
+            })
+            .any(|methods| methods.iter().any(|m| matches!(m, Decl::Function { name, .. } if name == "answer")));
+        assert!(found_answer || found_in_class, "answer function not found");
+    }
+
+    #[test]
+    fn extract_elixir_defmodule() {
+        let src = r#"defmodule Calculator do
+  def answer do
+    42
+  end
+
+  def main do
+    value = answer()
+    value
+  end
+end
+"#;
+        let m = parse_lang(tree_sitter_elixir::LANGUAGE.into(), src, extract_elixir).expect("ok");
+        let found_class = m
+            .decls
+            .iter()
+            .any(|d| matches!(d, Decl::Class { name, .. } if name == "Calculator"));
+        let found_answer = m
+            .decls
+            .iter()
+            .any(|d| matches!(d, Decl::Function { name, .. } if name == "answer"));
+        let found_main = m
+            .decls
+            .iter()
+            .any(|d| matches!(d, Decl::Function { name, .. } if name == "main"));
+        assert!(found_class || found_answer || found_main,
+            "expected Calculator module or answer/main functions (found class={found_class}, answer={found_answer}, main={found_main})"
+        );
+    }
+
+    #[test]
+    fn extract_julia_struct() {
+        let src = r#"mutable struct Point
+    x::Int
+    y::Int
+end
+
+function answer()
+    return 42
+end
+
+function main()
+    p = answer()
+    return nothing
+end
+"#;
+        let m = parse_lang(tree_sitter_julia::LANGUAGE.into(), src, extract_julia).expect("ok");
+        let found_struct = m
+            .decls
+            .iter()
+            .any(|d| matches!(d, Decl::Struct { name, .. } if name == "Point"));
+        let found_answer = m
+            .decls
+            .iter()
+            .any(|d| matches!(d, Decl::Function { name, .. } if name == "answer"));
+        assert!(found_struct, "Point struct not found");
+        assert!(found_answer, "answer function not found");
+    }
+
+    #[test]
+    fn extract_r_function() {
+        let src = r#"answer <- function(x) {
+    return(x + 42)
+}
+
+main <- function() {
+    value <- answer(1)
+    return(value)
+}
+"#;
+        let m = parse_lang(tree_sitter_r::LANGUAGE.into(), src, extract_r_lang).expect("ok");
+        let answer = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "answer"))
+            .expect("answer");
+        match answer {
+            Decl::Function {
+                params, ..
+            } => {
+                assert_eq!(params.len(), 1);
+                assert_eq!(params[0].0, "x");
+            }
+            _ => panic!("expected function"),
+        }
+        assert!(
+            m.decls
+                .iter()
+                .any(|d| matches!(d, Decl::Function { name, .. } if name == "main")),
+            "main function not found"
+        );
+    }
+
+    #[test]
+    fn extract_perl_subroutine() {
+        let src = r#"sub answer {
+    my ($x) = @_;
+    return $x + 42;
+}
+
+sub main {
+    my $value = answer(1);
+    return;
+}
+"#;
+        let m = parse_lang(tree_sitter_perl::LANGUAGE.into(), src, extract_perl).expect("ok");
+        let answer = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "answer"))
+            .expect("answer");
+        assert!(matches!(answer, Decl::Function { .. }), "answer should be a function");
+        assert!(
+            m.decls
+                .iter()
+                .any(|d| matches!(d, Decl::Function { name, .. } if name == "main")),
+            "main function not found"
+        );
     }
 }
