@@ -306,11 +306,6 @@ cargo run --manifest-path in-cli/Cargo.toml --bin protocol-gen
 
 V remains available only for optional parity tooling such as `shared/protocol/generate_models.v`; the Rust generator is the CI source of truth.
 
-## Development Notes
+# License
 
-- Prefer owned compiler paths where possible.
-- Use `.in` and `.icore` samples for language and Core IR changes.
-- Keep frontend-specific behavior documented in `docs/architecture`.
-- Keep package/capability behavior visible through `in package`, `in graph`, and `in agent`.
-- Treat `in agent` output as JSON by default; do not pass `--json` to that command.
-- Do not turn `.in` into a UI language.
+MPL-2.0
