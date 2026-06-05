@@ -1747,7 +1747,7 @@ fn lower_binary(
     pending_calls: &mut Vec<PendingCall>,
     fn_name: &str,
 ) -> Result<(), String> {
-    let is_float = matches!(expr_type(lhs), Some(Typ::Float) | Some(Typ::Float))
+    let is_float = matches!(expr_type(lhs), Some(Typ::Float))
         || matches!(expr_type(rhs), Some(Typ::Float));
     if is_float {
         return lower_float_binary(emitter, ctx, op, lhs, rhs, rd, functions, pending_calls, fn_name);

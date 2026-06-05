@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::core_ir::UnifiedModule;
 use crate::in_lang_parse;

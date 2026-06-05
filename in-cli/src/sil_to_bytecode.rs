@@ -1,6 +1,6 @@
 //! Lower SIL to bytecode for execution or JIT compilation.
 
-use crate::bytecode::{BytecodeFunction, BytecodeModule, CmpOp, Instruction};
+use crate::bytecode::{BytecodeFunction, BytecodeModule, Instruction};
 use crate::core_ir::FloatVal;
 use crate::hybrid_sil::SilArtifact;
 use std::collections::HashMap;

@@ -1,6 +1,5 @@
-//! Tree-sitter grammars → [`UnifiedModule`]. **C / C++ / ObjC++** `function_definition` fills coarse
-//! types, parameters, and trivial `return <integer>;` / `return <param>;` / `return;` bodies (single
-//! statement, no locals); other languages remain mostly signature-only until their extractors grow.
+//! Tree-sitter grammars → [`UnifiedModule`] with per-language declaration extraction and bounded
+//! scalar body lowering where wired.
 
 use super::ruby::extract_ruby;
 use crate::core_ir::{Decl, MethodSig, UnifiedModule, Visibility};

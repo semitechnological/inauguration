@@ -763,7 +763,7 @@ fn is_conservative_match(expected: &Typ, actual: &Typ) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core_ir::{Decl, Expr, LoopKind, MethodSig, Stmt, Typ, UnifiedModule, Visibility};
+    use crate::core_ir::{Decl, Expr, MethodSig, Stmt, Typ, UnifiedModule, Visibility};
 
     fn function(name: &str, ret: Typ, params: Vec<(String, Typ)>, body: Vec<Stmt>) -> Decl {
         Decl::Function {

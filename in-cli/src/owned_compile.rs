@@ -277,11 +277,11 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         import_resolver.add_search_path(PathBuf::from("."));
 
         // Check for package manifest to set name and dependency search paths
-        if let Some(pkg) = crate::package::PackageManifest::find_in_dir(&source_dir) {
-            report.package_name = Some(pkg.name.clone());
-            pkg_entry = Some(pkg.entry.clone());
-            for dep in &pkg.dependencies {
-                import_resolver.add_search_path(PathBuf::from(dep));
+        if let Some(pkg) = crate::package_manifest::compile_context_in_dir(&source_dir) {
+            report.package_name = Some(pkg.name);
+            pkg_entry = pkg.entry;
+            for dep in pkg.dependency_search_paths {
+                import_resolver.add_search_path(dep);
             }
         }
 

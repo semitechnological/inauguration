@@ -840,7 +840,7 @@ fn run_pipeline_for_path(
                 ))
             })?,
             Err(e) => {
-                let hint = "Hint: for `.in` use `fn main() -> void`; for `.icore` see docs/architecture/general-compiler.md; polyglot Core IR uses Tree-sitter grammars (signature-level IR). Unsupported languages need `.icore`.";
+                let hint = "Hint: for `.in` use `fn main() -> void`; for `.icore` see docs/architecture/general-compiler.md; polyglot Core IR uses Tree-sitter grammars with bounded extraction where wired. Unsupported languages need `.icore`.";
                 return Err(InError::Message(format!("{e}. {hint}")));
             }
         };

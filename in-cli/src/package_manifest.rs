@@ -10,6 +10,8 @@ pub const PACKAGE_MANIFEST_FILE: &str = "inauguration.package";
 pub struct PackageManifest {
     pub name: String,
     pub version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry: Option<String>,
     pub targets: BTreeMap<String, bool>,
     pub dependencies: BTreeMap<String, PackageDependency>,
     pub capabilities: Vec<String>,
@@ -19,6 +21,13 @@ pub struct PackageManifest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PackageDependency {
     pub version: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackageCompileContext {
+    pub name: String,
+    pub entry: Option<String>,
+    pub dependency_search_paths: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -169,6 +178,25 @@ pub fn load_package_manifest_from_source(
     })?;
     let manifest = load_package_manifest(&root.manifest_path)?;
     Ok((root, manifest))
+}
+
+pub fn compile_context_in_dir(dir: &Path) -> Option<PackageCompileContext> {
+    let manifest_path = dir.join(PACKAGE_MANIFEST_FILE);
+    if !manifest_path.is_file() {
+        return None;
+    }
+    let manifest = load_package_manifest(&manifest_path).ok()?;
+    let dependency_search_paths = manifest
+        .dependencies
+        .values()
+        .filter_map(|dependency| dependency.version.strip_prefix("path:"))
+        .map(PathBuf::from)
+        .collect();
+    Some(PackageCompileContext {
+        name: manifest.name,
+        entry: manifest.entry,
+        dependency_search_paths,
+    })
 }
 
 pub fn load_package_report_from_source<I, S, J, T>(
@@ -584,6 +612,7 @@ fn parse_package_manifest(source: &str) -> Result<PackageManifest, String> {
     let mut manifest = PackageManifest {
         name: String::new(),
         version: String::new(),
+        entry: None,
         targets: BTreeMap::new(),
         dependencies: BTreeMap::new(),
         capabilities: Vec::new(),
@@ -693,6 +722,10 @@ fn parse_top_level(
         }
         "version" => {
             manifest.version = required_scalar(value, line_number, "version")?.to_string();
+            Ok(None)
+        }
+        "entry" => {
+            manifest.entry = Some(required_scalar(value, line_number, "entry")?.to_string());
             Ok(None)
         }
         "targets" => parse_section_header(value, line_number, "targets", Section::Targets),
@@ -967,6 +1000,44 @@ version: 1.2.3
         assert!(manifest.dependencies.is_empty());
         assert!(manifest.capabilities.is_empty());
         assert!(manifest.extensions.is_empty());
+    }
+
+    #[test]
+    fn loads_optional_package_entry() {
+        let manifest = parse_text(
+            r#"name: entrypoint
+version: 0.1.0
+entry: start
+"#,
+        )
+        .expect("parse manifest");
+
+        assert_eq!(manifest.entry.as_deref(), Some("start"));
+    }
+
+    #[test]
+    fn discovers_compile_context_from_manifest() {
+        let temp = TempDirGuard::new();
+        fs::write(
+            temp.path.join("inauguration.package"),
+            r#"name: compile-context
+version: 0.1.0
+entry: boot
+dependencies:
+  local:
+    version: path:../local
+"#,
+        )
+        .expect("write manifest");
+
+        let context = compile_context_in_dir(&temp.path).expect("discover package compile context");
+
+        assert_eq!(context.name, "compile-context");
+        assert_eq!(context.entry.as_deref(), Some("boot"));
+        assert_eq!(
+            context.dependency_search_paths,
+            vec![PathBuf::from("../local")]
+        );
     }
 
     #[test]

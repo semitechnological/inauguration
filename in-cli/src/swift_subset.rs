@@ -382,6 +382,7 @@ fn strip_leading_func_effect_keywords(mut line: &str) -> &str {
     trim(line)
 }
 
+#[allow(dead_code)]
 /// One-line `struct Name { a: T, b: U }` (same `name: Type` tokens as `func` parameters).
 fn parse_struct_line(line: &str) -> StructDecl {
     let raw = trim(&line[7.min(line.len())..]);

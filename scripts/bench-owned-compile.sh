@@ -4,8 +4,10 @@ set -euo pipefail
 echo "=== owned-compile benchmark ==="
 
 RUNS="${IN_BENCH_RUNS:-5}"
-SRC=$(mktemp -d)/bench.in
-trap 'rm -f "$SRC"' EXIT
+SRC_DIR=$(mktemp -d)
+SRC="$SRC_DIR/bench.in"
+OUT="$SRC_DIR/bench.bc"
+trap 'rm -rf "$SRC_DIR"' EXIT
 
 cat > "$SRC" << 'ENDIN'
 fn answer() -> Int { return 42; }
@@ -19,13 +21,13 @@ if ! command -v "$IN_BIN" &>/dev/null; then
 fi
 
 echo "--- cold start ---"
-$IN_BIN compile --path "$SRC" --target bytecode --entry main 2>&1
+$IN_BIN compile --path "$SRC" --out "$OUT" --target bytecode --entry main 2>&1
 
 echo "--- warm ($RUNS runs) ---"
 declare -a TIMINGS=()
 for i in $(seq 1 "$RUNS"); do
   start=$(python3 -c 'import time; print(int(time.time() * 1_000_000))')
-  $IN_BIN compile --path "$SRC" --target bytecode --entry main 2>&1 >/dev/null
+  $IN_BIN compile --path "$SRC" --out "$OUT" --target bytecode --entry main 2>&1 >/dev/null
   end=$(python3 -c 'import time; print(int(time.time() * 1_000_000))')
   elapsed=$((end - start))
   TIMINGS+=("$elapsed")
