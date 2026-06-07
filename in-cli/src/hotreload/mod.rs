@@ -8,7 +8,7 @@ mod daemon_impl;
 #[cfg(unix)]
 pub use daemon_impl::*;
 
-pub use generated_protocol::PatchType;
+pub use generated_protocol::{PatchType, ReloadDecision};
 
 #[cfg(not(unix))]
 use std::path::PathBuf;

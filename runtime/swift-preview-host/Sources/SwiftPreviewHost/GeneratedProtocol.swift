@@ -6,3 +6,13 @@ public enum GeneratedWirePatchType: String, Codable, Sendable {
     case modifier = "modifier"
     case fullModule = "full_module"
 }
+
+public enum GeneratedWireReloadDecision: String, Codable, Sendable {
+    case patchApplied = "patch_applied"
+    case restartRequired = "restart_required"
+    case compileFailed = "compile_failed"
+    case abiLayoutMismatch = "abi_layout_mismatch"
+    case abiSymbolMissing = "abi_symbol_missing"
+    case abiAllocError = "abi_alloc_error"
+    case abiPanic = "abi_panic"
+}
