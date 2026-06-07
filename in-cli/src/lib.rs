@@ -4,6 +4,7 @@
 pub mod preview_client;
 
 pub mod agent_mode;
+pub mod arena;
 pub mod boundary_ir;
 pub mod boundary_verify;
 pub mod bytecode;
