@@ -1,11 +1,13 @@
 //! Owned native code generation for Apple ARM64 (Mach-O executable subset).
 
 pub mod aarch64;
+pub mod coff;
 pub mod elf;
 mod lower;
 mod macho;
 pub mod target;
 
+pub use coff::{write_dll, CoffDll, COFF_WINDOWS_TRIPLE};
 pub use elf::{write_executable as write_elf_executable, ElfExecutable, ELF_LINUX_TRIPLE};
 pub use lower::{
     compile_native_artifact_for_host, compile_native_executable, compile_native_executable_for_host,
