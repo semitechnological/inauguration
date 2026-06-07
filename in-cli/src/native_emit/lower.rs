@@ -1,22 +1,46 @@
 //! Core IR → AArch64 lowering for the owned native subset.
 
+use crate::boundary_emit;
+use crate::boundary_ir::{
+    BoundaryField, BoundaryLayout, BoundaryModule, BoundaryOwnership, BoundaryRepr,
+    BoundarySymbol, BoundaryTransfer, IN_ABI_VERSION,
+};
 use crate::core_ir::{Decl, Expr, FloatVal, Stmt, Typ, UnifiedModule};
 use crate::inrt;
 use crate::inrt::{is_inrt_builtin, inrt_builtin_param_slots};
 #[cfg(test)]
 use crate::inrt::INRT_BUILTINS;
 use crate::native_emit::aarch64::{self, CodeEmitter, REG_FP};
-use crate::native_emit::macho::{self, MachOExecutable};
+use crate::native_emit::macho::{self, ExportSymbol, MachOImage, MachOLinkage};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub const TARGET_TRIPLE: &str = "aarch64-apple-darwin";
 
 const ENTRY_STUB_SIZE: u32 = 16;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NativeLinkage {
+    Executable,
+    Dylib,
+    StaticLib,
+}
+
+impl From<NativeLinkage> for MachOLinkage {
+    fn from(linkage: NativeLinkage) -> Self {
+        match linkage {
+            NativeLinkage::Executable => MachOLinkage::Executable,
+            NativeLinkage::Dylib => MachOLinkage::Dylib,
+            NativeLinkage::StaticLib => MachOLinkage::StaticLib,
+        }
+    }
+}
+
 #[derive(Debug)]
 struct LoweredModule {
     code: Vec<u8>,
+    entry_offset: Option<u32>,
+    exports: Vec<ExportSymbol>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,15 +69,7 @@ pub fn compile_native_executable(
     entry: &str,
     out_path: &Path,
 ) -> Result<(), String> {
-    let lowered = lower_module(module, entry)?;
-    let exe = MachOExecutable {
-        code: lowered.code,
-        entry_offset: 0,
-    };
-    let mut file_bytes = Vec::new();
-    macho::write_executable(&exe, &mut file_bytes);
-    std::fs::write(out_path, &file_bytes)
-        .map_err(|err| format!("write native executable `{}`: {err}", out_path.display()))
+    compile_native_artifact(module, "App", entry, NativeLinkage::Executable, out_path).map(|_| ())
 }
 
 pub fn compile_native_executable_for_host(
@@ -67,11 +83,72 @@ pub fn compile_native_executable_for_host(
     compile_native_executable(module, entry, out_path)
 }
 
+pub fn compile_native_artifact_for_host(
+    module: &UnifiedModule,
+    module_id: &str,
+    entry: &str,
+    linkage: NativeLinkage,
+    out_path: &Path,
+) -> Result<Option<PathBuf>, String> {
+    if !host_supports_native_subset() {
+        return Err("native-host-unsupported".to_string());
+    }
+    compile_native_artifact(module, module_id, entry, linkage, out_path)
+}
+
+pub fn compile_native_artifact(
+    module: &UnifiedModule,
+    module_id: &str,
+    entry: &str,
+    linkage: NativeLinkage,
+    out_path: &Path,
+) -> Result<Option<PathBuf>, String> {
+    let lowered = lower_module(module, entry, linkage)?;
+    let exports = match linkage {
+        NativeLinkage::Executable => Vec::new(),
+        NativeLinkage::Dylib | NativeLinkage::StaticLib => lowered.exports.clone(),
+    };
+    let image = MachOImage {
+        code: lowered.code,
+        entry_offset: lowered.entry_offset,
+        exports,
+    };
+    let install_name = out_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("libin.dylib");
+    let install = match linkage {
+        NativeLinkage::Dylib => format!("@rpath/{install_name}"),
+        NativeLinkage::Executable | NativeLinkage::StaticLib => install_name.to_string(),
+    };
+    let mut file_bytes = Vec::new();
+    macho::write_image(&image, linkage.into(), &install, &mut file_bytes);
+    std::fs::write(out_path, &file_bytes)
+        .map_err(|err| format!("write native artifact `{}`: {err}", out_path.display()))?;
+    let abi_path = match linkage {
+        NativeLinkage::Dylib | NativeLinkage::StaticLib => {
+            let boundary = boundary_from_module(module, module_id, &lowered.exports);
+            let abi_json = boundary_emit::emit_abi_manifest(&boundary);
+            let abi_path = out_path.with_extension("abi.json");
+            std::fs::write(&abi_path, abi_json).map_err(|err| {
+                format!("write abi manifest `{}`: {err}", abi_path.display())
+            })?;
+            Some(abi_path)
+        }
+        NativeLinkage::Executable => None,
+    };
+    Ok(abi_path)
+}
+
 pub fn host_supports_native_subset() -> bool {
     cfg!(all(target_os = "macos", target_arch = "aarch64"))
 }
 
-fn lower_module(module: &UnifiedModule, entry: &str) -> Result<LoweredModule, String> {
+fn lower_module(
+    module: &UnifiedModule,
+    entry: &str,
+    linkage: NativeLinkage,
+) -> Result<LoweredModule, String> {
     let functions = collect_functions(module)?;
     let structs = collect_structs(module);
     let strings = collect_strings(module);
@@ -84,7 +161,9 @@ fn lower_module(module: &UnifiedModule, entry: &str) -> Result<LoweredModule, St
     }
 
     let mut emitter = CodeEmitter::new();
-    emitter.bytes.resize(ENTRY_STUB_SIZE as usize, 0);
+    if linkage == NativeLinkage::Executable {
+        emitter.bytes.resize(ENTRY_STUB_SIZE as usize, 0);
+    }
     let mut function_offsets = HashMap::new();
     let mut pending_calls = Vec::new();
     let mut pending_inrt_calls = Vec::new();
@@ -132,18 +211,157 @@ fn lower_module(module: &UnifiedModule, entry: &str) -> Result<LoweredModule, St
         }
     }
 
-    let entry_fn_offset = *function_offsets
-        .get(entry)
-        .ok_or_else(|| format!("native-lower: missing entry function `{entry}`"))?;
-    let stub = match entry_return {
-        EntryReturn::IntLike => inrt::build_entry_stub(entry_fn_offset),
-        EntryReturn::VoidOrReference => inrt::build_entry_stub_with_forced_exit(entry_fn_offset, 0),
+    let entry_offset = if linkage == NativeLinkage::Executable {
+        let entry_fn_offset = *function_offsets
+            .get(entry)
+            .ok_or_else(|| format!("native-lower: missing entry function `{entry}`"))?;
+        let stub = match entry_return {
+            EntryReturn::IntLike => inrt::build_entry_stub(entry_fn_offset),
+            EntryReturn::VoidOrReference => {
+                inrt::build_entry_stub_with_forced_exit(entry_fn_offset, 0)
+            }
+        };
+        emitter.bytes[..ENTRY_STUB_SIZE as usize].copy_from_slice(&stub);
+        Some(0)
+    } else {
+        None
     };
-    emitter.bytes[..ENTRY_STUB_SIZE as usize].copy_from_slice(&stub);
+
+    let mut export_names: Vec<String> = function_offsets.keys().cloned().collect();
+    export_names.sort();
+    let exports = export_names
+        .into_iter()
+        .map(|name| ExportSymbol {
+            name: name.clone(),
+            offset: *function_offsets.get(&name).expect("export offset"),
+        })
+        .collect();
 
     Ok(LoweredModule {
         code: emitter.bytes,
+        entry_offset,
+        exports,
     })
+}
+
+fn boundary_from_module(
+    module: &UnifiedModule,
+    module_id: &str,
+    exports: &[ExportSymbol],
+) -> BoundaryModule {
+    let functions = module
+        .decls
+        .iter()
+        .filter_map(|decl| match decl {
+            Decl::Function {
+                name, params, ret, ..
+            } => Some((name.clone(), (params.clone(), ret.clone()))),
+            _ => None,
+        })
+        .collect::<HashMap<String, (Vec<(String, Typ)>, Typ)>>();
+    let layouts = module
+        .decls
+        .iter()
+        .filter_map(|decl| match decl {
+            Decl::Struct { name, fields, .. } => Some(boundary_struct_layout(name, fields)),
+            _ => None,
+        })
+        .collect();
+    let symbols = exports
+        .iter()
+        .filter_map(|export| {
+            let (params, ret) = functions.get(&export.name)?;
+            Some(BoundarySymbol {
+                name: export.name.clone(),
+                signature_hash: symbol_signature_hash(&export.name, params, ret),
+                ownership: BoundaryOwnership::ReturnsOwnedHandle,
+                calling_convention: "c".to_string(),
+            })
+        })
+        .collect();
+    let effective_module_id = module.effective_module_id(module_id);
+    BoundaryModule {
+        abi_version: IN_ABI_VERSION,
+        module: effective_module_id.to_string(),
+        layouts,
+        symbols,
+        allocators: vec![],
+        layout_hash: String::new(),
+    }
+    .with_layout_hash()
+}
+
+fn boundary_struct_layout(name: &str, fields: &[(String, Typ)]) -> BoundaryLayout {
+    let mut offset = 0u64;
+    let mut boundary_fields = Vec::new();
+    for (field_name, field_ty) in fields {
+        let align = boundary_field_align(field_ty);
+        offset = offset.next_multiple_of(align);
+        boundary_fields.push(BoundaryField {
+            name: field_name.clone(),
+            offset,
+            typ: boundary_typ_name(field_ty),
+            transfer: Some(BoundaryTransfer::Copy),
+        });
+        offset += boundary_field_size(field_ty);
+    }
+    let align = 8;
+    let size = offset.next_multiple_of(align);
+    BoundaryLayout {
+        name: name.to_string(),
+        kind: "struct".to_string(),
+        repr: Some(BoundaryRepr::C),
+        size,
+        align,
+        stride: size,
+        fields: boundary_fields,
+    }
+}
+
+fn boundary_typ_name(typ: &Typ) -> String {
+    match typ {
+        Typ::Int => "i64".to_string(),
+        Typ::Bool => "bool".to_string(),
+        Typ::String => "InSliceU8".to_string(),
+        Typ::Float => "f64".to_string(),
+        Typ::Named(name) => name.clone(),
+        Typ::Array(elem) => format!("[{}]", boundary_typ_name(elem)),
+        Typ::Generic(name) => name.clone(),
+        Typ::Void => "void".to_string(),
+    }
+}
+
+fn boundary_field_size(typ: &Typ) -> u64 {
+    match typ {
+        Typ::Int | Typ::Bool | Typ::Float => 8,
+        Typ::String => 16,
+        Typ::Named(_) => 8,
+        Typ::Array(_) => 16,
+        Typ::Generic(_) => 8,
+        Typ::Void => 0,
+    }
+}
+
+fn boundary_field_align(typ: &Typ) -> u64 {
+    match typ {
+        Typ::Int | Typ::Bool | Typ::Float | Typ::Named(_) | Typ::Generic(_) => 8,
+        Typ::String | Typ::Array(_) => 8,
+        Typ::Void => 1,
+    }
+}
+
+fn symbol_signature_hash(name: &str, params: &[(String, Typ)], ret: &Typ) -> String {
+    let payload = format!(
+        "{}({}):{}",
+        name,
+        params
+            .iter()
+            .map(|(param, typ)| format!("{}:{}", param, boundary_typ_name(typ)))
+            .collect::<Vec<_>>()
+            .join(","),
+        boundary_typ_name(ret)
+    );
+    format!("blake3-{}", blake3::hash(payload.as_bytes()).to_hex())
 }
 
 fn collect_functions(module: &UnifiedModule) -> Result<HashMap<String, FunctionInfo>, String> {
@@ -2392,7 +2610,7 @@ mod tests {
     #[test]
     fn lowers_answer_literal_module_to_bytes() {
         let module = answer_module();
-        let lowered = lower_module(&module, "answer").expect("lower");
+        let lowered = lower_module(&module, "answer", NativeLinkage::Executable).expect("lower");
         assert!(lowered.code.len() > ENTRY_STUB_SIZE as usize);
         assert_eq!(&lowered.code[0..4], &inrt::build_entry_stub(16)[0..4]);
     }
@@ -2406,6 +2624,43 @@ mod tests {
             result.expect("compile on host");
             assert!(path.exists());
             let _ = std::fs::remove_file(path);
+        } else {
+            assert_eq!(result.unwrap_err(), "native-host-unsupported");
+        }
+    }
+
+    #[test]
+    fn dylib_lowering_tracks_export_symbols() {
+        let module = answer_module();
+        let lowered = lower_module(&module, "answer", NativeLinkage::Dylib).expect("lower");
+        assert_eq!(lowered.entry_offset, None);
+        assert_eq!(lowered.exports.len(), 1);
+        assert_eq!(lowered.exports[0].name, "answer");
+        assert_eq!(lowered.exports[0].offset, 0);
+    }
+
+    #[test]
+    fn dylib_compile_emits_abi_json() {
+        let module = answer_module();
+        let path = temp_executable("dylib");
+        let dylib_path = path.with_extension("dylib");
+        let result = compile_native_artifact_for_host(
+            &module,
+            "App",
+            "answer",
+            NativeLinkage::Dylib,
+            &dylib_path,
+        );
+        if host_supports_native_subset() {
+            let abi_path = result.expect("compile dylib on host");
+            let abi_path = abi_path.expect("abi path");
+            assert!(dylib_path.exists());
+            assert!(abi_path.exists());
+            let manifest = std::fs::read_to_string(&abi_path).expect("read abi");
+            assert!(manifest.contains("\"answer\""));
+            assert!(manifest.contains("\"layout_hash\""));
+            let _ = std::fs::remove_file(dylib_path);
+            let _ = std::fs::remove_file(abi_path);
         } else {
             assert_eq!(result.unwrap_err(), "native-host-unsupported");
         }
@@ -2439,13 +2694,13 @@ mod tests {
             ],
         };
 
-        lower_module(&module, "main").expect("lower");
+        lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
     }
 
     #[test]
     fn lowers_integer_division_to_aarch64_sdiv() {
         let module = return_binary_module("/", 18, 3);
-        let lowered = lower_module(&module, "main").expect("lower");
+        let lowered = lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
 
         assert!(code_contains_insn(&lowered.code, 0x9AC1_0C00));
     }
@@ -2453,7 +2708,7 @@ mod tests {
     #[test]
     fn lowers_integer_modulo_to_aarch64_sdiv_msub() {
         let module = return_binary_module("%", 20, 6);
-        let lowered = lower_module(&module, "main").expect("lower");
+        let lowered = lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
 
         assert!(code_contains_insn(&lowered.code, 0x9AC1_0C02));
         assert!(code_contains_insn(&lowered.code, 0x9B01_8040));
@@ -2462,7 +2717,7 @@ mod tests {
     #[test]
     fn lowers_integer_division_by_zero_to_failure_return() {
         let module = return_binary_module("/", 18, 0);
-        let lowered = lower_module(&module, "main").expect("lower");
+        let lowered = lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
 
         assert_contains_divide_failure_path(&lowered.code, 12);
     }
@@ -2470,7 +2725,7 @@ mod tests {
     #[test]
     fn lowers_integer_modulo_by_zero_to_failure_return() {
         let module = return_binary_module("%", 18, 0);
-        let lowered = lower_module(&module, "main").expect("lower");
+        let lowered = lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
 
         assert_contains_divide_failure_path(&lowered.code, 16);
     }
@@ -2488,7 +2743,7 @@ mod tests {
             }],
         };
 
-        lower_module(&module, "main").expect("lower");
+        lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
     }
 
     #[test]
@@ -2519,7 +2774,7 @@ mod tests {
             ],
         };
 
-        lower_module(&module, "neg").expect("lower");
+        lower_module(&module, "neg", NativeLinkage::Executable).expect("lower");
     }
 
     #[test]
@@ -2537,7 +2792,7 @@ fn main() -> Int {
         )
         .expect("parse");
 
-        lower_module(&module, "main").expect("lower");
+        lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
     }
 
     #[test]
@@ -2557,7 +2812,7 @@ fn main() -> Int {
         )
         .expect("parse");
 
-        lower_module(&module, "main").expect("lower");
+        lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
     }
 
     #[test]
@@ -2581,7 +2836,7 @@ fn main() -> Int {
         )
         .expect("parse");
 
-        lower_module(&module, "main").expect("lower");
+        lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
     }
 
     #[test]
@@ -2605,7 +2860,7 @@ fn main() -> Int {
         )
         .expect("parse");
 
-        lower_module(&module, "main").expect("lower");
+        lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
     }
 
     #[test]
@@ -2644,7 +2899,7 @@ fn main() -> Int {
             ],
         };
 
-        lower_module(&module, "main").expect("lower");
+        lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
     }
 
     #[test]
@@ -2660,7 +2915,7 @@ fn main() -> Int {
         )
         .expect("parse");
 
-        lower_module(&module, "main").expect("lower");
+        lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
     }
 
     #[test]
@@ -2676,7 +2931,7 @@ fn main() -> Int {
         )
         .expect("parse");
 
-        lower_module(&module, "main").expect("lower");
+        lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
     }
 
     #[test]
@@ -2695,7 +2950,7 @@ fn main() -> Int {
         )
         .expect("parse");
 
-        lower_module(&module, "main").expect("lower");
+        lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
     }
 
     #[test]
@@ -2715,7 +2970,7 @@ fn main() -> Int {
         )
         .expect("parse");
 
-        lower_module(&module, "main").expect("lower");
+        lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
     }
 
     #[test]
@@ -2734,7 +2989,7 @@ fn main() -> Int {
         )
         .expect("parse");
 
-        let lowered = lower_module(&module, "main").expect("lower");
+        let lowered = lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
         let values: Vec<i64> = lowered
             .code
             .chunks_exact(8)
@@ -2768,7 +3023,7 @@ fn main() -> Int {
         )
         .expect("parse");
 
-        lower_module(&module, "main").expect("lower");
+        lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
     }
 
     #[test]
@@ -2788,7 +3043,7 @@ fn main() -> Int {
             }],
         };
 
-        lower_module(&module, "main").expect("lower");
+        lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
     }
 
     #[test]
@@ -2812,7 +3067,7 @@ fn main() -> Int {
             }],
         };
 
-        lower_module(&module, "main").expect("lower");
+        lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
     }
 
     #[test]
@@ -2847,7 +3102,7 @@ fn main() -> Int {
             }],
         };
 
-        lower_module(&module, "main").expect("lower");
+        lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
     }
 
     #[test]
@@ -2879,7 +3134,7 @@ fn main() -> Int {
             }],
         };
 
-        lower_module(&module, "main").expect("lower");
+        lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
     }
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -3816,7 +4071,7 @@ fn main() -> Int {
                 type_params: vec![],
             }],
         };
-        match lower_module(&module, "main") {
+        match lower_module(&module, "main", NativeLinkage::Executable) {
             Ok(_) => panic!("expected lowering failure"),
             Err(err) => assert!(err.contains("array return type mismatch")),
         }
@@ -3837,7 +4092,7 @@ fn main() -> Int {
                 type_params: vec![],
             }],
         };
-        match lower_module(&module, "main") {
+        match lower_module(&module, "main", NativeLinkage::Executable) {
             Ok(_) => panic!("expected lowering failure"),
             Err(err) => assert!(err.contains("native-array-nested-unsupported")),
         }
@@ -3872,7 +4127,7 @@ fn main() -> Int {
                 },
             ],
         };
-        match lower_module(&module, "main") {
+        match lower_module(&module, "main", NativeLinkage::Executable) {
             Ok(_) => panic!("expected lowering failure"),
             Err(err) => assert!(err.contains("native-array-aggregate-unsupported")),
         }
@@ -3894,7 +4149,7 @@ fn main() -> Int {
 
     #[test] fn inrt_call_emits_bl_placeholder() {
         let m = build_inrt_call_module("__inrt_str_len", vec![Expr::StringLit("x".into())], Typ::Int);
-        let lowered = lower_module(&m, "main").expect("lower");
+        let lowered = lower_module(&m, "main", NativeLinkage::Executable).expect("lower");
         assert!(lowered.code.len() > ENTRY_STUB_SIZE as usize + 4);
         let words: Vec<u32> = lowered.code.chunks_exact(4).filter_map(|b| b.try_into().ok()).map(u32::from_le_bytes).collect();
         let has_bl = words.iter().any(|w| (*w >> 26) == 0b100101);
@@ -3903,52 +4158,52 @@ fn main() -> Int {
 
     #[test] fn lowers_array_load_on_aarch64() {
         let m = build_inrt_call_module("__inrt_array_load", vec![Expr::IntLit(0x1000), Expr::IntLit(2)], Typ::Int);
-        let lowered = lower_module(&m, "main").expect("lower");
+        let lowered = lower_module(&m, "main", NativeLinkage::Executable).expect("lower");
         assert!(!lowered.code.is_empty());
     }
 
     #[test] fn lowers_array_store_on_aarch64() {
         let m = build_inrt_call_module("__inrt_array_store", vec![Expr::IntLit(0x2000), Expr::IntLit(1), Expr::IntLit(42)], Typ::Int);
-        lower_module(&m, "main").expect("lower");
+        lower_module(&m, "main", NativeLinkage::Executable).expect("lower");
     }
 
     #[test] fn lowers_string_concat_on_aarch64() {
         let m = build_inrt_call_module("__inrt_str_concat", vec![Expr::StringLit("hello".into()), Expr::StringLit("world".into())], Typ::String);
-        let lowered = lower_module(&m, "main").expect("lower");
+        let lowered = lower_module(&m, "main", NativeLinkage::Executable).expect("lower");
         assert!(lowered.code.len() > ENTRY_STUB_SIZE as usize);
     }
 
     #[test] fn lowers_str_len_on_aarch64() {
         let m = build_inrt_call_module("__inrt_str_len", vec![Expr::StringLit("test".into())], Typ::Int);
-        let lowered = lower_module(&m, "main").expect("lower");
+        let lowered = lower_module(&m, "main", NativeLinkage::Executable).expect("lower");
         assert!(lowered.code.len() > ENTRY_STUB_SIZE as usize);
     }
 
     #[test] fn lowers_array_len_on_aarch64() {
         let m = build_inrt_call_module("__inrt_array_len", vec![Expr::IntLit(0x3000)], Typ::Int);
-        lower_module(&m, "main").expect("lower");
+        lower_module(&m, "main", NativeLinkage::Executable).expect("lower");
     }
 
     #[test] fn lowers_array_push_on_aarch64() {
         let m = build_inrt_call_module("__inrt_array_push", vec![Expr::IntLit(0x4000), Expr::IntLit(7)], Typ::Int);
-        lower_module(&m, "main").expect("lower");
+        lower_module(&m, "main", NativeLinkage::Executable).expect("lower");
     }
 
     #[test] fn lowers_str_substr_on_aarch64() {
         let m = build_inrt_call_module("__inrt_str_substr", vec![Expr::StringLit("abcdef".into()), Expr::IntLit(2), Expr::IntLit(3)], Typ::String);
-        lower_module(&m, "main").expect("lower");
+        lower_module(&m, "main", NativeLinkage::Executable).expect("lower");
     }
 
     #[test] fn inrt_call_emits_runtime_blob_at_end() {
         let m = build_inrt_call_module("__inrt_str_len", vec![Expr::StringLit("hello".into())], Typ::Int);
-        let lowered = lower_module(&m, "main").expect("lower");
+        let lowered = lower_module(&m, "main", NativeLinkage::Executable).expect("lower");
         let (blob, _) = inrt::build_runtime_blob();
         assert!(lowered.code.len() > blob.len() + ENTRY_STUB_SIZE as usize);
     }
 
     #[test] fn rejects_inrt_call_with_wrong_arity() {
         let m = build_inrt_call_module("__inrt_str_len", vec![Expr::IntLit(1), Expr::IntLit(2)], Typ::Int);
-        assert!(lower_module(&m, "main").unwrap_err().contains("arity mismatch"));
+        assert!(lower_module(&m, "main", NativeLinkage::Executable).unwrap_err().contains("arity mismatch"));
     }
 
     #[test] fn lowers_inrt_call_with_ident_arg() {
@@ -3957,7 +4212,7 @@ fn main() -> Int {
             body: vec![Stmt::Return(Some(Expr::Call { callee: Box::new(Expr::Ident("__inrt_str_len".to_string())), args: vec![Expr::Ident("s".into())] }))],
             type_params: vec![],
         }]};
-        lower_module(&m, "main").expect("lower");
+        lower_module(&m, "main", NativeLinkage::Executable).expect("lower");
     }
 
     #[test] fn all_inrt_builtins_can_be_called() {
@@ -3965,7 +4220,7 @@ fn main() -> Int {
             let s = inrt::inrt_builtin_param_slots(b).unwrap_or(0);
             let a: Vec<Expr> = (0..s).map(|i| Expr::IntLit(i as i64)).collect();
             let m = build_inrt_call_module(b, a, Typ::Int);
-            assert!(lower_module(&m, "main").is_ok(), "failed for {b}");
+            assert!(lower_module(&m, "main", NativeLinkage::Executable).is_ok(), "failed for {b}");
         }
     }
 
@@ -3984,7 +4239,7 @@ fn main() -> Int {
                 type_params: vec![],
             }],
         };
-        let lowered = lower_module(&module, "main").expect("throw should lower");
+        let lowered = lower_module(&module, "main", NativeLinkage::Executable).expect("throw should lower");
         assert!(code_contains_insns(
             &lowered.code,
             &[aarch64::load_i64(0, 42)[0]],
@@ -4006,7 +4261,7 @@ fn main() -> Int {
                 type_params: vec![],
             }],
         };
-        let lowered = lower_module(&module, "main").expect("try should lower");
+        let lowered = lower_module(&module, "main", NativeLinkage::Executable).expect("try should lower");
         assert!(code_contains_insns(
             &lowered.code,
             &[aarch64::load_i64(0, 1)[0]],
@@ -4031,7 +4286,7 @@ fn main() -> Int {
                 type_params: vec![],
             }],
         };
-        let lowered = lower_module(&module, "main").expect("try/catch with throw should lower");
+        let lowered = lower_module(&module, "main", NativeLinkage::Executable).expect("try/catch with throw should lower");
         assert!(code_contains_insns(
             &lowered.code,
             &[aarch64::load_i64(0, 42)[0], aarch64::load_i64(0, 1)[0]],
@@ -4067,14 +4322,14 @@ fn main() -> Int {
                 type_params: vec![],
             }],
         };
-        let lowered = lower_module(&module, "main").expect("float should lower");
+        let lowered = lower_module(&module, "main", NativeLinkage::Executable).expect("float should lower");
         assert!(lowered.code.len() > ENTRY_STUB_SIZE as usize);
     }
 
     #[test]
     fn lowers_float_add_instruction() {
         let module = return_float_binary_module("+", 3.0, 4.0);
-        let lowered = lower_module(&module, "main").expect("float add should lower");
+        let lowered = lower_module(&module, "main", NativeLinkage::Executable).expect("float add should lower");
         assert!(code_contains_insn(&lowered.code, aarch64::fadd_s(0, 0, 1)));
         assert!(code_contains_insn(&lowered.code, aarch64::fmov_from_gp(0, 0)));
         assert!(code_contains_insn(&lowered.code, aarch64::fmov_to_gp(0, 0)));
@@ -4083,21 +4338,21 @@ fn main() -> Int {
     #[test]
     fn lowers_float_mul_instruction() {
         let module = return_float_binary_module("*", 2.0, 3.0);
-        let lowered = lower_module(&module, "main").expect("float mul should lower");
+        let lowered = lower_module(&module, "main", NativeLinkage::Executable).expect("float mul should lower");
         assert!(code_contains_insn(&lowered.code, aarch64::fmul_s(0, 0, 1)));
     }
 
     #[test]
     fn lowers_float_sub_instruction() {
         let module = return_float_binary_module("-", 5.0, 2.0);
-        let lowered = lower_module(&module, "main").expect("float sub should lower");
+        let lowered = lower_module(&module, "main", NativeLinkage::Executable).expect("float sub should lower");
         assert!(code_contains_insn(&lowered.code, aarch64::fsub_s(0, 0, 1)));
     }
 
     #[test]
     fn lowers_float_div_instruction() {
         let module = return_float_binary_module("/", 10.0, 2.0);
-        let lowered = lower_module(&module, "main").expect("float div should lower");
+        let lowered = lower_module(&module, "main", NativeLinkage::Executable).expect("float div should lower");
         assert!(code_contains_insn(&lowered.code, aarch64::fdiv_s(0, 0, 1)));
     }
 }

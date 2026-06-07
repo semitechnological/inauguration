@@ -4,6 +4,10 @@ use std::path::{Path, PathBuf};
 
 const CACHE_SCHEMA_VERSION: u32 = 1;
 
+fn default_cached_linkage() -> String {
+    "executable".to_string()
+}
+
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct CachedOwnedCompileReport {
     schema_version: u32,
@@ -16,6 +20,8 @@ struct CachedOwnedCompileReport {
     module_identity: Option<crate::core_ir::ModuleIdentityReport>,
     target: String,
     entry: Option<String>,
+    #[serde(default = "default_cached_linkage")]
+    linkage: String,
     frontend_level: String,
     semantic_level: String,
     backend_level: String,
@@ -26,6 +32,7 @@ struct CachedOwnedCompileReport {
     success: bool,
     artifact_path: Option<String>,
     executable_path: Option<String>,
+    abi_path: Option<String>,
     parsed_function_count: usize,
     typed_function_count: usize,
     call_edge_count: usize,
@@ -49,6 +56,7 @@ impl From<&OwnedCompileReport> for CachedOwnedCompileReport {
             package_name: report.package_name.clone(),
             target: report.target.clone(),
             entry: report.entry.clone(),
+            linkage: report.linkage.clone(),
             frontend_level: report.frontend_level.to_string(),
             semantic_level: report.semantic_level.to_string(),
             backend_level: report.backend_level.to_string(),
@@ -59,6 +67,7 @@ impl From<&OwnedCompileReport> for CachedOwnedCompileReport {
             success: report.success,
             artifact_path: report.artifact_path.clone(),
             executable_path: report.executable_path.clone(),
+            abi_path: report.abi_path.clone(),
             parsed_function_count: report.parsed_function_count,
             typed_function_count: report.typed_function_count,
             call_edge_count: report.call_edge_count,
@@ -84,6 +93,7 @@ impl From<CachedOwnedCompileReport> for OwnedCompileReport {
             package_name: cached.package_name,
             target: cached.target,
             entry: cached.entry,
+            linkage: cached.linkage,
             frontend_level: leak_static(cached.frontend_level),
             semantic_level: leak_static(cached.semantic_level),
             backend_level: leak_static(cached.backend_level),
@@ -94,6 +104,7 @@ impl From<CachedOwnedCompileReport> for OwnedCompileReport {
             success: cached.success,
             artifact_path: cached.artifact_path,
             executable_path: cached.executable_path,
+            abi_path: cached.abi_path,
             parsed_function_count: cached.parsed_function_count,
             typed_function_count: cached.typed_function_count,
             call_edge_count: cached.call_edge_count,
@@ -241,6 +252,7 @@ mod tests {
             }),
             target: "bytecode".to_string(),
             entry: None,
+            linkage: "executable".to_string(),
             frontend_level: "core-ir-direct",
             semantic_level: "typed-subset",
             backend_level: "bytecode-vm-subset",
@@ -251,6 +263,7 @@ mod tests {
             success: true,
             artifact_path: None,
             executable_path: None,
+            abi_path: None,
             parsed_function_count: 1,
             typed_function_count: 1,
             call_edge_count: 0,
