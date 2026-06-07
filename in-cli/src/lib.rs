@@ -30,6 +30,7 @@ pub mod in_lang_parse;
 pub mod inrt;
 pub mod language_support;
 pub mod lower_core;
+pub mod mobile;
 pub mod module_resolver;
 pub mod native_backend;
 pub mod native_emit;
