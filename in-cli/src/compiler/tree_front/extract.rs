@@ -2,10 +2,15 @@
 //! scalar body lowering where wired.
 
 use super::ruby::extract_ruby;
+use crate::boundary_ir::{
+    BoundaryField, BoundaryLayout, BoundaryModule, BoundaryOwnership, BoundaryRepr, BoundarySymbol,
+    BoundaryTransfer, CompileArtifact, IN_ABI_VERSION,
+};
+use crate::boundary_verify::boundary_ir_verify;
 use crate::core_ir::{Decl, MethodSig, UnifiedModule, Visibility};
 use crate::core_ir::{CatchArm, Expr, MatchArm, Stmt, Typ};
 use crate::parser_registry::ParserId;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use tree_sitter::{Language, Node, Parser};
 
@@ -148,6 +153,43 @@ fn parse_lang(
         );
     }
     Ok(UnifiedModule::new(decls))
+}
+
+pub fn parse_zig_artifact(path: &Path) -> Result<CompileArtifact, String> {
+    let src = std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let module_id = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("zig")
+        .to_string();
+    parse_zig_artifact_source(&src, &module_id)
+}
+
+pub fn parse_zig_artifact_source(src: &str, module_id: &str) -> Result<CompileArtifact, String> {
+    let mut parser = Parser::new();
+    parser
+        .set_language(&tree_sitter_zig::LANGUAGE.into())
+        .map_err(|e| format!("Tree-sitter grammar load failed: {e}"))?;
+    let tree = parser
+        .parse(src, None)
+        .ok_or_else(|| "Tree-sitter parse returned None".to_string())?;
+    let root = tree.root_node();
+    if root.has_error() {
+        return Err("Tree-sitter parse tree contains syntax errors".into());
+    }
+    let decls = dedup_fns(extract_zig(src.as_bytes(), root)?);
+    if decls.is_empty() {
+        return Err(
+            "parsed successfully but extracted zero functions — file may contain only types/data"
+                .into(),
+        );
+    }
+    let semantic = UnifiedModule::new(decls);
+    let boundary = extract_zig_boundary_module(src.as_bytes(), root, module_id);
+    Ok(match boundary {
+        Some(boundary) => CompileArtifact::with_boundary(semantic, boundary),
+        None => CompileArtifact::from_semantic(semantic),
+    })
 }
 
 fn decl_fn(name: String, params: Vec<(String, Typ)>, ret: Typ) -> Decl {
@@ -3740,6 +3782,301 @@ fn rust_pattern_name<'a>(src: &[u8], pat: Node<'a>) -> Option<String> {
     Some(node_txt(src, id).trim().to_string())
 }
 
+#[derive(Clone)]
+struct ZigAbiType {
+    boundary_type: String,
+    size: u64,
+    align: u64,
+    transfer: Option<BoundaryTransfer>,
+}
+
+fn zig_struct_repr(src: &[u8], n: Node<'_>) -> Option<BoundaryRepr> {
+    let text = node_txt(src, n).trim_start();
+    if text.starts_with("packed struct") {
+        Some(BoundaryRepr::Packed)
+    } else if text.starts_with("extern struct") {
+        Some(BoundaryRepr::C)
+    } else {
+        None
+    }
+}
+
+fn zig_boundary_type_name(src: &[u8], n: Node<'_>) -> String {
+    node_txt(src, n).trim().to_string()
+}
+
+fn zig_boundary_container_fields(src: &[u8], struct_node: Node<'_>) -> Option<Vec<(String, String)>> {
+    let mut fields = Vec::new();
+    let mut field_nodes = Vec::new();
+    collect_kinds(struct_node, &["container_field"], &mut field_nodes);
+    for field in field_nodes {
+        let name_n = field
+            .child_by_field_name("name")
+            .or_else(|| first_named(field, "identifier"))?;
+        let name = node_txt(src, name_n).trim().to_string();
+        let type_n = field.child_by_field_name("type").or_else(|| {
+            let mut w = field.walk();
+            let mut last = None;
+            for ch in field.named_children(&mut w) {
+                if ch != name_n {
+                    last = Some(ch);
+                }
+            }
+            last
+        })?;
+        fields.push((name, zig_boundary_type_name(src, type_n)));
+    }
+    if fields.is_empty() {
+        None
+    } else {
+        Some(fields)
+    }
+}
+
+fn zig_extern_struct_spec(
+    src: &[u8],
+    decl: Node<'_>,
+) -> Option<(String, BoundaryRepr, Vec<(String, String)>)> {
+    let struct_node = first_named(decl, "struct_declaration")?;
+    let repr = zig_struct_repr(src, struct_node)?;
+    let name_n = first_named(decl, "identifier")?;
+    let name = node_txt(src, name_n).trim().to_string();
+    let fields = zig_boundary_container_fields(src, struct_node)?;
+    Some((name, repr, fields))
+}
+
+fn zig_scalar_abi(boundary_type: &str, size: u64, align: u64) -> ZigAbiType {
+    ZigAbiType {
+        boundary_type: boundary_type.to_string(),
+        size,
+        align,
+        transfer: Some(BoundaryTransfer::Copy),
+    }
+}
+
+fn zig_align_up(offset: u64, align: u64) -> u64 {
+    if align == 0 {
+        return offset;
+    }
+    let mask = align - 1;
+    (offset + mask) & !mask
+}
+
+fn zig_abi_type_for(
+    type_name: &str,
+    layout_specs: &HashMap<String, (BoundaryRepr, Vec<(String, String)>)>,
+    packed: bool,
+) -> Option<ZigAbiType> {
+    if type_name.contains('*') || type_name.starts_with('[') {
+        return Some(zig_scalar_abi("u64", 8, 8));
+    }
+    match type_name {
+        "i8" => Some(zig_scalar_abi("i8", 1, 1)),
+        "u8" => Some(zig_scalar_abi("u8", 1, 1)),
+        "i16" => Some(zig_scalar_abi("i16", 2, 2)),
+        "u16" => Some(zig_scalar_abi("u16", 2, 2)),
+        "i32" => Some(zig_scalar_abi("i32", 4, 4)),
+        "u32" => Some(zig_scalar_abi("u32", 4, 4)),
+        "f16" => Some(zig_scalar_abi("float", 2, 2)),
+        "f32" => Some(zig_scalar_abi("float", 4, 4)),
+        "f64" => Some(zig_scalar_abi("f64", 8, 8)),
+        "i64" => Some(zig_scalar_abi("i64", 8, 8)),
+        "u64" => Some(zig_scalar_abi("u64", 8, 8)),
+        "isize" => Some(zig_scalar_abi("i64", 8, 8)),
+        "usize" => Some(zig_scalar_abi("u64", 8, 8)),
+        "bool" => Some(zig_scalar_abi("bool", 1, 1)),
+        "void" => Some(zig_scalar_abi("void", 0, 1)),
+        "InSliceU8" => Some(ZigAbiType {
+            boundary_type: "InSliceU8".to_string(),
+            size: 16,
+            align: 8,
+            transfer: Some(BoundaryTransfer::Borrow),
+        }),
+        name => {
+            if let Some((repr, fields)) = layout_specs.get(name) {
+                let packed_layout = packed || matches!(repr, BoundaryRepr::Packed);
+                let layout = zig_compute_struct_layout(name, repr.clone(), fields, layout_specs)?;
+                Some(ZigAbiType {
+                    boundary_type: name.to_string(),
+                    size: layout.size,
+                    align: if packed_layout { 1 } else { layout.align },
+                    transfer: Some(BoundaryTransfer::Copy),
+                })
+            } else {
+                None
+            }
+        }
+    }
+}
+
+fn zig_compute_struct_layout(
+    name: &str,
+    repr: BoundaryRepr,
+    fields: &[(String, String)],
+    layout_specs: &HashMap<String, (BoundaryRepr, Vec<(String, String)>)>,
+) -> Option<BoundaryLayout> {
+    let packed = matches!(repr, BoundaryRepr::Packed);
+    let mut offset = 0u64;
+    let mut max_align = 1u64;
+    let mut boundary_fields = Vec::new();
+
+    for (field_name, field_ty) in fields {
+        let abi = zig_abi_type_for(field_ty, layout_specs, packed)?;
+        let field_align = if packed { 1 } else { abi.align };
+        offset = zig_align_up(offset, field_align);
+        boundary_fields.push(BoundaryField {
+            name: field_name.clone(),
+            offset,
+            typ: abi.boundary_type.clone(),
+            transfer: abi.transfer,
+        });
+        offset = offset.saturating_add(abi.size);
+        max_align = max_align.max(field_align);
+    }
+
+    let struct_align = if packed { 1 } else { max_align };
+    let size = if offset == 0 {
+        struct_align
+    } else {
+        zig_align_up(offset, struct_align)
+    };
+
+    Some(BoundaryLayout {
+        name: name.to_string(),
+        kind: "struct".to_string(),
+        repr: Some(repr),
+        size,
+        align: struct_align,
+        stride: size,
+        fields: boundary_fields,
+    })
+}
+
+fn zig_fn_is_export(src: &[u8], fun: Node<'_>) -> bool {
+    node_txt(src, fun).contains("export fn")
+}
+
+fn zig_fn_param_type_names(src: &[u8], fun: Node<'_>) -> Vec<String> {
+    let Some(params) = named_descendant(fun, "parameters") else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let mut w = params.walk();
+    for ch in params.named_children(&mut w) {
+        if ch.kind() != "parameter" {
+            continue;
+        }
+        let Some(id) = first_named(ch, "identifier") else {
+            continue;
+        };
+        if let Some(ty) = last_named(ch).filter(|t| *t != id) {
+            out.push(zig_boundary_type_name(src, ty));
+        }
+    }
+    out
+}
+
+fn zig_fn_return_type_name(src: &[u8], fun: Node<'_>) -> String {
+    let Some(params) = named_descendant(fun, "parameters") else {
+        return "void".to_string();
+    };
+    let mut after_params = false;
+    let mut w = fun.walk();
+    for ch in fun.named_children(&mut w) {
+        if ch == params {
+            after_params = true;
+            continue;
+        }
+        if after_params && ch.kind() != "block" {
+            return zig_boundary_type_name(src, ch);
+        }
+        if ch.kind() == "block" {
+            break;
+        }
+    }
+    "void".to_string()
+}
+
+fn zig_boundary_symbol_from_fn(
+    src: &[u8],
+    fun: Node<'_>,
+    layout_specs: &HashMap<String, (BoundaryRepr, Vec<(String, String)>)>,
+) -> Option<BoundarySymbol> {
+    if !zig_fn_is_export(src, fun) {
+        return None;
+    }
+    let name_n = first_named(fun, "identifier")?;
+    let name = node_txt(src, name_n).trim().to_string();
+    let mut parts = vec![name.clone()];
+    for ty in zig_fn_param_type_names(src, fun) {
+        parts.push(
+            zig_abi_type_for(&ty, layout_specs, false)
+                .map(|abi| abi.boundary_type)
+                .unwrap_or(ty),
+        );
+    }
+    parts.push(
+        zig_abi_type_for(&zig_fn_return_type_name(src, fun), layout_specs, false)
+            .map(|abi| abi.boundary_type)
+            .unwrap_or_else(|| zig_fn_return_type_name(src, fun)),
+    );
+    let canonical = parts.join(";");
+    let hash = blake3::hash(canonical.as_bytes());
+    Some(BoundarySymbol {
+        name,
+        signature_hash: format!("blake3-{}", hash.to_hex()),
+        ownership: BoundaryOwnership::ReturnsOwnedHandle,
+        calling_convention: "c".to_string(),
+    })
+}
+
+fn extract_zig_boundary_module(src: &[u8], root: Node<'_>, module_id: &str) -> Option<BoundaryModule> {
+    let mut layouts = Vec::new();
+    let mut symbols = Vec::new();
+    let mut layout_specs: HashMap<String, (BoundaryRepr, Vec<(String, String)>)> = HashMap::new();
+
+    let mut var_decls = Vec::new();
+    collect_kinds(root, &["variable_declaration"], &mut var_decls);
+    for decl in var_decls {
+        if let Some((name, repr, fields)) = zig_extern_struct_spec(src, decl) {
+            layout_specs.insert(name, (repr, fields));
+        }
+    }
+
+    for (name, (repr, fields)) in &layout_specs {
+        if let Some(layout) = zig_compute_struct_layout(name, repr.clone(), fields, &layout_specs) {
+            layouts.push(layout);
+        }
+    }
+
+    let mut fun_nodes = Vec::new();
+    collect_kinds(root, &["function_declaration"], &mut fun_nodes);
+    for fun in fun_nodes {
+        if let Some(symbol) = zig_boundary_symbol_from_fn(src, fun, &layout_specs) {
+            symbols.push(symbol);
+        }
+    }
+
+    if layouts.is_empty() && symbols.is_empty() {
+        return None;
+    }
+
+    let boundary = BoundaryModule {
+        abi_version: IN_ABI_VERSION,
+        module: format!("zig.{module_id}"),
+        layouts,
+        symbols,
+        allocators: vec![],
+        layout_hash: String::new(),
+    }
+    .with_layout_hash();
+    let report = boundary_ir_verify(&boundary);
+    if !report.ok {
+        return None;
+    }
+    Some(boundary)
+}
+
 fn extract_zig(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
     extract_fn_nodes(src, root, &["function_declaration"], |src, n| {
         let name_n = n
@@ -4830,6 +5167,7 @@ fn dart_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::boundary_ir::{BoundaryRepr, BoundaryTransfer};
     use std::path::PathBuf;
 
     fn repo_sample(name: &str) -> String {
@@ -5672,6 +6010,84 @@ end
             }
             _ => panic!("expected function"),
         }
+    }
+
+    #[test]
+    fn zig_extracts_extern_struct_boundary_module() {
+        let src = r#"
+pub const InSliceU8 = extern struct {
+    ptr: [*]const u8,
+    len: u64,
+};
+
+pub export fn person_new(age: u32) Person {
+    return Person{ .name = InSliceU8{ .ptr = undefined, .len = 0 }, .age = age };
+}
+
+pub const Person = extern struct {
+    name: InSliceU8,
+    age: u32,
+};
+
+pub fn main() void {}
+"#;
+        let artifact = parse_zig_artifact_source(src, "person").expect("parse zig artifact");
+        let boundary = artifact.boundary.expect("boundary module");
+        assert_eq!(boundary.module, "zig.person");
+        assert_eq!(boundary.layouts.len(), 2);
+        let person = boundary
+            .layouts
+            .iter()
+            .find(|layout| layout.name == "Person")
+            .expect("Person layout");
+        assert_eq!(person.repr, Some(BoundaryRepr::C));
+        assert_eq!(person.size, 24);
+        assert_eq!(person.align, 8);
+        assert_eq!(person.fields.len(), 2);
+        assert_eq!(person.fields[0].typ, "InSliceU8");
+        assert_eq!(person.fields[0].transfer, Some(BoundaryTransfer::Borrow));
+        assert_eq!(person.fields[1].typ, "u32");
+        let in_slice = boundary
+            .layouts
+            .iter()
+            .find(|layout| layout.name == "InSliceU8")
+            .expect("InSliceU8 layout");
+        assert_eq!(in_slice.size, 16);
+        assert_eq!(in_slice.fields[0].typ, "u64");
+        assert_eq!(in_slice.fields[1].typ, "u64");
+        assert_eq!(boundary.symbols.len(), 1);
+        assert_eq!(boundary.symbols[0].name, "person_new");
+        assert_eq!(boundary.symbols[0].calling_convention, "c");
+        assert!(!boundary.symbols[0].signature_hash.is_empty());
+        assert!(!boundary.layout_hash.is_empty());
+    }
+
+    #[test]
+    fn zig_artifact_without_boundary_markers_has_no_boundary() {
+        let src = "fn helper(value: i32) i32 { return value; }\npub fn main() void { return; }\n";
+        let artifact = parse_zig_artifact_source(src, "point").expect("parse zig artifact");
+        assert!(artifact.boundary.is_none());
+    }
+
+    #[test]
+    fn zig_fixture_extracts_extern_struct_boundary() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../conformance/abi/zig-extern-struct.zig");
+        let artifact = parse_zig_artifact(&path).expect("parse zig fixture");
+        let boundary = artifact.boundary.expect("boundary module");
+        assert_eq!(boundary.module, "zig.zig-extern-struct");
+        assert!(
+            boundary
+                .layouts
+                .iter()
+                .any(|layout| layout.name == "Person" && layout.size == 24)
+        );
+        assert!(
+            boundary
+                .symbols
+                .iter()
+                .any(|symbol| symbol.name == "person_new")
+        );
     }
 
     #[test]

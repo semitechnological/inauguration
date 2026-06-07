@@ -4,4 +4,4 @@
 mod extract;
 mod ruby;
 
-pub use extract::parse_polyglot_file;
+pub use extract::{parse_polyglot_file, parse_zig_artifact, parse_zig_artifact_source};
