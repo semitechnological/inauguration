@@ -131,6 +131,6 @@ run_compile_owned apps/polyglot-sample/sample.ml
 run_compile_owned apps/polyglot-sample/sample.php
 run_compile_owned apps/polyglot-sample/sample.lua
 run_compile_owned apps/polyglot-sample/sample.scala
-run_icore_redirect apps/polyglot-sample/sample.nim
-run_icore_redirect apps/polyglot-sample/sample.odin
+run_compile_owned apps/polyglot-sample/sample.nim
+run_compile_owned apps/polyglot-sample/sample.odin
 run_icore_redirect apps/polyglot-sample/sample.ha
