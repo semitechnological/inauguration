@@ -1778,29 +1778,39 @@ fn cmd_test(root: &Path, options: TestOptions) -> Result<()> {
     run_test_groups(groups, options.serial)
 }
 
-fn owned_native_test_step_names() -> [&'static str; 3] {
+fn owned_native_test_step_names() -> [&'static str; 6] {
     [
         "owned native compiler (scripts/check-owned-native-compiler.sh)",
         "native answer sample (scripts/check-native-answer-sample.sh)",
         "owned polyglot samples (scripts/check-polyglot-sample.sh)",
+        "abi layouts (scripts/check-abi-layouts.sh)",
+        "dynamic loader (scripts/check-dynamic-loader.sh)",
+        "target matrix (scripts/check-target-matrix.sh)",
     ]
+}
+
+fn owned_native_script_for_step(name: &str) -> &'static str {
+    if name.contains("owned-native-compiler") {
+        "scripts/check-owned-native-compiler.sh"
+    } else if name.contains("native-answer") {
+        "scripts/check-native-answer-sample.sh"
+    } else if name.contains("polyglot") {
+        "scripts/check-polyglot-sample.sh"
+    } else if name.contains("abi layouts") {
+        "scripts/check-abi-layouts.sh"
+    } else if name.contains("dynamic loader") {
+        "scripts/check-dynamic-loader.sh"
+    } else {
+        "scripts/check-target-matrix.sh"
+    }
 }
 
 fn owned_native_test_groups(root: &Path) -> Vec<TestGroup> {
     owned_native_test_step_names()
         .into_iter()
-        .map(|name| {
-            let script = if name.contains("owned-native-compiler") {
-                "scripts/check-owned-native-compiler.sh"
-            } else if name.contains("native-answer") {
-                "scripts/check-native-answer-sample.sh"
-            } else {
-                "scripts/check-polyglot-sample.sh"
-            };
-            TestGroup {
-                name,
-                commands: vec![bash_command(root, script)],
-            }
+        .map(|name| TestGroup {
+            name,
+            commands: vec![bash_command(root, owned_native_script_for_step(name))],
         })
         .collect()
 }
@@ -2848,6 +2858,21 @@ mod tests {
             steps
                 .iter()
                 .any(|step| step.contains("check-polyglot-sample.sh"))
+        );
+        assert!(
+            steps
+                .iter()
+                .any(|step| step.contains("check-abi-layouts.sh"))
+        );
+        assert!(
+            steps
+                .iter()
+                .any(|step| step.contains("check-dynamic-loader.sh"))
+        );
+        assert!(
+            steps
+                .iter()
+                .any(|step| step.contains("check-target-matrix.sh"))
         );
     }
 
