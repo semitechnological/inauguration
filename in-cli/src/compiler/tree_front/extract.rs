@@ -22,14 +22,7 @@ pub fn parse_polyglot_file(id: ParserId, path: &Path) -> Result<UnifiedModule, S
             "internal: `{}` must use the dedicated front, not tree_front",
             id.as_str()
         )),
-        ParserId::Go
-        | ParserId::OCaml
-        | ParserId::Clojure
-        | ParserId::D
-        | ParserId::Crystal
-        | ParserId::VbNet
-        | ParserId::Hare
-        | ParserId::V => Err(format!(
+        ParserId::Go | ParserId::OCaml | ParserId::V => Err(format!(
             "parser `{}` ({}): {}.",
             id.as_str(),
             id.family_label(),

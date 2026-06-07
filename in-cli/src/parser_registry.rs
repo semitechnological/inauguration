@@ -384,6 +384,31 @@ pub fn parse_with_resolved(
                 .map_err(ParserRegistryError::Msg)
                 .map(Some)
         }
+        ResolvedBuildParser::CoreIr(ParserId::Hare) => {
+            crate::compiler::hare_boundary::parse_hare_file(path)
+                .map_err(ParserRegistryError::Msg)
+                .map(Some)
+        }
+        ResolvedBuildParser::CoreIr(ParserId::D) => {
+            crate::compiler::d_boundary::parse_d_file(path)
+                .map_err(ParserRegistryError::Msg)
+                .map(Some)
+        }
+        ResolvedBuildParser::CoreIr(ParserId::Crystal) => {
+            crate::compiler::crystal_boundary::parse_crystal_file(path)
+                .map_err(ParserRegistryError::Msg)
+                .map(Some)
+        }
+        ResolvedBuildParser::CoreIr(ParserId::Clojure) => {
+            crate::compiler::clojure_boundary::parse_clojure_file(path)
+                .map_err(ParserRegistryError::Msg)
+                .map(Some)
+        }
+        ResolvedBuildParser::CoreIr(ParserId::VbNet) => {
+            crate::compiler::vb_boundary::parse_vb_file(path)
+                .map_err(ParserRegistryError::Msg)
+                .map(Some)
+        }
         ResolvedBuildParser::CoreIr(id) => {
             crate::compiler::tree_front::parse_polyglot_file(id, path)
                 .map_err(ParserRegistryError::Msg)
@@ -606,13 +631,18 @@ mod tests {
     }
 
     #[test]
-    fn polyglot_clojure_returns_icore_hint() {
+    fn clojure_boundary_front_parses_polyglot_sample_shape() {
         let path = temp_file_path("sample.clj");
-        std::fs::write(&path, "(ns user)\n").expect("write temp");
-        let err = parse_with_resolved(ResolvedBuildParser::CoreIr(ParserId::Clojure), &path)
-            .expect_err("clojure has no wired grammar");
-        assert!(matches!(err, ParserRegistryError::Msg(s) if s.contains("icore")));
+        std::fs::write(&path, "(defn answer [] 42)\n(defn main [] nil)\n").expect("write temp");
+        let m = parse_with_resolved(ResolvedBuildParser::CoreIr(ParserId::Clojure), &path)
+            .expect("parse")
+            .expect("module");
         let _ = std::fs::remove_file(&path);
+        assert!(
+            m.decls
+                .iter()
+                .any(|d| matches!(d, crate::core_ir::Decl::Function { name, .. } if name == "answer"))
+        );
     }
 
     #[test]

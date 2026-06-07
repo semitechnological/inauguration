@@ -34,6 +34,19 @@ declare -a LANGS=(
   "js|sample.js||0"
   "ts|sample.ts||0"
   "python|sample.py||0"
+  "scala|sample.scala||0"
+  "php|sample.php||0"
+  "lua|sample.lua||0"
+
+  "zig|sample.zig||0"
+  "dart|sample.dart||0"
+  "nim|sample.nim||0"
+  "odin|sample.odin||0"
+  "hare|sample.ha||0"
+  "d|sample.d||0"
+  "crystal|sample.cr||0"
+  "clojure|sample.clj||0"
+  "vb|sample.vb||0"
 )
 
 FAILED=0

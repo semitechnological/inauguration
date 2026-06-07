@@ -133,4 +133,8 @@ run_compile_owned apps/polyglot-sample/sample.lua
 run_compile_owned apps/polyglot-sample/sample.scala
 run_compile_owned apps/polyglot-sample/sample.nim
 run_compile_owned apps/polyglot-sample/sample.odin
-run_icore_redirect apps/polyglot-sample/sample.ha
+run_compile_owned apps/polyglot-sample/sample.ha
+run_compile_owned apps/polyglot-sample/sample.d
+run_compile_owned apps/polyglot-sample/sample.cr
+run_compile_owned apps/polyglot-sample/sample.clj
+run_compile_owned apps/polyglot-sample/sample.vb

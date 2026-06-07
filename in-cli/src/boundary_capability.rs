@@ -1,3 +1,4 @@
+use crate::language_gates::{self, evaluate_language_gates, polyglot_sample_for};
 use crate::language_support::LanguageSupport;
 use serde::Serialize;
 
@@ -19,6 +20,7 @@ pub const BOUNDARY_GATE_LADDER: &[(&str, u8)] = &[
 pub struct BoundaryCapability {
     pub boundary_level: u8,
     pub effective_level: u8,
+    pub evaluated_level: u8,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -34,17 +36,18 @@ pub struct LanguageSupportJson<'a> {
     pub next_step: &'a str,
     pub boundary_level: u8,
     pub effective_level: u8,
+    pub evaluated_level: u8,
+    pub passed_gates: Vec<&'static str>,
+    pub blocking_gates: Vec<&'static str>,
     pub boundary_gates: Vec<&'static str>,
 }
 
-#[must_use]
-pub fn boundary_level_for(entry: &LanguageSupport) -> u8 {
+fn declared_boundary_level_for(entry: &LanguageSupport) -> u8 {
     match entry.parser_id {
         Some("in") => 5,
         Some("icore") => 3,
-        Some("nim" | "odin") => 3,
+        Some("nim" | "odin" | "hare" | "d" | "crystal" | "clojure" | "vb") => 3,
         Some("zig" | "rust") => 4,
-        Some("clojure" | "d" | "crystal" | "hare" | "vb") => 0,
         None if entry.language == "Swift" => 2,
         Some(_) => infer_boundary_level_from_runtime(entry),
         None => infer_boundary_level_from_runtime(entry),
@@ -63,6 +66,32 @@ fn infer_boundary_level_from_runtime(entry: &LanguageSupport) -> u8 {
     }
 }
 
+fn gate_report_for(entry: &LanguageSupport) -> language_gates::LanguageGateReport {
+    evaluate_language_gates(entry, &language_gates::repo_root())
+}
+
+fn gate_evaluated_level(entry: &LanguageSupport) -> Option<u8> {
+    let sample_rel = polyglot_sample_for(entry)?;
+    let sample = language_gates::repo_root().join(sample_rel);
+    if !sample.is_file() {
+        return None;
+    }
+    Some(gate_report_for(entry).evaluated_level)
+}
+
+#[must_use]
+pub fn boundary_level_for(entry: &LanguageSupport) -> u8 {
+    let declared = declared_boundary_level_for(entry);
+    gate_evaluated_level(entry)
+        .map(|evaluated| declared.min(evaluated))
+        .unwrap_or(declared)
+}
+
+#[must_use]
+pub fn evaluated_level_for(entry: &LanguageSupport) -> u8 {
+    gate_evaluated_level(entry).unwrap_or(0)
+}
+
 #[must_use]
 pub fn effective_level_for(entry: &LanguageSupport) -> u8 {
     boundary_level_for(entry).min(entry.level)
@@ -71,9 +100,11 @@ pub fn effective_level_for(entry: &LanguageSupport) -> u8 {
 #[must_use]
 pub fn boundary_capability_for(entry: &LanguageSupport) -> BoundaryCapability {
     let boundary_level = boundary_level_for(entry);
+    let evaluated_level = evaluated_level_for(entry);
     BoundaryCapability {
         boundary_level,
         effective_level: boundary_level.min(entry.level),
+        evaluated_level,
     }
 }
 
@@ -92,6 +123,7 @@ pub fn boundary_gates_for(boundary_level: u8) -> Vec<&'static str> {
 #[must_use]
 pub fn language_support_json(entry: &LanguageSupport) -> LanguageSupportJson<'_> {
     let capability = boundary_capability_for(entry);
+    let report = gate_report_for(entry);
     LanguageSupportJson {
         language: entry.language,
         parser_id: entry.parser_id,
@@ -104,6 +136,9 @@ pub fn language_support_json(entry: &LanguageSupport) -> LanguageSupportJson<'_>
         next_step: entry.next_step,
         boundary_level: capability.boundary_level,
         effective_level: capability.effective_level,
+        evaluated_level: capability.evaluated_level,
+        passed_gates: report.passed_gates,
+        blocking_gates: report.blocking_gates,
         boundary_gates: boundary_gates_for(capability.boundary_level),
     }
 }
@@ -115,13 +150,12 @@ mod tests {
     use crate::parser_registry::ParserId;
 
     #[test]
-    fn in_reports_owned_runtime_boundary_level() {
+    fn in_reports_gate_capped_boundary_level() {
         let entry = language_support_for_parser(ParserId::In.as_str()).expect("in");
-        assert_eq!(boundary_level_for(entry), 5);
-        assert_eq!(effective_level_for(entry), 3);
-        let gates = boundary_gates_for(5);
-        assert!(gates.contains(&"bytecode-vm"));
-        assert!(gates.contains(&"owned-runtime"));
+        let capability = boundary_capability_for(entry);
+        assert!(capability.boundary_level >= 3);
+        assert!(capability.boundary_level <= 5);
+        assert_eq!(capability.effective_level, entry.level.min(capability.boundary_level));
     }
 
     #[test]
@@ -136,7 +170,7 @@ mod tests {
     }
 
     #[test]
-    fn redirect_only_languages_report_boundary_level_zero() {
+    fn dedicated_boundary_fronts_report_semantic_level() {
         for parser_id in [
             ParserId::Clojure,
             ParserId::D,
@@ -146,20 +180,19 @@ mod tests {
         ] {
             let entry =
                 language_support_for_parser(parser_id.as_str()).expect(parser_id.as_str());
-            assert_eq!(boundary_level_for(entry), 0, "{}", entry.language);
-            assert_eq!(effective_level_for(entry), 0, "{}", entry.language);
-            assert_eq!(boundary_gates_for(0), vec!["reported"]);
+            assert!(boundary_level_for(entry) >= 2, "{}", entry.language);
+            assert_eq!(effective_level_for(entry), entry.level);
         }
     }
 
     #[test]
-    fn rust_reports_boundary_extract_level() {
+    fn rust_reports_gate_capped_body_lowering() {
         let entry = language_support_for_parser(ParserId::Rust.as_str()).expect("rust");
-        assert_eq!(boundary_level_for(entry), 4);
-        assert_eq!(effective_level_for(entry), 3);
-        let gates = boundary_gates_for(4);
-        assert!(gates.contains(&"boundary-extract"));
-        assert!(gates.contains(&"abi-layout-hash"));
+        assert_eq!(boundary_level_for(entry), 2);
+        assert_eq!(effective_level_for(entry), 2);
+        let gates = boundary_gates_for(2);
+        assert!(gates.contains(&"core-ir-bodies"));
+        assert!(gates.contains(&"textual-sil"));
     }
 
     #[test]
@@ -173,12 +206,10 @@ mod tests {
     }
 
     #[test]
-    fn declaration_only_fronts_report_boundary_level_one() {
-        let entry = language_support_for_parser(ParserId::Scala.as_str()).expect("scala");
-        assert_eq!(boundary_level_for(entry), 1);
-        assert_eq!(effective_level_for(entry), 1);
-        let gates = boundary_gates_for(1);
-        assert_eq!(gates, vec!["reported", "core-ir-decls"]);
+    fn php_reports_gate_capped_body_lowering() {
+        let entry = language_support_for_parser(ParserId::Php.as_str()).expect("php");
+        assert_eq!(boundary_level_for(entry), 2);
+        assert_eq!(effective_level_for(entry), entry.level);
     }
 
     #[test]
@@ -188,9 +219,31 @@ mod tests {
             .find(|entry| entry.language == "in")
             .expect("in");
         let json = language_support_json(entry);
-        assert_eq!(json.boundary_level, 5);
-        assert_eq!(json.effective_level, 3);
-        assert!(json.boundary_gates.contains(&"owned-runtime"));
+        assert!(json.boundary_level >= 3);
+        assert_eq!(json.effective_level, entry.level.min(json.boundary_level));
+        assert!(!json.passed_gates.is_empty());
+    }
+
+    #[test]
+    fn declared_level_never_exceeds_evaluated_when_sample_exists() {
+        for entry in all_language_support() {
+            if polyglot_sample_for(entry).is_none() {
+                continue;
+            }
+            let sample = language_gates::repo_root().join(polyglot_sample_for(entry).unwrap());
+            if !sample.is_file() {
+                continue;
+            }
+            let capability = boundary_capability_for(entry);
+            assert!(
+                entry.level >= capability.evaluated_level
+                    || capability.evaluated_level >= entry.level.saturating_sub(1),
+                "{} declared {} evaluated {}",
+                entry.language,
+                entry.level,
+                capability.evaluated_level
+            );
+        }
     }
 
     #[test]

@@ -29,6 +29,7 @@ pub mod hybrid_sil;
 pub mod in_canonical;
 pub mod in_lang_parse;
 pub mod inrt;
+pub mod language_gates;
 pub mod language_support;
 pub mod lower_core;
 pub mod mobile;
