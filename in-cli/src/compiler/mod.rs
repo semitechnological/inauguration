@@ -7,6 +7,8 @@
 pub mod driver;
 pub mod go_front;
 pub mod icore;
+pub mod nim_boundary;
+pub mod odin_boundary;
 pub mod ocaml_front;
 pub mod rust_front;
 pub mod tree_front;
