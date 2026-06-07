@@ -4,6 +4,7 @@
 pub mod preview_client;
 
 pub mod agent_mode;
+pub mod arena;
 pub mod boundary_capability;
 pub mod boundary_emit;
 pub mod boundary_ir;
