@@ -25,7 +25,7 @@ The target is a safe, small, fast compiler for V, Go, Rust, OCaml, TypeScript, J
 | 2 | Bounded function bodies lower into Core IR and textual SIL. |
 | 3 | The front typechecks enough language semantics to produce source-semantic diagnostics. |
 | 4 | The front emits graph-aware facts, repair plans, and stable agent JSON. |
-| 5 | The front has production build or hot reload semantics plus an owned runtime boundary. |
+| 5 | The front has production build or hot reload semantics plus an owned runtime boundary. Boundary IR (`icoreVersion: 3` + `boundary` JSON) is the interchange contract for cross-language ABI metadata at this level. |
 
 ## Phased roadmap
 
@@ -37,7 +37,7 @@ The target is a safe, small, fast compiler for V, Go, Rust, OCaml, TypeScript, J
 | 3 | JVM and CLR semantics | Java, Kotlin, C#, and related fronts share class/method metadata, field access, constructor lowering, and runtime strategy docs. |
 | 4 | Systems language depth | C, C++, Zig, Odin, Hare, Nim, Rust, Go, and V gain locals, calls, modules/packages, control flow, and ABI boundary docs. |
 | 5 | Native runtime spine | Bytecode VM supports the common Core IR subset with deterministic execution, capability checks, and conformance examples. |
-| 6 | Production claims | A language reaches level 5 only when examples compile and run without external compilers on the claimed path, quality gates are green, and benchmarks prove the speed claim for that scope. |
+| 6 | Production claims | A language reaches level 5 only when examples compile and run without external compilers on the claimed path, quality gates are green, benchmarks prove the speed claim for that scope, and Boundary IR layouts/symbols verify against `shared/abi/in_abi.h`. |
 
 ## v0.4 surface contract
 
@@ -67,9 +67,23 @@ The first owned runtime is the existing bytecode VM subset fed by Core IR/SIL. T
 4. Run `in test` before push for the self-hosted compiler gates; run `in test --toolchain --external-parity` when implementation crates, protocol generation, Swift runtime integration, or reference compiler parity are in scope.
 5. Benchmark only after correctness gates pass.
 
+## Boundary IR (Level 5 contract)
+
+Level 5 is not only “runs without external compilers.” It also requires a **Boundary IR** artifact that agents and mobile/native packagers can consume without re-parsing source:
+
+| Piece | Contract |
+|-------|----------|
+| `icoreVersion: 3` | Semantic decls may omit `main` when a `boundary` section is present. |
+| `boundary.layouts` | C-compatible struct layouts with explicit offsets, align, stride, and transfer mode (`copy`, `borrow`, `owned`). |
+| `boundary.symbols` | Exported symbols with `signature_hash`, ownership class, and calling convention. |
+| `boundary.allocators` | Host arena / module allocator ids referenced by `InBufU8` and borrow tokens. |
+| Verification | `boundary_ir_verify` plus `scripts/check-abi-layouts.sh` gate layout hash and managed-type rejection. |
+
+Dedicated boundary fronts (for example Nim/Odin comment JSON or Rust/Zig extractors) may emit the same `BoundaryModule` shape without forcing every language through Tree-sitter first.
+
 ## Current slice
 
-The current implementation has moved past the first matrix-only slice. OCaml has a dedicated bounded front for top-level `let` functions and simple application expressions. Ruby is level 2 for bounded scalar method bodies. Parser ids without a compatible wired front remain tracked level-0 `.icore` redirects until their own fronts land.
+The current implementation has moved past the first matrix-only slice. OCaml has a dedicated bounded front for top-level `let` functions and simple application expressions. Ruby is level 2 for bounded scalar method bodies. `icoreVersion: 3` ingests Boundary IR from `.icore` and dedicated boundary fronts. Parser ids without a compatible wired front remain tracked level-0 `.icore` redirects until their own fronts land.
 
 ## See also
 

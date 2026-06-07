@@ -25,12 +25,27 @@ Rust type: `in_cli::core_ir::UnifiedModule`.
 
 **`Typ`**: `Int`, `String`, `Bool`, `Void`, `Named(String)` — shared with `swift_subset` today for consistency.
 
+## Boundary IR (`icoreVersion: 3`)
+
+Rust types: `in_cli::boundary_ir::BoundaryModule`, `CompileArtifact`.
+
+| Field | Meaning |
+|-------|--------|
+| `abi_version` | Must match `IN_ABI_VERSION` in `shared/abi/in_abi.h`. |
+| `module` | Stable boundary module id (for example `sample.person`). |
+| `layouts` | Struct/enum layouts with C repr, size, align, stride, and per-field transfer mode. |
+| `symbols` | Exported ABI symbols with ownership and calling convention metadata. |
+| `allocators` | Allocator ids (`host_arena`, module heap) used by buffers and borrow tokens. |
+| `layout_hash` | Canonical `blake3-…` hash over layouts + symbols; empty means compute on ingest. |
+
+`compiler::icore::parse_icore_artifact` verifies boundary modules before lowering. Level-5 language fronts may attach the same `BoundaryModule` through dedicated extractors (Nim/Odin comment JSON today; Rust/Zig extractors planned) without expanding Core IR statement forms.
+
 ## `ParserId` (extensible)
 
 | Id | Source | Entry |
 |----|--------|--------|
 | `In` | `.in` files (and `#!in parser=in`) | `in_lang_parse` → `UnifiedModule` → `compiler::driver` / `lower_core`; parser-side surface facts feed agent `effects` / `capabilities` |
-| `Icore` | `.icore` files (and `#!in parser=icore`) | `compiler::icore` v1 declarations or v2 bounded body JSON → `UnifiedModule` → same lowering |
+| `Icore` | `.icore` files (and `#!in parser=icore`) | `compiler::icore` v1 declarations, v2 bounded body JSON, or **v3 Boundary IR** (`boundary` section + optional semantic decls) → `CompileArtifact` → same lowering |
 | `c`, `cpp`, `java`, `python`, … | Known extensions or `#!in parser=<slug>` | **Tree-sitter polyglot** — [`compiler::tree_front`](../../in-cli/src/compiler/tree_front/mod.rs) grammar-backed AST → `UnifiedModule`; selected fronts share bounded scalar body lowering through generic AST conventions, other routed fronts remain declaration-level; icore-only ids documented in [parser-surface.md](parser-surface.md). |
 
 ## Resolution order for `in build`

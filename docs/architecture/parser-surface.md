@@ -66,12 +66,12 @@ Resolution order is documented in the `parser_registry` module rustdoc. Summary:
 
 | Level | Meaning | Current fronts |
 |-------|---------|----------------|
-| 0 | Routes to a known `ParserId`, but no compatible grammar/front is wired; callers get an `.icore` hint. | `clojure`, `nim`, `odin`, `hare`, `d`, `crystal`, `vb` |
+| 0 | Routes to a known `ParserId`, but no compatible grammar/front is wired; callers get an `.icore` hint. | `clojure`, `hare`, `d`, `crystal`, `vb` |
 | 1 | Extracts top-level declarations into `UnifiedModule`; bodies are empty or ignored. | `scala`, `fsharp`, `php`, `perl`, `lua`, `elixir`, `erlang`, `haskell`, `julia`, `r`; Objective-C methods are also declaration-only. |
-| 2 | Lowers a bounded statement/expression subset into Core IR. | `icore` v2, `rust`, `go`, `v`, `ocaml`, `java`, `groovy`, `javascript`, `typescript`, `kotlin`, `csharp`, `python`, `ruby`, `zig`, `dart`; C / C++ / Objective-C++ functions support bounded scalar bodies and C-family runtime/ABI remains unowned. |
+| 2 | Lowers a bounded statement/expression subset into Core IR. | `icore` v2, `rust`, `go`, `v`, `ocaml`, `nim`, `odin`, `java`, `groovy`, `javascript`, `typescript`, `kotlin`, `csharp`, `python`, `ruby`, `zig`, `dart`; C / C++ / Objective-C++ functions support bounded scalar bodies and C-family runtime/ABI remains unowned. |
 | 3 | Typechecks enough language semantics to produce reliable diagnostics. | `.in` for its bounded subset: package/module/import facts, dependency import symbols, capabilities, extern requirements, source-semantic Core IR diagnostics, `INPKG001` / `INPKG002` semantic import warnings, and agent repair plans. |
 | 4 | Emits graph-aware SIL artifacts and agent repair plans. | Agent JSON exists; no language front is promoted to this level until its diagnostics and repair plans are source-semantic for that front. |
-| 5 | Supports production build/hotreload semantics for that language family. | Swift uses the separate Swift SIL path today; Core IR language families are not at this level yet. |
+| 5 | Supports production build/hotreload semantics for that language family. | Swift uses the separate Swift SIL path today. Core IR families reach level 5 only with owned runtime boundaries **and** verified Boundary IR (`icoreVersion: 3` or a dedicated boundary front). |
 
 The ladder is a routing and agent-contract signal, not a promise of full language semantics or bundled runtimes. `swift` is intentionally outside the Core IR extension table and has no `ParserId`: it selects the Swift SIL path (`swiftc` and/or `IN_NATIVE_SWIFT_SIL`) until agent-mode JSON gives it a comparable compatibility report.
 
