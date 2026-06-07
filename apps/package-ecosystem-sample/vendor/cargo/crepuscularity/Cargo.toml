@@ -1,0 +1,8 @@
+[package]
+name = "crepuscularity"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "greet"
+path = "src/main.rs"

@@ -1,0 +1,20 @@
+lock-version: 1
+name: ecosystem-demo
+version: 0.1.0
+dependencies:
+  cargo:crepuscularity:
+    version: path:vendor/cargo/crepuscularity
+    kind: cargo
+    install_path: vendor/cargo/crepuscularity
+  go:fiber:
+    version: path:vendor/go/fiber
+    kind: go
+    install_path: vendor/go/fiber
+  npm:hono:
+    version: path:vendor/npm/hono
+    kind: npm
+    install_path: vendor/npm/hono
+  pypi:flask:
+    version: path:vendor/pypi/flask
+    kind: pypi
+    install_path: vendor/pypi/flask

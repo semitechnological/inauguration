@@ -1,0 +1,15 @@
+// @expect parse: ok
+// @expect bytecode: executes
+// @expect result: String("caught: nope")
+
+fn inner() -> void {
+    throw "nope";
+}
+
+fn main() -> String {
+    try {
+        inner();
+    } catch (e) {
+        return "caught: nope";
+    }
+}

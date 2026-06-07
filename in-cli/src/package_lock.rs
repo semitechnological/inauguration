@@ -124,6 +124,9 @@ pub fn format_package_lock(lock: &PackageLock) -> String {
             if let Some(checksum) = &dependency.checksum {
                 lines.push(format!("    checksum: {checksum}"));
             }
+            if let Some(install_path) = &dependency.install_path {
+                lines.push(format!("    install_path: {install_path}"));
+            }
             if !dependency.targets.is_empty() {
                 lines.push("    targets:".to_string());
                 for target in &dependency.targets {
@@ -391,20 +394,15 @@ fn parse_lock_dependency_header(
     line_number: usize,
     lock: &mut PackageLock,
 ) -> Result<String, String> {
-    let (key, value) = split_lock_field(line, line_number)?;
-    if !value.is_empty() {
-        return Err(format!(
-            "line {line_number}: dependency `{key}` must contain metadata fields"
-        ));
-    }
+    let key = crate::package_ref::split_dependency_header(line, line_number)?;
     if lock
         .dependencies
-        .insert(key.to_string(), PackageDependency::default())
+        .insert(key.clone(), PackageDependency::default())
         .is_some()
     {
         return Err(format!("line {line_number}: duplicate dependency `{key}`"));
     }
-    Ok(key.to_string())
+    Ok(key)
 }
 
 fn parse_lock_dependency_field(
@@ -461,6 +459,14 @@ fn parse_lock_dependency_field(
             required_lock_scalar(value, line_number, "checksum")?,
             |dependency, value| dependency.checksum = Some(value.to_string()),
         ),
+        "install_path" => assign_optional_dependency_field(
+            dependency,
+            line_number,
+            dependency_name,
+            "install_path",
+            required_lock_scalar(value, line_number, "install_path")?,
+            |dependency, value| dependency.install_path = Some(value.to_string()),
+        ),
         "targets" => parse_lock_dependency_subsection_header(
             value,
             line_number,
@@ -512,6 +518,11 @@ fn assign_optional_dependency_field(
         "checksum" if dependency.checksum.is_some() => {
             return Err(format!(
                 "line {line_number}: duplicate checksum for dependency `{dependency_name}`"
+            ));
+        }
+        "install_path" if dependency.install_path.is_some() => {
+            return Err(format!(
+                "line {line_number}: duplicate install_path for dependency `{dependency_name}`"
             ));
         }
         _ => {}
@@ -703,6 +714,7 @@ mod tests {
                     targets: vec!["macos".into()],
                     capabilities: vec!["network.http".into()],
                     build: BTreeMap::from([("profile".into(), "release".into())]),
+                    install_path: None,
                 },
             )]),
         };

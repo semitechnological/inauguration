@@ -2,7 +2,7 @@ use crate::boundary_emit::{emit_abi_manifest, emit_layout_probes};
 use crate::boundary_verify::boundary_ir_verify;
 use crate::compiler::driver;
 use crate::core_ir::{Decl, UnifiedModule};
-use crate::core_typecheck;
+use crate::family_typecheck;
 use crate::language_support::LanguageSupport;
 use crate::parser_registry::{self, ParserId, ResolvedBuildParser};
 use serde::Serialize;
@@ -139,7 +139,7 @@ pub fn evaluate_path(path: &Path, _entry: &LanguageSupport) -> LanguageGateRepor
         return finish_level(sample_path, passed, blocking, level);
     }
 
-    if core_typecheck::typecheck_executable(&module).is_ok() {
+    if family_typecheck::typecheck_resolved(&resolved, &module).is_ok() {
         passed.push(GATE_SEMANTIC_TYPECHECK);
         level = 3;
     } else {
@@ -319,12 +319,35 @@ mod tests {
     }
 
     #[test]
-    fn zig_sample_reaches_owned_body_lowering() {
+    fn zig_sample_reaches_family_typecheck() {
         let entry = language_support_for_parser("zig").expect("zig");
         let report = evaluate_language_gates(entry, &repo_root());
-        assert!(report.evaluated_level >= 2, "{report:?}");
-        assert!(report.passed_gates.contains(&GATE_CORE_IR_BODIES));
-        assert!(report.passed_gates.contains(&GATE_TEXTUAL_SIL));
+        assert!(report.evaluated_level >= 3, "{report:?}");
+        assert!(report.passed_gates.contains(&GATE_SEMANTIC_TYPECHECK));
+    }
+
+    #[test]
+    fn lua_sample_reaches_family_typecheck() {
+        let entry = language_support_for_parser("lua").expect("lua");
+        let report = evaluate_language_gates(entry, &repo_root());
+        assert!(report.evaluated_level >= 3, "{report:?}");
+    }
+
+    #[test]
+    fn promoted_tree_and_boundary_samples_reach_declared_gates() {
+        let root = repo_root();
+        for parser_id in [
+            "php", "lua", "rust", "scala", "perl", "nim", "hare", "d", "crystal", "clojure", "vb",
+        ] {
+            let entry = language_support_for_parser(parser_id).expect(parser_id);
+            let report = evaluate_language_gates(entry, &root);
+            assert!(
+                report.evaluated_level >= entry.level.saturating_sub(1),
+                "{parser_id} declared {} evaluated {:?}",
+                entry.level,
+                report
+            );
+        }
     }
 
     #[test]

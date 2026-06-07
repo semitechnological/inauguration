@@ -714,7 +714,7 @@ const RAST: AstShape = AstShape {
 
 const PERLAST: AstShape = AstShape {
     block_kinds: &["block"],
-    return_kinds: &["return_statement"],
+    return_kinds: &["return_statement", "return_expression"],
     expr_stmt_kinds: &["expression_statement"],
     local_decl_kinds: &["my_statement", "our_statement"],
     assignment_kinds: &["assignment_expression"],
@@ -826,7 +826,7 @@ fn ast_stmt(
     if kind_in(stmt, shape.call_kinds) {
         return ast_expr(src, stmt, shape).map(Stmt::Expr);
     }
-    None
+    ast_expr(src, stmt, shape).map(Stmt::Expr)
 }
 
 fn ast_return_expr(src: &[u8], ret: Node<'_>, shape: AstShape) -> Option<Option<Expr>> {

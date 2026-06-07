@@ -49,6 +49,9 @@ impl BytecodeVM {
 
     /// Call a user-defined function.
     fn call_function(&mut self, name: &str, args: Vec<Value>) -> Result<Value, String> {
+        if let Some(runtime) = self.module.package_exports.get(name) {
+            return crate::package_runtime::invoke_package_export(runtime, &args);
+        }
         let func = self
             .module
             .find_function(name)
@@ -452,6 +455,20 @@ impl BytecodeVM {
             "&&" => return Ok(Value::Bool(lhs.to_bool() && rhs.to_bool())),
             "||" => return Ok(Value::Bool(lhs.to_bool() || rhs.to_bool())),
             _ => {}
+        }
+        if op == "+"
+            && matches!(lhs, Value::String(_))
+            && matches!(rhs, Value::String(_))
+        {
+            let left = match lhs {
+                Value::String(s) => s,
+                _ => unreachable!("checked above"),
+            };
+            let right = match rhs {
+                Value::String(s) => s,
+                _ => unreachable!("checked above"),
+            };
+            return Ok(Value::String(format!("{left}{right}")));
         }
         if matches!(lhs, Value::Float(_)) || matches!(rhs, Value::Float(_)) {
             let l = lhs.to_float();

@@ -2,7 +2,7 @@ use crate::bytecode_compiler;
 use crate::compile_cache;
 use crate::core_ir::{Decl, ModuleIdentityReport, UnifiedModule};
 use crate::core_ir_verifier;
-use crate::core_typecheck;
+
 use crate::external_guard::{self, ExternalInvocationGuard};
 use crate::native_backend;
 use crate::native_emit::{self, NativeLinkage};
@@ -298,7 +298,9 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         import_resolver.add_search_path(PathBuf::from("."));
 
         // Check for package manifest to set name and dependency search paths
-        if let Some(pkg) = crate::package_manifest::compile_context_in_dir(&source_dir) {
+        if let Some(pkg) =
+            crate::package_manifest::compile_context_for_source(&request.path)
+        {
             report.package_name = Some(pkg.name);
             pkg_entry = pkg.entry;
             for dep in pkg.dependency_search_paths {
@@ -342,7 +344,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         return finalize_report(&mut report, started, &cwd, &frontend_hash);
     }
 
-    if let Err(err) = core_typecheck::typecheck_executable(&module) {
+    if let Err(err) = crate::family_typecheck::typecheck_resolved(&resolved, &module) {
         report.semantic_level = "failed";
         report.reason_code = Some("semantic-typecheck-failed".to_string());
         report.reason = Some(err.clone());

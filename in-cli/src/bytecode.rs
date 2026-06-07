@@ -163,6 +163,8 @@ pub struct BytecodeModule {
     pub functions: Vec<BytecodeFunction>,
     pub entry_point: String,
     pub identity: Option<ModuleIdentityReport>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub package_exports: std::collections::BTreeMap<String, crate::package_runtime::PackageExportRuntime>,
 }
 
 impl BytecodeModule {
@@ -171,6 +173,7 @@ impl BytecodeModule {
             functions: Vec::new(),
             entry_point,
             identity: None,
+            package_exports: std::collections::BTreeMap::new(),
         }
     }
 
@@ -193,6 +196,11 @@ pub fn module_to_text(module: &BytecodeModule) -> String {
     if let Some(identity) = &module.identity {
         if let Ok(encoded) = serde_json::to_string(identity) {
             out.push_str(&format!("; module_identity: {encoded}\n"));
+        }
+    }
+    if !module.package_exports.is_empty() {
+        if let Ok(encoded) = serde_json::to_string(&module.package_exports) {
+            out.push_str(&format!("; package_exports: {encoded}\n"));
         }
     }
     out.push_str("; ---\n\n");
@@ -252,6 +260,7 @@ pub fn text_to_module(text: &str) -> Result<BytecodeModule, String> {
     let mut current_func: Option<BytecodeFunction> = None;
     let mut entry_point = "main".to_string();
     let mut identity = None;
+    let mut package_exports = std::collections::BTreeMap::new();
 
     for line in text.lines() {
         let trimmed = line.trim();
@@ -268,6 +277,13 @@ pub fn text_to_module(text: &str) -> Result<BytecodeModule, String> {
                 entry_point = rest.trim_end_matches(')').trim().to_string();
             } else if let Some(rest) = trimmed.strip_prefix("; module_identity:") {
                 identity = parse_module_identity_line(rest.trim());
+            } else if let Some(rest) = trimmed.strip_prefix("; package_exports:") {
+                if let Ok(parsed) = serde_json::from_str::<
+                    std::collections::BTreeMap<String, crate::package_runtime::PackageExportRuntime>,
+                >(rest.trim())
+                {
+                    package_exports = parsed;
+                }
             }
             continue;
         }
@@ -321,6 +337,7 @@ pub fn text_to_module(text: &str) -> Result<BytecodeModule, String> {
         functions,
         entry_point,
         identity,
+        package_exports,
     })
 }
 

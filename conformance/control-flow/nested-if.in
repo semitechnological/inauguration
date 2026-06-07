@@ -1,0 +1,12 @@
+// @expect parse: ok
+// @expect bytecode: executes
+// @expect result: 3
+
+fn main() -> Int {
+    if 1 > 0 {
+        if 2 > 1 {
+            return 3;
+        }
+    }
+    return 0;
+}

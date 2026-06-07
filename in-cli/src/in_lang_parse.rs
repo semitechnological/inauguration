@@ -22,6 +22,7 @@ pub struct InExternBinding {
     pub language: String,
     pub name: String,
     pub required_capabilities: Vec<String>,
+    pub ret: Option<Typ>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -45,108 +46,58 @@ pub struct InParallelTaskFact {
     pub name: String,
 }
 
+fn std_binding(name: &str, caps: Vec<String>) -> InExternBinding {
+    InExternBinding {
+        language: "std".into(),
+        name: name.into(),
+        required_capabilities: caps,
+        ret: None,
+    }
+}
+
 pub fn in_standard_import_bindings(import: &str) -> Vec<InExternBinding> {
     match normalize_import_path(import) {
-        "std.io" => vec![InExternBinding {
-            language: "std".into(),
-            name: "print".into(),
-            required_capabilities: vec!["process.stdout".into()],
-        }],
+        "std.io" => vec![std_binding("print", vec!["process.stdout".into()])],
         "std.fs" => vec![
-            InExternBinding {
-                language: "std".into(),
-                name: "read_file".into(),
-                required_capabilities: vec!["fs.read".into()],
-            },
-            InExternBinding {
-                language: "std".into(),
-                name: "write_file".into(),
-                required_capabilities: vec!["fs.write".into()],
-            },
+            std_binding("read_file", vec!["fs.read".into()]),
+            std_binding("write_file", vec!["fs.write".into()]),
         ],
-        "std.http" => vec![InExternBinding {
-            language: "std".into(),
-            name: "http_get".into(),
-            required_capabilities: vec!["network.http".into()],
-        }],
+        "std.http" => vec![std_binding("http_get", vec!["network.http".into()])],
         "std.json" => vec![
-            InExternBinding {
-                language: "std".into(),
-                name: "json_parse".into(),
-                required_capabilities: Vec::new(),
-            },
-            InExternBinding {
-                language: "std".into(),
-                name: "json_stringify".into(),
-                required_capabilities: Vec::new(),
-            },
+            std_binding("json_parse", Vec::new()),
+            std_binding("json_stringify", Vec::new()),
         ],
-        "std.process" => vec![InExternBinding {
-            language: "std".into(),
-            name: "process_run".into(),
-            required_capabilities: vec!["process.spawn".into()],
-        }],
+        "std.process" => vec![std_binding("process_run", vec!["process.spawn".into()])],
         "std.cli" => vec![
-            InExternBinding {
-                language: "std".into(),
-                name: "arg_count".into(),
-                required_capabilities: vec!["process.args".into()],
-            },
-            InExternBinding {
-                language: "std".into(),
-                name: "arg".into(),
-                required_capabilities: vec!["process.args".into()],
-            },
+            std_binding("arg_count", vec!["process.args".into()]),
+            std_binding("arg", vec!["process.args".into()]),
         ],
         "std.env" => vec![
-            InExternBinding {
-                language: "std".into(),
-                name: "env_get".into(),
-                required_capabilities: vec!["env.read".into()],
-            },
-            InExternBinding {
-                language: "std".into(),
-                name: "env_set".into(),
-                required_capabilities: vec!["env.write".into()],
-            },
-            InExternBinding {
-                language: "std".into(),
-                name: "env_has".into(),
-                required_capabilities: vec!["env.read".into()],
-            },
+            std_binding("env_get", vec!["env.read".into()]),
+            std_binding("env_set", vec!["env.write".into()]),
+            std_binding("env_has", vec!["env.read".into()]),
         ],
         "std.path" => vec![
-            InExternBinding {
-                language: "std".into(),
-                name: "path_join".into(),
-                required_capabilities: Vec::new(),
-            },
-            InExternBinding {
-                language: "std".into(),
-                name: "path_dirname".into(),
-                required_capabilities: Vec::new(),
-            },
-            InExternBinding {
-                language: "std".into(),
-                name: "path_basename".into(),
-                required_capabilities: Vec::new(),
-            },
-            InExternBinding {
-                language: "std".into(),
-                name: "path_extname".into(),
-                required_capabilities: Vec::new(),
-            },
-            InExternBinding {
-                language: "std".into(),
-                name: "path_normalize".into(),
-                required_capabilities: Vec::new(),
-            },
+            std_binding("path_join", Vec::new()),
+            std_binding("path_dirname", Vec::new()),
+            std_binding("path_basename", Vec::new()),
+            std_binding("path_extname", Vec::new()),
+            std_binding("path_normalize", Vec::new()),
         ],
         _ => Vec::new(),
     }
 }
 
 fn binding_decl(binding: &InExternBinding) -> Decl {
+    if let Some(ret) = &binding.ret {
+        return Decl::Function {
+            name: binding.name.clone(),
+            params: Vec::new(),
+            ret: ret.clone(),
+            body: Vec::new(),
+            type_params: vec![],
+        };
+    }
     match binding.name.as_str() {
         "print" => Decl::Function {
             name: binding.name.clone(),
@@ -998,13 +949,20 @@ fn find_top_level_binary_op<'a>(s: &str, ops: &[&'a str]) -> Option<(&'a str, us
             '[' => depth += 1,
             ']' => depth -= 1,
             _ if depth == 0 => {
+                let mut best: Option<(&'a str, usize)> = None;
                 for op in ops {
                     if s[i..].starts_with(op) {
                         if *op == "-" && s[i + 1..].starts_with('>') {
                             continue;
                         }
-                        matches.push((*op, i));
+                        match best {
+                            Some((prev, _)) if op.len() <= prev.len() => {}
+                            _ => best = Some((*op, i)),
+                        }
                     }
+                }
+                if let Some(m) = best {
+                    matches.push(m);
                 }
             }
             _ => {}
@@ -1621,6 +1579,7 @@ fn parse_extern_fn_block(block: &str) -> Result<InExternBinding, String> {
         language: language.to_string(),
         name,
         required_capabilities,
+        ret: None,
     })
 }
 
@@ -1663,7 +1622,7 @@ fn parse_package_or_module_name(kind: &str, rest: &str) -> Result<String, String
     if name.is_empty() {
         return Err(format!(".in: {kind} name missing"));
     }
-    if !valid_package_or_module_name(name) {
+    if !valid_package_or_module_name(name) && !crate::package_ref::is_valid_semantic_import(name) {
         return Err(format!(".in: invalid {kind} name `{name}`"));
     }
     Ok(name.to_string())
@@ -2327,7 +2286,10 @@ fn infer_in_expr_type(
     }
 }
 
-fn parse_in_module_without_validation(source: &str) -> Result<UnifiedModule, String> {
+fn parse_in_module_without_validation(
+    source: &str,
+    source_path: Option<&std::path::Path>,
+) -> Result<UnifiedModule, String> {
     let surface = parse_in_surface_info(source)?;
     let identity = CoreModuleIdentity {
         package: surface.package.clone(),
@@ -2344,6 +2306,27 @@ fn parse_in_module_without_validation(source: &str) -> Result<UnifiedModule, Str
                 .into_iter()
                 .map(|binding| binding_decl(&binding)),
         );
+    }
+    if let Some(path) = source_path {
+        if let Ok((root, manifest)) =
+            crate::package_manifest::load_package_manifest_from_source(path)
+        {
+            let lock = crate::package_lock::discover_package_lock(&root.root).and_then(|lock_root| {
+                crate::package_lock::load_package_lock(&lock_root.lock_path).ok()
+            });
+            for import in &surface.semantic_imports {
+                std_decls.extend(
+                    crate::package_extern::package_import_bindings_for_semantic_import(
+                        import,
+                        &root.root,
+                        &manifest,
+                        lock.as_ref(),
+                    )
+                    .into_iter()
+                    .map(|binding| binding_decl(&binding)),
+                );
+            }
+        }
     }
     std_decls.extend(module.decls);
     module.decls = std_decls;
@@ -2429,7 +2412,7 @@ fn validate_module(module: &UnifiedModule, require_main: bool) -> Result<(), Str
 
 /// Parse and validate `.in` v0.2 source; returns human-readable errors as strings.
 pub fn parse_in_source(source: &str) -> Result<UnifiedModule, String> {
-    let module = parse_in_module_without_validation(source)?;
+    let module = parse_in_module_without_validation(source, None)?;
     validate_module(&module, true)?;
     Ok(module)
 }
@@ -2470,7 +2453,7 @@ fn parse_in_file_inner(path: &Path, seen: &mut HashSet<PathBuf>) -> Result<Unifi
             decls.extend(imported.decls);
         }
     }
-    let module = parse_in_module_without_validation(&source)?;
+    let module = parse_in_module_without_validation(&source, Some(path))?;
     let identity = module.identity.clone();
     decls.extend(module.decls);
     Ok(UnifiedModule::with_identity(decls, identity))
@@ -2681,7 +2664,8 @@ fn main() -> void { read_file("x"); return; }
             vec![InExternBinding {
                 language: "rust".into(),
                 name: "read_file".into(),
-                required_capabilities: Vec::new()
+                required_capabilities: Vec::new(),
+                ret: None,
             }]
         );
     }
@@ -3220,6 +3204,16 @@ fn main() -> void {
                 && matches!(index, Expr::IntLit(1))
                 && matches!(value, Expr::IntLit(9))
         ));
+    }
+
+    #[test]
+    fn parse_expr_prefers_longest_comparison_operator() {
+        use crate::core_ir::Expr;
+        let parsed = parse_expr("n <= 1");
+        match &parsed {
+            Expr::Binary { op, .. } => assert_eq!(op, "<="),
+            other => panic!("expected <=, got {other:?}"),
+        }
     }
 
     #[test]

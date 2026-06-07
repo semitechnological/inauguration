@@ -372,7 +372,20 @@ fn check_expr(
             check_expr(fn_name, lhs, facts, env, call_edges)?;
             check_expr(fn_name, rhs, facts, env, call_edges)?;
             match op.as_str() {
-                "+" | "-" | "*" | "/" | "%" | "<" | ">" | "<=" | ">=" => {
+                "+" => {
+                    let lhs_typ = expr_type(lhs, facts, env);
+                    let rhs_typ = expr_type(rhs, facts, env);
+                    if lhs_typ == Some(Typ::String) || rhs_typ == Some(Typ::String) {
+                        require_type(fn_name, "binary operand", &Typ::String, lhs, facts, env)?;
+                        require_type(fn_name, "binary operand", &Typ::String, rhs, facts, env)
+                    } else {
+                        check_numeric_binop_operands(fn_name, lhs, rhs, facts, env)
+                    }
+                }
+                "-" | "*" | "/" | "<" | ">" | "<=" | ">=" => {
+                    check_numeric_binop_operands(fn_name, lhs, rhs, facts, env)
+                }
+                "%" => {
                     require_type(fn_name, "binary operand", &Typ::Int, lhs, facts, env)?;
                     require_type(fn_name, "binary operand", &Typ::Int, rhs, facts, env)
                 }
@@ -591,14 +604,32 @@ fn expr_type(expr: &Expr, facts: &ModuleFacts<'_>, env: &HashMap<String, Typ>) -
         }
         Expr::Unary { op, expr } => match op.as_str() {
             "!" => Some(Typ::Bool),
-            "-" => Some(Typ::Int),
+            "-" => {
+                if expr_type(expr, facts, env) == Some(Typ::Float) {
+                    Some(Typ::Float)
+                } else {
+                    Some(Typ::Int)
+                }
+            }
             _ => expr_type(expr, facts, env),
         },
-        Expr::Binary { op, .. } => match op.as_str() {
-            "+" | "-" | "*" | "/" | "%" => Some(Typ::Int),
-            "==" | "!=" | "<" | ">" | "<=" | ">=" | "&&" | "||" => Some(Typ::Bool),
-            _ => None,
-        },
+        Expr::Binary { op, lhs, rhs } => {
+            let lhs_typ = expr_type(lhs, facts, env);
+            let rhs_typ = expr_type(rhs, facts, env);
+            match op.as_str() {
+                "+" if lhs_typ == Some(Typ::String) || rhs_typ == Some(Typ::String) => {
+                    Some(Typ::String)
+                }
+                "+" | "-" | "*" | "/"
+                    if lhs_typ == Some(Typ::Float) || rhs_typ == Some(Typ::Float) =>
+                {
+                    Some(Typ::Float)
+                }
+                "+" | "-" | "*" | "/" | "%" => Some(Typ::Int),
+                "==" | "!=" | "<" | ">" | "<=" | ">=" | "&&" | "||" => Some(Typ::Bool),
+                _ => None,
+            }
+        }
         Expr::Call { callee, .. } => {
             if let Expr::Ident(name) = callee.as_ref()
                 && let Some(sig) = facts.functions.get(name.as_str())
@@ -608,6 +639,24 @@ fn expr_type(expr: &Expr, facts: &ModuleFacts<'_>, env: &HashMap<String, Typ>) -
             None
         }
         Expr::Closure { .. } => None,
+    }
+}
+
+fn check_numeric_binop_operands(
+    fn_name: &str,
+    lhs: &Expr,
+    rhs: &Expr,
+    facts: &ModuleFacts<'_>,
+    env: &HashMap<String, Typ>,
+) -> Result<(), (String, String)> {
+    let lhs_typ = expr_type(lhs, facts, env);
+    let rhs_typ = expr_type(rhs, facts, env);
+    if lhs_typ == Some(Typ::Float) || rhs_typ == Some(Typ::Float) {
+        require_type(fn_name, "binary operand", &Typ::Float, lhs, facts, env)?;
+        require_type(fn_name, "binary operand", &Typ::Float, rhs, facts, env)
+    } else {
+        require_type(fn_name, "binary operand", &Typ::Int, lhs, facts, env)?;
+        require_type(fn_name, "binary operand", &Typ::Int, rhs, facts, env)
     }
 }
 

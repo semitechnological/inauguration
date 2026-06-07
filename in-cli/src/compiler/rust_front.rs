@@ -458,7 +458,12 @@ fn lower_block(block: &syn::Block) -> Vec<Stmt> {
         }
     }
     if !out.iter().any(|s| matches!(s, Stmt::Return(_))) {
-        out.push(Stmt::Return(None));
+        if let Some(Stmt::Expr(expr)) = out.last().cloned() {
+            out.pop();
+            out.push(Stmt::Return(Some(expr)));
+        } else {
+            out.push(Stmt::Return(None));
+        }
     }
     out
 }

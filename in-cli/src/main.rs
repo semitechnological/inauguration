@@ -37,6 +37,26 @@ struct Cli {
     command: Commands,
 }
 
+#[derive(Subcommand, Debug)]
+enum PackageCommands {
+    #[command(about = "Install declared dependencies from cargo/npm registries or local paths")]
+    Install {
+        #[arg(long, default_value = ".")]
+        path: String,
+        #[arg(long, default_value_t = false, help = "Reuse inauguration.lock install paths only")]
+        offline: bool,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    #[command(about = "Write inauguration.lock for declared dependencies")]
+    Lock {
+        #[arg(long, default_value = ".")]
+        path: String,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+}
+
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum PreviewClientKind {
     /// SwiftPM preview-host-client against PreviewHost (SwiftUI-capable).
@@ -165,8 +185,37 @@ enum Commands {
         #[arg(long, default_value_t = false)]
         json: bool,
     },
-    #[command(about = "Report inauguration.package metadata")]
+    #[command(
+        about = "Install package dependencies from registries or local paths",
+        visible_aliases = ["get", "stall", "i"]
+    )]
+    Install {
+        #[arg(value_name = "PACKAGE", help = "Ecosystem refs such as pip:flask or cargo:serde")]
+        packages: Vec<String>,
+        #[arg(long, default_value = ".")]
+        path: String,
+        #[arg(long, default_value_t = false, help = "Reuse inauguration.lock install paths only")]
+        offline: bool,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    #[command(about = "Add packages to inauguration.package and install them")]
+    Add {
+        #[arg(value_name = "PACKAGE", help = "Ecosystem refs such as pip:flask or npm:hono")]
+        packages: Vec<String>,
+        #[arg(long, default_value = ".")]
+        path: String,
+        #[arg(long, default_value = "latest")]
+        version: String,
+        #[arg(long, default_value_t = false, help = "Reuse inauguration.lock install paths only")]
+        offline: bool,
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    #[command(about = "Package manifest report and dependency management")]
     Package {
+        #[command(subcommand)]
+        action: Option<PackageCommands>,
         #[arg(long, default_value = ".")]
         path: String,
         #[arg(long, default_value_t = false)]
@@ -378,7 +427,31 @@ fn run() -> Result<()> {
             },
             json,
         ),
-        Commands::Package { path, json } => cmd_package(&invocation_cwd, &path, json),
+        Commands::Install {
+            packages,
+            path,
+            offline,
+            json,
+        } => cmd_install(&invocation_cwd, &packages, &path, offline, json, "latest"),
+        Commands::Add {
+            packages,
+            path,
+            version,
+            offline,
+            json,
+        } => cmd_install(&invocation_cwd, &packages, &path, offline, json, &version),
+        Commands::Package { action, path, json } => match action {
+            Some(PackageCommands::Install {
+                path: install_path,
+                offline,
+                json: install_json,
+            }) => cmd_install(&invocation_cwd, &[], &install_path, offline, install_json, "latest"),
+            Some(PackageCommands::Lock {
+                path: lock_path,
+                json: lock_json,
+            }) => cmd_package_lock(&invocation_cwd, &lock_path, lock_json),
+            None => cmd_package(&invocation_cwd, &path, json),
+        },
         Commands::Languages { json } => cmd_languages(json),
         Commands::Dev { preview_client } => {
             cmd_dev(&workspace_root(invocation_cwd.clone())?, preview_client)
@@ -678,6 +751,66 @@ fn cmd_graph(
             "{}",
             inauguration::graph_report::graph_report_text(&report, selection)
         );
+    }
+    Ok(())
+}
+
+fn cmd_install(
+    invocation_cwd: &Path,
+    packages: &[String],
+    path: &str,
+    offline: bool,
+    json: bool,
+    version: &str,
+) -> Result<()> {
+    let package_path = resolve_invocation_path(invocation_cwd, path);
+    let report = inauguration::package_install::install_with_packages(
+        &package_path,
+        packages,
+        version,
+        inauguration::package_install::InstallOptions { offline },
+    )
+    .map_err(InError::Message)?;
+    if json {
+        let raw = serde_json::to_string_pretty(&report)
+            .map_err(|err| InError::Message(format!("serialize package install report: {err}")))?;
+        println!("{raw}");
+    } else {
+        println!("root: {}", report.root.display());
+        println!("lock: {}", report.lock_path.display());
+        println!("installed: {}", report.installed.len());
+        for dep in &report.installed {
+            println!(
+                "  {} {} {} -> {} ({})",
+                dep.ecosystem,
+                dep.name,
+                dep.version,
+                dep.install_path.display(),
+                dep.reason
+            );
+        }
+        println!("duration_ms: {}", report.duration_ms);
+    }
+    Ok(())
+}
+
+fn cmd_package_lock(invocation_cwd: &Path, path: &str, json: bool) -> Result<()> {
+    let package_path = resolve_invocation_path(invocation_cwd, path);
+    let (lock_path, lock) =
+        inauguration::package_install::lock_dependencies(&package_path).map_err(InError::Message)?;
+    if json {
+        let raw = serde_json::json!({
+            "lock_path": lock_path,
+            "lock": lock,
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&raw)
+                .map_err(|err| InError::Message(format!("serialize package lock report: {err}")))?
+        );
+    } else {
+        println!("lock: {}", lock_path.display());
+        println!("dependencies: {}", lock.dependencies.len());
     }
     Ok(())
 }
@@ -1815,11 +1948,12 @@ fn owned_native_test_groups(root: &Path) -> Vec<TestGroup> {
         .collect()
 }
 
-fn test_step_names() -> [&'static str; 3] {
+fn test_step_names() -> [&'static str; 4] {
     [
         "polyglot samples (scripts/check-polyglot-sample.sh)",
         "bytecode compiler (scripts/check-bytecode-compiler.sh)",
         "orchestration compiler (scripts/check-orchestration-compiler.sh)",
+        "conformance suite (scripts/run-conformance.sh)",
     ]
 }
 
@@ -1845,6 +1979,8 @@ fn self_host_test_groups(root: &Path) -> Vec<TestGroup> {
                 "scripts/check-polyglot-sample.sh"
             } else if name.contains("bytecode") {
                 "scripts/check-bytecode-compiler.sh"
+            } else if name.contains("conformance") {
+                "scripts/run-conformance.sh"
             } else {
                 "scripts/check-orchestration-compiler.sh"
             };
@@ -2573,11 +2709,47 @@ mod tests {
         let cli = Cli::try_parse_from(["in", "package", "--path", "apps/package-sample", "--json"])
             .expect("cli parse");
         match cli.command {
-            Commands::Package { path, json } => {
+            Commands::Package {
+                action: None,
+                path,
+                json,
+            } => {
                 assert_eq!(path, "apps/package-sample");
                 assert!(json);
             }
             _ => panic!("expected package command"),
+        }
+    }
+
+    #[test]
+    fn parse_install_aliases_and_package_refs() {
+        for alias in ["install", "get", "stall", "i"] {
+            let cli = Cli::try_parse_from(["in", alias, "pip:flask", "--path", "."])
+                .expect("cli parse");
+            match cli.command {
+                Commands::Install { packages, path, .. } => {
+                    assert_eq!(packages, vec!["pip:flask"]);
+                    assert_eq!(path, ".");
+                }
+                _ => panic!("expected install command for alias {alias}"),
+            }
+        }
+    }
+
+    #[test]
+    fn parse_add_package_refs() {
+        let cli = Cli::try_parse_from(["in", "add", "pip:flask", "npm:hono", "--version", "^1.0.0"])
+            .expect("cli parse");
+        match cli.command {
+            Commands::Add {
+                packages,
+                version,
+                ..
+            } => {
+                assert_eq!(packages, vec!["pip:flask", "npm:hono"]);
+                assert_eq!(version, "^1.0.0");
+            }
+            _ => panic!("expected add command"),
         }
     }
 

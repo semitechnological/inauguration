@@ -1,0 +1,7 @@
+// @expect parse: ok
+// @expect bytecode: executes
+// @expect result: Float(FloatVal(6.0))
+
+fn main() -> Float {
+    return 2.5 + 3.5;
+}

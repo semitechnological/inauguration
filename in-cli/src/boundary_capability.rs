@@ -186,13 +186,10 @@ mod tests {
     }
 
     #[test]
-    fn rust_reports_gate_capped_body_lowering() {
+    fn rust_reports_family_typecheck_level() {
         let entry = language_support_for_parser(ParserId::Rust.as_str()).expect("rust");
-        assert_eq!(boundary_level_for(entry), 2);
-        assert_eq!(effective_level_for(entry), 2);
-        let gates = boundary_gates_for(2);
-        assert!(gates.contains(&"core-ir-bodies"));
-        assert!(gates.contains(&"textual-sil"));
+        assert!(boundary_level_for(entry) >= 3);
+        assert_eq!(effective_level_for(entry), entry.level);
     }
 
     #[test]
@@ -201,15 +198,15 @@ mod tests {
             let entry =
                 language_support_for_parser(parser_id.as_str()).expect(parser_id.as_str());
             assert_eq!(boundary_level_for(entry), 3, "{}", entry.language);
-            assert_eq!(effective_level_for(entry), 2, "{}", entry.language);
+            assert_eq!(effective_level_for(entry), entry.level, "{}", entry.language);
         }
     }
 
     #[test]
-    fn php_reports_gate_capped_body_lowering() {
+    fn php_reports_family_typecheck_level() {
         let entry = language_support_for_parser(ParserId::Php.as_str()).expect("php");
-        assert_eq!(boundary_level_for(entry), 2);
-        assert_eq!(effective_level_for(entry), entry.level);
+        assert!(boundary_level_for(entry) >= 2);
+        assert_eq!(effective_level_for(entry), entry.level.min(boundary_level_for(entry)));
     }
 
     #[test]

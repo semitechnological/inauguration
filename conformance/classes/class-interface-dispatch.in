@@ -1,0 +1,22 @@
+// @expect parse: ok
+
+interface Speaker {
+    fn speak() -> String
+}
+
+class Dog {
+    fn speak() -> String {
+        return "woof";
+    }
+}
+
+class Cat {
+    fn speak() -> String {
+        return "meow";
+    }
+}
+
+fn main() -> String {
+    let d = Dog {};
+    return d.speak();
+}

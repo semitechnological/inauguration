@@ -1,0 +1,7 @@
+// @expect parse: ok
+// @expect bytecode: executes
+// @expect result: String("hello world")
+
+fn main() -> String {
+    return "hello" + " " + "world";
+}

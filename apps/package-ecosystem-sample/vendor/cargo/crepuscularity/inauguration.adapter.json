@@ -1,0 +1,17 @@
+{
+  "exports": [
+    {
+      "symbol": "crepuscularity_greet",
+      "returns": "string",
+      "invoke": {
+        "program": "cargo",
+        "args": [
+          "run",
+          "--quiet",
+          "--manifest-path",
+          "Cargo.toml"
+        ]
+      }
+    }
+  ]
+}

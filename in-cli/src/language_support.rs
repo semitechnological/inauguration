@@ -183,10 +183,10 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Scala",
         parser_id: Some("scala"),
         extensions: &["scala", "sc"],
-        level: 1,
-        level_label: "Tree-sitter declaration extraction",
+        level: 2,
+        level_label: "Tree-sitter bounded body lowering with class/trait extraction",
         front: "compiler::tree_front",
-        runtime_boundary: "Core IR declarations only; JVM runtime is not bundled",
+        runtime_boundary: "Core IR and textual SIL; JVM runtime is not bundled",
         example: "apps/polyglot-sample/sample.scala",
         next_step: "Add parameters, return types, bounded bodies, and JVM runtime strategy",
     },
@@ -216,8 +216,8 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "VB.NET",
         parser_id: Some("vb"),
         extensions: &["vb"],
-        level: 2,
-        level_label: "bounded Function/Sub lowering with optional inline boundary metadata",
+        level: 3,
+        level_label: "bounded Function/Sub lowering with family typecheck and optional inline boundary metadata",
         front: "compiler::vb_boundary",
         runtime_boundary: "Core IR and textual SIL; CLR runtime is not bundled",
         example: "apps/polyglot-sample/sample.vb",
@@ -249,8 +249,8 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "PHP",
         parser_id: Some("php"),
         extensions: &["php", "phtml"],
-        level: 2,
-        level_label: "Tree-sitter bounded scalar body lowering",
+        level: 3,
+        level_label: "Tree-sitter bounded body lowering with family typecheck",
         front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL; PHP runtime is not bundled",
         example: "apps/polyglot-sample/sample.php",
@@ -260,10 +260,10 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Perl",
         parser_id: Some("perl"),
         extensions: &["pl", "pm"],
-        level: 1,
-        level_label: "Tree-sitter declaration extraction",
+        level: 2,
+        level_label: "Tree-sitter bounded body lowering with package/class extraction",
         front: "compiler::tree_front",
-        runtime_boundary: "Core IR declarations only; Perl runtime is not bundled",
+        runtime_boundary: "Core IR and textual SIL; Perl runtime is not bundled",
         example: "apps/polyglot-sample/sample.pl",
         next_step: "Add parameters, bounded bodies, and runtime strategy",
     },
@@ -271,8 +271,8 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Zig",
         parser_id: Some("zig"),
         extensions: &["zig"],
-        level: 2,
-        level_label: "Tree-sitter bounded scalar body lowering",
+        level: 3,
+        level_label: "Tree-sitter bounded body lowering with family typecheck",
         front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL; Zig runtime/ABI is not bundled",
         example: "apps/polyglot-sample/sample.zig",
@@ -293,8 +293,8 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Lua",
         parser_id: Some("lua"),
         extensions: &["lua"],
-        level: 2,
-        level_label: "Tree-sitter bounded scalar body lowering",
+        level: 3,
+        level_label: "Tree-sitter bounded body lowering with family typecheck",
         front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL; Lua runtime is not bundled",
         example: "apps/polyglot-sample/sample.lua",
@@ -304,8 +304,8 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Clojure",
         parser_id: Some("clojure"),
         extensions: &["clj", "cljs", "cljc"],
-        level: 2,
-        level_label: "bounded defn lowering with optional inline boundary metadata",
+        level: 3,
+        level_label: "bounded defn lowering with family typecheck and optional inline boundary metadata",
         front: "compiler::clojure_boundary",
         runtime_boundary: "Core IR and textual SIL; JVM runtime is not bundled",
         example: "apps/polyglot-sample/sample.clj",
@@ -348,8 +348,8 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Nim",
         parser_id: Some("nim"),
         extensions: &["nim"],
-        level: 2,
-        level_label: "bounded proc lowering with optional inline boundary metadata",
+        level: 3,
+        level_label: "bounded proc lowering with family typecheck and optional inline boundary metadata",
         front: "compiler::nim_boundary",
         runtime_boundary: "Core IR and textual SIL; Nim runtime is not bundled",
         example: "apps/polyglot-sample/sample.nim",
@@ -392,8 +392,8 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "D",
         parser_id: Some("d"),
         extensions: &["d"],
-        level: 2,
-        level_label: "bounded function lowering with optional inline boundary metadata",
+        level: 3,
+        level_label: "bounded function lowering with family typecheck and optional inline boundary metadata",
         front: "compiler::d_boundary",
         runtime_boundary: "Core IR and textual SIL; D runtime is not bundled",
         example: "apps/polyglot-sample/sample.d",
@@ -403,8 +403,8 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Crystal",
         parser_id: Some("crystal"),
         extensions: &["cr"],
-        level: 2,
-        level_label: "bounded def lowering with optional inline boundary metadata",
+        level: 3,
+        level_label: "bounded def lowering with family typecheck and optional inline boundary metadata",
         front: "compiler::crystal_boundary",
         runtime_boundary: "Core IR and textual SIL; Crystal runtime is not bundled",
         example: "apps/polyglot-sample/sample.cr",
@@ -414,8 +414,8 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Odin",
         parser_id: Some("odin"),
         extensions: &["odin"],
-        level: 2,
-        level_label: "bounded proc lowering with optional inline boundary metadata",
+        level: 3,
+        level_label: "bounded proc lowering with family typecheck and optional inline boundary metadata",
         front: "compiler::odin_boundary",
         runtime_boundary: "Core IR and textual SIL; Odin runtime is not bundled",
         example: "apps/polyglot-sample/sample.odin",
@@ -425,8 +425,8 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Hare",
         parser_id: Some("hare"),
         extensions: &["ha"],
-        level: 2,
-        level_label: "bounded fn lowering with optional inline boundary metadata",
+        level: 3,
+        level_label: "bounded fn lowering with family typecheck and optional inline boundary metadata",
         front: "compiler::hare_boundary",
         runtime_boundary: "Core IR and textual SIL; Hare runtime is not bundled",
         example: "apps/polyglot-sample/sample.ha",
@@ -519,15 +519,29 @@ mod tests {
     }
 
     #[test]
-    fn only_in_rust_and_java_report_level_three() {
+    fn level_three_fronts_include_core_and_promoted_families() {
         let level_three = LANGUAGE_SUPPORT
             .iter()
             .filter(|entry| entry.level == 3)
             .map(|entry| entry.language)
             .collect::<Vec<_>>();
-        assert!(level_three.contains(&"in"));
-        assert!(level_three.contains(&"Rust"));
-        assert!(level_three.contains(&"Java"));
+        for language in [
+            "in",
+            "Rust",
+            "Java",
+            "PHP",
+            "Lua",
+            "Zig",
+            "Nim",
+            "Odin",
+            "Hare",
+            "D",
+            "Crystal",
+            "Clojure",
+            "VB.NET",
+        ] {
+            assert!(level_three.contains(&language), "missing {language}");
+        }
     }
 
     #[test]
@@ -540,8 +554,9 @@ mod tests {
             "Kotlin",
             "C#",
             "Python",
-            "Zig",
             "Dart",
+            "Scala",
+            "Perl",
         ] {
             let entry = LANGUAGE_SUPPORT
                 .iter()

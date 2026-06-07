@@ -1,0 +1,15 @@
+{
+  "exports": [
+    {
+      "symbol": "fiber_greet",
+      "returns": "string",
+      "invoke": {
+        "program": "go",
+        "args": [
+          "run",
+          "."
+        ]
+      }
+    }
+  ]
+}

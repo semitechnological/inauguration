@@ -1,6 +1,8 @@
 // @expect parse: ok
 // @expect has-function: greet
 // @expect has-call-edge: greet
+// @expect bytecode: executes
+// @expect result: String("hello world")
 
 fn greet(name: String) -> String {
     return "hello " + name;

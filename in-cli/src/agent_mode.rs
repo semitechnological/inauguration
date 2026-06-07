@@ -489,6 +489,23 @@ fn build_report(path: &Path, config: &AgentModeConfig) -> Result<AgentReport, Ag
                     extern_bindings
                         .extend(crate::in_lang_parse::in_standard_import_bindings(import));
                 }
+                if let Ok((root, manifest)) =
+                    crate::package_manifest::load_package_manifest_from_source(path)
+                {
+                    let lock = crate::package_lock::discover_package_lock(&root.root).and_then(
+                        |lock_root| crate::package_lock::load_package_lock(&lock_root.lock_path).ok(),
+                    );
+                    for import in &surface.semantic_imports {
+                        extern_bindings.extend(
+                            crate::package_extern::package_import_bindings_for_semantic_import(
+                                import,
+                                &root.root,
+                                &manifest,
+                                lock.as_ref(),
+                            ),
+                        );
+                    }
+                }
                 for binding in &extern_bindings {
                     for required in &binding.required_capabilities {
                         if !declared_capabilities.contains(required) {
@@ -522,8 +539,21 @@ fn build_report(path: &Path, config: &AgentModeConfig) -> Result<AgentReport, Ag
                     &surface.semantic_imports,
                     package_manifest.as_ref(),
                 );
-                package_symbol_index =
-                    crate::package_manifest::symbol_index_for_semantic_imports(&semantic_imports);
+                package_symbol_index = if let Ok((root, manifest)) =
+                    crate::package_manifest::load_package_manifest_from_source(path)
+                {
+                    let lock = crate::package_lock::discover_package_lock(&root.root).and_then(
+                        |lock_root| crate::package_lock::load_package_lock(&lock_root.lock_path).ok(),
+                    );
+                    crate::package_manifest::symbol_index_for_semantic_imports_with_context(
+                        &semantic_imports,
+                        Some(&root.root),
+                        Some(&manifest),
+                        lock.as_ref(),
+                    )
+                } else {
+                    crate::package_manifest::symbol_index_for_semantic_imports(&semantic_imports)
+                };
                 package_diagnostics =
                     crate::package_manifest::diagnostics_for_semantic_imports(&semantic_imports);
                 for diagnostic_fact in &package_diagnostics {

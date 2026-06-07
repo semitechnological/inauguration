@@ -45,6 +45,7 @@ pub fn compile_source_path(
     let artifact = crate::hybrid_sil::parse_textual_sil(&sil);
     let mut module = sil_to_bytecode::lower_sil_to_bytecode(&artifact)?;
     module.identity = Some(identity.clone());
+    module.package_exports = crate::package_runtime::collect_package_exports_for_source(path);
     Ok(BytecodeCompileOutput {
         module,
         sil,

@@ -1,0 +1,7 @@
+// @expect parse: ok
+// @expect bytecode: executes
+// @expect result: Bool(true)
+
+fn main() -> Bool {
+    return true && false || true;
+}

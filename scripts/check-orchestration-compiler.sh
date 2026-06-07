@@ -388,4 +388,123 @@ require(
 require(data.get("symbol_index") == [], "unresolved package import should not create symbols")
 PY
 
+echo "check ecosystem package install and imports"
+ecosystem_install_json="$tmp_dir/package-ecosystem-install.json"
+"${in_cmd[@]}" install --path apps/package-ecosystem-sample --json > "$ecosystem_install_json"
+python3 - "$ecosystem_install_json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+data = json.loads(Path(sys.argv[1]).read_text())
+
+def require(condition, message):
+    if not condition:
+        raise SystemExit(message)
+
+installed = data.get("installed") or []
+require(len(installed) == 4, "ecosystem install expected four dependencies")
+require(
+    any(item.get("key") == "cargo:crepuscularity" and item.get("status") == "installed" for item in installed),
+    "ecosystem install missing cargo:crepuscularity",
+)
+require(
+    any(item.get("key") == "npm:hono" and item.get("status") == "installed" for item in installed),
+    "ecosystem install missing npm:hono",
+)
+require(
+    any(item.get("key") == "pypi:flask" and item.get("status") == "installed" for item in installed),
+    "ecosystem install missing pypi:flask",
+)
+require(
+    any(item.get("key") == "go:fiber" and item.get("status") == "installed" for item in installed),
+    "ecosystem install missing go:fiber",
+)
+PY
+
+ecosystem_package_json="$tmp_dir/package-ecosystem.json"
+"${in_cmd[@]}" package --path apps/package-ecosystem-sample/main.in --json > "$ecosystem_package_json"
+python3 - "$ecosystem_package_json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+data = json.loads(Path(sys.argv[1]).read_text())
+
+def require(condition, message):
+    if not condition:
+        raise SystemExit(message)
+
+semantic_imports = data.get("semantic_imports") or []
+require(
+    any(item.get("import") == "cargo:crepuscularity" and item.get("status") == "resolved" for item in semantic_imports),
+    "ecosystem package report did not resolve cargo:crepuscularity",
+)
+require(
+    any(item.get("import") == "npm:hono" and item.get("status") == "resolved" for item in semantic_imports),
+    "ecosystem package report did not resolve npm:hono",
+)
+require(
+    any(item.get("import") == "pip:flask" and item.get("status") == "resolved" for item in semantic_imports),
+    "ecosystem package report did not resolve pip:flask alias",
+)
+symbol_index = data.get("symbol_index") or []
+require(
+    any(item.get("id") == "symbol:dependency:cargo:crepuscularity" for item in symbol_index),
+    "ecosystem package symbol index missing cargo:crepuscularity",
+)
+require(
+    any(item.get("id") == "symbol:dependency:npm:hono" for item in symbol_index),
+    "ecosystem package symbol index missing npm:hono",
+)
+require(
+    any(item.get("id") == "symbol:export:pypi:flask:flask_greet" for item in symbol_index),
+    "ecosystem package symbol index missing flask_greet export",
+)
+require(
+    any(item.get("import") == "go:fiber" and item.get("status") == "resolved" for item in semantic_imports),
+    "ecosystem package report did not resolve go:fiber",
+)
+require(
+    any(item.get("id") == "symbol:export:go:fiber:fiber_greet" for item in symbol_index),
+    "ecosystem package symbol index missing fiber_greet export",
+)
+require(data.get("diagnostics") == [], "ecosystem package report unexpectedly had diagnostics")
+PY
+
+ecosystem_bytecode_log="$tmp_dir/package-ecosystem-bytecode.log"
+"${in_cmd[@]}" execute-bytecode --verbose apps/package-ecosystem-sample/main.in > "$ecosystem_bytecode_log" 2>&1
+python3 - "$ecosystem_bytecode_log" <<'PY'
+import sys
+from pathlib import Path
+
+log = Path(sys.argv[1]).read_text()
+
+def require(condition, message):
+    if not condition:
+        raise SystemExit(message)
+
+require("hono:flask:crepuscularity:fiber" in log, "ecosystem bytecode did not invoke all four real package exports")
+PY
+
+agent_ecosystem_json="$tmp_dir/package-ecosystem-agent.json"
+"${in_cmd[@]}" agent --path apps/package-ecosystem-sample/main.in --module-id ecosystem_demo > "$agent_ecosystem_json"
+python3 - "$agent_ecosystem_json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+data = json.loads(Path(sys.argv[1]).read_text())
+
+def require(condition, message):
+    if not condition:
+        raise SystemExit(message)
+
+diagnostics = data.get("diagnostics") or []
+require(
+    not any(item.get("code") == "INPKG002" for item in diagnostics),
+    "ecosystem sample should synthesize package extern bindings without INPKG002",
+)
+PY
+
 echo "orchestration compiler checks passed"

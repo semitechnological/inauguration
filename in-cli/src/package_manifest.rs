@@ -35,6 +35,8 @@ pub struct PackageDependency {
     pub capabilities: Vec<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub build: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub install_path: Option<String>,
 }
 
 impl PackageDependency {
@@ -49,6 +51,13 @@ impl PackageDependency {
         self.version
             .strip_prefix("path:")
             .map(PathBuf::from)
+    }
+
+    pub fn resolved_install_path(&self, package_root: &Path) -> Option<PathBuf> {
+        self.install_path
+            .as_ref()
+            .map(|path| package_root.join(path))
+            .filter(|path| path.is_dir())
     }
 }
 
@@ -177,6 +186,85 @@ pub fn load_package_manifest(path: &Path) -> Result<PackageManifest, String> {
     parse_package_manifest(&source)
 }
 
+pub fn write_package_manifest(path: &Path, manifest: &PackageManifest) -> Result<(), String> {
+    let source = format_package_manifest(manifest);
+    fs::write(path, source).map_err(|err| format!("write {}: {err}", path.display()))
+}
+
+pub fn format_package_manifest(manifest: &PackageManifest) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("name: {}\n", manifest.name));
+    out.push_str(&format!("version: {}\n", manifest.version));
+    if let Some(entry) = &manifest.entry {
+        out.push_str(&format!("entry: {entry}\n"));
+    }
+    if !manifest.targets.is_empty() {
+        out.push_str("targets:\n");
+        for (target, enabled) in &manifest.targets {
+            out.push_str(&format!("  {target}: {enabled}\n"));
+        }
+    }
+    if !manifest.dependencies.is_empty() {
+        out.push_str("dependencies:\n");
+        for (key, dependency) in &manifest.dependencies {
+            out.push_str(&format!("  {key}:\n"));
+            out.push_str(&format!("    version: {}\n", dependency.version));
+            if let Some(kind) = &dependency.kind {
+                out.push_str(&format!("    kind: {kind}\n"));
+            }
+            if let Some(source) = &dependency.source {
+                out.push_str(&format!("    source: {source}\n"));
+            }
+            if let Some(rev) = &dependency.rev {
+                out.push_str(&format!("    rev: {rev}\n"));
+            }
+            if let Some(checksum) = &dependency.checksum {
+                out.push_str(&format!("    checksum: {checksum}\n"));
+            }
+            if let Some(install_path) = &dependency.install_path {
+                out.push_str(&format!("    install_path: {install_path}\n"));
+            }
+        }
+    }
+    if !manifest.capabilities.is_empty() {
+        out.push_str("capabilities:\n");
+        for capability in &manifest.capabilities {
+            out.push_str(&format!("  - {capability}\n"));
+        }
+    }
+    if !manifest.extensions.is_empty() {
+        out.push_str("extensions:\n");
+        for extension in &manifest.extensions {
+            out.push_str(&format!("  - {extension}\n"));
+        }
+    }
+    out
+}
+
+pub fn resolve_dependency_install_path(
+    package_root: &Path,
+    dependency_key: &str,
+    dependency: &PackageDependency,
+    lock: Option<&crate::package_lock::PackageLock>,
+) -> Option<PathBuf> {
+    let locked = lock.and_then(|lock| lock.dependencies.get(dependency_key));
+    locked
+        .and_then(|dep| dep.resolved_install_path(package_root))
+        .or_else(|| dependency.resolved_install_path(package_root))
+        .or_else(|| {
+            dependency
+                .resolved_source_path()
+                .map(|path| {
+                    if path.is_absolute() {
+                        path
+                    } else {
+                        package_root.join(path)
+                    }
+                })
+                .filter(|path| path.is_dir())
+        })
+}
+
 pub fn discover_package_root(path: &Path) -> Option<PackageRoot> {
     let mut current = if path
         .file_name()
@@ -217,21 +305,61 @@ pub fn load_package_manifest_from_source(
 }
 
 pub fn compile_context_in_dir(dir: &Path) -> Option<PackageCompileContext> {
-    let manifest_path = dir.join(PACKAGE_MANIFEST_FILE);
+    discover_package_root(dir).and_then(|root| compile_context_at_root(&root.root))
+}
+
+pub fn compile_context_for_source(source_path: &Path) -> Option<PackageCompileContext> {
+    discover_package_root(source_path).and_then(|root| compile_context_at_root(&root.root))
+}
+
+pub fn compile_context_at_root(package_root: &Path) -> Option<PackageCompileContext> {
+    let manifest_path = package_root.join(PACKAGE_MANIFEST_FILE);
     if !manifest_path.is_file() {
         return None;
     }
     let manifest = load_package_manifest(&manifest_path).ok()?;
-    let dependency_search_paths = manifest
-        .dependencies
-        .values()
-        .filter_map(PackageDependency::resolved_source_path)
-        .collect();
+    let lock = crate::package_lock::discover_package_lock(package_root)
+        .and_then(|root| crate::package_lock::load_package_lock(&root.lock_path).ok());
+    let dependency_search_paths = dependency_search_paths_for_root(package_root, &manifest, lock.as_ref());
     Some(PackageCompileContext {
         name: manifest.name,
         entry: manifest.entry,
         dependency_search_paths,
     })
+}
+
+fn dependency_search_paths_for_root(
+    package_root: &Path,
+    manifest: &PackageManifest,
+    lock: Option<&crate::package_lock::PackageLock>,
+) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for (key, dependency) in &manifest.dependencies {
+        let locked = lock.and_then(|lock| lock.dependencies.get(key));
+        let candidate = locked
+            .and_then(|dep| dep.resolved_install_path(package_root))
+            .or_else(|| dependency.resolved_install_path(package_root))
+            .or_else(|| {
+                dependency
+                    .resolved_source_path()
+                    .map(|path| {
+                        if path.is_absolute() {
+                            path
+                        } else {
+                            package_root.join(path)
+                        }
+                    })
+                    .filter(|path| path.is_dir())
+            });
+        if let Some(path) = candidate {
+            let key = path.display().to_string();
+            if seen.insert(key) {
+                paths.push(path);
+            }
+        }
+    }
+    paths
 }
 
 pub fn load_package_report_from_source<I, S, J, T>(
@@ -253,7 +381,14 @@ where
         Some(&report.manifest.name),
     ));
     report.semantic_imports = resolve_semantic_imports(&semantic_imports, Some(&report.manifest));
-    report.symbol_index = symbol_index_for_semantic_imports(&report.semantic_imports);
+    let lock = crate::package_lock::discover_package_lock(&report.root)
+        .and_then(|root| crate::package_lock::load_package_lock(&root.lock_path).ok());
+    report.symbol_index = symbol_index_for_semantic_imports_with_context(
+        &report.semantic_imports,
+        Some(&report.root),
+        Some(&report.manifest),
+        lock.as_ref(),
+    );
     report.diagnostics = diagnostics_for_semantic_imports(&report.semantic_imports);
     Ok(report)
 }
@@ -332,8 +467,22 @@ fn resolve_semantic_import(
             import: import.to_string(),
             dependency: Some(import.to_string()),
             status: "resolved".to_string(),
-            reason: "dependency-exact-match".to_string(),
+            reason: dependency_resolution_reason(import).to_string(),
         };
+    }
+    if let Some(package_ref) = crate::package_ref::parse_package_ref(import) {
+        for (key, dependency) in &manifest.dependencies {
+            if let Some(dep_ref) = crate::package_ref::package_ref_for_dependency(key, dependency) {
+                if dep_ref == package_ref {
+                    return PackageSemanticImport {
+                        import: import.to_string(),
+                        dependency: Some(key.clone()),
+                        status: "resolved".to_string(),
+                        reason: "dependency-ecosystem-match".to_string(),
+                    };
+                }
+            }
+        }
     }
     let suffix = import.rsplit('.').next().unwrap_or(import);
     if suffix != import && manifest.dependencies.contains_key(suffix) {
@@ -352,25 +501,62 @@ fn resolve_semantic_import(
     }
 }
 
+fn dependency_resolution_reason(import: &str) -> &'static str {
+    if crate::package_ref::parse_package_ref(import).is_some() {
+        "dependency-ecosystem-exact-match"
+    } else {
+        "dependency-exact-match"
+    }
+}
+
+pub fn parse_package_manifest_source(source: &str) -> Result<PackageManifest, String> {
+    parse_package_manifest(source)
+}
+
 pub fn symbol_index_for_semantic_imports(
     imports: &[PackageSemanticImport],
 ) -> Vec<PackageSymbolIndexEntry> {
-    imports
-        .iter()
-        .filter_map(|import| {
-            let dependency = import.dependency.as_ref()?;
-            if import.status != "resolved" {
-                return None;
+    symbol_index_for_semantic_imports_with_context(imports, None, None, None)
+}
+
+pub fn symbol_index_for_semantic_imports_with_context(
+    imports: &[PackageSemanticImport],
+    package_root: Option<&Path>,
+    manifest: Option<&PackageManifest>,
+    lock: Option<&crate::package_lock::PackageLock>,
+) -> Vec<PackageSymbolIndexEntry> {
+    let mut entries = Vec::new();
+    for import in imports {
+        let dependency = match import.dependency.as_ref() {
+            Some(dependency) if import.status == "resolved" => dependency,
+            _ => continue,
+        };
+        entries.push(PackageSymbolIndexEntry {
+            id: format!("symbol:dependency:{dependency}"),
+            kind: "dependency".to_string(),
+            name: dependency.clone(),
+            source_import: import.import.clone(),
+            dependency: dependency.clone(),
+        });
+        if let (Some(root), Some(manifest)) = (package_root, manifest) {
+            let exports = crate::package_extern::export_symbols_for_resolved_import(
+                import,
+                root,
+                manifest,
+                lock,
+            );
+            for export in exports {
+                entries.push(PackageSymbolIndexEntry {
+                    id: format!("symbol:export:{dependency}:{export}"),
+                    kind: "export".to_string(),
+                    name: export,
+                    source_import: import.import.clone(),
+                    dependency: dependency.clone(),
+                });
             }
-            Some(PackageSymbolIndexEntry {
-                id: format!("symbol:dependency:{dependency}"),
-                kind: "dependency".to_string(),
-                name: dependency.clone(),
-                source_import: import.import.clone(),
-                dependency: dependency.clone(),
-            })
-        })
-        .collect()
+        }
+    }
+    entries
 }
 
 pub fn diagnostics_for_semantic_imports(
@@ -842,20 +1028,15 @@ fn parse_dependency_header(
     line_number: usize,
     manifest: &mut PackageManifest,
 ) -> Result<String, String> {
-    let (key, value) = split_field(line, line_number)?;
-    if !value.is_empty() {
-        return Err(format!(
-            "line {line_number}: dependency `{key}` must contain metadata fields"
-        ));
-    }
+    let key = crate::package_ref::split_dependency_header(line, line_number)?;
     if manifest
         .dependencies
-        .insert(key.to_string(), PackageDependency::default())
+        .insert(key.clone(), PackageDependency::default())
         .is_some()
     {
         return Err(format!("line {line_number}: duplicate dependency `{key}`"));
     }
-    Ok(key.to_string())
+    Ok(key)
 }
 
 fn parse_dependency_field(
@@ -918,6 +1099,16 @@ fn parse_dependency_field(
                 ));
             }
             dependency.checksum = Some(checksum.to_string());
+            Ok(None)
+        }
+        "install_path" => {
+            let install_path = required_scalar(value, line_number, "install_path")?;
+            if dependency.install_path.is_some() {
+                return Err(format!(
+                    "line {line_number}: duplicate install_path for dependency `{dependency_name}`"
+                ));
+            }
+            dependency.install_path = Some(install_path.to_string());
             Ok(None)
         }
         "targets" => parse_dependency_subsection_header(
@@ -1242,6 +1433,7 @@ dependencies:
     #[test]
     fn discovers_compile_context_from_manifest() {
         let temp = TempDirGuard::new();
+        fs::create_dir_all(temp.path.join("vendor/local")).expect("vendor dir");
         fs::write(
             temp.path.join("inauguration.package"),
             r#"name: compile-context
@@ -1249,7 +1441,7 @@ version: 0.1.0
 entry: boot
 dependencies:
   local:
-    version: path:../local
+    version: path:vendor/local
 "#,
         )
         .expect("write manifest");
@@ -1258,10 +1450,8 @@ dependencies:
 
         assert_eq!(context.name, "compile-context");
         assert_eq!(context.entry.as_deref(), Some("boot"));
-        assert_eq!(
-            context.dependency_search_paths,
-            vec![PathBuf::from("../local")]
-        );
+        assert_eq!(context.dependency_search_paths.len(), 1);
+        assert!(context.dependency_search_paths[0].ends_with("vendor/local"));
     }
 
     #[test]
@@ -1525,6 +1715,38 @@ dependencies:
             source_identity_for_surface(None, Some("other.main".into()), Some("graphable"));
         assert_eq!(module_mismatch.status, "mismatch");
         assert_eq!(module_mismatch.reason, "module-outside-package");
+    }
+
+    #[test]
+    fn ecosystem_semantic_imports_resolve_against_manifest_dependencies() {
+        let manifest = parse_text(
+            r#"name: ecosystem-demo
+version: 0.1.0
+dependencies:
+  cargo:crepuscularity:
+    version: path:vendor/cargo/crepuscularity
+    kind: cargo
+  npm:hono:
+    version: path:vendor/npm/hono
+    kind: npm
+"#,
+        )
+        .expect("parse manifest");
+
+        let imports = resolve_semantic_imports(
+            &[
+                "cargo:crepuscularity".to_string(),
+                "npm:hono".to_string(),
+                "cargo:missing".to_string(),
+            ],
+            Some(&manifest),
+        );
+        assert_eq!(imports[0].status, "resolved");
+        assert_eq!(imports[0].dependency.as_deref(), Some("cargo:crepuscularity"));
+        assert_eq!(imports[0].reason, "dependency-ecosystem-exact-match");
+        assert_eq!(imports[1].status, "resolved");
+        assert_eq!(imports[1].dependency.as_deref(), Some("npm:hono"));
+        assert_eq!(imports[2].status, "unresolved");
     }
 
     #[test]

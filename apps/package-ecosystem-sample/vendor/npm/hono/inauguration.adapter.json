@@ -1,0 +1,15 @@
+{
+  "exports": [
+    {
+      "symbol": "hono_greet",
+      "returns": "string",
+      "invoke": {
+        "program": "node",
+        "args": [
+          "-e",
+          "const m=require('./index.js'); process.stdout.write(m.greet());"
+        ]
+      }
+    }
+  ]
+}

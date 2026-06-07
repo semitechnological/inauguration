@@ -1,7 +1,8 @@
 // @expect parse: ok
 // @expect has-function: fact
 // @expect has-call-edge: fact
-// bytecode not verified: recursion lowering is WIP in bytecode backend
+// @expect bytecode: executes
+// @expect result: 120
 
 fn fact(n: Int) -> Int {
     if n <= 1 {

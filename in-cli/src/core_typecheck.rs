@@ -285,7 +285,20 @@ fn check_expr(
             check_expr(fn_name, lhs, facts, env)?;
             check_expr(fn_name, rhs, facts, env)?;
             match op.as_str() {
-                "+" | "-" | "*" | "/" | "%" | "<" | ">" | "<=" | ">=" => {
+                "+" => {
+                    let lhs_typ = expr_type(lhs, facts, env)?;
+                    let rhs_typ = expr_type(rhs, facts, env)?;
+                    if lhs_typ == Some(Typ::String) || rhs_typ == Some(Typ::String) {
+                        require_type(fn_name, "binary operand", &Typ::String, lhs, facts, env)?;
+                        require_type(fn_name, "binary operand", &Typ::String, rhs, facts, env)
+                    } else {
+                        check_numeric_binop_operands(fn_name, lhs, rhs, facts, env)
+                    }
+                }
+                "-" | "*" | "/" | "<" | ">" | "<=" | ">=" => {
+                    check_numeric_binop_operands(fn_name, lhs, rhs, facts, env)
+                }
+                "%" => {
                     require_type(fn_name, "binary operand", &Typ::Int, lhs, facts, env)?;
                     require_type(fn_name, "binary operand", &Typ::Int, rhs, facts, env)
                 }
@@ -469,14 +482,32 @@ fn expr_type(
         }
         Expr::Unary { op, expr } => match op.as_str() {
             "!" => Ok(Some(Typ::Bool)),
-            "-" => Ok(Some(Typ::Int)),
+            "-" => {
+                if expr_type(expr, facts, env)? == Some(Typ::Float) {
+                    Ok(Some(Typ::Float))
+                } else {
+                    Ok(Some(Typ::Int))
+                }
+            }
             _ => expr_type(expr, facts, env),
         },
-        Expr::Binary { op, .. } => match op.as_str() {
-            "+" | "-" | "*" | "/" | "%" => Ok(Some(Typ::Int)),
-            "==" | "!=" | "<" | ">" | "<=" | ">=" | "&&" | "||" => Ok(Some(Typ::Bool)),
-            _ => Ok(None),
-        },
+        Expr::Binary { op, lhs, rhs } => {
+            let lhs_typ = expr_type(lhs, facts, env)?;
+            let rhs_typ = expr_type(rhs, facts, env)?;
+            match op.as_str() {
+                "+" if lhs_typ == Some(Typ::String) || rhs_typ == Some(Typ::String) => {
+                    Ok(Some(Typ::String))
+                }
+                "+" | "-" | "*" | "/"
+                    if lhs_typ == Some(Typ::Float) || rhs_typ == Some(Typ::Float) =>
+                {
+                    Ok(Some(Typ::Float))
+                }
+                "+" | "-" | "*" | "/" | "%" => Ok(Some(Typ::Int)),
+                "==" | "!=" | "<" | ">" | "<=" | ">=" | "&&" | "||" => Ok(Some(Typ::Bool)),
+                _ => Ok(None),
+            }
+        }
         Expr::Call { callee, .. } => {
             if let Expr::Ident(name) = callee.as_ref() {
                 if is_builtin_fn(name) {
@@ -489,6 +520,24 @@ fn expr_type(
             Ok(None)
         }
         Expr::Closure { .. } => Ok(None),
+    }
+}
+
+fn check_numeric_binop_operands(
+    fn_name: &str,
+    lhs: &Expr,
+    rhs: &Expr,
+    facts: &ModuleFacts,
+    env: &HashMap<String, Typ>,
+) -> Result<(), String> {
+    let lhs_typ = expr_type(lhs, facts, env)?;
+    let rhs_typ = expr_type(rhs, facts, env)?;
+    if lhs_typ == Some(Typ::Float) || rhs_typ == Some(Typ::Float) {
+        require_type(fn_name, "binary operand", &Typ::Float, lhs, facts, env)?;
+        require_type(fn_name, "binary operand", &Typ::Float, rhs, facts, env)
+    } else {
+        require_type(fn_name, "binary operand", &Typ::Int, lhs, facts, env)?;
+        require_type(fn_name, "binary operand", &Typ::Int, rhs, facts, env)
     }
 }
 
@@ -1006,5 +1055,23 @@ mod tests {
             ModuleKind::Library,
         )
         .expect("library modules should not require main");
+    }
+
+    #[test]
+    fn accepts_float_and_string_binary_operators() {
+        typecheck_executable(
+            &crate::in_lang_parse::parse_in_source(
+                "fn main() -> Float { return 2.5 + 3.5; }\n",
+            )
+            .expect("parse float"),
+        )
+        .expect("float add");
+        typecheck_executable(
+            &crate::in_lang_parse::parse_in_source(
+                "fn main() -> String { return \"a\" + \"b\"; }\n",
+            )
+            .expect("parse string"),
+        )
+        .expect("string concat");
     }
 }
