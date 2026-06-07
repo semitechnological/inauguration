@@ -15,6 +15,7 @@ pub mod compiler;
 pub mod core_ir;
 pub mod core_ir_verifier;
 pub mod core_typecheck;
+pub mod dynamic_module;
 pub mod extension_registry;
 pub mod typecheck;
 pub mod external_guard;

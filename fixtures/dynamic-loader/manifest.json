@@ -1,0 +1,7 @@
+{
+  "entry_symbol": "in_module_vtable",
+  "abi_version": 1,
+  "pointer_width": 64,
+  "endian": 0,
+  "layout_hash": 0
+}
