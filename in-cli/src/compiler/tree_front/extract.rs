@@ -20,11 +20,9 @@ pub fn parse_polyglot_file(id: ParserId, path: &Path) -> Result<UnifiedModule, S
         ParserId::Go
         | ParserId::OCaml
         | ParserId::Clojure
-        | ParserId::Nim
         | ParserId::D
         | ParserId::Crystal
         | ParserId::VbNet
-        | ParserId::Odin
         | ParserId::Hare
         | ParserId::V => Err(format!(
             "parser `{}` ({}): {}.",

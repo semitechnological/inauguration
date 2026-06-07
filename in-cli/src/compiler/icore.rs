@@ -68,15 +68,6 @@ fn parse_typ(s: &str) -> Typ {
     }
 }
 
-fn type_known(structs: &HashSet<&str>, t: &Typ) -> bool {
-    match t {
-        Typ::Named(n) => structs.contains(n.as_str()),
-        Typ::Array(item) => type_known(structs, item),
-        Typ::Int | Typ::Float | Typ::String | Typ::Bool | Typ::Void => true,
-        Typ::Generic(_) => false,
-    }
-}
-
 /// Parse `.icore` JSON into [`UnifiedModule`]. Version **1** supports only **empty** function bodies
 /// (`body` must be `[]`); statements are accepted from `.in` or future versions.
 pub fn parse_icore_file(path: &Path) -> Result<UnifiedModule, String> {
@@ -105,7 +96,22 @@ pub fn parse_icore_artifact_source(raw: &str) -> Result<CompileArtifact, String>
             ));
         }
     }
-    let semantic = parse_icore_decls(file.icore_version, file.decls)?;
+    let boundary_layout_names = boundary
+        .as_ref()
+        .map(|module| {
+            module
+                .layouts
+                .iter()
+                .map(|layout| layout.name.as_str())
+                .collect::<HashSet<_>>()
+        })
+        .unwrap_or_default();
+    let semantic = parse_icore_decls(
+        file.icore_version,
+        file.decls,
+        boundary.is_some(),
+        &boundary_layout_names,
+    )?;
     Ok(if let Some(boundary) = boundary {
         CompileArtifact::with_boundary(semantic, boundary)
     } else {
@@ -118,7 +124,12 @@ pub fn parse_icore_source(raw: &str) -> Result<UnifiedModule, String> {
     parse_icore_artifact_source(raw).map(|artifact| artifact.semantic)
 }
 
-fn parse_icore_decls(icore_version: u32, icore_decls: Vec<IcoreDecl>) -> Result<UnifiedModule, String> {
+fn parse_icore_decls(
+    icore_version: u32,
+    icore_decls: Vec<IcoreDecl>,
+    has_boundary: bool,
+    boundary_layout_names: &HashSet<&str>,
+) -> Result<UnifiedModule, String> {
     if !matches!(icore_version, 1 | 2 | 3) {
         return Err(format!(
             "icore: unsupported icoreVersion {icore_version} (only 1, 2, and 3 supported)"
@@ -167,7 +178,12 @@ fn parse_icore_decls(icore_version: u32, icore_decls: Vec<IcoreDecl>) -> Result<
     }
 
     let module = UnifiedModule::new(decls);
-    validate_module(&module)?;
+    validate_module(
+        &module,
+        icore_version,
+        has_boundary,
+        boundary_layout_names,
+    )?;
     Ok(module)
 }
 
@@ -352,7 +368,29 @@ fn parse_optional_expr_field(
     }
 }
 
-fn validate_module(module: &UnifiedModule) -> Result<(), String> {
+fn type_known_with_boundary(
+    struct_names: &HashSet<&str>,
+    boundary_layout_names: &HashSet<&str>,
+    t: &Typ,
+) -> bool {
+    match t {
+        Typ::Named(name) => {
+            struct_names.contains(name.as_str()) || boundary_layout_names.contains(name.as_str())
+        }
+        Typ::Array(item) => {
+            type_known_with_boundary(struct_names, boundary_layout_names, item)
+        }
+        Typ::Int | Typ::Float | Typ::String | Typ::Bool | Typ::Void => true,
+        Typ::Generic(_) => false,
+    }
+}
+
+fn validate_module(
+    module: &UnifiedModule,
+    icore_version: u32,
+    has_boundary: bool,
+    boundary_layout_names: &HashSet<&str>,
+) -> Result<(), String> {
     if module.decls.is_empty() {
         return Err("icore: decls is empty".into());
     }
@@ -369,11 +407,12 @@ fn validate_module(module: &UnifiedModule) -> Result<(), String> {
             return Err(format!("icore: duplicate top-level name `{n}`"));
         }
     }
+    let requires_main = !(icore_version == 3 && has_boundary);
     let has_main = module
         .decls
         .iter()
         .any(|d| matches!(d, Decl::Function { name, .. } if name == "main"));
-    if !has_main {
+    if requires_main && !has_main {
         return Err("icore: missing required function `main`".into());
     }
 
@@ -390,7 +429,7 @@ fn validate_module(module: &UnifiedModule) -> Result<(), String> {
         match d {
             Decl::Struct { name, fields, .. } => {
                 for (field, ty) in fields {
-                    if !type_known(&struct_names, ty) {
+                    if !type_known_with_boundary(&struct_names, boundary_layout_names, ty) {
                         return Err(format!(
                             "icore: unknown type in struct `{name}` field `{field}`"
                         ));
@@ -401,13 +440,13 @@ fn validate_module(module: &UnifiedModule) -> Result<(), String> {
                 name, params, ret, ..
             } => {
                 for (param, ty) in params {
-                    if !type_known(&struct_names, ty) {
+                    if !type_known_with_boundary(&struct_names, boundary_layout_names, ty) {
                         return Err(format!(
                             "icore: unknown type in function `{name}` parameter `{param}`"
                         ));
                     }
                 }
-                if !type_known(&struct_names, ret) {
+                if !type_known_with_boundary(&struct_names, boundary_layout_names, ret) {
                     return Err(format!("icore: unknown return type in function `{name}`"));
                 }
             }
@@ -609,5 +648,61 @@ mod tests {
         }"#;
         let err = parse_icore_source(j).expect_err("unknown binary operator must be rejected");
         assert!(err.contains("unsupported binary operator `%%`"), "{err}");
+    }
+
+    #[test]
+    fn parses_v3_boundary_without_main() {
+        let j = r#"{
+            "icoreVersion": 3,
+            "decls": [
+                {
+                    "kind": "function",
+                    "name": "person_age",
+                    "params": [{"name": "p", "type": "Person"}],
+                    "return": "Int",
+                    "body": [
+                        {"kind": "return", "value": {"kind": "int", "value": 0}}
+                    ]
+                }
+            ],
+            "boundary": {
+                "abi_version": 1,
+                "module": "sample.person",
+                "layouts": [
+                    {
+                        "name": "Person",
+                        "kind": "struct",
+                        "repr": "c",
+                        "size": 24,
+                        "align": 8,
+                        "stride": 24,
+                        "fields": [
+                            {"name": "name", "offset": 0, "type": "InSliceU8", "transfer": "borrow"},
+                            {"name": "age", "offset": 16, "type": "u32", "transfer": "copy"}
+                        ]
+                    }
+                ],
+                "symbols": [
+                    {
+                        "name": "person_new",
+                        "signature_hash": "person_new_v1",
+                        "ownership": "returns-owned-handle",
+                        "calling_convention": "c"
+                    }
+                ],
+                "allocators": [
+                    {"id": 1, "kind": "host_arena", "free_with": "host"}
+                ]
+            }
+        }"#;
+        let artifact = parse_icore_artifact_source(j).expect("v3 boundary ingest");
+        assert!(artifact.boundary.is_some());
+        assert!(
+            artifact
+                .semantic
+                .decls
+                .iter()
+                .any(|d| matches!(d, Decl::Function { name, .. } if name == "person_age"))
+        );
     }
 }
