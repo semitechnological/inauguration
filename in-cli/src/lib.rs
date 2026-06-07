@@ -37,6 +37,7 @@ pub mod parser_registry;
 pub mod sil_emit;
 pub mod sil_to_bytecode;
 pub mod swift_subset;
+pub mod target;
 pub mod v_native;
 pub mod vm;
 

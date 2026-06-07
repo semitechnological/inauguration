@@ -1533,12 +1533,24 @@ fn backend_owned_levels(
     target: BackendTargetCli,
 ) -> (&'static str, &'static str, &'static str, &'static str) {
     match target {
-        BackendTargetCli::Native => (
-            inauguration::native_backend::native_backend_status().input_stage,
-            "failed",
-            "contract-only",
-            "none",
-        ),
+        BackendTargetCli::Native => {
+            let spec = inauguration::target::native_target_spec();
+            if spec.implemented {
+                (
+                    spec.input_stage,
+                    "typed-subset",
+                    spec.stage,
+                    "owned-native-exit-stub",
+                )
+            } else {
+                (
+                    spec.input_stage,
+                    "failed",
+                    spec.stage,
+                    "none",
+                )
+            }
+        }
         BackendTargetCli::Bytecode => {
             if artifact.is_some() {
                 (
@@ -1570,10 +1582,10 @@ fn cmd_backend(
     let start = Instant::now();
     let source_path = resolve_invocation_path(cwd, path);
     let selected = match target {
-        BackendTargetCli::Bytecode => inauguration::native_backend::bytecode_backend_status(),
-        BackendTargetCli::Native => inauguration::native_backend::native_backend_status(),
+        BackendTargetCli::Bytecode => inauguration::target::bytecode_target_spec(),
+        BackendTargetCli::Native => inauguration::target::native_target_spec(),
     };
-    let mut request_supported = matches!(target, BackendTargetCli::Bytecode);
+    let mut request_supported = selected.backend_artifact_supported;
     let mut request_reason_code = if selected.implemented {
         None
     } else {
@@ -1647,7 +1659,7 @@ fn cmd_backend(
                 "error": request_error,
             },
             "selected": selected,
-            "available": inauguration::native_backend::backend_statuses(),
+            "available": inauguration::target::all_target_specs(),
             "artifact": artifact,
             "timing": {
                 "total_micros": start.elapsed().as_micros(),

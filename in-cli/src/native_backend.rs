@@ -1,64 +1,27 @@
-use serde::Serialize;
+pub use crate::target::{
+    BYTECODE_BACKEND_SUBSET, NATIVE_AARCH64_SUBSET, NATIVE_BACKEND_NOT_IMPLEMENTED, TargetSpec,
+};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct NativeBackendStatus {
-    pub name: &'static str,
-    pub implemented: bool,
-    pub stage: &'static str,
-    pub reason_code: &'static str,
-    pub reason: &'static str,
-    pub input_stage: &'static str,
-    pub artifact_kind: &'static str,
+pub type NativeBackendStatus = TargetSpec;
+
+#[must_use]
+pub fn bytecode_backend_status() -> TargetSpec {
+    crate::target::bytecode_target_spec()
 }
 
-pub const NATIVE_BACKEND_NOT_IMPLEMENTED: &str = "native-backend-not-implemented";
-pub const NATIVE_AARCH64_SUBSET: &str = "native-aarch64-subset";
-pub const BYTECODE_BACKEND_SUBSET: &str = "bytecode-vm-subset";
-
-pub fn bytecode_backend_status() -> NativeBackendStatus {
-    NativeBackendStatus {
-        name: "bytecode",
-        implemented: true,
-        stage: "owned-runtime-subset",
-        reason_code: BYTECODE_BACKEND_SUBSET,
-        reason: "inauguration owns this bytecode assembly format, SIL-to-bytecode lowering path, and stack VM runtime for the supported Core IR subset",
-        input_stage: "core-ir-to-textual-sil",
-        artifact_kind: "bytecode-assembly",
-    }
+#[must_use]
+pub fn native_backend_status() -> TargetSpec {
+    crate::target::native_target_spec()
 }
 
-#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-pub fn native_backend_status() -> NativeBackendStatus {
-    NativeBackendStatus {
-        name: "native",
-        implemented: true,
-        stage: "owned-native-subset",
-        reason_code: NATIVE_AARCH64_SUBSET,
-        reason: "inauguration owns a Mach-O executable emitter and AArch64 lowering path for a checked Core IR scalar subset on Apple ARM64 hosts",
-        input_stage: "core-ir",
-        artifact_kind: "mach-o-executable",
-    }
+#[must_use]
+pub fn backend_statuses() -> Vec<TargetSpec> {
+    crate::target::all_target_specs().to_vec()
 }
 
-#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
-pub fn native_backend_status() -> NativeBackendStatus {
-    NativeBackendStatus {
-        name: "native",
-        implemented: false,
-        stage: "contract-only",
-        reason_code: NATIVE_BACKEND_NOT_IMPLEMENTED,
-        reason: "inauguration currently has no in-tree object-file emitter, linker driver, ABI lowering, or owned machine runtime for native code generation",
-        input_stage: "core-ir-or-textual-sil",
-        artifact_kind: "none",
-    }
-}
-
-pub fn backend_statuses() -> Vec<NativeBackendStatus> {
-    vec![bytecode_backend_status(), native_backend_status()]
-}
-
+#[must_use]
 pub fn native_subset_host_available() -> bool {
-    cfg!(all(target_os = "macos", target_arch = "aarch64"))
+    crate::target::native_subset_host_available()
 }
 
 #[cfg(test)]
