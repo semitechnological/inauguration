@@ -3,8 +3,11 @@
 pub mod aarch64;
 mod lower;
 mod macho;
+pub mod raw;
+pub mod target;
 
 pub use lower::{
     compile_native_executable, compile_native_executable_for_host, host_supports_native_subset,
     TARGET_TRIPLE,
 };
+pub use target::{freestanding_supported, resolve_native_target, NativeTarget, NativeTargetKind};
