@@ -32,6 +32,7 @@ pub mod native_backend;
 pub mod native_emit;
 pub mod native_swift_sil;
 pub mod owned_compile;
+pub mod package_lock;
 pub mod package_manifest;
 pub mod parser_registry;
 pub mod sil_emit;
