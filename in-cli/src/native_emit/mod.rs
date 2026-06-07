@@ -5,6 +5,7 @@ pub mod coff;
 pub mod elf;
 mod lower;
 mod macho;
+pub mod raw;
 pub mod target;
 
 pub use coff::{write_dll, CoffDll, COFF_WINDOWS_TRIPLE};
@@ -15,6 +16,7 @@ pub use lower::{
 };
 pub use macho::{ExportSymbol, MachOLinkage};
 pub use target::{
-    all_native_emit_targets, elf_linux_target_status, macho_target_status, NativeEmitTargetStatus,
+    all_native_emit_targets, elf_linux_target_status, freestanding_supported, macho_target_status,
+    resolve_native_target, NativeEmitTargetStatus, NativeTarget, NativeTargetKind,
     NATIVE_EMIT_CONTRACT, NATIVE_EMIT_IMPLEMENTED, NATIVE_EMIT_SKELETON,
 };
