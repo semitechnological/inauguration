@@ -42,9 +42,9 @@ pub fn boundary_level_for(entry: &LanguageSupport) -> u8 {
     match entry.parser_id {
         Some("in") => 5,
         Some("icore") => 3,
-        Some(
-            "clojure" | "nim" | "d" | "crystal" | "odin" | "hare" | "vb",
-        ) => 0,
+        Some("nim" | "odin") => 3,
+        Some("zig" | "rust") => 4,
+        Some("clojure" | "d" | "crystal" | "hare" | "vb") => 0,
         None if entry.language == "Swift" => 2,
         Some(_) => infer_boundary_level_from_runtime(entry),
         None => infer_boundary_level_from_runtime(entry),
@@ -139,10 +139,8 @@ mod tests {
     fn redirect_only_languages_report_boundary_level_zero() {
         for parser_id in [
             ParserId::Clojure,
-            ParserId::Nim,
             ParserId::D,
             ParserId::Crystal,
-            ParserId::Odin,
             ParserId::Hare,
             ParserId::VbNet,
         ] {
@@ -155,14 +153,23 @@ mod tests {
     }
 
     #[test]
-    fn sil_boundaries_report_level_two_gates() {
+    fn rust_reports_boundary_extract_level() {
         let entry = language_support_for_parser(ParserId::Rust.as_str()).expect("rust");
-        assert_eq!(boundary_level_for(entry), 2);
-        assert_eq!(effective_level_for(entry), 2);
-        let gates = boundary_gates_for(2);
-        assert!(gates.contains(&"core-ir-bodies"));
-        assert!(gates.contains(&"textual-sil"));
-        assert!(!gates.contains(&"boundary-ir-verify"));
+        assert_eq!(boundary_level_for(entry), 4);
+        assert_eq!(effective_level_for(entry), 3);
+        let gates = boundary_gates_for(4);
+        assert!(gates.contains(&"boundary-extract"));
+        assert!(gates.contains(&"abi-layout-hash"));
+    }
+
+    #[test]
+    fn nim_odin_report_boundary_ir_attach_level() {
+        for parser_id in [ParserId::Nim, ParserId::Odin] {
+            let entry =
+                language_support_for_parser(parser_id.as_str()).expect(parser_id.as_str());
+            assert_eq!(boundary_level_for(entry), 3, "{}", entry.language);
+            assert_eq!(effective_level_for(entry), 2, "{}", entry.language);
+        }
     }
 
     #[test]
