@@ -1,0 +1,74 @@
+use crate::boundary_ir::{BoundaryLayout, BoundaryModule, BoundaryRepr};
+
+pub fn emit_c_header(module: &BoundaryModule) -> Result<String, String> {
+    if module.module.is_empty() {
+        return Err("module id is empty".to_string());
+    }
+
+    let guard = super::guard_token(&module.module);
+    let mut out = String::new();
+    out.push_str(&format!("#ifndef {guard}\n"));
+    out.push_str(&format!("#define {guard}\n\n"));
+    out.push_str("#include <stdint.h>\n");
+    out.push_str("#include \"in_abi.h\"\n\n");
+    out.push_str("#if defined(__GNUC__) || defined(__clang__)\n");
+    out.push_str("#define IN_BOUNDARY_PACKED __attribute__((packed))\n");
+    out.push_str("#else\n");
+    out.push_str("#define IN_BOUNDARY_PACKED\n");
+    out.push_str("#endif\n\n");
+
+    for layout in &module.layouts {
+        emit_layout(&mut out, layout)?;
+    }
+
+    out.push_str(&format!("\n#endif\n"));
+    Ok(out)
+}
+
+fn emit_layout(out: &mut String, layout: &BoundaryLayout) -> Result<(), String> {
+    if layout.name.is_empty() {
+        return Err("layout name is empty".to_string());
+    }
+
+    if layout.kind != "struct" && layout.kind != "enum" {
+        return Err(format!(
+            "layout `{}` unsupported kind `{}`",
+            layout.name, layout.kind
+        ));
+    }
+
+    let packed = matches!(layout.repr, Some(BoundaryRepr::Packed));
+    if packed {
+        out.push_str("typedef IN_BOUNDARY_PACKED struct ");
+    } else {
+        out.push_str("typedef struct ");
+    }
+    out.push_str(&layout.name);
+    out.push_str(" {\n");
+
+    if layout.fields.is_empty() {
+        out.push_str(&format!("    uint8_t _reserved[{}];\n", layout.size));
+    } else {
+        for field in &layout.fields {
+            let c_type = super::c_type_name(&field.typ);
+            out.push_str(&format!("    {} {};\n", c_type, field.name));
+        }
+    }
+
+    out.push_str(&format!("}} {};\n\n", layout.name));
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::boundary_emit::sample_module;
+
+    #[test]
+    fn header_guard_uses_module_token() {
+        let module = sample_module();
+        let header = emit_c_header(&module).expect("header");
+        assert!(header.contains("#ifndef IN_BOUNDARY_SAMPLE_PERSON_H"));
+        assert!(header.contains("#define IN_BOUNDARY_SAMPLE_PERSON_H"));
+    }
+}
