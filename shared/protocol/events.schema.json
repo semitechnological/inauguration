@@ -43,6 +43,18 @@
         "instructions": { "type": "array", "items": { "type": "string" } }
       }
     },
+    "ReloadDecision": {
+      "type": "string",
+      "enum": [
+        "patch_applied",
+        "restart_required",
+        "compile_failed",
+        "abi_layout_mismatch",
+        "abi_symbol_missing",
+        "abi_alloc_error",
+        "abi_panic"
+      ]
+    },
     "ReloadPatch": {
       "type": "object",
       "required": ["kind", "target", "patch_type", "compatible"],
@@ -50,7 +62,8 @@
         "kind": { "const": "reload_patch" },
         "target": { "type": "string" },
         "patch_type": { "type": "string", "enum": ["view_body", "modifier", "full_module"] },
-        "compatible": { "type": "boolean" }
+        "compatible": { "type": "boolean" },
+        "reload_decision": { "$ref": "#/$defs/ReloadDecision" }
       }
     },
     "RuntimeMetrics": {

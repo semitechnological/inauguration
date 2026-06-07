@@ -8,3 +8,15 @@ pub enum PatchType {
     Modifier,
     FullModule,
 }
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReloadDecision {
+    PatchApplied,
+    RestartRequired,
+    CompileFailed,
+    AbiLayoutMismatch,
+    AbiSymbolMissing,
+    AbiAllocError,
+    AbiPanic,
+}

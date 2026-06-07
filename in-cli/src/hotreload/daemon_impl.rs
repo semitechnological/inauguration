@@ -12,7 +12,7 @@ use tokio::net::UnixListener;
 use tokio::sync::{Mutex, mpsc};
 use tokio::time::sleep;
 
-use super::generated_protocol::PatchType;
+use super::generated_protocol::{PatchType, ReloadDecision};
 use crate::hybrid_sil;
 use crate::native_swift_sil;
 use crate::parser_registry::{self, ParserCli, ResolvedBuildParser};
@@ -31,6 +31,7 @@ pub struct PatchEnvelope {
     pub patch_id: String,
     pub timestamp_ms: u64,
     pub patch: ReloadPatch,
+    pub reload_decision: ReloadDecision,
     pub reason: String,
 }
 
@@ -40,6 +41,7 @@ pub struct RuntimeMetric {
     pub source: String,
     pub target: String,
     pub compatible: bool,
+    pub reload_decision: ReloadDecision,
     pub reason: String,
     pub compile_check_ms: u64,
     pub compile_cache_hit: bool,
@@ -687,16 +689,58 @@ fn compile_check_cached(path: &Path, cache: &mut CompileCache) -> CompileCheckRe
     result
 }
 
-pub fn apply_restart_supervisor(mut patch: ReloadPatch, compile_ok: bool) -> (ReloadPatch, String) {
+pub const IN_ABI_OK: u32 = 0;
+pub const IN_ABI_PANIC: u32 = 1;
+pub const IN_ABI_LAYOUT_MISMATCH: u32 = 2;
+pub const IN_ABI_ALLOC_ERROR: u32 = 3;
+pub const IN_ABI_SYMBOL_MISSING: u32 = 4;
+
+pub fn reload_decision_wire(decision: &ReloadDecision) -> String {
+    serde_json::to_string(decision)
+        .expect("reload decision serializes")
+        .trim_matches('"')
+        .to_string()
+}
+
+pub fn reload_decision_for_abi_status(status: u32) -> Option<ReloadDecision> {
+    match status {
+        IN_ABI_OK => None,
+        IN_ABI_LAYOUT_MISMATCH => Some(ReloadDecision::AbiLayoutMismatch),
+        IN_ABI_SYMBOL_MISSING => Some(ReloadDecision::AbiSymbolMissing),
+        IN_ABI_ALLOC_ERROR => Some(ReloadDecision::AbiAllocError),
+        IN_ABI_PANIC => Some(ReloadDecision::AbiPanic),
+        _ => Some(ReloadDecision::RestartRequired),
+    }
+}
+
+pub fn apply_restart_supervisor(
+    mut patch: ReloadPatch,
+    compile_ok: bool,
+) -> (ReloadPatch, ReloadDecision) {
     if !compile_ok {
         patch.compatible = false;
-        return (patch, "compile_failed".to_string());
+        return (patch, ReloadDecision::CompileFailed);
     }
     if matches!(patch.patch_type, PatchType::FullModule) || !patch.compatible {
         patch.compatible = false;
-        return (patch, "restart_required".to_string());
+        return (patch, ReloadDecision::RestartRequired);
     }
-    (patch, "patch_applied".to_string())
+    (patch, ReloadDecision::PatchApplied)
+}
+
+pub fn plan_reload_with_abi(
+    patch: ReloadPatch,
+    compile_ok: bool,
+    abi_status: Option<u32>,
+) -> (ReloadPatch, ReloadDecision) {
+    if let Some(status) = abi_status
+        && let Some(decision) = reload_decision_for_abi_status(status)
+    {
+        let mut patch = patch;
+        patch.compatible = false;
+        return (patch, decision);
+    }
+    apply_restart_supervisor(patch, compile_ok)
 }
 
 pub async fn append_metric(path: &Path, metric: &RuntimeMetric) -> Result<(), DaemonError> {
@@ -760,7 +804,8 @@ async fn emit_patch(
     let sil_call_edges = sil_graph.edge_count();
     let callee_driven = sil_callee_driven_hotreload_enabled();
     let patch = plan_patch_with_sil_graph(target, symbols, Some(&sil_graph), callee_driven);
-    let (patch, mut reason) = apply_restart_supervisor(patch, compile_check.ok);
+    let (patch, decision) = plan_reload_with_abi(patch, compile_check.ok, None);
+    let mut reason = reload_decision_wire(&decision);
     reason = format!("{reason}|{}", sil_graph.reason_tag());
     if let Some(n) = sil_call_edges {
         reason = format!("{reason}|sil_call_edges={n}");
@@ -770,6 +815,7 @@ async fn emit_patch(
         patch_id: patch_id_for(target),
         timestamp_ms: now_ms(),
         patch: patch.clone(),
+        reload_decision: decision.clone(),
         reason: reason.clone(),
     };
     let metric = RuntimeMetric {
@@ -777,6 +823,7 @@ async fn emit_patch(
         source: "daemon".to_string(),
         target: patch.target.clone(),
         compatible: patch.compatible,
+        reload_decision: decision,
         reason,
         compile_check_ms: compile_check.elapsed_ms,
         compile_cache_hit: compile_check.cache_hit,
@@ -867,9 +914,9 @@ mod tests {
         );
         assert_eq!(p.patch_type, PatchType::ViewBody);
         assert!(p.compatible);
-        let (out, reason) = apply_restart_supervisor(p, true);
+        let (out, decision) = apply_restart_supervisor(p, true);
         assert!(out.compatible);
-        assert_eq!(reason, "patch_applied");
+        assert_eq!(decision, ReloadDecision::PatchApplied);
     }
 
     #[test]
@@ -988,9 +1035,9 @@ mod tests {
     #[test]
     fn restart_supervisor_marks_restart_for_failed_compile() {
         let patch = plan_patch("ContentView.swift", &["body".to_string()]);
-        let (updated, reason) = apply_restart_supervisor(patch, false);
+        let (updated, decision) = apply_restart_supervisor(patch, false);
         assert!(!updated.compatible);
-        assert_eq!(reason, "compile_failed");
+        assert_eq!(decision, ReloadDecision::CompileFailed);
     }
 
     #[test]
@@ -1058,6 +1105,35 @@ mod tests {
         assert!(json.contains("\"patch_type\":\"view_body\""));
     }
 
+    #[test]
+    fn hotreload_reload_decision_serializes_to_schema_snake_case() {
+        let json = serde_json::to_string(&ReloadDecision::AbiSymbolMissing).expect("serialize");
+        assert_eq!(json, "\"abi_symbol_missing\"");
+    }
+
+    #[test]
+    fn hotreload_abi_layout_mismatch_forces_restart_decision() {
+        let patch = plan_patch("ContentView.swift", &["body".to_string()]);
+        let (out, decision) = plan_reload_with_abi(patch, true, Some(IN_ABI_LAYOUT_MISMATCH));
+        assert!(!out.compatible);
+        assert_eq!(decision, ReloadDecision::AbiLayoutMismatch);
+    }
+
+    #[test]
+    fn hotreload_abi_ok_defers_to_restart_supervisor() {
+        let patch = plan_patch("ContentView.swift", &["body".to_string()]);
+        let (out, decision) = plan_reload_with_abi(patch, true, Some(IN_ABI_OK));
+        assert!(out.compatible);
+        assert_eq!(decision, ReloadDecision::PatchApplied);
+    }
+
+    #[test]
+    fn hotreload_plan_reload_with_abi_stub_maps_symbol_missing() {
+        let patch = plan_patch("Sources/Helper.swift", &[]);
+        let (_, decision) = plan_reload_with_abi(patch, true, Some(IN_ABI_SYMBOL_MISSING));
+        assert_eq!(decision, ReloadDecision::AbiSymbolMissing);
+    }
+
     #[tokio::test]
     async fn metric_file_is_written() {
         let path = std::env::temp_dir().join(format!("hotreload-metric-{}.ndjson", now_ms()));
@@ -1066,6 +1142,7 @@ mod tests {
             source: "test".to_string(),
             target: "ContentView.swift".to_string(),
             compatible: true,
+            reload_decision: ReloadDecision::PatchApplied,
             reason: "patch_applied".to_string(),
             compile_check_ms: 1,
             compile_cache_hit: false,
