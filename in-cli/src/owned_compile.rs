@@ -5,7 +5,7 @@ use crate::core_ir_verifier;
 use crate::core_typecheck;
 use crate::external_guard::{self, ExternalInvocationGuard};
 use crate::native_backend;
-use crate::native_emit;
+use crate::native_emit::{self, NativeLinkage};
 use crate::parser_registry::{self, ParserCli};
 use crate::sil_to_bytecode;
 use crate::vm::BytecodeVM;
@@ -28,6 +28,7 @@ pub struct OwnedCompileRequest {
     pub target: CompileTarget,
     pub entry: Option<String>,
     pub out: Option<PathBuf>,
+    pub linkage: NativeLinkage,
     pub jobs: usize,
 }
 
@@ -42,6 +43,8 @@ pub struct OwnedCompileReport {
     pub module_identity: Option<ModuleIdentityReport>,
     pub target: String,
     pub entry: Option<String>,
+    #[serde(default = "default_linkage_label")]
+    pub linkage: String,
     pub frontend_level: &'static str,
     pub semantic_level: &'static str,
     pub backend_level: &'static str,
@@ -52,6 +55,7 @@ pub struct OwnedCompileReport {
     pub success: bool,
     pub artifact_path: Option<String>,
     pub executable_path: Option<String>,
+    pub abi_path: Option<String>,
     pub parsed_function_count: usize,
     pub typed_function_count: usize,
     pub call_edge_count: usize,
@@ -69,6 +73,18 @@ fn target_label(target: CompileTarget) -> &'static str {
         CompileTarget::Bytecode => "bytecode",
         CompileTarget::Native => "native",
     }
+}
+
+fn linkage_label(linkage: NativeLinkage) -> &'static str {
+    match linkage {
+        NativeLinkage::Executable => "executable",
+        NativeLinkage::Dylib => "dylib",
+        NativeLinkage::StaticLib => "staticlib",
+    }
+}
+
+fn default_linkage_label() -> String {
+    linkage_label(NativeLinkage::Executable).to_string()
 }
 
 fn count_functions(module: &UnifiedModule) -> usize {
@@ -136,6 +152,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
                 package_name: None,
                 target: target_label(request.target).to_string(),
                 entry: request.entry.clone(),
+                linkage: linkage_label(request.linkage).to_string(),
                 frontend_level: "unsupported",
                 semantic_level: "failed",
                 backend_level: match request.target {
@@ -152,6 +169,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
                 success: false,
                 artifact_path: None,
                 executable_path: None,
+                abi_path: None,
                 parsed_function_count: 0,
                 typed_function_count: 0,
                 call_edge_count: 0,
@@ -175,6 +193,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         if cached.target == target_label(request.target)
             && cached.entry == request.entry
             && cached.module_id == request.module_id
+            && cached.linkage == linkage_label(request.linkage)
             && requested_out == cached_out
         {
             cached.cache_hit = true;
@@ -197,6 +216,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         package_name: None,
         target: target_label(request.target).to_string(),
         entry: request.entry.clone(),
+        linkage: linkage_label(request.linkage).to_string(),
         frontend_level: "unsupported",
         semantic_level: "failed",
         backend_level: match request.target {
@@ -213,6 +233,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         success: false,
         artifact_path: None,
         executable_path: None,
+        abi_path: None,
         parsed_function_count: 0,
         typed_function_count: 0,
         call_edge_count: 0,
@@ -366,16 +387,21 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
             }
         }
         CompileTarget::Native => match compile_native(&module, &request.module_id, request) {
-            Ok((executable_path, eval_exit)) => {
+            Ok((artifact_path, eval_exit, abi_path)) => {
                 report.backend_level = "owned-native-subset";
                 report.runtime_level = "inrt-native";
                 let status = native_backend::native_backend_status();
                 report.reason_code = Some(status.reason_code.to_string());
                 report.reason = Some(status.reason.to_string());
                 report.success = true;
-                report.eval_exit_code = Some(eval_exit);
-                report.executable_path = Some(executable_path.clone());
-                report.artifact_path = Some(executable_path);
+                report.eval_exit_code = eval_exit;
+                report.executable_path = if request.linkage == NativeLinkage::Executable {
+                    Some(artifact_path.clone())
+                } else {
+                    None
+                };
+                report.artifact_path = Some(artifact_path);
+                report.abi_path = abi_path;
             }
             Err(err) if err == "native-host-unsupported" => {
                 let status = native_backend::native_backend_status();
@@ -401,29 +427,45 @@ fn compile_native(
     module: &UnifiedModule,
     module_id: &str,
     request: &OwnedCompileRequest,
-) -> Result<(String, u8), String> {
+) -> Result<(String, Option<u8>, Option<String>), String> {
     let entry = request
         .entry
         .as_deref()
         .filter(|name| !name.is_empty())
         .unwrap_or("answer");
-    let eval_exit = const_eval_entry_exit_code(module, module_id, entry)?;
+    let eval_exit = match request.linkage {
+        NativeLinkage::Executable => Some(const_eval_entry_exit_code(module, module_id, entry)?),
+        NativeLinkage::Dylib | NativeLinkage::StaticLib => None,
+    };
     let out_path = request
         .out
         .as_ref()
         .ok_or_else(|| "native compile requires --out executable path".to_string())?;
-    native_emit::compile_native_executable_for_host(module, entry, out_path)?;
+    let abi_path = native_emit::compile_native_artifact_for_host(
+        module,
+        module_id,
+        entry,
+        request.linkage,
+        out_path,
+    )?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let mut perms = fs::metadata(out_path)
-            .map_err(|err| format!("native executable metadata: {err}"))?
+            .map_err(|err| format!("native artifact metadata: {err}"))?
             .permissions();
-        perms.set_mode(0o755);
+        perms.set_mode(match request.linkage {
+            NativeLinkage::StaticLib => 0o644,
+            NativeLinkage::Executable | NativeLinkage::Dylib => 0o755,
+        });
         fs::set_permissions(out_path, perms)
-            .map_err(|err| format!("chmod native executable: {err}"))?;
+            .map_err(|err| format!("chmod native artifact: {err}"))?;
     }
-    Ok((out_path.display().to_string(), eval_exit))
+    Ok((
+        out_path.display().to_string(),
+        eval_exit,
+        abi_path.map(|path| path.display().to_string()),
+    ))
 }
 
 fn try_const_answer_entry(module: &UnifiedModule, entry: &str) -> Option<u8> {
@@ -558,6 +600,7 @@ mod tests {
             target,
             entry: entry.map(str::to_string),
             out,
+            linkage: NativeLinkage::Executable,
             jobs: 1,
         }
     }

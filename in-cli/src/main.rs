@@ -3,6 +3,7 @@ use inauguration::external_guard::ExternalInvocationGuard;
 use inauguration::hybrid_core::ChangeEvent;
 use inauguration::hybrid_pipeline::{StageTimings, run_wave_with_timings};
 use inauguration::hybrid_scheduler::BuildScheduler;
+use inauguration::native_emit::NativeLinkage;
 use inauguration::owned_compile::{
     CompileTarget, OwnedCompileRequest, compile_owned, report_to_json,
 };
@@ -54,6 +55,13 @@ enum BackendTargetCli {
 enum CompileTargetCli {
     Bytecode,
     Native,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum NativeLinkageCli {
+    Executable,
+    Dylib,
+    StaticLib,
 }
 
 #[derive(Subcommand, Debug)]
@@ -231,6 +239,8 @@ enum Commands {
         parser: ParserCli,
         #[arg(long)]
         entry: Option<String>,
+        #[arg(long, value_enum, default_value_t = NativeLinkageCli::Executable)]
+        linkage: NativeLinkageCli,
         #[arg(long, default_value = "1")]
         jobs: usize,
         #[arg(long, default_value_t = false)]
@@ -405,6 +415,7 @@ fn run() -> Result<()> {
             module_id,
             parser,
             entry,
+            linkage,
             jobs,
             json,
         } => cmd_compile(
@@ -415,6 +426,7 @@ fn run() -> Result<()> {
             &module_id,
             parser,
             entry.as_deref(),
+            linkage,
             jobs,
             json,
         ),
@@ -1271,6 +1283,14 @@ fn compile_target_cli_to_owned(target: CompileTargetCli) -> CompileTarget {
     }
 }
 
+fn compile_linkage_cli_to_owned(linkage: NativeLinkageCli) -> NativeLinkage {
+    match linkage {
+        NativeLinkageCli::Executable => NativeLinkage::Executable,
+        NativeLinkageCli::Dylib => NativeLinkage::Dylib,
+        NativeLinkageCli::StaticLib => NativeLinkage::StaticLib,
+    }
+}
+
 fn cmd_compile(
     cwd: &Path,
     path: &str,
@@ -1279,6 +1299,7 @@ fn cmd_compile(
     module_id: &str,
     parser: ParserCli,
     entry: Option<&str>,
+    linkage: NativeLinkageCli,
     jobs: usize,
     json: bool,
 ) -> Result<()> {
@@ -1298,6 +1319,7 @@ fn cmd_compile(
         target: compile_target_cli_to_owned(target),
         entry: entry.map(str::to_string),
         out: Some(out_path),
+        linkage: compile_linkage_cli_to_owned(linkage),
         jobs: jobs.max(1),
     };
     let report = compile_owned(&request);
@@ -1332,6 +1354,7 @@ fn cmd_compile(
         if let Some(entry) = &report.entry {
             println!("entry: {entry}");
         }
+        println!("linkage: {}", report.linkage);
         println!("frontend_level: {}", report.frontend_level);
         println!("semantic_level: {}", report.semantic_level);
         println!("backend_level: {}", report.backend_level);
@@ -1347,6 +1370,9 @@ fn cmd_compile(
         }
         if let Some(path) = &report.executable_path {
             println!("executable_path: {path}");
+        }
+        if let Some(path) = &report.abi_path {
+            println!("abi_path: {path}");
         }
         println!("parsed_function_count: {}", report.parsed_function_count);
         println!("typed_function_count: {}", report.typed_function_count);
@@ -2596,6 +2622,7 @@ mod tests {
                 module_id,
                 parser,
                 entry,
+                linkage,
                 jobs,
                 json,
             } => {
@@ -2605,6 +2632,7 @@ mod tests {
                 assert_eq!(module_id, "Hello");
                 assert!(matches!(parser, ParserCli::In));
                 assert_eq!(entry.as_deref(), Some("main"));
+                assert!(matches!(linkage, NativeLinkageCli::Executable));
                 assert_eq!(jobs, 1);
                 assert!(json);
             }
@@ -2628,6 +2656,29 @@ mod tests {
         match cli.command {
             Commands::Compile { target, .. } => {
                 assert!(matches!(target, CompileTargetCli::Native));
+            }
+            _ => panic!("expected compile command"),
+        }
+    }
+
+    #[test]
+    fn parse_compile_native_dylib_linkage_subcommand() {
+        let cli = Cli::try_parse_from([
+            "in",
+            "compile",
+            "--path",
+            "apps/in-sample/hello.in",
+            "--target",
+            "native",
+            "--linkage",
+            "dylib",
+            "--out",
+            "target/libhello.dylib",
+        ])
+        .expect("cli parse");
+        match cli.command {
+            Commands::Compile { linkage, .. } => {
+                assert!(matches!(linkage, NativeLinkageCli::Dylib));
             }
             _ => panic!("expected compile command"),
         }
