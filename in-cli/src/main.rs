@@ -793,7 +793,11 @@ fn package_report_for_path(path: &Path) -> Result<inauguration::package_manifest
 fn cmd_languages(json: bool) -> Result<()> {
     let entries = inauguration::language_support::all_language_support();
     if json {
-        let raw = serde_json::to_string_pretty(entries)
+        let reports: Vec<_> = entries
+            .iter()
+            .map(inauguration::boundary_capability::language_support_json)
+            .collect();
+        let raw = serde_json::to_string_pretty(&reports)
             .map_err(|err| InError::Message(format!("serialize language support: {err}")))?;
         println!("{raw}");
         return Ok(());
