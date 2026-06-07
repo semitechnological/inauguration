@@ -18,9 +18,38 @@ pub struct PackageManifest {
     pub extensions: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct PackageDependency {
     pub version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rev: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checksum: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub targets: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capabilities: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub build: BTreeMap<String, String>,
+}
+
+impl PackageDependency {
+    pub fn resolved_source_path(&self) -> Option<PathBuf> {
+        if let Some(source) = self.source.as_deref().filter(|value| !value.is_empty()) {
+            if self.kind.as_deref() == Some("path")
+                || self.version.strip_prefix("path:").is_some()
+            {
+                return Some(PathBuf::from(source));
+            }
+        }
+        self.version
+            .strip_prefix("path:")
+            .map(PathBuf::from)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -130,6 +159,13 @@ enum Section {
     Extensions,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DependencySubsection {
+    Targets,
+    Capabilities,
+    Build,
+}
+
 pub fn load_package_manifest(path: &Path) -> Result<PackageManifest, String> {
     let manifest_path = if path.is_dir() {
         path.join(PACKAGE_MANIFEST_FILE)
@@ -189,8 +225,7 @@ pub fn compile_context_in_dir(dir: &Path) -> Option<PackageCompileContext> {
     let dependency_search_paths = manifest
         .dependencies
         .values()
-        .filter_map(|dependency| dependency.version.strip_prefix("path:"))
-        .map(PathBuf::from)
+        .filter_map(PackageDependency::resolved_source_path)
         .collect();
     Some(PackageCompileContext {
         name: manifest.name,
@@ -620,6 +655,7 @@ fn parse_package_manifest(source: &str) -> Result<PackageManifest, String> {
     };
     let mut section = None;
     let mut dependency_name: Option<String> = None;
+    let mut dependency_subsection: Option<DependencySubsection> = None;
 
     for (index, raw_line) in source.lines().enumerate() {
         let line_number = index + 1;
@@ -638,19 +674,23 @@ fn parse_package_manifest(source: &str) -> Result<PackageManifest, String> {
         match indent {
             0 => {
                 dependency_name = None;
+                dependency_subsection = None;
                 section = parse_top_level(line, line_number, &mut manifest)?;
             }
             2 => match section {
                 Some(Section::Targets) => {
                     dependency_name = None;
+                    dependency_subsection = None;
                     parse_target(line, line_number, &mut manifest)?;
                 }
                 Some(Section::Dependencies) => {
+                    dependency_subsection = None;
                     dependency_name =
                         Some(parse_dependency_header(line, line_number, &mut manifest)?);
                 }
                 Some(Section::Capabilities) => {
                     dependency_name = None;
+                    dependency_subsection = None;
                     parse_list_item(
                         line,
                         line_number,
@@ -660,6 +700,7 @@ fn parse_package_manifest(source: &str) -> Result<PackageManifest, String> {
                 }
                 Some(Section::Extensions) => {
                     dependency_name = None;
+                    dependency_subsection = None;
                     parse_list_item(line, line_number, "extensions", &mut manifest.extensions)?;
                 }
                 None => {
@@ -677,11 +718,29 @@ fn parse_package_manifest(source: &str) -> Result<PackageManifest, String> {
                 let name = dependency_name.as_deref().ok_or_else(|| {
                     format!("line {line_number}: dependency metadata requires a dependency name")
                 })?;
-                parse_dependency_field(line, line_number, name, &mut manifest)?;
+                dependency_subsection =
+                    parse_dependency_field(line, line_number, name, &mut manifest)?;
+            }
+            6 => {
+                if section != Some(Section::Dependencies) {
+                    return Err(format!(
+                        "line {line_number}: indentation is only valid for dependency metadata"
+                    ));
+                }
+                let name = dependency_name.as_deref().ok_or_else(|| {
+                    format!("line {line_number}: dependency metadata requires a dependency name")
+                })?;
+                parse_dependency_nested_field(
+                    line,
+                    line_number,
+                    name,
+                    dependency_subsection,
+                    &mut manifest,
+                )?;
             }
             _ => {
                 return Err(format!(
-                    "line {line_number}: malformed indentation; use 0, 2, or 4 spaces"
+                    "line {line_number}: malformed indentation; use 0, 2, 4, or 6 spaces"
                 ));
             }
         }
@@ -791,12 +850,7 @@ fn parse_dependency_header(
     }
     if manifest
         .dependencies
-        .insert(
-            key.to_string(),
-            PackageDependency {
-                version: String::new(),
-            },
-        )
+        .insert(key.to_string(), PackageDependency::default())
         .is_some()
     {
         return Err(format!("line {line_number}: duplicate dependency `{key}`"));
@@ -809,28 +863,136 @@ fn parse_dependency_field(
     line_number: usize,
     dependency_name: &str,
     manifest: &mut PackageManifest,
-) -> Result<(), String> {
+) -> Result<Option<DependencySubsection>, String> {
     let (key, value) = split_field(line, line_number)?;
+    let dependency = manifest
+        .dependencies
+        .get_mut(dependency_name)
+        .ok_or_else(|| format!("line {line_number}: unknown dependency `{dependency_name}`"))?;
     match key {
         "version" => {
             let version = required_scalar(value, line_number, "version")?;
-            let dependency = manifest
-                .dependencies
-                .get_mut(dependency_name)
-                .ok_or_else(|| {
-                    format!("line {line_number}: unknown dependency `{dependency_name}`")
-                })?;
             if !dependency.version.is_empty() {
                 return Err(format!(
                     "line {line_number}: duplicate version for dependency `{dependency_name}`"
                 ));
             }
             dependency.version = version.to_string();
-            Ok(())
+            Ok(None)
         }
+        "kind" => {
+            let kind = required_scalar(value, line_number, "kind")?;
+            if dependency.kind.is_some() {
+                return Err(format!(
+                    "line {line_number}: duplicate kind for dependency `{dependency_name}`"
+                ));
+            }
+            dependency.kind = Some(kind.to_string());
+            Ok(None)
+        }
+        "source" => {
+            let source = required_scalar(value, line_number, "source")?;
+            if dependency.source.is_some() {
+                return Err(format!(
+                    "line {line_number}: duplicate source for dependency `{dependency_name}`"
+                ));
+            }
+            dependency.source = Some(source.to_string());
+            Ok(None)
+        }
+        "rev" => {
+            let rev = required_scalar(value, line_number, "rev")?;
+            if dependency.rev.is_some() {
+                return Err(format!(
+                    "line {line_number}: duplicate rev for dependency `{dependency_name}`"
+                ));
+            }
+            dependency.rev = Some(rev.to_string());
+            Ok(None)
+        }
+        "checksum" => {
+            let checksum = required_scalar(value, line_number, "checksum")?;
+            if dependency.checksum.is_some() {
+                return Err(format!(
+                    "line {line_number}: duplicate checksum for dependency `{dependency_name}`"
+                ));
+            }
+            dependency.checksum = Some(checksum.to_string());
+            Ok(None)
+        }
+        "targets" => parse_dependency_subsection_header(
+            value,
+            line_number,
+            "targets",
+            DependencySubsection::Targets,
+        ),
+        "capabilities" => parse_dependency_subsection_header(
+            value,
+            line_number,
+            "capabilities",
+            DependencySubsection::Capabilities,
+        ),
+        "build" => parse_dependency_subsection_header(
+            value,
+            line_number,
+            "build",
+            DependencySubsection::Build,
+        ),
         other => Err(format!(
             "line {line_number}: unknown dependency field `{other}` for `{dependency_name}`"
         )),
+    }
+}
+
+fn parse_dependency_subsection_header(
+    value: &str,
+    line_number: usize,
+    name: &str,
+    subsection: DependencySubsection,
+) -> Result<Option<DependencySubsection>, String> {
+    if value.is_empty() {
+        Ok(Some(subsection))
+    } else {
+        Err(format!(
+            "line {line_number}: dependency subsection `{name}` must not have an inline value"
+        ))
+    }
+}
+
+fn parse_dependency_nested_field(
+    line: &str,
+    line_number: usize,
+    dependency_name: &str,
+    subsection: Option<DependencySubsection>,
+    manifest: &mut PackageManifest,
+) -> Result<(), String> {
+    let subsection = subsection.ok_or_else(|| {
+        format!("line {line_number}: nested dependency metadata requires a subsection")
+    })?;
+    let dependency = manifest
+        .dependencies
+        .get_mut(dependency_name)
+        .ok_or_else(|| format!("line {line_number}: unknown dependency `{dependency_name}`"))?;
+    match subsection {
+        DependencySubsection::Targets => {
+            parse_list_item(line, line_number, "dependency targets", &mut dependency.targets)
+        }
+        DependencySubsection::Capabilities => parse_list_item(
+            line,
+            line_number,
+            "dependency capabilities",
+            &mut dependency.capabilities,
+        ),
+        DependencySubsection::Build => {
+            let (key, value) = split_field(line, line_number)?;
+            let value = required_scalar(value, line_number, key)?;
+            if dependency.build.insert(key.to_string(), value.to_string()).is_some() {
+                return Err(format!(
+                    "line {line_number}: duplicate build field `{key}` for dependency `{dependency_name}`"
+                ));
+            }
+            Ok(())
+        }
     }
 }
 
@@ -954,13 +1116,15 @@ extensions:
         assert_eq!(
             manifest.dependencies.get("postgres"),
             Some(&PackageDependency {
-                version: "^1.0.0".into()
+                version: "^1.0.0".into(),
+                ..Default::default()
             })
         );
         assert_eq!(
             manifest.dependencies.get("redis"),
             Some(&PackageDependency {
-                version: "latest".into()
+                version: "latest".into(),
+                ..Default::default()
             })
         );
         assert_eq!(
@@ -1013,6 +1177,66 @@ entry: start
         .expect("parse manifest");
 
         assert_eq!(manifest.entry.as_deref(), Some("start"));
+    }
+
+    #[test]
+    fn loads_extended_dependency_metadata() {
+        let manifest = parse_text(
+            r#"name: hyperchat
+version: 0.1.0
+dependencies:
+  postgres:
+    version: ^1.0.0
+    kind: registry
+    source: https://registry.inauguration.dev
+    rev: main
+    checksum: sha256:abc123
+    targets:
+      - macos
+      - linux
+    capabilities:
+      - network.http
+    build:
+      profile: release
+      features: gpu
+"#,
+        )
+        .expect("parse extended dependency metadata");
+
+        let postgres = manifest
+            .dependencies
+            .get("postgres")
+            .expect("postgres dependency");
+        assert_eq!(postgres.version, "^1.0.0");
+        assert_eq!(postgres.kind.as_deref(), Some("registry"));
+        assert_eq!(
+            postgres.source.as_deref(),
+            Some("https://registry.inauguration.dev")
+        );
+        assert_eq!(postgres.rev.as_deref(), Some("main"));
+        assert_eq!(postgres.checksum.as_deref(), Some("sha256:abc123"));
+        assert_eq!(postgres.targets, vec!["macos".to_string(), "linux".to_string()]);
+        assert_eq!(postgres.capabilities, vec!["network.http".to_string()]);
+        assert_eq!(
+            postgres.build.get("profile").map(String::as_str),
+            Some("release")
+        );
+        assert_eq!(postgres.build.get("features").map(String::as_str), Some("gpu"));
+    }
+
+    #[test]
+    fn resolves_path_dependency_from_kind_and_source() {
+        let dependency = PackageDependency {
+            version: "0.1.0".into(),
+            kind: Some("path".into()),
+            source: Some("../local".into()),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            dependency.resolved_source_path(),
+            Some(PathBuf::from("../local"))
+        );
     }
 
     #[test]
