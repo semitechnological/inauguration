@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -179,14 +179,125 @@ fn sanitize_symbol_component(name: &str) -> String {
         .collect()
 }
 
+const PYPI_SITE_PACKAGES_DIR: &str = "inauguration-site-packages";
+
+fn prepare_go_package(install_path: &Path) -> Result<(), String> {
+    let invoke_dir = install_path.join("inauguration-invoke");
+    if !invoke_dir.join("go.mod").is_file() {
+        return Ok(());
+    }
+    let status = std::process::Command::new("go")
+        .args(["mod", "tidy"])
+        .current_dir(&invoke_dir)
+        .status()
+        .map_err(|err| format!("go mod tidy not available for go package: {err}"))?;
+    if !status.success() {
+        return Err(format!(
+            "go mod tidy failed for package at {}",
+            install_path.display()
+        ));
+    }
+    Ok(())
+}
+
+fn prepare_pypi_package(install_path: &Path) -> Result<(), String> {
+    let has_manifest = ["pyproject.toml", "setup.py"]
+        .into_iter()
+        .any(|name| install_path.join(name).is_file());
+    if !has_manifest {
+        return Ok(());
+    }
+    let target = install_path.join(PYPI_SITE_PACKAGES_DIR);
+    fs::create_dir_all(&target)
+        .map_err(|err| format!("create pypi site-packages {}: {err}", target.display()))?;
+    let status = std::process::Command::new("python3")
+        .args([
+            "-m",
+            "pip",
+            "install",
+            "--quiet",
+            "--disable-pip-version-check",
+            "--target",
+        ])
+        .arg(&target)
+        .arg(".")
+        .current_dir(install_path)
+        .status()
+        .map_err(|err| format!("pip install not available for pypi package: {err}"))?;
+    if !status.success() {
+        return Err(format!(
+            "pip install failed for package at {}",
+            install_path.display()
+        ));
+    }
+    Ok(())
+}
+
+pub fn adapter_overlay_dir(package_root: &Path, dependency_key: &str) -> PathBuf {
+    package_root.join("adapters").join(dependency_key)
+}
+
+pub fn apply_adapter_overlay(
+    package_root: &Path,
+    dependency_key: &str,
+    install_path: &Path,
+) -> Result<(), String> {
+    let overlay = adapter_overlay_dir(package_root, dependency_key);
+    if !overlay.is_dir() {
+        return Ok(());
+    }
+    copy_overlay_tree(&overlay, install_path)
+}
+
+fn copy_overlay_tree(source: &Path, destination: &Path) -> Result<(), String> {
+    for entry in fs::read_dir(source).map_err(|err| format!("read overlay {}: {err}", source.display()))? {
+        let entry = entry.map_err(|err| format!("read overlay entry: {err}"))?;
+        let file_type = entry
+            .file_type()
+            .map_err(|err| format!("overlay file type {}: {err}", entry.path().display()))?;
+        let target = destination.join(entry.file_name());
+        if file_type.is_dir() {
+            fs::create_dir_all(&target)
+                .map_err(|err| format!("create overlay dir {}: {err}", target.display()))?;
+            copy_overlay_tree(&entry.path(), &target)?;
+        } else if file_type.is_file() {
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent).map_err(|err| {
+                    format!("create overlay parent {}: {err}", parent.display())
+                })?;
+            }
+            fs::copy(entry.path(), &target).map_err(|err| {
+                format!(
+                    "copy overlay {} -> {}: {err}",
+                    entry.path().display(),
+                    target.display()
+                )
+            })?;
+        }
+    }
+    Ok(())
+}
+
 pub fn prepare_installed_package(install_path: &Path, ecosystem: &str) -> Result<(), String> {
+    if ecosystem == "pypi" {
+        return prepare_pypi_package(install_path);
+    }
+    if ecosystem == "go" {
+        return prepare_go_package(install_path);
+    }
     if ecosystem != "cargo" {
         return Ok(());
     }
-    let manifest = install_path.join("Cargo.toml");
-    if !manifest.is_file() {
-        return Ok(());
-    }
+    let runner_manifest = install_path.join("inauguration-runner").join("Cargo.toml");
+    let manifest = if runner_manifest.is_file() {
+        runner_manifest
+    } else {
+        let root_manifest = install_path.join("Cargo.toml");
+        if !root_manifest.is_file() {
+            return Ok(());
+        }
+        root_manifest
+    };
     let status = std::process::Command::new("cargo")
         .args(["build", "--quiet", "--manifest-path"])
         .arg(&manifest)

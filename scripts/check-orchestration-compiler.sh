@@ -405,20 +405,40 @@ def require(condition, message):
 installed = data.get("installed") or []
 require(len(installed) == 4, "ecosystem install expected four dependencies")
 require(
-    any(item.get("key") == "cargo:crepuscularity" and item.get("status") == "installed" for item in installed),
-    "ecosystem install missing cargo:crepuscularity",
+    any(
+        item.get("key") == "cargo:crepuscularity"
+        and item.get("status") == "installed"
+        and item.get("registry") == "crates.io"
+        for item in installed
+    ),
+    "ecosystem install missing cargo:crepuscularity from crates.io",
 )
 require(
-    any(item.get("key") == "npm:hono" and item.get("status") == "installed" for item in installed),
-    "ecosystem install missing npm:hono",
+    any(
+        item.get("key") == "npm:hono"
+        and item.get("status") == "installed"
+        and item.get("registry") == "registry.npmjs.org"
+        for item in installed
+    ),
+    "ecosystem install missing npm:hono from registry.npmjs.org",
 )
 require(
-    any(item.get("key") == "pypi:flask" and item.get("status") == "installed" for item in installed),
-    "ecosystem install missing pypi:flask",
+    any(
+        item.get("key") == "pypi:flask"
+        and item.get("status") == "installed"
+        and item.get("registry") == "pypi.org"
+        for item in installed
+    ),
+    "ecosystem install missing pypi:flask from pypi.org",
 )
 require(
-    any(item.get("key") == "go:fiber" and item.get("status") == "installed" for item in installed),
-    "ecosystem install missing go:fiber",
+    any(
+        item.get("key") == "go:fiber"
+        and item.get("status") == "installed"
+        and item.get("registry") == "proxy.golang.org"
+        for item in installed
+    ),
+    "ecosystem install missing go:fiber from proxy.golang.org",
 )
 PY
 

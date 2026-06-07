@@ -91,7 +91,10 @@ pub fn package_ref_for_dependency(
     dependency_key: &str,
     dependency: &PackageDependency,
 ) -> Option<PackageRef> {
-    if let Some(parsed) = parse_package_ref(dependency_key) {
+    if let Some(mut parsed) = parse_package_ref(dependency_key) {
+        if let Some(source) = dependency.source.as_deref().filter(|value| !value.is_empty()) {
+            parsed.name = source.to_string();
+        }
         return Some(parsed);
     }
     let kind = dependency.kind.as_deref()?;

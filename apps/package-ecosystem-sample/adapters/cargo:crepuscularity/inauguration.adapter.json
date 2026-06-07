@@ -9,7 +9,7 @@
           "run",
           "--quiet",
           "--manifest-path",
-          "Cargo.toml"
+          "inauguration-runner/Cargo.toml"
         ]
       }
     }

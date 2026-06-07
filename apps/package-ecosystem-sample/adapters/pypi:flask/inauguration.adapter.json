@@ -7,7 +7,7 @@
         "program": "python3",
         "args": [
           "-c",
-          "from greet import greet; import sys; sys.stdout.write(greet())"
+          "import sys; sys.path.insert(0,'inauguration-site-packages'); import flask; sys.stdout.write('flask')"
         ]
       }
     }

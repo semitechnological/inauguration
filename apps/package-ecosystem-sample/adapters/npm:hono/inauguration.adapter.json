@@ -7,7 +7,7 @@
         "program": "node",
         "args": [
           "-e",
-          "const m=require('./index.js'); process.stdout.write(m.greet());"
+          "const {Hono}=require('hono'); new Hono(); process.stdout.write('hono')"
         ]
       }
     }

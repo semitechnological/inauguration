@@ -228,6 +228,7 @@ fn install_one_dependency(
             .strip_prefix("path:")
             .unwrap_or("path")
             .to_string();
+        crate::package_discover::apply_adapter_overlay(package_root, key, &install_path)?;
         crate::package_discover::prepare_installed_package(&install_path, &package_ref.ecosystem)?;
         let metadata = crate::package_discover::discover_installed_package(
             &install_path,
@@ -280,6 +281,7 @@ fn install_one_dependency(
     })?;
 
     fetch_and_extract(&package_ref, &download_url, &install_path)?;
+    crate::package_discover::apply_adapter_overlay(package_root, key, &install_path)?;
     crate::package_discover::prepare_installed_package(&install_path, &package_ref.ecosystem)?;
     let metadata = crate::package_discover::discover_installed_package(
         &install_path,
@@ -493,10 +495,18 @@ fn fetch_and_extract(
     download_url: &str,
     install_path: &Path,
 ) -> Result<(), String> {
-    let archive_path = install_path.join(format!("{}.download", package_ref.name));
+    let archive_name = package_ref
+        .name
+        .chars()
+        .map(|ch| if ch == '/' { '_' } else { ch })
+        .collect::<String>();
+    let archive_path = install_path.join(format!("{archive_name}.download"));
     curl_to_file(download_url, &archive_path)?;
     if package_ref.ecosystem == "go" || download_url.ends_with(".zip") {
         extract_zip(&archive_path, install_path)?;
+        if package_ref.ecosystem == "go" {
+            flatten_go_module_root(install_path)?;
+        }
     } else {
         let status = Command::new("tar")
             .arg("-xf")
@@ -531,6 +541,76 @@ fn extract_zip(archive_path: &Path, install_path: &Path) -> Result<(), String> {
     flatten_single_install_subdir(install_path)
 }
 
+fn flatten_go_module_root(install_path: &Path) -> Result<(), String> {
+    if install_path.join("go.mod").is_file() {
+        return Ok(());
+    }
+    let module_root = find_go_module_root(install_path, 0)?;
+    let Some(module_root) = module_root else {
+        return Ok(());
+    };
+    if module_root == install_path {
+        return Ok(());
+    }
+    for entry in fs::read_dir(&module_root).map_err(|err| format!("read go module root: {err}"))? {
+        let entry = entry.map_err(|err| format!("read go module entry: {err}"))?;
+        let target = install_path.join(entry.file_name());
+        if target.exists() {
+            continue;
+        }
+        fs::rename(entry.path(), target).map_err(|err| format!("flatten go module root: {err}"))?;
+    }
+    remove_dir_if_empty(&module_root)?;
+    prune_empty_dirs(install_path)?;
+    Ok(())
+}
+
+fn find_go_module_root(path: &Path, depth: usize) -> Result<Option<PathBuf>, String> {
+    if depth > 8 {
+        return Ok(None);
+    }
+    if path.join("go.mod").is_file() {
+        return Ok(Some(path.to_path_buf()));
+    }
+    let mut matches = Vec::new();
+    let entries = fs::read_dir(path).map_err(|err| format!("read dir {}: {err}", path.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|err| format!("read dir entry: {err}"))?;
+        if entry.file_type().map_err(|err| format!("dir type: {err}"))?.is_dir() {
+            if let Some(found) = find_go_module_root(&entry.path(), depth + 1)? {
+                matches.push(found);
+            }
+        }
+    }
+    if matches.len() == 1 {
+        return Ok(matches.pop());
+    }
+    Ok(None)
+}
+
+fn prune_empty_dirs(path: &Path) -> Result<(), String> {
+    let entries = fs::read_dir(path).map_err(|err| format!("read dir {}: {err}", path.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|err| format!("read dir entry: {err}"))?;
+        if entry.file_type().map_err(|err| format!("dir type: {err}"))?.is_dir() {
+            prune_empty_dirs(&entry.path())?;
+            let _ = fs::remove_dir(entry.path());
+        }
+    }
+    Ok(())
+}
+
+fn remove_dir_if_empty(path: &Path) -> Result<(), String> {
+    if fs::read_dir(path)
+        .map_err(|err| format!("read dir {}: {err}", path.display()))?
+        .next()
+        .is_none()
+    {
+        fs::remove_dir(path).map_err(|err| format!("remove empty dir {}: {err}", path.display()))?;
+    }
+    Ok(())
+}
+
 fn flatten_single_install_subdir(install_path: &Path) -> Result<(), String> {
     let mut dirs = fs::read_dir(install_path)
         .map_err(|err| format!("read install dir {}: {err}", install_path.display()))?
@@ -554,9 +634,11 @@ fn flatten_single_install_subdir(install_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+const REGISTRY_USER_AGENT: &str = "inauguration/0.2.0 (package-install)";
+
 fn curl_get(url: &str) -> Result<String, String> {
     let output = Command::new("curl")
-        .args(["-fsSL", url])
+        .args(["-fsSL", "-A", REGISTRY_USER_AGENT, url])
         .output()
         .map_err(|err| format!("curl not available for registry fetch: {err}"))?;
     if !output.status.success() {
@@ -569,8 +651,23 @@ fn curl_get(url: &str) -> Result<String, String> {
 }
 
 fn curl_to_file(url: &str, path: &Path) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|err| {
+            format!(
+                "failed to create download parent dir {}: {err}",
+                parent.display()
+            )
+        })?;
+    }
     let status = Command::new("curl")
-        .args(["-fsSL", url, "-o", &path.display().to_string()])
+        .args([
+            "-fsSL",
+            "-A",
+            REGISTRY_USER_AGENT,
+            url,
+            "-o",
+            &path.display().to_string(),
+        ])
         .status()
         .map_err(|err| format!("curl not available for registry fetch: {err}"))?;
     if !status.success() {

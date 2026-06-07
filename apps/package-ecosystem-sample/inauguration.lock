@@ -3,18 +3,19 @@ name: ecosystem-demo
 version: 0.1.0
 dependencies:
   cargo:crepuscularity:
-    version: path:vendor/cargo/crepuscularity
+    version: latest
     kind: cargo
-    install_path: vendor/cargo/crepuscularity
+    install_path: target/in/packages/cargo/crepuscularity/0.4.5
   go:fiber:
-    version: path:vendor/go/fiber
+    version: latest
     kind: go
-    install_path: vendor/go/fiber
+    source: github.com/gofiber/fiber/v2
+    install_path: target/in/packages/go/github.com/gofiber/fiber/v2/v2.45.0
   npm:hono:
-    version: path:vendor/npm/hono
+    version: latest
     kind: npm
-    install_path: vendor/npm/hono
+    install_path: target/in/packages/npm/hono/4.12.23
   pypi:flask:
-    version: path:vendor/pypi/flask
+    version: latest
     kind: pypi
-    install_path: vendor/pypi/flask
+    install_path: target/in/packages/pypi/flask/3.1.3
