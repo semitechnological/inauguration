@@ -1,0 +1,43 @@
+{
+  "icoreVersion": 3,
+  "decls": [
+    {
+      "kind": "function",
+      "name": "person_age",
+      "params": [{"name": "p", "type": "Person"}],
+      "return": "Int",
+      "body": [
+        {"kind": "return", "value": {"kind": "int", "value": 0}}
+      ]
+    }
+  ],
+  "boundary": {
+    "abi_version": 1,
+    "module": "sample.person",
+    "layouts": [
+      {
+        "name": "Person",
+        "kind": "struct",
+        "repr": "c",
+        "size": 24,
+        "align": 8,
+        "stride": 24,
+        "fields": [
+          {"name": "name", "offset": 0, "type": "InSliceU8", "transfer": "borrow"},
+          {"name": "age", "offset": 16, "type": "u32", "transfer": "copy"}
+        ]
+      }
+    ],
+    "symbols": [
+      {
+        "name": "person_new",
+        "signature_hash": "person_new_v1",
+        "ownership": "returns-owned-handle",
+        "calling_convention": "c"
+      }
+    ],
+    "allocators": [
+      {"id": 1, "kind": "host_arena", "free_with": "host"}
+    ]
+  }
+}

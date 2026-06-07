@@ -4,6 +4,8 @@
 //! front (codegen, tree-sitter bridge, another compiler) can feed the same Core IR + SIL path
 //! without re-implementing the `.in` lexer.
 
+use crate::boundary_ir::{BoundaryModule, CompileArtifact};
+use crate::boundary_verify::boundary_ir_verify;
 use crate::core_ir::{Decl, Typ, UnifiedModule};
 use crate::core_ir::{Expr, Stmt};
 use serde::Deserialize;
@@ -17,6 +19,8 @@ struct IcoreFile {
     #[serde(default, rename = "icoreVersion")]
     icore_version: u32,
     decls: Vec<IcoreDecl>,
+    #[serde(default)]
+    boundary: Option<BoundaryModule>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -76,23 +80,53 @@ fn type_known(structs: &HashSet<&str>, t: &Typ) -> bool {
 /// Parse `.icore` JSON into [`UnifiedModule`]. Version **1** supports only **empty** function bodies
 /// (`body` must be `[]`); statements are accepted from `.in` or future versions.
 pub fn parse_icore_file(path: &Path) -> Result<UnifiedModule, String> {
+    parse_icore_artifact(path).map(|artifact| artifact.semantic)
+}
+
+pub fn parse_icore_artifact(path: &Path) -> Result<CompileArtifact, String> {
     let raw = fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    parse_icore_source(&raw)
+    parse_icore_artifact_source(&raw)
+}
+
+pub fn parse_icore_artifact_source(raw: &str) -> Result<CompileArtifact, String> {
+    let file: IcoreFile = serde_json::from_str(raw).map_err(|e| format!("icore JSON: {e}"))?;
+    let boundary = file.boundary.map(|mut b| {
+        if b.layout_hash.is_empty() {
+            b = b.with_layout_hash();
+        }
+        b
+    });
+    if let Some(ref module) = boundary {
+        let report = boundary_ir_verify(module);
+        if !report.ok {
+            return Err(format!(
+                "icore boundary: {}",
+                report.diagnostics.join("; ")
+            ));
+        }
+    }
+    let semantic = parse_icore_decls(file.icore_version, file.decls)?;
+    Ok(if let Some(boundary) = boundary {
+        CompileArtifact::with_boundary(semantic, boundary)
+    } else {
+        CompileArtifact::from_semantic(semantic)
+    })
 }
 
 /// Parse JSON (for tests and tooling that already hold the string).
 pub fn parse_icore_source(raw: &str) -> Result<UnifiedModule, String> {
-    let file: IcoreFile = serde_json::from_str(raw).map_err(|e| format!("icore JSON: {e}"))?;
-    if !matches!(file.icore_version, 1 | 2) {
+    parse_icore_artifact_source(raw).map(|artifact| artifact.semantic)
+}
+
+fn parse_icore_decls(icore_version: u32, icore_decls: Vec<IcoreDecl>) -> Result<UnifiedModule, String> {
+    if !matches!(icore_version, 1 | 2 | 3) {
         return Err(format!(
-            "icore: unsupported icoreVersion {} (only 1 and 2 supported)",
-            file.icore_version
+            "icore: unsupported icoreVersion {icore_version} (only 1, 2, and 3 supported)"
         ));
     }
 
     let mut decls = Vec::new();
-    let icore_version = file.icore_version;
-    for d in file.decls {
+    for d in icore_decls {
         match d {
             IcoreDecl::Struct { name, fields } => {
                 let flds: Vec<(String, Typ)> = fields

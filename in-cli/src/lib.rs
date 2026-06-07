@@ -4,6 +4,8 @@
 pub mod preview_client;
 
 pub mod agent_mode;
+pub mod boundary_ir;
+pub mod boundary_verify;
 pub mod bytecode;
 pub mod bytecode_compiler;
 pub mod compile_cache;
