@@ -408,6 +408,30 @@ impl BytecodeVM {
                 let needle = iter.next().unwrap_or(Value::Nil).to_string_display();
                 vec![Value::Bool(haystack.contains(&needle))]
             }
+            "str_trim" => {
+                let text = args.first().map_or(String::new(), Value::to_string_display);
+                vec![Value::String(text.trim().to_string())]
+            }
+            "str_split_lines" => {
+                let text = args.first().map_or(String::new(), Value::to_string_display);
+                vec![Value::Array(
+                    text.lines()
+                        .map(|line| Value::String(line.to_string()))
+                        .collect(),
+                )]
+            }
+            "str_split_spaces" => {
+                let text = args.first().map_or(String::new(), Value::to_string_display);
+                vec![Value::Array(
+                    text.split_whitespace()
+                        .map(|part| Value::String(part.to_string()))
+                        .collect(),
+                )]
+            }
+            "str_to_int" => {
+                let text = args.first().map_or(String::new(), Value::to_string_display);
+                vec![Value::Int(text.trim().parse::<i64>().unwrap_or_default())]
+            }
             "json_stringify" => {
                 let text = args.first().map_or(String::new(), Value::to_string_display);
                 let mut out = String::from("\"");
@@ -734,6 +758,77 @@ mod tests {
         let mut vm = BytecodeVM::new(module);
         let result = vm.run().expect("run json stringify builtin");
         assert_eq!(result, Value::String("\"a\\\"b\"".to_string()));
+    }
+
+    #[test]
+    fn vm_std_string_trim_builtin_executes() {
+        let mut module = BytecodeModule::new("main".to_string());
+        module.add_function(BytecodeFunction {
+            name: "main".to_string(),
+            local_count: 0,
+            instructions: vec![
+                Instruction::LoadString("  answer  ".to_string()),
+                Instruction::CallBuiltin("str_trim".to_string(), 1),
+                Instruction::Return,
+            ],
+        });
+        let mut vm = BytecodeVM::new(module);
+        let result = vm.run().expect("run string trim builtin");
+        assert_eq!(result, Value::String("answer".to_string()));
+    }
+
+    #[test]
+    fn vm_std_string_split_lines_builtin_executes() {
+        let mut module = BytecodeModule::new("main".to_string());
+        module.add_function(BytecodeFunction {
+            name: "main".to_string(),
+            local_count: 0,
+            instructions: vec![
+                Instruction::LoadString("first\nsecond\n".to_string()),
+                Instruction::CallBuiltin("str_split_lines".to_string(), 1),
+                Instruction::CallBuiltin("array_len".to_string(), 1),
+                Instruction::Return,
+            ],
+        });
+        let mut vm = BytecodeVM::new(module);
+        let result = vm.run().expect("run string split lines builtin");
+        assert_eq!(result, Value::Int(2));
+    }
+
+    #[test]
+    fn vm_std_string_split_spaces_builtin_executes() {
+        let mut module = BytecodeModule::new("main".to_string());
+        module.add_function(BytecodeFunction {
+            name: "main".to_string(),
+            local_count: 0,
+            instructions: vec![
+                Instruction::LoadString("let answer = 40 + 2".to_string()),
+                Instruction::CallBuiltin("str_split_spaces".to_string(), 1),
+                Instruction::LoadInt(1),
+                Instruction::IndexAccess,
+                Instruction::Return,
+            ],
+        });
+        let mut vm = BytecodeVM::new(module);
+        let result = vm.run().expect("run string split spaces builtin");
+        assert_eq!(result, Value::String("answer".to_string()));
+    }
+
+    #[test]
+    fn vm_std_string_to_int_builtin_executes() {
+        let mut module = BytecodeModule::new("main".to_string());
+        module.add_function(BytecodeFunction {
+            name: "main".to_string(),
+            local_count: 0,
+            instructions: vec![
+                Instruction::LoadString("42".to_string()),
+                Instruction::CallBuiltin("str_to_int".to_string(), 1),
+                Instruction::Return,
+            ],
+        });
+        let mut vm = BytecodeVM::new(module);
+        let result = vm.run().expect("run string to int builtin");
+        assert_eq!(result, Value::Int(42));
     }
 
     #[test]

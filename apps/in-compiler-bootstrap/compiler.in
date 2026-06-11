@@ -8,31 +8,91 @@ fn quote(text: String) -> String {
   return json_stringify(text);
 }
 
-fn emit_answer_icore() -> String {
-  let q_version: String = quote("icoreVersion");
-  let q_decls: String = quote("decls");
+fn line_name(line: String) -> String {
+  let parts: [String] = str_split_spaces(str_trim(line));
+  return parts[1];
+}
+
+fn line_value(line: String) -> Int {
+  let parts: [String] = str_split_spaces(str_trim(line));
+  let left: Int = str_to_int(parts[3]);
+  let right: Int = str_to_int(parts[5]);
+  let op: String = parts[4];
+  if str_eq(op, "+") {
+    return left + right;
+  }
+  if str_eq(op, "-") {
+    return left - right;
+  }
+  if str_eq(op, "*") {
+    return left * right;
+  }
+  if str_eq(op, "/") {
+    return left / right;
+  }
+  return 0;
+}
+
+fn emit_int_function(name: String, value: Int) -> String {
   let q_kind: String = quote("kind");
   let q_function: String = quote("function");
   let q_name: String = quote("name");
-  let q_answer: String = quote("answer");
   let q_params: String = quote("params");
   let q_return: String = quote("return");
   let q_int: String = quote("Int");
   let q_body: String = quote("body");
   let q_value: String = quote("value");
-  let q_main: String = quote("main");
-  let answer_decl: String = "{" + q_kind + ":" + q_function + "," + q_name + ":" + q_answer + "," + q_params + ":[]," + q_return + ":" + q_int + "," + q_body + ":[{" + q_kind + ":" + quote("return") + "," + q_value + ":42}]}";
-  let main_decl: String = "{" + q_kind + ":" + q_function + "," + q_name + ":" + q_main + "," + q_params + ":[]," + q_return + ":" + q_int + "," + q_body + ":[{" + q_kind + ":" + quote("return") + "," + q_value + ":42}]}";
-  return "{" + q_version + ":2," + q_decls + ":[" + answer_decl + "," + main_decl + "]}";
+  let q_return_stmt: String = quote("return");
+  return "{" + q_kind + ":" + q_function + "," + q_name + ":" + quote(name) + "," + q_params + ":[]," + q_return + ":" + q_int + "," + q_body + ":[{" + q_kind + ":" + q_return_stmt + "," + q_value + ":" + to_string(value) + "}]}";
+}
+
+fn emit_program_with_decls(decls: String, final_value: Int) -> String {
+  let q_version: String = quote("icoreVersion");
+  let q_decls: String = quote("decls");
+  let main_decl: String = emit_int_function("main", final_value);
+  return "{" + q_version + ":2," + q_decls + ":[" + decls + "," + main_decl + "]}";
+}
+
+fn compile_source(source: String) -> String {
+  let lines: [String] = str_split_lines(source);
+  let count: Int = array_len(lines);
+  if count < 2 {
+    return "{}";
+  }
+  let final_name: String = str_trim(lines[count - 1]);
+  let i: Int = 0;
+  let current_name: String = "";
+  let current_value: Int = 0;
+  let final_value: Int = 0;
+  let matched_final: Bool = false;
+  let decls: String = "";
+  while i < count - 1 {
+    let line: String = str_trim(lines[i]);
+    if str_contains(line, "let ") && str_contains(line, " = ") {
+      current_name = line_name(line);
+      current_value = line_value(line);
+      if str_eq(decls, "") {
+        decls = emit_int_function(current_name, current_value);
+      } else {
+        decls = decls + "," + emit_int_function(current_name, current_value);
+      }
+      if str_eq(current_name, final_name) {
+        final_value = current_value;
+        matched_final = true;
+      }
+    }
+    i = i + 1;
+  }
+  if matched_final {
+    return emit_program_with_decls(decls, final_value);
+  }
+  return "{}";
 }
 
 fn main() -> String {
   let path: String = path_join("apps/in-compiler-bootstrap", "sample.expr");
   let source: String = read_file(path);
-  if str_contains(source, "let answer = 40 + 2") && str_contains(source, "answer") {
-    let icore: String = emit_answer_icore();
-    let ok: Bool = write_file("/tmp/in-compiler-bootstrap-generated.icore", icore);
-    return icore;
-  }
-  return "{}";
+  let icore: String = compile_source(source);
+  let ok: Bool = write_file("/tmp/in-compiler-bootstrap-generated.icore", icore);
+  return icore;
 }
