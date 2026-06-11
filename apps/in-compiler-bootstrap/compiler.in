@@ -13,9 +13,9 @@ fn line_name(line: String) -> String {
   return parts[1];
 }
 
-fn token_value(token: String, known_name: String, known_value: Int) -> Int {
-  if str_eq(token, known_name) {
-    return known_value;
+fn token_value(token: String, names: String, values: String) -> Int {
+  if str_table_has(names, token) {
+    return str_table_get_int(names, values, token);
   }
   return str_to_int(token);
 }
@@ -44,8 +44,8 @@ fn emit_call_expr(name: String) -> String {
   return "{" + quote("kind") + ":" + quote("call") + "," + quote("callee") + ":" + quote(name) + "," + quote("args") + ":[]}";
 }
 
-fn emit_value_expr(token: String, known_name: String) -> String {
-  if str_eq(token, known_name) {
+fn emit_value_expr(token: String, names: String) -> String {
+  if str_table_has(names, token) {
     return emit_call_expr(token);
   }
   return emit_int_expr(str_to_int(token));
@@ -55,20 +55,20 @@ fn emit_binary_expr(op: String, lhs: String, rhs: String) -> String {
   return "{" + quote("kind") + ":" + quote("binary") + "," + quote("op") + ":" + quote(op) + "," + quote("lhs") + ":" + lhs + "," + quote("rhs") + ":" + rhs + "}";
 }
 
-fn line_expr(line: String, known_name: String) -> String {
+fn line_expr(line: String, names: String) -> String {
   let parts: [String] = str_tokenize_expr(str_trim(line));
   let count: Int = array_len(parts);
-  let left: String = emit_value_expr(parts[3], known_name);
+  let left: String = emit_value_expr(parts[3], names);
   if count < 6 {
     return left;
   }
   let op1: String = parts[4];
-  let middle: String = emit_value_expr(parts[5], known_name);
+  let middle: String = emit_value_expr(parts[5], names);
   if count < 8 {
     return emit_binary_expr(op1, left, middle);
   }
   let op2: String = parts[6];
-  let right: String = emit_value_expr(parts[7], known_name);
+  let right: String = emit_value_expr(parts[7], names);
   if str_eq(op2, "*") || str_eq(op2, "/") {
     let rhs: String = emit_binary_expr(op2, middle, right);
     return emit_binary_expr(op1, left, rhs);
@@ -77,20 +77,20 @@ fn line_expr(line: String, known_name: String) -> String {
   return emit_binary_expr(op2, lhs, right);
 }
 
-fn line_value(line: String, known_name: String, known_value: Int) -> Int {
+fn line_value(line: String, names: String, values: String) -> Int {
   let parts: [String] = str_tokenize_expr(str_trim(line));
   let count: Int = array_len(parts);
-  let left: Int = token_value(parts[3], known_name, known_value);
+  let left: Int = token_value(parts[3], names, values);
   if count < 6 {
     return left;
   }
   let op1: String = parts[4];
-  let middle: Int = token_value(parts[5], known_name, known_value);
+  let middle: Int = token_value(parts[5], names, values);
   if count < 8 {
     return apply_op(left, op1, middle);
   }
   let op2: String = parts[6];
-  let right: Int = token_value(parts[7], known_name, known_value);
+  let right: Int = token_value(parts[7], names, values);
   if str_eq(op2, "*") || str_eq(op2, "/") {
     let rhs: Int = apply_op(middle, op2, right);
     return apply_op(left, op1, rhs);
@@ -136,19 +136,21 @@ fn compile_source(source: String) -> String {
   let final_value: Int = 0;
   let matched_final: Bool = false;
   let decls: String = "";
+  let names: String = "";
+  let values: String = "";
   while i < count - 1 {
     let line: String = str_trim(lines[i]);
     if str_contains(line, "let") && str_contains(line, "=") {
-      let previous_name: String = current_name;
-      let previous_value: Int = current_value;
       current_name = line_name(line);
-      current_value = line_value(line, previous_name, previous_value);
-      let current_expr: String = line_expr(line, previous_name);
+      current_value = line_value(line, names, values);
+      let current_expr: String = line_expr(line, names);
       if str_eq(decls, "") {
         decls = emit_int_function_expr(current_name, current_expr);
       } else {
         decls = decls + "," + emit_int_function_expr(current_name, current_expr);
       }
+      names = names + current_name + "|";
+      values = values + to_string(current_value) + "|";
       if str_eq(current_name, final_name) {
         final_value = current_value;
         matched_final = true;

@@ -455,6 +455,30 @@ impl BytecodeVM {
                 let text = args.first().map_or(String::new(), Value::to_string_display);
                 vec![Value::Int(text.trim().parse::<i64>().unwrap_or_default())]
             }
+            "str_table_has" => {
+                let mut iter = args.into_iter();
+                let names = iter.next().unwrap_or(Value::Nil).to_string_display();
+                let needle = iter.next().unwrap_or(Value::Nil).to_string_display();
+                vec![Value::Bool(names.split('|').any(|name| name == needle))]
+            }
+            "str_table_get_int" => {
+                let mut iter = args.into_iter();
+                let names = iter.next().unwrap_or(Value::Nil).to_string_display();
+                let values = iter.next().unwrap_or(Value::Nil).to_string_display();
+                let needle = iter.next().unwrap_or(Value::Nil).to_string_display();
+                let value = names
+                    .split('|')
+                    .zip(values.split('|'))
+                    .find_map(|(name, value)| {
+                        if name == needle {
+                            value.trim().parse::<i64>().ok()
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_default();
+                vec![Value::Int(value)]
+            }
             "json_stringify" => {
                 let text = args.first().map_or(String::new(), Value::to_string_display);
                 let mut out = String::from("\"");
@@ -871,6 +895,43 @@ mod tests {
         let mut vm = BytecodeVM::new(module);
         let result = vm.run().expect("run string tokenize expr builtin");
         assert_eq!(result, Value::String("base".to_string()));
+    }
+
+    #[test]
+    fn vm_std_symbol_table_has_builtin_executes() {
+        let mut module = BytecodeModule::new("main".to_string());
+        module.add_function(BytecodeFunction {
+            name: "main".to_string(),
+            local_count: 0,
+            instructions: vec![
+                Instruction::LoadString("base|ignored|".to_string()),
+                Instruction::LoadString("base".to_string()),
+                Instruction::CallBuiltin("str_table_has".to_string(), 2),
+                Instruction::Return,
+            ],
+        });
+        let mut vm = BytecodeVM::new(module);
+        let result = vm.run().expect("run symbol table has builtin");
+        assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn vm_std_symbol_table_get_int_builtin_executes() {
+        let mut module = BytecodeModule::new("main".to_string());
+        module.add_function(BytecodeFunction {
+            name: "main".to_string(),
+            local_count: 0,
+            instructions: vec![
+                Instruction::LoadString("base|ignored|".to_string()),
+                Instruction::LoadString("40|7|".to_string()),
+                Instruction::LoadString("base".to_string()),
+                Instruction::CallBuiltin("str_table_get_int".to_string(), 3),
+                Instruction::Return,
+            ],
+        });
+        let mut vm = BytecodeVM::new(module);
+        let result = vm.run().expect("run symbol table get int builtin");
+        assert_eq!(result, Value::Int(40));
     }
 
     #[test]

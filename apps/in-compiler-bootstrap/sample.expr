@@ -1,3 +1,4 @@
 let base=40
+let ignored=7
 let answer=base+1*2
 answer

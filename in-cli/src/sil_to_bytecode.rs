@@ -185,6 +185,8 @@ fn is_builtin_function(name: &str) -> bool {
             | "str_split_spaces"
             | "str_tokenize_expr"
             | "str_to_int"
+            | "str_table_has"
+            | "str_table_get_int"
             | "json_stringify"
             | "path_join"
             | "path_dirname"
