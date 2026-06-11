@@ -36,6 +36,47 @@ fn apply_op(left: Int, op: String, right: Int) -> Int {
   return 0;
 }
 
+fn emit_int_expr(value: Int) -> String {
+  return "{" + quote("kind") + ":" + quote("int") + "," + quote("value") + ":" + to_string(value) + "}";
+}
+
+fn emit_call_expr(name: String) -> String {
+  return "{" + quote("kind") + ":" + quote("call") + "," + quote("callee") + ":" + quote(name) + "," + quote("args") + ":[]}";
+}
+
+fn emit_value_expr(token: String, known_name: String) -> String {
+  if str_eq(token, known_name) {
+    return emit_call_expr(token);
+  }
+  return emit_int_expr(str_to_int(token));
+}
+
+fn emit_binary_expr(op: String, lhs: String, rhs: String) -> String {
+  return "{" + quote("kind") + ":" + quote("binary") + "," + quote("op") + ":" + quote(op) + "," + quote("lhs") + ":" + lhs + "," + quote("rhs") + ":" + rhs + "}";
+}
+
+fn line_expr(line: String, known_name: String) -> String {
+  let parts: [String] = str_tokenize_expr(str_trim(line));
+  let count: Int = array_len(parts);
+  let left: String = emit_value_expr(parts[3], known_name);
+  if count < 6 {
+    return left;
+  }
+  let op1: String = parts[4];
+  let middle: String = emit_value_expr(parts[5], known_name);
+  if count < 8 {
+    return emit_binary_expr(op1, left, middle);
+  }
+  let op2: String = parts[6];
+  let right: String = emit_value_expr(parts[7], known_name);
+  if str_eq(op2, "*") || str_eq(op2, "/") {
+    let rhs: String = emit_binary_expr(op2, middle, right);
+    return emit_binary_expr(op1, left, rhs);
+  }
+  let lhs: String = emit_binary_expr(op1, left, middle);
+  return emit_binary_expr(op2, lhs, right);
+}
+
 fn line_value(line: String, known_name: String, known_value: Int) -> Int {
   let parts: [String] = str_tokenize_expr(str_trim(line));
   let count: Int = array_len(parts);
@@ -58,7 +99,7 @@ fn line_value(line: String, known_name: String, known_value: Int) -> Int {
   return apply_op(lhs, op2, right);
 }
 
-fn emit_int_function(name: String, value: Int) -> String {
+fn emit_int_function_expr(name: String, expr: String) -> String {
   let q_kind: String = quote("kind");
   let q_function: String = quote("function");
   let q_name: String = quote("name");
@@ -66,15 +107,19 @@ fn emit_int_function(name: String, value: Int) -> String {
   let q_return: String = quote("return");
   let q_int: String = quote("Int");
   let q_body: String = quote("body");
-  let q_value: String = quote("value");
   let q_return_stmt: String = quote("return");
-  return "{" + q_kind + ":" + q_function + "," + q_name + ":" + quote(name) + "," + q_params + ":[]," + q_return + ":" + q_int + "," + q_body + ":[{" + q_kind + ":" + q_return_stmt + "," + q_value + ":" + to_string(value) + "}]}";
+  let q_expr: String = quote("expr");
+  return "{" + q_kind + ":" + q_function + "," + q_name + ":" + quote(name) + "," + q_params + ":[]," + q_return + ":" + q_int + "," + q_body + ":[{" + q_kind + ":" + q_return_stmt + "," + q_expr + ":" + expr + "}]}";
 }
 
-fn emit_program_with_decls(decls: String, final_value: Int) -> String {
+fn emit_int_function(name: String, value: Int) -> String {
+  return emit_int_function_expr(name, emit_int_expr(value));
+}
+
+fn emit_program_with_decls(decls: String, final_name: String) -> String {
   let q_version: String = quote("icoreVersion");
   let q_decls: String = quote("decls");
-  let main_decl: String = emit_int_function("main", final_value);
+  let main_decl: String = emit_int_function_expr("main", emit_call_expr(final_name));
   return "{" + q_version + ":2," + q_decls + ":[" + decls + "," + main_decl + "]}";
 }
 
@@ -98,10 +143,11 @@ fn compile_source(source: String) -> String {
       let previous_value: Int = current_value;
       current_name = line_name(line);
       current_value = line_value(line, previous_name, previous_value);
+      let current_expr: String = line_expr(line, previous_name);
       if str_eq(decls, "") {
-        decls = emit_int_function(current_name, current_value);
+        decls = emit_int_function_expr(current_name, current_expr);
       } else {
-        decls = decls + "," + emit_int_function(current_name, current_value);
+        decls = decls + "," + emit_int_function_expr(current_name, current_expr);
       }
       if str_eq(current_name, final_name) {
         final_value = current_value;
@@ -111,7 +157,7 @@ fn compile_source(source: String) -> String {
     i = i + 1;
   }
   if matched_final {
-    return emit_program_with_decls(decls, final_value);
+    return emit_program_with_decls(decls, final_name);
   }
   return "{}";
 }
