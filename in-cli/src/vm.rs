@@ -428,6 +428,29 @@ impl BytecodeVM {
                         .collect(),
                 )]
             }
+            "str_tokenize_expr" => {
+                let text = args.first().map_or(String::new(), Value::to_string_display);
+                let mut tokens = Vec::new();
+                let mut current = String::new();
+                for ch in text.chars() {
+                    if ch.is_whitespace() {
+                        if !current.is_empty() {
+                            tokens.push(Value::String(std::mem::take(&mut current)));
+                        }
+                    } else if matches!(ch, '+' | '-' | '*' | '/' | '(' | ')' | '=') {
+                        if !current.is_empty() {
+                            tokens.push(Value::String(std::mem::take(&mut current)));
+                        }
+                        tokens.push(Value::String(ch.to_string()));
+                    } else {
+                        current.push(ch);
+                    }
+                }
+                if !current.is_empty() {
+                    tokens.push(Value::String(current));
+                }
+                vec![Value::Array(tokens)]
+            }
             "str_to_int" => {
                 let text = args.first().map_or(String::new(), Value::to_string_display);
                 vec![Value::Int(text.trim().parse::<i64>().unwrap_or_default())]
@@ -829,6 +852,25 @@ mod tests {
         let mut vm = BytecodeVM::new(module);
         let result = vm.run().expect("run string to int builtin");
         assert_eq!(result, Value::Int(42));
+    }
+
+    #[test]
+    fn vm_std_string_tokenize_expr_builtin_executes() {
+        let mut module = BytecodeModule::new("main".to_string());
+        module.add_function(BytecodeFunction {
+            name: "main".to_string(),
+            local_count: 0,
+            instructions: vec![
+                Instruction::LoadString("let answer=base+1*2".to_string()),
+                Instruction::CallBuiltin("str_tokenize_expr".to_string(), 1),
+                Instruction::LoadInt(3),
+                Instruction::IndexAccess,
+                Instruction::Return,
+            ],
+        });
+        let mut vm = BytecodeVM::new(module);
+        let result = vm.run().expect("run string tokenize expr builtin");
+        assert_eq!(result, Value::String("base".to_string()));
     }
 
     #[test]

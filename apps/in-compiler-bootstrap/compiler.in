@@ -9,15 +9,18 @@ fn quote(text: String) -> String {
 }
 
 fn line_name(line: String) -> String {
-  let parts: [String] = str_split_spaces(str_trim(line));
+  let parts: [String] = str_tokenize_expr(str_trim(line));
   return parts[1];
 }
 
-fn line_value(line: String) -> Int {
-  let parts: [String] = str_split_spaces(str_trim(line));
-  let left: Int = str_to_int(parts[3]);
-  let right: Int = str_to_int(parts[5]);
-  let op: String = parts[4];
+fn token_value(token: String, known_name: String, known_value: Int) -> Int {
+  if str_eq(token, known_name) {
+    return known_value;
+  }
+  return str_to_int(token);
+}
+
+fn apply_op(left: Int, op: String, right: Int) -> Int {
   if str_eq(op, "+") {
     return left + right;
   }
@@ -31,6 +34,28 @@ fn line_value(line: String) -> Int {
     return left / right;
   }
   return 0;
+}
+
+fn line_value(line: String, known_name: String, known_value: Int) -> Int {
+  let parts: [String] = str_tokenize_expr(str_trim(line));
+  let count: Int = array_len(parts);
+  let left: Int = token_value(parts[3], known_name, known_value);
+  if count < 6 {
+    return left;
+  }
+  let op1: String = parts[4];
+  let middle: Int = token_value(parts[5], known_name, known_value);
+  if count < 8 {
+    return apply_op(left, op1, middle);
+  }
+  let op2: String = parts[6];
+  let right: Int = token_value(parts[7], known_name, known_value);
+  if str_eq(op2, "*") || str_eq(op2, "/") {
+    let rhs: Int = apply_op(middle, op2, right);
+    return apply_op(left, op1, rhs);
+  }
+  let lhs: Int = apply_op(left, op1, middle);
+  return apply_op(lhs, op2, right);
 }
 
 fn emit_int_function(name: String, value: Int) -> String {
@@ -68,9 +93,11 @@ fn compile_source(source: String) -> String {
   let decls: String = "";
   while i < count - 1 {
     let line: String = str_trim(lines[i]);
-    if str_contains(line, "let ") && str_contains(line, " = ") {
+    if str_contains(line, "let") && str_contains(line, "=") {
+      let previous_name: String = current_name;
+      let previous_value: Int = current_value;
       current_name = line_name(line);
-      current_value = line_value(line);
+      current_value = line_value(line, previous_name, previous_value);
       if str_eq(decls, "") {
         decls = emit_int_function(current_name, current_value);
       } else {

@@ -183,6 +183,7 @@ fn is_builtin_function(name: &str) -> bool {
             | "str_trim"
             | "str_split_lines"
             | "str_split_spaces"
+            | "str_tokenize_expr"
             | "str_to_int"
             | "json_stringify"
             | "path_join"

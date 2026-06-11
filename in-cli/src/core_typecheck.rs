@@ -63,6 +63,7 @@ fn is_builtin_fn(name: &str) -> bool {
             | "str_trim"
             | "str_split_lines"
             | "str_split_spaces"
+            | "str_tokenize_expr"
             | "str_to_int"
             | "array_push"
             | "array_pop"
@@ -77,7 +78,9 @@ fn builtin_return_type(name: &str) -> Typ {
         "len" | "array_len" | "bool_to_int" | "to_int" | "str_to_int" => Typ::Int,
         "str_eq" | "str_contains" | "int_to_bool" => Typ::Bool,
         "str_concat" | "str_trim" | "to_string" => Typ::String,
-        "str_split_lines" | "str_split_spaces" => Typ::Array(Box::new(Typ::String)),
+        "str_split_lines" | "str_split_spaces" | "str_tokenize_expr" => {
+            Typ::Array(Box::new(Typ::String))
+        }
         _ => Typ::Void,
     }
 }
