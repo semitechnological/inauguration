@@ -180,6 +180,7 @@ fn is_builtin_function(name: &str) -> bool {
             | "str_concat"
             | "str_eq"
             | "str_contains"
+            | "json_stringify"
             | "path_join"
             | "path_dirname"
             | "path_basename"

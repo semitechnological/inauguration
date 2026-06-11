@@ -408,6 +408,22 @@ impl BytecodeVM {
                 let needle = iter.next().unwrap_or(Value::Nil).to_string_display();
                 vec![Value::Bool(haystack.contains(&needle))]
             }
+            "json_stringify" => {
+                let text = args.first().map_or(String::new(), Value::to_string_display);
+                let mut out = String::from("\"");
+                for ch in text.chars() {
+                    match ch {
+                        '"' => out.push_str("\\\""),
+                        '\\' => out.push_str("\\\\"),
+                        '\n' => out.push_str("\\n"),
+                        '\r' => out.push_str("\\r"),
+                        '\t' => out.push_str("\\t"),
+                        _ => out.push(ch),
+                    }
+                }
+                out.push('"');
+                vec![Value::String(out)]
+            }
             "path_join" => {
                 let mut iter = args.into_iter();
                 let base = iter.next().unwrap_or(Value::Nil).to_string_display();
@@ -701,6 +717,23 @@ mod tests {
         let result = vm.run().expect("run fs builtins");
         assert_eq!(result, Value::String("hello compiler".to_string()));
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn vm_std_json_stringify_builtin_executes() {
+        let mut module = BytecodeModule::new("main".to_string());
+        module.add_function(BytecodeFunction {
+            name: "main".to_string(),
+            local_count: 0,
+            instructions: vec![
+                Instruction::LoadString("a\"b".to_string()),
+                Instruction::CallBuiltin("json_stringify".to_string(), 1),
+                Instruction::Return,
+            ],
+        });
+        let mut vm = BytecodeVM::new(module);
+        let result = vm.run().expect("run json stringify builtin");
+        assert_eq!(result, Value::String("\"a\\\"b\"".to_string()));
     }
 
     #[test]

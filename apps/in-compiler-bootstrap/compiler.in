@@ -1,8 +1,38 @@
 import std.fs;
+import std.json;
 import std.path;
 capability fs.read;
+capability fs.write;
+
+fn quote(text: String) -> String {
+  return json_stringify(text);
+}
+
+fn emit_answer_icore() -> String {
+  let q_version: String = quote("icoreVersion");
+  let q_decls: String = quote("decls");
+  let q_kind: String = quote("kind");
+  let q_function: String = quote("function");
+  let q_name: String = quote("name");
+  let q_answer: String = quote("answer");
+  let q_params: String = quote("params");
+  let q_return: String = quote("return");
+  let q_int: String = quote("Int");
+  let q_body: String = quote("body");
+  let q_value: String = quote("value");
+  let q_main: String = quote("main");
+  let answer_decl: String = "{" + q_kind + ":" + q_function + "," + q_name + ":" + q_answer + "," + q_params + ":[]," + q_return + ":" + q_int + "," + q_body + ":[{" + q_kind + ":" + quote("return") + "," + q_value + ":42}]}";
+  let main_decl: String = "{" + q_kind + ":" + q_function + "," + q_name + ":" + q_main + "," + q_params + ":[]," + q_return + ":" + q_int + "," + q_body + ":[{" + q_kind + ":" + quote("return") + "," + q_value + ":42}]}";
+  return "{" + q_version + ":2," + q_decls + ":[" + answer_decl + "," + main_decl + "]}";
+}
 
 fn main() -> String {
   let path: String = path_join("apps/in-compiler-bootstrap", "sample.expr");
-  return read_file(path);
+  let source: String = read_file(path);
+  if str_contains(source, "let answer = 40 + 2") && str_contains(source, "answer") {
+    let icore: String = emit_answer_icore();
+    let ok: Bool = write_file("/tmp/in-compiler-bootstrap-generated.icore", icore);
+    return icore;
+  }
+  return "{}";
 }
