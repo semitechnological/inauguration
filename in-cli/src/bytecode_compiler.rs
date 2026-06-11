@@ -1,5 +1,4 @@
 use crate::bytecode::{BytecodeModule, Value, module_to_text, text_to_module};
-use crate::core_typecheck;
 use crate::parser_registry::{self, ParserCli};
 use crate::sil_to_bytecode;
 use crate::vm::BytecodeVM;
@@ -26,7 +25,7 @@ pub fn compile_source_path(
     };
     // Desugar classes to structs before typecheck
     crate::lower_core::desugar_module(&mut module);
-    core_typecheck::typecheck_executable(&module)?;
+    crate::family_typecheck::typecheck_resolved(&resolved, &module)?;
 
     if std::env::var("IN_TYPECHECK").is_ok() {
         let strict = std::env::var("IN_TYPECHECK").as_deref() == Ok("strict");

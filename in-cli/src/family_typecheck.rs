@@ -21,6 +21,8 @@ pub fn uses_family_typecheck(parser_id: ParserId) -> bool {
             | ParserId::Lua
             | ParserId::Zig
             | ParserId::Rust
+            | ParserId::JavaScript
+            | ParserId::TypeScript
             | ParserId::Scala
             | ParserId::Perl
             | ParserId::Nim
@@ -42,7 +44,10 @@ pub fn typecheck_for_parser(parser_id: ParserId, module: &UnifiedModule) -> Resu
 }
 
 fn uses_polyglot_entrypoint_typecheck(parser_id: ParserId) -> bool {
-    matches!(parser_id, ParserId::Lua)
+    matches!(
+        parser_id,
+        ParserId::Lua | ParserId::JavaScript | ParserId::TypeScript
+    )
 }
 
 fn typecheck_polyglot_entrypoints(module: &UnifiedModule) -> Result<(), String> {
@@ -57,7 +62,10 @@ fn typecheck_polyglot_entrypoints(module: &UnifiedModule) -> Result<(), String> 
         })
         .cloned()
         .collect();
-    if !entrypoints.iter().any(|d| matches!(d, Decl::Function { name, .. } if name == "main")) {
+    if !entrypoints
+        .iter()
+        .any(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+    {
         return Err("missing main function".to_string());
     }
     core_typecheck::typecheck_executable(&UnifiedModule::new(entrypoints))
@@ -124,8 +132,10 @@ fn normalize_decl(parser_id: ParserId, decl: &Decl) -> Decl {
 
 fn normalize_function_ret(parser_id: ParserId, ret: &Typ, body: &[Stmt]) -> Typ {
     let normalized = normalize_type(ret);
-    if matches!(parser_id, ParserId::Lua | ParserId::Perl | ParserId::Ruby)
-        && normalized == Typ::Void
+    if matches!(
+        parser_id,
+        ParserId::Lua | ParserId::Perl | ParserId::Ruby | ParserId::JavaScript
+    ) && normalized == Typ::Void
     {
         if let Some(inferred) = infer_return_type_from_body(body) {
             return inferred;
@@ -137,7 +147,13 @@ fn normalize_function_ret(parser_id: ParserId, ret: &Typ, body: &[Stmt]) -> Typ 
 fn normalize_function_body(parser_id: ParserId, ret: &Typ, body: &mut Vec<Stmt>) {
     if !matches!(
         parser_id,
-        ParserId::Php | ParserId::Lua | ParserId::Zig | ParserId::Scala | ParserId::Perl
+        ParserId::Php
+            | ParserId::Lua
+            | ParserId::Zig
+            | ParserId::Scala
+            | ParserId::Perl
+            | ParserId::JavaScript
+            | ParserId::TypeScript
     ) {
         return;
     }
@@ -260,5 +276,47 @@ mod tests {
             },
         ]);
         assert!(typecheck_for_parser(ParserId::Lua, &module).is_ok());
+    }
+
+    #[test]
+    fn javascript_void_ret_infers_from_return_stmt() {
+        let module = UnifiedModule::new(vec![
+            Decl::Function {
+                name: "answer".into(),
+                params: vec![],
+                ret: Typ::Void,
+                body: vec![Stmt::Return(Some(Expr::IntLit(42)))],
+                type_params: vec![],
+            },
+            Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Void,
+                body: vec![],
+                type_params: vec![],
+            },
+        ]);
+        assert!(typecheck_for_parser(ParserId::JavaScript, &module).is_ok());
+    }
+
+    #[test]
+    fn typescript_number_return_typechecks_after_normalization() {
+        let module = UnifiedModule::new(vec![
+            Decl::Function {
+                name: "answer".into(),
+                params: vec![],
+                ret: Typ::Named("number".into()),
+                body: vec![Stmt::Return(Some(Expr::IntLit(42)))],
+                type_params: vec![],
+            },
+            Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Named("void".into()),
+                body: vec![],
+                type_params: vec![],
+            },
+        ]);
+        assert!(typecheck_for_parser(ParserId::TypeScript, &module).is_ok());
     }
 }

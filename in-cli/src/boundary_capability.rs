@@ -48,6 +48,7 @@ fn declared_boundary_level_for(entry: &LanguageSupport) -> u8 {
         Some("icore") => 3,
         Some("nim" | "odin" | "hare" | "d" | "crystal" | "clojure" | "vb") => 3,
         Some("zig" | "rust") => 4,
+        Some("javascript" | "typescript") => 5,
         None if entry.language == "Swift" => 2,
         Some(_) => infer_boundary_level_from_runtime(entry),
         None => infer_boundary_level_from_runtime(entry),
@@ -155,7 +156,10 @@ mod tests {
         let capability = boundary_capability_for(entry);
         assert!(capability.boundary_level >= 3);
         assert!(capability.boundary_level <= 5);
-        assert_eq!(capability.effective_level, entry.level.min(capability.boundary_level));
+        assert_eq!(
+            capability.effective_level,
+            entry.level.min(capability.boundary_level)
+        );
     }
 
     #[test]
@@ -178,8 +182,7 @@ mod tests {
             ParserId::Hare,
             ParserId::VbNet,
         ] {
-            let entry =
-                language_support_for_parser(parser_id.as_str()).expect(parser_id.as_str());
+            let entry = language_support_for_parser(parser_id.as_str()).expect(parser_id.as_str());
             assert!(boundary_level_for(entry) >= 2, "{}", entry.language);
             assert_eq!(effective_level_for(entry), entry.level);
         }
@@ -195,10 +198,14 @@ mod tests {
     #[test]
     fn nim_odin_report_boundary_ir_attach_level() {
         for parser_id in [ParserId::Nim, ParserId::Odin] {
-            let entry =
-                language_support_for_parser(parser_id.as_str()).expect(parser_id.as_str());
+            let entry = language_support_for_parser(parser_id.as_str()).expect(parser_id.as_str());
             assert_eq!(boundary_level_for(entry), 3, "{}", entry.language);
-            assert_eq!(effective_level_for(entry), entry.level, "{}", entry.language);
+            assert_eq!(
+                effective_level_for(entry),
+                entry.level,
+                "{}",
+                entry.language
+            );
         }
     }
 
@@ -206,7 +213,10 @@ mod tests {
     fn php_reports_family_typecheck_level() {
         let entry = language_support_for_parser(ParserId::Php.as_str()).expect("php");
         assert!(boundary_level_for(entry) >= 2);
-        assert_eq!(effective_level_for(entry), entry.level.min(boundary_level_for(entry)));
+        assert_eq!(
+            effective_level_for(entry),
+            entry.level.min(boundary_level_for(entry))
+        );
     }
 
     #[test]

@@ -8,6 +8,7 @@ pub mod clojure_boundary;
 pub mod crystal_boundary;
 pub mod d_boundary;
 pub mod driver;
+pub mod ecmascript_boundary;
 pub mod go_front;
 pub mod hare_boundary;
 pub mod icore;

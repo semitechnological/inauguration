@@ -23,8 +23,8 @@ Run: `scripts/check-self-hosted-language-matrix.sh`
 | rust     | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: dedicated bounded body lowering |
 | go       | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: dedicated bounded body lowering |
 | v        | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: dedicated bounded body lowering |
-| js       | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: tree-sitter bounded body lowering |
-| ts       | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: tree-sitter bounded body lowering |
+| js       | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 5: bounded entrypoint + Boundary IR + bytecode VM |
+| ts       | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 5: bounded entrypoint + Boundary IR + bytecode VM |
 | python   | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: tree-sitter scalar body lowering |
 | ruby     | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: tree-sitter scalar body lowering |
 

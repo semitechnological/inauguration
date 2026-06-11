@@ -150,23 +150,23 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "JavaScript",
         parser_id: Some("javascript"),
         extensions: &["js", "mjs", "cjs", "jsx"],
-        level: 2,
-        level_label: "Tree-sitter bounded body lowering",
+        level: 5,
+        level_label: "Tree-sitter bounded entrypoint with Boundary IR and bytecode VM",
         front: "compiler::tree_front",
-        runtime_boundary: "Core IR and textual SIL; JS runtime is not bundled",
+        runtime_boundary: "Core IR, Boundary IR, textual SIL, and owned bytecode VM subset; JS runtime is not bundled",
         example: "apps/polyglot-sample/sample.js",
-        next_step: "Extract classes, closures, and arrow functions from Tree-sitter CST to Core IR",
+        next_step: "Expand class/closure/arrow semantics beyond the bounded entrypoint subset and define JS runtime strategy",
     },
     LanguageSupport {
         language: "TypeScript",
         parser_id: Some("typescript"),
         extensions: &["ts", "tsx", "mts", "cts"],
-        level: 2,
-        level_label: "Tree-sitter bounded body lowering",
+        level: 5,
+        level_label: "Tree-sitter bounded entrypoint with Boundary IR and bytecode VM",
         front: "compiler::tree_front",
-        runtime_boundary: "Core IR and textual SIL; TS checker/runtime is not bundled",
+        runtime_boundary: "Core IR, Boundary IR, textual SIL, and owned bytecode VM subset; TS checker/runtime is not bundled",
         example: "apps/polyglot-sample/sample.ts",
-        next_step: "Extract typed classes, arrow functions, and richer statements from Tree-sitter CST to Core IR",
+        next_step: "Expand typed class/arrow semantics beyond the bounded entrypoint subset and define TS checker/runtime strategy",
     },
     LanguageSupport {
         language: "Kotlin",
@@ -526,19 +526,8 @@ mod tests {
             .map(|entry| entry.language)
             .collect::<Vec<_>>();
         for language in [
-            "in",
-            "Rust",
-            "Java",
-            "PHP",
-            "Lua",
-            "Zig",
-            "Nim",
-            "Odin",
-            "Hare",
-            "D",
-            "Crystal",
-            "Clojure",
-            "VB.NET",
+            "in", "Rust", "Java", "PHP", "Lua", "Zig", "Nim", "Odin", "Hare", "D", "Crystal",
+            "Clojure", "VB.NET",
         ] {
             assert!(level_three.contains(&language), "missing {language}");
         }
@@ -547,16 +536,7 @@ mod tests {
     #[test]
     fn scalar_body_fronts_are_reported_as_level_two() {
         for language in [
-            "C",
-            "C++",
-            "JavaScript",
-            "TypeScript",
-            "Kotlin",
-            "C#",
-            "Python",
-            "Dart",
-            "Scala",
-            "Perl",
+            "C", "C++", "Kotlin", "C#", "Python", "Dart", "Scala", "Perl",
         ] {
             let entry = LANGUAGE_SUPPORT
                 .iter()
@@ -565,6 +545,19 @@ mod tests {
             assert_eq!(entry.level, 2, "{language}");
             assert!(entry.level_label.contains("body"), "{language}");
             assert!(entry.runtime_boundary.contains("Core IR"), "{language}");
+        }
+    }
+
+    #[test]
+    fn javascript_and_typescript_report_bounded_bytecode_vm_level() {
+        for language in ["JavaScript", "TypeScript"] {
+            let entry = LANGUAGE_SUPPORT
+                .iter()
+                .find(|entry| entry.language == language)
+                .expect(language);
+            assert_eq!(entry.level, 5, "{language}");
+            assert!(entry.level_label.contains("bytecode VM"), "{language}");
+            assert!(entry.runtime_boundary.contains("Boundary IR"), "{language}");
         }
     }
 

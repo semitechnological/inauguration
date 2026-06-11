@@ -179,7 +179,10 @@ pub fn evaluate_path(path: &Path, _entry: &LanguageSupport) -> LanguageGateRepor
     finish_level(sample_path, passed, blocking, level)
 }
 
-fn load_boundary(path: &Path, resolved: &ResolvedBuildParser) -> Option<crate::boundary_ir::BoundaryModule> {
+fn load_boundary(
+    path: &Path,
+    resolved: &ResolvedBuildParser,
+) -> Option<crate::boundary_ir::BoundaryModule> {
     let artifact = match resolved {
         ResolvedBuildParser::CoreIr(ParserId::Icore) => {
             crate::compiler::icore::parse_icore_artifact(path).ok()
@@ -189,6 +192,9 @@ fn load_boundary(path: &Path, resolved: &ResolvedBuildParser) -> Option<crate::b
         }
         ResolvedBuildParser::CoreIr(ParserId::Rust) => {
             crate::compiler::rust_front::parse_rust_artifact(path).ok()
+        }
+        ResolvedBuildParser::CoreIr(parser_id @ (ParserId::JavaScript | ParserId::TypeScript)) => {
+            crate::compiler::ecmascript_boundary::parse_ecmascript_artifact(*parser_id, path).ok()
         }
         ResolvedBuildParser::CoreIr(ParserId::Nim) => {
             crate::compiler::nim_boundary::parse_nim_artifact(path).ok()
@@ -334,10 +340,42 @@ mod tests {
     }
 
     #[test]
+    fn javascript_sample_reaches_bytecode_vm_gate() {
+        let entry = language_support_for_parser("javascript").expect("javascript");
+        let report = evaluate_language_gates(entry, &repo_root());
+        assert!(report.evaluated_level >= 5, "{report:?}");
+        assert!(report.passed_gates.contains(&GATE_SEMANTIC_TYPECHECK));
+        assert!(report.passed_gates.contains(&GATE_BOUNDARY_IR_ATTACH));
+        assert!(report.passed_gates.contains(&GATE_BYTECODE_VM));
+    }
+
+    #[test]
+    fn typescript_sample_reaches_bytecode_vm_gate() {
+        let entry = language_support_for_parser("typescript").expect("typescript");
+        let report = evaluate_language_gates(entry, &repo_root());
+        assert!(report.evaluated_level >= 5, "{report:?}");
+        assert!(report.passed_gates.contains(&GATE_SEMANTIC_TYPECHECK));
+        assert!(report.passed_gates.contains(&GATE_BOUNDARY_IR_ATTACH));
+        assert!(report.passed_gates.contains(&GATE_BYTECODE_VM));
+    }
+
+    #[test]
     fn promoted_tree_and_boundary_samples_reach_declared_gates() {
         let root = repo_root();
         for parser_id in [
-            "php", "lua", "rust", "scala", "perl", "nim", "hare", "d", "crystal", "clojure", "vb",
+            "php",
+            "lua",
+            "rust",
+            "javascript",
+            "typescript",
+            "scala",
+            "perl",
+            "nim",
+            "hare",
+            "d",
+            "crystal",
+            "clojure",
+            "vb",
         ] {
             let entry = language_support_for_parser(parser_id).expect(parser_id);
             let report = evaluate_language_gates(entry, &root);
@@ -371,5 +409,31 @@ mod tests {
                 report
             );
         }
+    }
+
+    #[test]
+    fn javascript_inline_boundary_can_reach_level_four_gates() {
+        let path = std::env::temp_dir().join(format!(
+            "in-js-boundary-{}-{}.js",
+            std::process::id(),
+            "level-four"
+        ));
+        std::fs::write(
+            &path,
+            r#"//? in_boundary {"abi_version":1,"module":"sample.js","layouts":[{"name":"Point","kind":"struct","repr":"c","size":8,"align":4,"stride":8,"fields":[{"name":"x","offset":0,"type":"i32","transfer":"copy"},{"name":"y","offset":4,"type":"i32","transfer":"copy"}]}],"symbols":[{"name":"point_new","signature_hash":"point_new_v1","ownership":"returns-owned-handle","calling_convention":"c"}]}
+function answer() {
+  return 42;
+}
+function main() {}
+"#,
+        )
+        .expect("write js fixture");
+        let entry = language_support_for_parser("javascript").expect("javascript");
+        let report = evaluate_path(&path, entry);
+        let _ = std::fs::remove_file(&path);
+        assert!(report.evaluated_level >= 4, "{report:?}");
+        assert!(report.passed_gates.contains(&GATE_BOUNDARY_IR_ATTACH));
+        assert!(report.passed_gates.contains(&GATE_BOUNDARY_IR_VERIFY));
+        assert!(report.passed_gates.contains(&GATE_ABI_LAYOUT_HASH));
     }
 }
