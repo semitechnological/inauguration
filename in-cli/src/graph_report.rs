@@ -1,7 +1,7 @@
 use crate::agent_mode::{self, CallEdge, OrchestrationFacts, ParserDecision, SizeTiming};
 use crate::package_manifest::{
-    self, PackageDiagnostic, PackageManifest, PackageSemanticImport, PackageSourceIdentity,
-    PackageSymbolIndexEntry,
+    self, PackageDiagnostic, PackageManifest, PackageSemanticBinding, PackageSemanticImport,
+    PackageSourceIdentity, PackageSymbolIndexEntry,
 };
 use crate::parser_registry::ParserCli;
 use serde::{Deserialize, Serialize};
@@ -60,6 +60,7 @@ pub struct GraphReport {
     pub parser_decision: ParserDecision,
     pub package_identity: Option<PackageSourceIdentity>,
     pub semantic_imports: Vec<PackageSemanticImport>,
+    pub semantic_bindings: Vec<PackageSemanticBinding>,
     pub package_symbol_index: Vec<PackageSymbolIndexEntry>,
     pub package_diagnostics: Vec<PackageDiagnostic>,
     pub imports: Vec<String>,
@@ -86,8 +87,12 @@ pub fn build_graph_report(
         package_identity_for_graph_source(&source_path, package_manifest.as_ref());
     let semantic_imports =
         semantic_imports_for_graph_source(&source_path, package_manifest.as_ref());
-    let package_symbol_index =
+    let semantic_bindings = semantic_bindings_for_graph_source(&source_path, &semantic_imports);
+    let mut package_symbol_index =
         package_manifest::symbol_index_for_semantic_imports(&semantic_imports);
+    package_symbol_index.extend(package_manifest::symbol_index_for_semantic_bindings(
+        &semantic_bindings,
+    ));
     let package_diagnostics = package_manifest::diagnostics_for_semantic_imports(&semantic_imports);
     let mut imports = Vec::new();
     let mut effects = Vec::new();
@@ -167,6 +172,7 @@ pub fn build_graph_report(
         parser_decision: report.parser_decision,
         package_identity,
         semantic_imports,
+        semantic_bindings,
         package_symbol_index,
         package_diagnostics,
         imports,
@@ -216,6 +222,22 @@ fn semantic_imports_for_graph_source(
     manifest: Option<&PackageManifest>,
 ) -> Vec<PackageSemanticImport> {
     package_manifest::semantic_imports_for_source_path(source_path, manifest).unwrap_or_default()
+}
+
+fn semantic_bindings_for_graph_source(
+    source_path: &Path,
+    imports: &[PackageSemanticImport],
+) -> Vec<PackageSemanticBinding> {
+    if source_path.extension().and_then(|ext| ext.to_str()) != Some("in") {
+        return Vec::new();
+    }
+    let Ok(source) = std::fs::read_to_string(source_path) else {
+        return Vec::new();
+    };
+    let Ok(surface) = crate::in_lang_parse::parse_in_surface_info(&source) else {
+        return Vec::new();
+    };
+    package_manifest::resolve_semantic_bindings(&surface.semantic_bindings, imports)
 }
 
 pub fn graph_report_to_json(report: &GraphReport) -> Result<String, serde_json::Error> {
@@ -477,7 +499,7 @@ dependencies:
         let source_path = temp.path.join("main.in");
         fs::write(
             &source_path,
-            "package hyperchat;\nuse database.postgres;\nfn main() -> void { return; }\n",
+            "package hyperchat;\nuse database.postgres;\nbind database.postgres as postgres;\nfn main() -> void { return; }\n",
         )
         .expect("write source");
         let path = source_path.to_string_lossy().to_string();
@@ -495,7 +517,10 @@ dependencies:
             Some("postgres")
         );
         assert_eq!(report.semantic_imports[0].status, "resolved");
-        assert_eq!(report.package_symbol_index.len(), 1);
+        assert_eq!(report.semantic_bindings.len(), 1);
+        assert_eq!(report.semantic_bindings[0].alias, "postgres");
+        assert_eq!(report.semantic_bindings[0].status, "resolved");
+        assert_eq!(report.package_symbol_index.len(), 2);
         assert_eq!(
             report.package_symbol_index[0].id,
             "symbol:dependency:postgres"
@@ -509,6 +534,14 @@ dependencies:
                 .symbols
                 .iter()
                 .any(|symbol| symbol.kind == "dependency"
+                    && symbol.name == "postgres"
+                    && symbol.detail == "database.postgres")
+        );
+        assert!(
+            report
+                .symbols
+                .iter()
+                .any(|symbol| symbol.kind == "binding"
                     && symbol.name == "postgres"
                     && symbol.detail == "database.postgres")
         );

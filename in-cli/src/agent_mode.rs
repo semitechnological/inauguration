@@ -539,6 +539,10 @@ fn build_report(path: &Path, config: &AgentModeConfig) -> Result<AgentReport, Ag
                     &surface.semantic_imports,
                     package_manifest.as_ref(),
                 );
+                let semantic_bindings = crate::package_manifest::resolve_semantic_bindings(
+                    &surface.semantic_bindings,
+                    &semantic_imports,
+                );
                 package_symbol_index = if let Ok((root, manifest)) =
                     crate::package_manifest::load_package_manifest_from_source(path)
                 {
@@ -554,6 +558,11 @@ fn build_report(path: &Path, config: &AgentModeConfig) -> Result<AgentReport, Ag
                 } else {
                     crate::package_manifest::symbol_index_for_semantic_imports(&semantic_imports)
                 };
+                package_symbol_index.extend(
+                    crate::package_manifest::symbol_index_for_semantic_bindings(
+                        &semantic_bindings,
+                    ),
+                );
                 package_diagnostics =
                     crate::package_manifest::diagnostics_for_semantic_imports(&semantic_imports);
                 for diagnostic_fact in &package_diagnostics {
@@ -571,6 +580,11 @@ fn build_report(path: &Path, config: &AgentModeConfig) -> Result<AgentReport, Ag
                 diagnostics.extend(dependency_symbol_call_diagnostics(
                     &module,
                     &package_symbol_index,
+                    &semantic_bindings
+                        .iter()
+                        .filter(|binding| binding.status == "resolved")
+                        .map(|binding| binding.alias.as_str())
+                        .collect::<std::collections::BTreeSet<_>>(),
                     parser_id.as_deref(),
                     &source,
                 ));
@@ -578,6 +592,13 @@ fn build_report(path: &Path, config: &AgentModeConfig) -> Result<AgentReport, Ag
                     semantic_imports
                         .into_iter()
                         .map(|import| format!("use:{}:{}", import.import, import.status)),
+                );
+                effects.extend(
+                    semantic_bindings
+                        .into_iter()
+                        .map(|binding| {
+                            format!("bind:{}:{}:{}", binding.import, binding.alias, binding.status)
+                        }),
                 );
                 effects.extend(
                     surface
@@ -903,6 +924,7 @@ fn core_diagnostics(
 fn dependency_symbol_call_diagnostics(
     module: &UnifiedModule,
     symbols: &[PackageSymbolIndexEntry],
+    bound_aliases: &std::collections::BTreeSet<&str>,
     parser_id: Option<&str>,
     source: &str,
 ) -> Vec<AgentDiagnostic> {
@@ -928,7 +950,13 @@ fn dependency_symbol_call_diagnostics(
         })
         .collect::<std::collections::BTreeSet<_>>();
     let mut calls = std::collections::BTreeSet::new();
-    collect_dependency_symbol_calls(module, &dependency_symbols, &functions, &mut calls);
+    collect_dependency_symbol_calls(
+        module,
+        &dependency_symbols,
+        &functions,
+        bound_aliases,
+        &mut calls,
+    );
     calls
         .into_iter()
         .map(|(name, source_import, dependency)| {
@@ -952,12 +980,19 @@ fn collect_dependency_symbol_calls<'a>(
     module: &'a UnifiedModule,
     symbols: &[(&'a str, &'a str, &'a str)],
     functions: &std::collections::BTreeSet<&'a str>,
+    bound_aliases: &std::collections::BTreeSet<&'a str>,
     out: &mut std::collections::BTreeSet<(&'a str, &'a str, &'a str)>,
 ) {
     for decl in &module.decls {
         if let Decl::Function { body, .. } = decl {
             for stmt in body {
-                collect_dependency_symbol_calls_from_stmt(stmt, symbols, functions, out);
+                collect_dependency_symbol_calls_from_stmt(
+                    stmt,
+                    symbols,
+                    functions,
+                    bound_aliases,
+                    out,
+                );
             }
         }
     }
@@ -967,6 +1002,7 @@ fn collect_dependency_symbol_calls_from_stmt<'a>(
     stmt: &'a Stmt,
     symbols: &[(&'a str, &'a str, &'a str)],
     functions: &std::collections::BTreeSet<&'a str>,
+    bound_aliases: &std::collections::BTreeSet<&'a str>,
     out: &mut std::collections::BTreeSet<(&'a str, &'a str, &'a str)>,
 ) {
     match stmt {
@@ -974,39 +1010,87 @@ fn collect_dependency_symbol_calls_from_stmt<'a>(
         | Stmt::Assign(_, expr)
         | Stmt::Return(Some(expr))
         | Stmt::Expr(expr) => {
-            collect_dependency_symbol_calls_from_expr(expr, symbols, functions, out);
+            collect_dependency_symbol_calls_from_expr(expr, symbols, functions, bound_aliases, out);
         }
         Stmt::IndexAssign { base, index, value } => {
-            collect_dependency_symbol_calls_from_expr(base, symbols, functions, out);
-            collect_dependency_symbol_calls_from_expr(index, symbols, functions, out);
-            collect_dependency_symbol_calls_from_expr(value, symbols, functions, out);
+            collect_dependency_symbol_calls_from_expr(base, symbols, functions, bound_aliases, out);
+            collect_dependency_symbol_calls_from_expr(
+                index,
+                symbols,
+                functions,
+                bound_aliases,
+                out,
+            );
+            collect_dependency_symbol_calls_from_expr(
+                value,
+                symbols,
+                functions,
+                bound_aliases,
+                out,
+            );
         }
         Stmt::If {
             cond,
             then_body,
             else_body,
         } => {
-            collect_dependency_symbol_calls_from_expr(cond, symbols, functions, out);
+            collect_dependency_symbol_calls_from_expr(cond, symbols, functions, bound_aliases, out);
             for nested in then_body {
-                collect_dependency_symbol_calls_from_stmt(nested, symbols, functions, out);
+                collect_dependency_symbol_calls_from_stmt(
+                    nested,
+                    symbols,
+                    functions,
+                    bound_aliases,
+                    out,
+                );
             }
             for nested in else_body {
-                collect_dependency_symbol_calls_from_stmt(nested, symbols, functions, out);
+                collect_dependency_symbol_calls_from_stmt(
+                    nested,
+                    symbols,
+                    functions,
+                    bound_aliases,
+                    out,
+                );
             }
         }
         Stmt::Loop { cond, body, .. } => {
             if let Some(cond) = cond {
-                collect_dependency_symbol_calls_from_expr(cond, symbols, functions, out);
+                collect_dependency_symbol_calls_from_expr(
+                    cond,
+                    symbols,
+                    functions,
+                    bound_aliases,
+                    out,
+                );
             }
             for nested in body {
-                collect_dependency_symbol_calls_from_stmt(nested, symbols, functions, out);
+                collect_dependency_symbol_calls_from_stmt(
+                    nested,
+                    symbols,
+                    functions,
+                    bound_aliases,
+                    out,
+                );
             }
         }
         Stmt::Match { scrutinee, arms } => {
-            collect_dependency_symbol_calls_from_expr(scrutinee, symbols, functions, out);
+            collect_dependency_symbol_calls_from_expr(
+                scrutinee,
+                symbols,
+                functions,
+                bound_aliases,
+                out,
+            );
             for arm in arms {
                 for nested in &arm.body {
-                    collect_dependency_symbol_calls_from_stmt(nested, symbols, functions, out);
+                    collect_dependency_symbol_calls_from_stmt(
+                        nested,
+                        symbols,
+                        functions,
+                        bound_aliases,
+                        out,
+                    );
                 }
             }
         }
@@ -1019,48 +1103,84 @@ fn collect_dependency_symbol_calls_from_expr<'a>(
     expr: &'a Expr,
     symbols: &[(&'a str, &'a str, &'a str)],
     functions: &std::collections::BTreeSet<&'a str>,
+    bound_aliases: &std::collections::BTreeSet<&'a str>,
     out: &mut std::collections::BTreeSet<(&'a str, &'a str, &'a str)>,
 ) {
     match expr {
         Expr::Unary { expr, .. } => {
-            collect_dependency_symbol_calls_from_expr(expr, symbols, functions, out);
+            collect_dependency_symbol_calls_from_expr(expr, symbols, functions, bound_aliases, out);
         }
         Expr::Binary { lhs, rhs, .. } => {
-            collect_dependency_symbol_calls_from_expr(lhs, symbols, functions, out);
-            collect_dependency_symbol_calls_from_expr(rhs, symbols, functions, out);
+            collect_dependency_symbol_calls_from_expr(lhs, symbols, functions, bound_aliases, out);
+            collect_dependency_symbol_calls_from_expr(rhs, symbols, functions, bound_aliases, out);
         }
         Expr::StructInit { fields, .. } => {
             for (_, expr) in fields {
-                collect_dependency_symbol_calls_from_expr(expr, symbols, functions, out);
+                collect_dependency_symbol_calls_from_expr(
+                    expr,
+                    symbols,
+                    functions,
+                    bound_aliases,
+                    out,
+                );
             }
         }
         Expr::Field { base, .. } => {
-            collect_dependency_symbol_calls_from_expr(base, symbols, functions, out);
+            collect_dependency_symbol_calls_from_expr(base, symbols, functions, bound_aliases, out);
         }
         Expr::ArrayLit(items) => {
             for item in items {
-                collect_dependency_symbol_calls_from_expr(item, symbols, functions, out);
+                collect_dependency_symbol_calls_from_expr(
+                    item,
+                    symbols,
+                    functions,
+                    bound_aliases,
+                    out,
+                );
             }
         }
         Expr::Index { base, index } => {
-            collect_dependency_symbol_calls_from_expr(base, symbols, functions, out);
-            collect_dependency_symbol_calls_from_expr(index, symbols, functions, out);
+            collect_dependency_symbol_calls_from_expr(base, symbols, functions, bound_aliases, out);
+            collect_dependency_symbol_calls_from_expr(
+                index,
+                symbols,
+                functions,
+                bound_aliases,
+                out,
+            );
         }
         Expr::Call { callee, args } => {
             if let Expr::Ident(name) = callee.as_ref()
                 && !functions.contains(name.as_str())
+                && !bound_aliases.contains(name.as_str())
                 && let Some(symbol) = symbols
                     .iter()
                     .find(|(symbol_name, _, _)| symbol_name == &name.as_str())
             {
                 out.insert(*symbol);
             }
-            collect_dependency_symbol_calls_from_expr(callee, symbols, functions, out);
+            collect_dependency_symbol_calls_from_expr(
+                callee,
+                symbols,
+                functions,
+                bound_aliases,
+                out,
+            );
             for arg in args {
-                collect_dependency_symbol_calls_from_expr(arg, symbols, functions, out);
+                collect_dependency_symbol_calls_from_expr(
+                    arg,
+                    symbols,
+                    functions,
+                    bound_aliases,
+                    out,
+                );
             }
         }
-        Expr::IntLit(_) | Expr::FloatLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Ident(_) => {}
+        Expr::IntLit(_)
+        | Expr::FloatLit(_)
+        | Expr::StringLit(_)
+        | Expr::BoolLit(_)
+        | Expr::Ident(_) => {}
         Expr::Closure { .. } => {}
     }
 }
@@ -1749,6 +1869,58 @@ dependencies:
             && item.message.contains("database.postgres")
             && item.message.contains("postgres")));
         assert_eq!(report.repair_plans[0].id, "wrap-package-dependency");
+        fs::remove_dir_all(dir).expect("remove temp package");
+    }
+
+    #[test]
+    fn in_report_allows_explicit_bound_dependency_symbol_call() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock before UNIX_EPOCH")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "inauguration-agent-mode-package-bind-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).expect("create temp package");
+        fs::write(
+            dir.join("inauguration.package"),
+            r#"name: hyperchat
+version: 0.1.0
+dependencies:
+  postgres:
+    version: ^1.0.0
+"#,
+        )
+        .expect("write manifest");
+        let source_path = dir.join("main.in");
+        fs::write(
+            &source_path,
+            "package hyperchat;\nuse database.postgres;\nbind database.postgres as postgres;\nfn main() -> void { postgres(\"select 1\"); return; }\n",
+        )
+        .expect("write source");
+
+        let report = json_report(&source_path, &AgentModeConfig::default()).expect("report");
+
+        assert!(
+            report
+                .effects
+                .contains(&"bind:database.postgres:postgres:resolved".to_string())
+        );
+        assert!(
+            report
+                .package_symbol_index
+                .iter()
+                .any(|item| item.id == "symbol:binding:postgres"
+                    && item.kind == "binding"
+                    && item.source_import == "database.postgres")
+        );
+        assert!(
+            !report
+                .diagnostics
+                .iter()
+                .any(|item| item.code == "INPKG002")
+        );
         fs::remove_dir_all(dir).expect("remove temp package");
     }
 

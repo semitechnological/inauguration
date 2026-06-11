@@ -66,10 +66,10 @@ Resolution order is documented in the `parser_registry` module rustdoc. Summary:
 
 | Level | Meaning | Current fronts |
 |-------|---------|----------------|
-| 0 | Routes to a known `ParserId`, but no compatible grammar/front is wired; callers get an `.icore` hint. | `clojure`, `hare`, `d`, `crystal`, `vb` |
-| 1 | Extracts top-level declarations into `UnifiedModule`; bodies are empty or ignored. | `scala`, `fsharp`, `php`, `perl`, `lua`, `elixir`, `erlang`, `haskell`, `julia`, `r`; Objective-C methods are also declaration-only. |
-| 2 | Lowers a bounded statement/expression subset into Core IR. | `icore` v2, `rust`, `go`, `v`, `ocaml`, `nim`, `odin`, `java`, `groovy`, `javascript`, `typescript`, `kotlin`, `csharp`, `python`, `ruby`, `zig`, `dart`; C / C++ / Objective-C++ functions support bounded scalar bodies and C-family runtime/ABI remains unowned. |
-| 3 | Typechecks enough language semantics to produce reliable diagnostics. | `.in` for its bounded subset: package/module/import facts, dependency import symbols, capabilities, extern requirements, source-semantic Core IR diagnostics, `INPKG001` / `INPKG002` semantic import warnings, and agent repair plans. |
+| 0 | Routes to a known `ParserId`, but no compatible grammar/front is wired; callers get an `.icore` hint. | None in the current `in languages --json` matrix. |
+| 1 | Extracts top-level declarations into `UnifiedModule`; bodies are empty or ignored. | `fsharp`, `elixir`, `erlang`, `haskell`, `julia`, `r`; Objective-C methods are also declaration-only. |
+| 2 | Lowers a bounded statement/expression subset into Core IR. | `icore` v2, `go`, `v`, `ocaml`, `groovy`, `javascript`, `typescript`, `kotlin`, `scala`, `csharp`, `python`, `ruby`, `perl`, `dart`; Ruby is covered by the self-hosted matrix with explicit-return scalar bodies. C / C++ / Objective-C++ functions support bounded scalar bodies and C-family runtime/ABI remains unowned. |
+| 3 | Typechecks enough language semantics to produce reliable diagnostics. | `.in` for its bounded subset: package/module/import/bind facts, dependency import symbols, capabilities, extern requirements, source-semantic Core IR diagnostics, `INPKG001` / `INPKG002` semantic import warnings, and agent repair plans. Promoted family fronts at this level are `rust`, `java`, `php`, `zig`, `lua`, `clojure`, `nim`, `odin`, `hare`, `d`, `crystal`, and `vb`. |
 | 4 | Emits graph-aware SIL artifacts and agent repair plans. | Agent JSON exists; no language front is promoted to this level until its diagnostics and repair plans are source-semantic for that front. |
 | 5 | Supports production build/hotreload semantics for that language family. | Swift uses the separate Swift SIL path today. Core IR families reach level 5 only with owned runtime boundaries **and** verified Boundary IR (`icoreVersion: 3` or a dedicated boundary front). |
 

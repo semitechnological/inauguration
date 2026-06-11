@@ -23,7 +23,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         front: "in_lang_parse",
         runtime_boundary: "self-hosted Core IR to textual SIL and bytecode VM subset",
         example: "apps/polyglot-sample/sample.in",
-        next_step: "Deepen closure semantics, wire try/catch VM support, add class/interface declarations",
+        next_step: "Deepen closure runtime semantics, package binding execution boundaries, and richer class/interface lowering",
     },
     LanguageSupport {
         language: "icore",

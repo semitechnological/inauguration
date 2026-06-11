@@ -100,6 +100,7 @@ pub struct PackageReport {
     pub graph: PackageGraphReport,
     pub source_identity: Option<PackageSourceIdentity>,
     pub semantic_imports: Vec<PackageSemanticImport>,
+    pub semantic_bindings: Vec<PackageSemanticBinding>,
     pub symbol_index: Vec<PackageSymbolIndexEntry>,
     pub diagnostics: Vec<PackageDiagnostic>,
 }
@@ -137,6 +138,15 @@ pub struct PackageSourceIdentity {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PackageSemanticImport {
     pub import: String,
+    pub dependency: Option<String>,
+    pub status: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PackageSemanticBinding {
+    pub import: String,
+    pub alias: String,
     pub dependency: Option<String>,
     pub status: String,
     pub reason: String,
@@ -376,11 +386,14 @@ where
     let (root, manifest) = load_package_manifest_from_source(source_path)?;
     let mut report = package_report(root, manifest, requested_targets, required_capabilities);
     let semantic_imports = source_semantic_imports(source_path).unwrap_or_default();
+    let semantic_bindings = source_semantic_bindings(source_path).unwrap_or_default();
     report.source_identity = Some(source_identity_for_path(
         source_path,
         Some(&report.manifest.name),
     ));
     report.semantic_imports = resolve_semantic_imports(&semantic_imports, Some(&report.manifest));
+    report.semantic_bindings =
+        resolve_semantic_bindings(&semantic_bindings, &report.semantic_imports);
     let lock = crate::package_lock::discover_package_lock(&report.root)
         .and_then(|root| crate::package_lock::load_package_lock(&root.lock_path).ok());
     report.symbol_index = symbol_index_for_semantic_imports_with_context(
@@ -389,6 +402,9 @@ where
         Some(&report.manifest),
         lock.as_ref(),
     );
+    report
+        .symbol_index
+        .extend(symbol_index_for_semantic_bindings(&report.semantic_bindings));
     report.diagnostics = diagnostics_for_semantic_imports(&report.semantic_imports);
     Ok(report)
 }
@@ -417,6 +433,7 @@ where
         graph,
         source_identity: None,
         semantic_imports: Vec::new(),
+        semantic_bindings: Vec::new(),
         symbol_index: Vec::new(),
         diagnostics: Vec::new(),
     }
@@ -430,6 +447,17 @@ fn source_semantic_imports(source_path: &Path) -> Result<Vec<String>, String> {
         .map_err(|err| format!("failed to read {}: {err}", source_path.display()))?;
     let surface = crate::in_lang_parse::parse_in_surface_info(&source)?;
     Ok(surface.semantic_imports)
+}
+
+fn source_semantic_bindings(
+    source_path: &Path,
+) -> Result<Vec<crate::in_lang_parse::InSemanticBinding>, String> {
+    if source_path.extension().and_then(|ext| ext.to_str()) != Some("in") {
+        return Ok(Vec::new());
+    }
+    let source = fs::read_to_string(source_path).map_err(|err| err.to_string())?;
+    let surface = crate::in_lang_parse::parse_in_surface_info(&source)?;
+    Ok(surface.semantic_bindings)
 }
 
 pub fn semantic_imports_for_source_path(
@@ -447,6 +475,37 @@ pub fn resolve_semantic_imports(
     imports
         .iter()
         .map(|import| resolve_semantic_import(import, manifest))
+        .collect()
+}
+
+pub fn resolve_semantic_bindings(
+    bindings: &[crate::in_lang_parse::InSemanticBinding],
+    imports: &[PackageSemanticImport],
+) -> Vec<PackageSemanticBinding> {
+    bindings
+        .iter()
+        .map(|binding| {
+            let resolved = imports
+                .iter()
+                .find(|import| import.import == binding.import && import.status == "resolved");
+            if let Some(import) = resolved {
+                PackageSemanticBinding {
+                    import: binding.import.clone(),
+                    alias: binding.alias.clone(),
+                    dependency: import.dependency.clone(),
+                    status: "resolved".to_string(),
+                    reason: "semantic-import-resolved".to_string(),
+                }
+            } else {
+                PackageSemanticBinding {
+                    import: binding.import.clone(),
+                    alias: binding.alias.clone(),
+                    dependency: None,
+                    status: "unresolved".to_string(),
+                    reason: "semantic-import-unresolved".to_string(),
+                }
+            }
+        })
         .collect()
 }
 
@@ -517,6 +576,25 @@ pub fn symbol_index_for_semantic_imports(
     imports: &[PackageSemanticImport],
 ) -> Vec<PackageSymbolIndexEntry> {
     symbol_index_for_semantic_imports_with_context(imports, None, None, None)
+}
+
+pub fn symbol_index_for_semantic_bindings(
+    bindings: &[PackageSemanticBinding],
+) -> Vec<PackageSymbolIndexEntry> {
+    bindings
+        .iter()
+        .filter(|binding| binding.status == "resolved")
+        .filter_map(|binding| {
+            let dependency = binding.dependency.as_ref()?;
+            Some(PackageSymbolIndexEntry {
+                id: format!("symbol:binding:{}", binding.alias),
+                kind: "binding".to_string(),
+                name: binding.alias.clone(),
+                source_import: binding.import.clone(),
+                dependency: dependency.clone(),
+            })
+        })
+        .collect()
 }
 
 pub fn symbol_index_for_semantic_imports_with_context(
@@ -1670,7 +1748,7 @@ dependencies:
         let source_path = temp.path.join("main.in");
         fs::write(
             &source_path,
-            "package agents.sample;\nuse database.postgres;\nuse cache.redis;\nfn main() -> void { return; }\n",
+            "package agents.sample;\nuse database.postgres;\nbind database.postgres as postgres;\nuse cache.redis;\nfn main() -> void { return; }\n",
         )
         .expect("write source");
 
@@ -1681,9 +1759,18 @@ dependencies:
         )
         .expect("load source package report");
 
-        assert_eq!(report.symbol_index.len(), 1);
+        assert_eq!(report.semantic_bindings.len(), 1);
+        assert_eq!(report.semantic_bindings[0].alias, "postgres");
+        assert_eq!(report.semantic_bindings[0].status, "resolved");
+        assert_eq!(report.symbol_index.len(), 2);
         assert_eq!(report.symbol_index[0].id, "symbol:dependency:postgres");
         assert_eq!(report.symbol_index[0].source_import, "database.postgres");
+        assert!(report
+            .symbol_index
+            .iter()
+            .any(|entry| entry.id == "symbol:binding:postgres"
+                && entry.kind == "binding"
+                && entry.name == "postgres"));
         assert_eq!(report.diagnostics.len(), 1);
         assert_eq!(report.diagnostics[0].code, "INPKG001");
         assert_eq!(report.diagnostics[0].import, "cache.redis");

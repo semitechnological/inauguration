@@ -408,6 +408,29 @@ impl BytecodeVM {
                 let needle = iter.next().unwrap_or(Value::Nil).to_string_display();
                 vec![Value::Bool(haystack.contains(&needle))]
             }
+            "str_starts_with" => {
+                let mut iter = args.into_iter();
+                let text = iter.next().unwrap_or(Value::Nil).to_string_display();
+                let prefix = iter.next().unwrap_or(Value::Nil).to_string_display();
+                vec![Value::Bool(text.starts_with(&prefix))]
+            }
+            "str_index_of" => {
+                let mut iter = args.into_iter();
+                let text = iter.next().unwrap_or(Value::Nil).to_string_display();
+                let needle = iter.next().unwrap_or(Value::Nil).to_string_display();
+                let index = text.find(&needle).map_or(-1, |idx| idx as i64);
+                vec![Value::Int(index)]
+            }
+            "str_slice" => {
+                let mut iter = args.into_iter();
+                let text = iter.next().unwrap_or(Value::Nil).to_string_display();
+                let start = iter.next().unwrap_or(Value::Nil).to_int().max(0) as usize;
+                let end = iter.next().unwrap_or(Value::Nil).to_int().max(0) as usize;
+                let len = text.len();
+                let start = start.min(len);
+                let end = end.min(len).max(start);
+                vec![Value::String(text[start..end].to_string())]
+            }
             "str_trim" => {
                 let text = args.first().map_or(String::new(), Value::to_string_display);
                 vec![Value::String(text.trim().to_string())]
@@ -437,7 +460,11 @@ impl BytecodeVM {
                         if !current.is_empty() {
                             tokens.push(Value::String(std::mem::take(&mut current)));
                         }
-                    } else if matches!(ch, '+' | '-' | '*' | '/' | '(' | ')' | '=') {
+                    } else if matches!(ch, '(' | ')') {
+                        if !current.is_empty() {
+                            tokens.push(Value::String(std::mem::take(&mut current)));
+                        }
+                    } else if matches!(ch, '+' | '-' | '*' | '/' | '=') {
                         if !current.is_empty() {
                             tokens.push(Value::String(std::mem::take(&mut current)));
                         }
@@ -454,6 +481,10 @@ impl BytecodeVM {
             "str_to_int" => {
                 let text = args.first().map_or(String::new(), Value::to_string_display);
                 vec![Value::Int(text.trim().parse::<i64>().unwrap_or_default())]
+            }
+            "str_is_int" => {
+                let text = args.first().map_or(String::new(), Value::to_string_display);
+                vec![Value::Bool(text.trim().parse::<i64>().is_ok())]
             }
             "str_table_has" => {
                 let mut iter = args.into_iter();
@@ -876,6 +907,78 @@ mod tests {
         let mut vm = BytecodeVM::new(module);
         let result = vm.run().expect("run string to int builtin");
         assert_eq!(result, Value::Int(42));
+    }
+
+    #[test]
+    fn vm_std_string_starts_with_builtin_executes() {
+        let mut module = BytecodeModule::new("main".to_string());
+        module.add_function(BytecodeFunction {
+            name: "main".to_string(),
+            local_count: 0,
+            instructions: vec![
+                Instruction::LoadString("# comment".to_string()),
+                Instruction::LoadString("#".to_string()),
+                Instruction::CallBuiltin("str_starts_with".to_string(), 2),
+                Instruction::Return,
+            ],
+        });
+        let mut vm = BytecodeVM::new(module);
+        let result = vm.run().expect("run string starts with builtin");
+        assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn vm_std_string_index_of_builtin_executes() {
+        let mut module = BytecodeModule::new("main".to_string());
+        module.add_function(BytecodeFunction {
+            name: "main".to_string(),
+            local_count: 0,
+            instructions: vec![
+                Instruction::LoadString("let answer = 42".to_string()),
+                Instruction::LoadString("=".to_string()),
+                Instruction::CallBuiltin("str_index_of".to_string(), 2),
+                Instruction::Return,
+            ],
+        });
+        let mut vm = BytecodeVM::new(module);
+        let result = vm.run().expect("run string index of builtin");
+        assert_eq!(result, Value::Int(11));
+    }
+
+    #[test]
+    fn vm_std_string_slice_builtin_executes() {
+        let mut module = BytecodeModule::new("main".to_string());
+        module.add_function(BytecodeFunction {
+            name: "main".to_string(),
+            local_count: 0,
+            instructions: vec![
+                Instruction::LoadString("let answer".to_string()),
+                Instruction::LoadInt(4),
+                Instruction::LoadInt(10),
+                Instruction::CallBuiltin("str_slice".to_string(), 3),
+                Instruction::Return,
+            ],
+        });
+        let mut vm = BytecodeVM::new(module);
+        let result = vm.run().expect("run string slice builtin");
+        assert_eq!(result, Value::String("answer".to_string()));
+    }
+
+    #[test]
+    fn vm_std_string_is_int_builtin_executes() {
+        let mut module = BytecodeModule::new("main".to_string());
+        module.add_function(BytecodeFunction {
+            name: "main".to_string(),
+            local_count: 0,
+            instructions: vec![
+                Instruction::LoadString(" 42 ".to_string()),
+                Instruction::CallBuiltin("str_is_int".to_string(), 1),
+                Instruction::Return,
+            ],
+        });
+        let mut vm = BytecodeVM::new(module);
+        let result = vm.run().expect("run string is int builtin");
+        assert_eq!(result, Value::Bool(true));
     }
 
     #[test]

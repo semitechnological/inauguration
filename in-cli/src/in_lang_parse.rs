@@ -12,9 +12,16 @@ pub struct InSurfaceInfo {
     pub module: Option<String>,
     pub imports: Vec<String>,
     pub semantic_imports: Vec<String>,
+    pub semantic_bindings: Vec<InSemanticBinding>,
     pub capabilities: Vec<String>,
     pub externs: Vec<InExternBinding>,
     pub orchestration: InOrchestrationFacts,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InSemanticBinding {
+    pub import: String,
+    pub alias: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1628,6 +1635,27 @@ fn parse_package_or_module_name(kind: &str, rest: &str) -> Result<String, String
     Ok(name.to_string())
 }
 
+fn parse_semantic_binding(rest: &str) -> Result<InSemanticBinding, String> {
+    let t = trim(rest).trim_end_matches(';').trim();
+    let Some((import, alias)) = t.split_once(" as ") else {
+        return Err(".in: expected `bind <semantic.import> as <alias>`".into());
+    };
+    let import = parse_package_or_module_name("bind", import)?;
+    let alias = trim(alias);
+    if alias.is_empty() {
+        return Err(".in: bind alias missing".into());
+    }
+    if !alias.chars().next().is_some_and(|ch| ch == '_' || ch.is_ascii_alphabetic())
+        || !alias.chars().all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+    {
+        return Err(format!(".in: invalid bind alias `{alias}`"));
+    }
+    Ok(InSemanticBinding {
+        import,
+        alias: alias.to_string(),
+    })
+}
+
 fn next_function_name_after_annotation<'a, I>(lines: I) -> Option<String>
 where
     I: Iterator<Item = &'a str>,
@@ -1810,6 +1838,15 @@ pub fn parse_in_surface_info(source: &str) -> Result<InSurfaceInfo, String> {
             if let Some(rest) = line.strip_prefix("use ") {
                 let import = parse_package_or_module_name("use", rest)?;
                 info.semantic_imports.push(import);
+                depth += brace_delta(raw_line);
+                if depth < 0 {
+                    depth = 0;
+                }
+                continue;
+            }
+            if let Some(rest) = line.strip_prefix("bind ") {
+                let binding = parse_semantic_binding(rest)?;
+                info.semantic_bindings.push(binding);
                 depth += brace_delta(raw_line);
                 if depth < 0 {
                     depth = 0;
@@ -2704,6 +2741,26 @@ fn main() -> void { return; }
 "#;
         let info = parse_in_surface_info(src).expect("surface");
         assert_eq!(info.semantic_imports, vec!["database.postgres"]);
+        parse_in_source(src).expect("parse");
+    }
+
+    #[test]
+    fn surface_info_parses_semantic_bindings() {
+        let src = r#"
+package hyperchat;
+use database.postgres;
+bind database.postgres as postgres;
+fn main() -> void { return; }
+"#;
+        let info = parse_in_surface_info(src).expect("surface");
+        assert_eq!(info.semantic_imports, vec!["database.postgres"]);
+        assert_eq!(
+            info.semantic_bindings,
+            vec![InSemanticBinding {
+                import: "database.postgres".into(),
+                alias: "postgres".into(),
+            }]
+        );
         parse_in_source(src).expect("parse");
     }
 

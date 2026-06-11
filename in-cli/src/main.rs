@@ -835,6 +835,7 @@ fn cmd_package(invocation_cwd: &Path, path: &str, json: bool) -> Result<()> {
             "package_graph": report.graph,
             "source_identity": report.source_identity,
             "semantic_imports": report.semantic_imports,
+            "semantic_bindings": report.semantic_bindings,
             "symbol_index": report.symbol_index,
             "diagnostics": report.diagnostics,
         }))

@@ -34,6 +34,7 @@ declare -a LANGS=(
   "js|sample.js||0"
   "ts|sample.ts||0"
   "python|sample.py||0"
+  "ruby|sample.rb||0"
   "scala|sample.scala||0"
   "php|sample.php||0"
   "lua|sample.lua||0"

@@ -81,7 +81,7 @@
   - Let `.in` call or wrap symbols from language fronts that lower into Core IR.
   - First slices landed: top-level `package`, `module`, `import`, `capability`, and `extern <language> fn ...;` declarations parse in `.in`; local relative `.in` imports merge declarations; `std.io` / `std.fs` / `std.http` / `std.json` / `std.process` / `std.cli` synthesize bounded stdlib declarations; extern `requires` contracts warn when capabilities are missing; `if` / `else`, `while`, and binary expressions parse into Core IR; `in agent` and `in graph` report package/module/import facts, capabilities, orchestration facts, and extern call graph edges.
   - `std.env` and `std.path` now synthesize bounded Core IR declarations and agent capability diagnostics; the bytecode VM executes the first self-hosting stdlib subset for `std.fs`, `std.env`, `std.path`, and `std.io`.
-  - Next self-hosting slice: emit structured diagnostics for unsupported bootstrap source and expand the expression parser beyond one binary-precedence chain.
+  - Latest self-hosting slice: the bootstrap compiler now skips blank lines and `#` comments, accepts whitespace-tolerant integer `let` expressions with precedence and parenthesized grouping, emits structured unsupported-source diagnostics, and validates generated `.icore` through bytecode.
   - Continue gradual complexity: bind `.in package` / `module` facts to Core IR names and dependency symbols, more standard library APIs, richer expression operators, and additional control flow only when shared IR needs them.
   - Prefer standard library APIs over syntax sugar so agents have one obvious path for files, network, process, JSON, HTTP, and CLI tasks.
   - Keep `icore` as the lowest common interchange format for tools and agents that cannot or should not emit `.in` directly.
@@ -90,11 +90,12 @@
   - `idea.md` wants one semantic package graph: package identity, targets, dependencies, capabilities, extensions, indexing, graph invalidation, and semantic imports.
   - First identity slice landed: when a `.in` source declares `package` / `module`, `in graph --json` and `in package --json` report `package_identity` / `source_identity` with stable status and reason codes for match, missing manifest, mismatch, undeclared, unreadable, and non-`.in` sources.
   - Semantic import binding slice landed: top-level `.in` `use database.postgres;` facts parse, resolve against nearest `inauguration.package` dependencies by exact key or dotted suffix, create package symbol-index facts, appear in `in graph --symbols` as dependency symbols, and emit `INPKG001` warnings for unresolved imports without dependency installation or extension loading.
-  - Direct calls to resolved dependency symbols now produce `INPKG002` source-semantic warnings so agents see the difference between a known package dependency and a local unknown function.
+  - Explicit package binding slice landed: top-level `.in` `bind database.postgres as postgres;` facts parse, resolve only when the matching semantic import resolves, report `symbol:binding:postgres` in package/graph/agent surfaces, and suppress `INPKG002` for calls to the bound alias.
+  - Direct calls to resolved dependency symbols without an explicit binding still produce `INPKG002` source-semantic warnings so agents see the difference between a known package dependency and a local unknown function.
   - `.in package` and `module` facts now survive in Core IR identity, agent Core IR summaries, graph `package_identity`, package `source_identity`, backend report metadata, and bytecode artifact metadata while preserving unqualified SIL and bytecode function names.
   - Owned native ABI manifests now expose package/module identity for dylib/staticlib artifacts without renaming symbols or changing runtime behavior.
-  - Current limitation: `.in package`, `module`, and `use` facts do not affect dependency installation, extension loading, or runtime dependency invocation.
-  - Next slice: connect semantic imports to explicit dependency runtime binding while keeping unresolved imports warning-only.
+  - Current limitation: `.in package`, `module`, `use`, and `bind` facts do not affect dependency installation, extension loading, or runtime dependency invocation.
+  - Next slice: connect explicit dependency bindings to a runtime invocation boundary while keeping unresolved imports warning-only.
 
 - [x] Build a language-compatibility ladder.
   - Level 0: route extension or magic line to a known `ParserId`.

@@ -13,6 +13,73 @@ fn line_name(line: String) -> String {
   return parts[1];
 }
 
+fn is_skip_line(line: String) -> Bool {
+  let text: String = str_trim(line);
+  if str_eq(text, "") {
+    return true;
+  }
+  return str_starts_with(text, "#");
+}
+
+fn is_op(token: String) -> Bool {
+  if str_eq(token, "+") || str_eq(token, "-") {
+    return true;
+  }
+  if str_eq(token, "*") || str_eq(token, "/") {
+    return true;
+  }
+  return false;
+}
+
+fn is_value_token(token: String, names: String) -> Bool {
+  if str_is_int(token) {
+    return true;
+  }
+  return str_table_has(names, token);
+}
+
+fn line_supported(line: String, names: String) -> Bool {
+  let parts: [String] = str_tokenize_expr(str_trim(line));
+  let count: Int = array_len(parts);
+  if count < 4 {
+    return false;
+  }
+  if !str_eq(parts[0], "let") {
+    return false;
+  }
+  if !str_eq(parts[2], "=") {
+    return false;
+  }
+  if !is_value_token(parts[3], names) {
+    return false;
+  }
+  if count == 4 {
+    return true;
+  }
+  if count < 6 {
+    return false;
+  }
+  if !is_op(parts[4]) {
+    return false;
+  }
+  if !is_value_token(parts[5], names) {
+    return false;
+  }
+  if count == 6 {
+    return true;
+  }
+  if count < 8 {
+    return false;
+  }
+  if !is_op(parts[6]) {
+    return false;
+  }
+  if !is_value_token(parts[7], names) {
+    return false;
+  }
+  return count == 8;
+}
+
 fn token_value(token: String, names: String, values: String) -> Int {
   if str_table_has(names, token) {
     return str_table_get_int(names, values, token);
@@ -123,24 +190,31 @@ fn emit_program_with_decls(decls: String, final_name: String) -> String {
   return "{" + q_version + ":2," + q_decls + ":[" + decls + "," + main_decl + "]}";
 }
 
+fn emit_unsupported_diagnostic(reason: String, line: String) -> String {
+  return "{" + quote("code") + ":" + quote("INBOOT001") + "," + quote("severity") + ":" + quote("error") + "," + quote("reason") + ":" + quote(reason) + "," + quote("line") + ":" + quote(line) + "}";
+}
+
 fn compile_source(source: String) -> String {
   let lines: [String] = str_split_lines(source);
   let count: Int = array_len(lines);
-  if count < 2 {
+  if count < 1 {
     return "{}";
   }
-  let final_name: String = str_trim(lines[count - 1]);
   let i: Int = 0;
+  let final_name: String = "";
   let current_name: String = "";
   let current_value: Int = 0;
-  let final_value: Int = 0;
-  let matched_final: Bool = false;
   let decls: String = "";
   let names: String = "";
   let values: String = "";
-  while i < count - 1 {
+  while i < count {
     let line: String = str_trim(lines[i]);
-    if str_contains(line, "let") && str_contains(line, "=") {
+    if is_skip_line(line) {
+      i = i + 1;
+    } else if str_contains(line, "let") && str_contains(line, "=") {
+      if !line_supported(line, names) {
+        return "{}";
+      }
       current_name = line_name(line);
       current_value = line_value(line, names, values);
       let current_expr: String = line_expr(line, names);
@@ -151,14 +225,13 @@ fn compile_source(source: String) -> String {
       }
       names = names + current_name + "|";
       values = values + to_string(current_value) + "|";
-      if str_eq(current_name, final_name) {
-        final_value = current_value;
-        matched_final = true;
-      }
+      i = i + 1;
+    } else {
+      final_name = line;
+      i = i + 1;
     }
-    i = i + 1;
   }
-  if matched_final {
+  if str_table_has(names, final_name) {
     return emit_program_with_decls(decls, final_name);
   }
   return "{}";
@@ -169,5 +242,9 @@ fn main() -> String {
   let source: String = read_file(path);
   let icore: String = compile_source(source);
   let ok: Bool = write_file("/tmp/in-compiler-bootstrap-generated.icore", icore);
+  if str_contains(icore, "decls") {
+    return icore;
+  }
+  let diag_ok: Bool = write_file("/tmp/in-compiler-bootstrap-diagnostic.json", emit_unsupported_diagnostic("unsupported-source", source));
   return icore;
 }

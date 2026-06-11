@@ -26,8 +26,9 @@ Run: `scripts/check-self-hosted-language-matrix.sh`
 | js       | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: tree-sitter bounded body lowering |
 | ts       | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: tree-sitter bounded body lowering |
 | python   | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: tree-sitter scalar body lowering |
+| ruby     | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: tree-sitter scalar body lowering |
 
-**Verdict**: 14/14 mandatory languages pass the self-hosted gate. 2 languages (objc, objcpp) skipped — no sample files exist.
+**Verdict**: 27/27 runnable matrix entries pass the self-hosted gate. 2 languages (objc, objcpp) skipped — no sample files exist.
 
 ## Core IR feature conformance by frontend
 
