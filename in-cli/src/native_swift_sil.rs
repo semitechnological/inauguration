@@ -6,16 +6,37 @@
 //! **`try`** / **`1`** / **`true`**, **`only`** / **`2`** / **`strict`**, **`off`** / **`0`** / **`false`**.
 //! Default is **`only`** so `in build` stays self-hosted unless explicitly opted into toolchain fallback.
 
-use crate::core_ir::{Decl as IrDecl, UnifiedModule};
+use crate::core_ir::{Decl as IrDecl, UnifiedModule, Visibility};
+use crate::core_ir::{Expr, Stmt};
 use crate::swift_subset::{self, Decl, Diagnostic};
+use std::collections::HashSet;
 
 pub fn subset_program_to_unified(program: &[Decl]) -> UnifiedModule {
     let decls: Vec<IrDecl> = program
         .iter()
         .map(|d| match d {
-            Decl::Struct(s) => IrDecl::Struct {
+            Decl::Struct(s) if s.methods.is_empty() => IrDecl::Struct {
+                    name: s.name.clone(),
+                    fields: s.fields.clone(),
+                    type_params: vec![],
+                },
+            Decl::Struct(s) => IrDecl::Class {
                 name: s.name.clone(),
                 fields: s.fields.clone(),
+                methods: s
+                    .methods
+                    .iter()
+                    .map(|method| IrDecl::Function {
+                        name: method.name.clone(),
+                        params: method.params.clone(),
+                        ret: method.ret.clone(),
+                        body: rewrite_method_field_refs(&method.body, &s.fields, &method.params),
+                        type_params: vec![],
+                    })
+                    .collect(),
+                visibility: Visibility::Internal,
+                extends: None,
+                implements: vec![],
                 type_params: vec![],
             },
             Decl::Function(f) => IrDecl::Function {
@@ -28,6 +49,146 @@ pub fn subset_program_to_unified(program: &[Decl]) -> UnifiedModule {
         })
         .collect();
     UnifiedModule::new(decls)
+}
+
+fn rewrite_method_field_refs(
+    body: &[Stmt],
+    fields: &[(String, crate::core_ir::Typ)],
+    params: &[(String, crate::core_ir::Typ)],
+) -> Vec<Stmt> {
+    let field_names: HashSet<String> = fields.iter().map(|(name, _)| name.clone()).collect();
+    let mut locals: HashSet<String> = params.iter().map(|(name, _)| name.clone()).collect();
+    body.iter()
+        .cloned()
+        .map(|stmt| rewrite_stmt_field_refs(stmt, &field_names, &mut locals))
+        .collect()
+}
+
+fn rewrite_stmt_field_refs(
+    stmt: Stmt,
+    fields: &HashSet<String>,
+    locals: &mut HashSet<String>,
+) -> Stmt {
+    match stmt {
+        Stmt::Let(name, ty, expr) => {
+            let expr = rewrite_expr_field_refs(expr, fields, locals);
+            locals.insert(name.clone());
+            Stmt::Let(name, ty, expr)
+        }
+        Stmt::Assign(name, expr) => Stmt::Assign(name, rewrite_expr_field_refs(expr, fields, locals)),
+        Stmt::IndexAssign { base, index, value } => Stmt::IndexAssign {
+            base: rewrite_expr_field_refs(base, fields, locals),
+            index: rewrite_expr_field_refs(index, fields, locals),
+            value: rewrite_expr_field_refs(value, fields, locals),
+        },
+        Stmt::Return(Some(expr)) => Stmt::Return(Some(rewrite_expr_field_refs(expr, fields, locals))),
+        Stmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            let mut then_locals = locals.clone();
+            let mut else_locals = locals.clone();
+            Stmt::If {
+                cond: rewrite_expr_field_refs(cond, fields, locals),
+                then_body: then_body
+                    .into_iter()
+                    .map(|stmt| rewrite_stmt_field_refs(stmt, fields, &mut then_locals))
+                    .collect(),
+                else_body: else_body
+                    .into_iter()
+                    .map(|stmt| rewrite_stmt_field_refs(stmt, fields, &mut else_locals))
+                    .collect(),
+            }
+        }
+        Stmt::Loop { kind, cond, body } => {
+            let mut loop_locals = locals.clone();
+            Stmt::Loop {
+                kind,
+                cond: cond.map(|expr| rewrite_expr_field_refs(expr, fields, locals)),
+                body: body
+                    .into_iter()
+                    .map(|stmt| rewrite_stmt_field_refs(stmt, fields, &mut loop_locals))
+                    .collect(),
+            }
+        }
+        Stmt::Match { scrutinee, arms } => Stmt::Match {
+            scrutinee: rewrite_expr_field_refs(scrutinee, fields, locals),
+            arms: arms
+                .into_iter()
+                .map(|mut arm| {
+                    let mut arm_locals = locals.clone();
+                    arm.body = arm
+                        .body
+                        .into_iter()
+                        .map(|stmt| rewrite_stmt_field_refs(stmt, fields, &mut arm_locals))
+                        .collect();
+                    arm
+                })
+                .collect(),
+        },
+        Stmt::Throw(expr) => Stmt::Throw(rewrite_expr_field_refs(expr, fields, locals)),
+        Stmt::Try { body, catches } => Stmt::Try {
+            body: body
+                .into_iter()
+                .map(|stmt| rewrite_stmt_field_refs(stmt, fields, &mut locals.clone()))
+                .collect(),
+            catches,
+        },
+        Stmt::Expr(expr) => Stmt::Expr(rewrite_expr_field_refs(expr, fields, locals)),
+        other => other,
+    }
+}
+
+fn rewrite_expr_field_refs(
+    expr: Expr,
+    fields: &HashSet<String>,
+    locals: &HashSet<String>,
+) -> Expr {
+    match expr {
+        Expr::Ident(name) if fields.contains(&name) && !locals.contains(&name) => Expr::Field {
+            base: Box::new(Expr::Ident("self".to_string())),
+            name,
+        },
+        Expr::Unary { op, expr } => Expr::Unary {
+            op,
+            expr: Box::new(rewrite_expr_field_refs(*expr, fields, locals)),
+        },
+        Expr::Binary { op, lhs, rhs } => Expr::Binary {
+            op,
+            lhs: Box::new(rewrite_expr_field_refs(*lhs, fields, locals)),
+            rhs: Box::new(rewrite_expr_field_refs(*rhs, fields, locals)),
+        },
+        Expr::StructInit { name, fields: init_fields } => Expr::StructInit {
+            name,
+            fields: init_fields
+                .into_iter()
+                .map(|(name, expr)| (name, rewrite_expr_field_refs(expr, fields, locals)))
+                .collect(),
+        },
+        Expr::Field { base, name } => Expr::Field {
+            base: Box::new(rewrite_expr_field_refs(*base, fields, locals)),
+            name,
+        },
+        Expr::ArrayLit(items) => Expr::ArrayLit(
+            items
+                .into_iter()
+                .map(|expr| rewrite_expr_field_refs(expr, fields, locals))
+                .collect(),
+        ),
+        Expr::Index { base, index } => Expr::Index {
+            base: Box::new(rewrite_expr_field_refs(*base, fields, locals)),
+            index: Box::new(rewrite_expr_field_refs(*index, fields, locals)),
+        },
+        Expr::Call { callee, args } => Expr::Call {
+            callee: Box::new(rewrite_expr_field_refs(*callee, fields, locals)),
+            args: args
+                .into_iter()
+                .map(|expr| rewrite_expr_field_refs(expr, fields, locals))
+                .collect(),
+        },
+        other => other,
+    }
 }
 
 pub fn parse_swift_subset_to_unified(source: &str) -> Result<UnifiedModule, String> {
@@ -167,21 +328,11 @@ fn starts_top_level_decl(line: &str) -> bool {
     line.starts_with("func ") || line.starts_with("struct ") || line.starts_with("enum ")
 }
 
-fn starts_top_level_struct(line: &str) -> bool {
-    let line = strip_leading_keyword(
-        line,
-        &["fileprivate", "internal", "private", "public", "open"],
-        4,
-    );
-    line.starts_with("struct ")
-}
-
 /// Keep only top-level `func` / `struct` lines (brace-depth 0) for the line-oriented subset parser.
 pub fn filter_top_level_decl_lines(source: &str) -> String {
     let mut depth = 0i32;
     let mut out = String::new();
     let mut collecting = false;
-    let mut collecting_struct = false;
     for raw_line in source.lines() {
         let t = raw_line.trim();
         if t.is_empty() {
@@ -195,11 +346,7 @@ pub fn filter_top_level_decl_lines(source: &str) -> String {
         }
         let at_zero = depth == 0 && !collecting;
         let delta = brace_delta(raw_line);
-        let emit_collecting = if collecting_struct {
-            depth == 1 && (t == "}" || (!starts_top_level_decl(t) && t.contains(':')))
-        } else {
-            collecting
-        };
+        let emit_collecting = collecting;
         if emit_collecting || (at_zero && starts_top_level_decl(t)) {
             out.push_str(t);
             out.push('\n');
@@ -207,14 +354,12 @@ pub fn filter_top_level_decl_lines(source: &str) -> String {
         depth += delta;
         if at_zero && delta > 0 && starts_top_level_decl(t) {
             collecting = true;
-            collecting_struct = starts_top_level_struct(t);
         }
         if depth < 0 {
             depth = 0;
         }
         if collecting && depth == 0 {
             collecting = false;
-            collecting_struct = false;
         }
     }
     out
@@ -271,18 +416,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn filter_ignores_nested_func() {
+    fn filter_preserves_struct_methods() {
         let src = r#"
 import SwiftUI
 struct Outer {
     func inner() -> Void {
+      return
     }
 }
 func main() -> Void
 "#;
         let f = filter_top_level_decl_lines(src);
         assert!(f.contains("func main"));
-        assert!(!f.contains("func inner"));
+        assert!(f.contains("func inner"));
+        assert!(f.contains("return"));
     }
 
     #[test]
@@ -388,6 +535,28 @@ func main(u: User) -> String {
 "#;
         let sil = emit_in_tree_sil_or_diagnose(src, "App").expect("sil");
         assert!(sil.contains("sil @main"), "{sil}");
+        assert!(sil.contains("field_access"), "{sil}");
+    }
+
+    #[test]
+    fn emit_subset_sil_lowers_struct_method_calls() {
+        let src = r#"
+struct Counter {
+  let value: Int
+
+  func next() -> Int {
+    return value + 1
+  }
+}
+
+func main() -> Int {
+  let c = Counter(value: 1)
+  return c.next()
+}
+"#;
+        let sil = emit_in_tree_sil_or_diagnose(src, "App").expect("sil");
+        assert!(sil.contains("sil @Counter_next"), "{sil}");
+        assert!(sil.contains("function_ref @Counter_next"), "{sil}");
         assert!(sil.contains("field_access"), "{sil}");
     }
 

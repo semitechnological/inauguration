@@ -963,4 +963,49 @@ mod tests {
             [Instruction::Jump(target), Instruction::Label(label), ..] if target == label
         ));
     }
+
+    #[test]
+    fn in_try_catch_throw_lowers_to_bytecode_and_returns_catch_value() {
+        let src = r#"
+fn main() -> Int {
+  try {
+    throw "bad";
+    return 1;
+  } catch e {
+    return 7;
+  }
+}
+"#;
+        let module = crate::in_lang_parse::parse_in_source(src).expect("parse .in");
+        let sil = crate::lower_core::lower_to_textual_sil(&module, "App");
+        let artifact = crate::hybrid_sil::parse_textual_sil(&sil);
+        let bytecode_module = lower_sil_to_bytecode(&artifact).expect("lower SIL to bytecode");
+
+        let mut vm = crate::vm::BytecodeVM::new(bytecode_module);
+        let result = vm.run().expect("bytecode execution");
+
+        assert_eq!(result.to_int(), 7);
+    }
+
+    #[test]
+    fn in_uncaught_throw_lowers_to_bytecode_and_reports_runtime_error() {
+        let src = r#"
+fn main() -> Int {
+  throw "bad";
+  return 1;
+}
+"#;
+        let module = crate::in_lang_parse::parse_in_source(src).expect("parse .in");
+        let sil = crate::lower_core::lower_to_textual_sil(&module, "App");
+        let artifact = crate::hybrid_sil::parse_textual_sil(&sil);
+        let bytecode_module = lower_sil_to_bytecode(&artifact).expect("lower SIL to bytecode");
+
+        let mut vm = crate::vm::BytecodeVM::new(bytecode_module);
+        let err = vm.run().expect_err("uncaught throw should fail");
+
+        assert!(
+            err.contains("uncaught exception: bad"),
+            "runtime error: {err}"
+        );
+    }
 }

@@ -4,10 +4,10 @@ pub mod probes;
 pub mod swift_wrapper;
 
 pub use c_header::emit_c_header;
-pub use manifest::emit_abi_manifest;
-pub use probes::{emit_layout_probes, LayoutProbes};
+pub use manifest::{emit_abi_manifest, emit_abi_manifest_with_package};
+pub use probes::{LayoutProbes, emit_layout_probes};
 pub use swift_wrapper::{
-    emit_swift_boundary, emit_swift_layout_probes, emit_swift_wrapper, SwiftBoundaryEmit,
+    SwiftBoundaryEmit, emit_swift_boundary, emit_swift_layout_probes, emit_swift_wrapper,
 };
 
 use crate::boundary_ir::BoundaryRepr;
@@ -175,7 +175,9 @@ pub(crate) fn repr_attribute(repr: Option<&BoundaryRepr>) -> &'static str {
     }
 }
 
-pub(crate) fn prepared_module(module: &crate::boundary_ir::BoundaryModule) -> crate::boundary_ir::BoundaryModule {
+pub(crate) fn prepared_module(
+    module: &crate::boundary_ir::BoundaryModule,
+) -> crate::boundary_ir::BoundaryModule {
     if module.layout_hash.is_empty() {
         module.clone().with_layout_hash()
     } else {
@@ -250,9 +252,15 @@ mod tests {
 
         let swift = emit_swift_boundary(&module).expect("swift boundary");
         assert!(swift.wrapper.contains("import InBoundarySamplePerson"));
-        assert!(swift.wrapper.contains("public static func personNew() -> UInt64"));
-        assert!(swift
-            .layout_probes
-            .contains("XCTAssertEqual(MemoryLayout<Person>.offset(of: \\.age), 16)"));
+        assert!(
+            swift
+                .wrapper
+                .contains("public static func personNew() -> UInt64")
+        );
+        assert!(
+            swift
+                .layout_probes
+                .contains("XCTAssertEqual(MemoryLayout<Person>.offset(of: \\.age), 16)")
+        );
     }
 }

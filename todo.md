@@ -91,8 +91,9 @@
   - Semantic import binding slice landed: top-level `.in` `use database.postgres;` facts parse, resolve against nearest `inauguration.package` dependencies by exact key or dotted suffix, create package symbol-index facts, appear in `in graph --symbols` as dependency symbols, and emit `INPKG001` warnings for unresolved imports without dependency installation or extension loading.
   - Direct calls to resolved dependency symbols now produce `INPKG002` source-semantic warnings so agents see the difference between a known package dependency and a local unknown function.
   - `.in package` and `module` facts now survive in Core IR identity, agent Core IR summaries, graph `package_identity`, package `source_identity`, backend report metadata, and bytecode artifact metadata while preserving unqualified SIL and bytecode function names.
-  - Current limitation: `.in package`, `module`, and `use` facts do not affect code generation, dependency installation, or extension loading.
-  - Next slice: expose package/module identity in owned native artifacts once native artifact metadata exists, without renaming symbols or changing runtime behavior.
+  - Owned native ABI manifests now expose package/module identity for dylib/staticlib artifacts without renaming symbols or changing runtime behavior.
+  - Current limitation: `.in package`, `module`, and `use` facts do not affect dependency installation, extension loading, or runtime dependency invocation.
+  - Next slice: connect semantic imports to explicit dependency runtime binding while keeping unresolved imports warning-only.
 
 - [x] Build a language-compatibility ladder.
   - Level 0: route extension or magic line to a known `ParserId`.
@@ -116,7 +117,8 @@
 
 - [ ] Expand the native Swift subset.
   - First bounded-body slice landed: top-level Swift functions may now carry simple `let`, assignment, call, and return statements into shared Core IR lowering; `main` remains optional for hybrid/library-style sources.
-  - Continue replacing header-only parsing with a real subset AST for more top-level declarations, struct fields, function signatures, and bounded bodies.
+  - Multiline struct fields, bounded instance methods, labeled struct construction, and lowercase receiver method calls now parse/check in the in-tree subset.
+  - Continue replacing header-only parsing with a real subset AST for more top-level declarations, richer struct/member forms, function signatures, and bounded bodies.
   - Function-call, local identifier, struct-field, and return-type body checks now emit stable `E_UNKNOWN_FUNCTION` / `E_UNKNOWN_IDENTIFIER` / `E_UNKNOWN_FIELD` / `E_RETURN_TYPE`; `IN_NATIVE_SWIFT_SIL=only` has SIL snapshot coverage for locals, calls, and fields and preserves subset diagnostics before lowering.
   - Bounded `while condition { ... }` bodies now parse into Core IR loops, require Bool conditions via `E_WHILE_COND_TYPE`, and lower through the native SIL subset path.
   - `IN_NATIVE_SWIFT_SIL=try` now falls back only for unsupported non-subset sources and preserves real subset diagnostics such as `E_DUP_TOP`.

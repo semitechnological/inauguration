@@ -37,8 +37,8 @@ Feature support at the Core IR level (data structures exist), but frontends vary
 |---------|-------------|------------|-----------|----------|------------|-------------|
 | `Decl::Struct` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `Decl::Function` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `Decl::Class` | ❌ parser TODO | ✅ | ✅ | ✅ | ❌ | ❌ |
-| `Decl::Interface` | ❌ parser TODO | ❌ | ❌ | ❌ | ❌ | ❌ |
+| `Decl::Class` | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
+| `Decl::Interface` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | `Expr::Closure` | ✅ (expression) | ❌ | ❌ | ❌ | ❌ | ❌ |
 | `Stmt::Throw` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | `Stmt::Try` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
@@ -51,8 +51,8 @@ Feature support at the Core IR level (data structures exist), but frontends vary
 | `conformance/types/` | 4 | ✅ Runs — primitive, struct, array, named types |
 | `conformance/control-flow/` | 4 | ✅ Runs — if/else, loop, match, nested branches |
 | `conformance/functions/` | 4 | ✅ Runs — basic fn, params, expressions, void |
-| `conformance/classes/` | 2 | ⚠️ DESIGN — struct+fn pattern, class syntax not yet in parser |
-| `conformance/errors/` | 3 | ✅ Runs — throw-basic, try-catch, uncaught |
+| `conformance/classes/` | 9 | ✅ Runs — class syntax, methods, inheritance/interface shapes, Java class fixtures |
+| `conformance/errors/` | 6 | ✅ Runs — throw, try-catch, function throw, caught and uncaught paths |
 | `conformance/modules/` | 3 | ✅ Runs — package, capabilities, local import |
 | `conformance/async/` | 1 | 📋 STUB — Wave 3 design |
 | `conformance/runtime/` | 1 | 📋 STUB — Waves 4-5 design |
@@ -76,10 +76,8 @@ Feature support at the Core IR level (data structures exist), but frontends vary
 
 ## Remaining gaps (Wave 1)
 
-1. **`.in` parser class syntax** — `class Dog { ... }` not yet parsed; `Decl::Class` only emitted by Rust/Go/V fronts
-2. **`.in` parser try/catch/throw syntax** — not yet parsed; `Stmt::Try`/`Throw` are match-arm stubs
-3. **`is_async` field** — declared in design, not yet on `Decl::Function`
-4. **`Visibility` on Function/Struct** — only Class and Interface have visibility
-5. **`Closure::captures` field** — missing from `Expr::Closure`
-6. **`throw_error` VM builtin** — not yet implemented
-7. **Exception lowering** — `lower_core.rs` has match arms but no desugaring logic
+1. **Async execution semantics** — async fixtures parse, but scheduling/execution semantics remain design-stage
+2. **`is_async` field** — declared in design, not yet on `Decl::Function`
+3. **`Visibility` on Function/Struct** — only Class and Interface have visibility
+4. **Production class/interface runtime semantics** — `.in` parser/conformance coverage exists, but full dispatch/runtime policy remains bounded
+5. **Advanced exception semantics** — local throw/try-catch paths lower and execute, but typed exceptions and cross-function unwinding remain future work

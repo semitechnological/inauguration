@@ -2,14 +2,14 @@
 
 use crate::boundary_emit;
 use crate::boundary_ir::{
-    BoundaryField, BoundaryLayout, BoundaryModule, BoundaryOwnership, BoundaryRepr,
-    BoundarySymbol, BoundaryTransfer, IN_ABI_VERSION,
+    BoundaryField, BoundaryLayout, BoundaryModule, BoundaryOwnership, BoundaryRepr, BoundarySymbol,
+    BoundaryTransfer, IN_ABI_VERSION,
 };
 use crate::core_ir::{Decl, Expr, FloatVal, Stmt, Typ, UnifiedModule};
 use crate::inrt;
-use crate::inrt::{is_inrt_builtin, inrt_builtin_param_slots};
 #[cfg(test)]
 use crate::inrt::INRT_BUILTINS;
+use crate::inrt::{inrt_builtin_param_slots, is_inrt_builtin};
 use crate::native_emit::aarch64::{self, CodeEmitter, REG_FP};
 use crate::native_emit::macho::{self, ExportSymbol, MachOImage, MachOLinkage};
 use std::collections::HashMap;
@@ -128,11 +128,13 @@ pub fn compile_native_artifact(
     let abi_path = match linkage {
         NativeLinkage::Dylib | NativeLinkage::StaticLib => {
             let boundary = boundary_from_module(module, module_id, &lowered.exports);
-            let abi_json = boundary_emit::emit_abi_manifest(&boundary);
+            let abi_json = boundary_emit::emit_abi_manifest_with_package(
+                &boundary,
+                module.identity.package.as_deref(),
+            );
             let abi_path = out_path.with_extension("abi.json");
-            std::fs::write(&abi_path, abi_json).map_err(|err| {
-                format!("write abi manifest `{}`: {err}", abi_path.display())
-            })?;
+            std::fs::write(&abi_path, abi_json)
+                .map_err(|err| format!("write abi manifest `{}`: {err}", abi_path.display()))?;
             Some(abi_path)
         }
         NativeLinkage::Executable => None,
@@ -202,9 +204,12 @@ fn lower_module(
         let runtime_base = emitter.len();
         emitter.bytes.extend_from_slice(&runtime_blob);
         for call in &pending_inrt_calls {
-            let fn_offset = *runtime_offsets
-                .get(call.target.as_str())
-                .ok_or_else(|| format!("native-lower: unresolved inrt call target `{}`", call.target))?;
+            let fn_offset = *runtime_offsets.get(call.target.as_str()).ok_or_else(|| {
+                format!(
+                    "native-lower: unresolved inrt call target `{}`",
+                    call.target
+                )
+            })?;
             let target_abs = runtime_base + fn_offset;
             let offset = target_abs as i32 - call.site as i32;
             emitter.patch_u32(call.site, aarch64::bl(offset));
@@ -401,7 +406,9 @@ fn collect_functions(module: &UnifiedModule) -> Result<HashMap<String, FunctionI
 fn entry_return_kind(ret: &Typ) -> EntryReturn {
     match ret {
         Typ::Int | Typ::Float | Typ::Bool => EntryReturn::IntLike,
-        Typ::String | Typ::Void | Typ::Array(_) | Typ::Named(_) | Typ::Generic(_) => EntryReturn::VoidOrReference,
+        Typ::String | Typ::Void | Typ::Array(_) | Typ::Named(_) | Typ::Generic(_) => {
+            EntryReturn::VoidOrReference
+        }
     }
 }
 
@@ -507,7 +514,11 @@ fn collect_expr_strings(expr: &Expr, values: &mut Vec<String>) {
                 collect_expr_strings(arg, values);
             }
         }
-        Expr::IntLit(_) | Expr::FloatLit(_) | Expr::BoolLit(_) | Expr::Ident(_) | Expr::Closure { .. } => {}
+        Expr::IntLit(_)
+        | Expr::FloatLit(_)
+        | Expr::BoolLit(_)
+        | Expr::Ident(_)
+        | Expr::Closure { .. } => {}
     }
 }
 
@@ -983,7 +994,11 @@ fn lower_stmt(
 
             emitter.emit_u32(aarch64::ldrb(1, aarch64::REG_SP, ctx.error_flag_offset));
             emitter.emit_u32(aarch64::strb(1, aarch64::REG_SP, saved_flag_offset));
-            emitter.emit_u32(aarch64::strb(aarch64::REG_XZR, aarch64::REG_SP, ctx.error_flag_offset));
+            emitter.emit_u32(aarch64::strb(
+                aarch64::REG_XZR,
+                aarch64::REG_SP,
+                ctx.error_flag_offset,
+            ));
 
             for stmt in body {
                 lower_stmt(
@@ -1009,11 +1024,7 @@ fn lower_stmt(
             ));
 
             if let Some(catch_arm) = catches.first() {
-                emitter.emit_u32(aarch64::ldr64(
-                    0,
-                    aarch64::REG_SP,
-                    ctx.error_value_offset,
-                ));
+                emitter.emit_u32(aarch64::ldr64(0, aarch64::REG_SP, ctx.error_value_offset));
                 if let Some(LocalSlot::Scalar(offset)) = ctx.locals.get(&catch_arm.pattern) {
                     emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, *offset));
                 }
@@ -1038,11 +1049,7 @@ fn lower_stmt(
             emitter.patch_u32(end_branch, aarch64::b(end_delta));
 
             emitter.emit_u32(aarch64::ldrb(1, aarch64::REG_SP, saved_flag_offset));
-            emitter.emit_u32(aarch64::strb(
-                1,
-                aarch64::REG_SP,
-                ctx.error_flag_offset,
-            ));
+            emitter.emit_u32(aarch64::strb(1, aarch64::REG_SP, ctx.error_flag_offset));
 
             Ok(())
         }
@@ -1936,7 +1943,15 @@ fn lower_float_binary(
 ) -> Result<(), String> {
     lower_expr_into(emitter, ctx, lhs, rd, functions, pending_calls, fn_name)?;
     let rhs_reg = if rd == 1 { 2 } else { 1 };
-    lower_expr_into(emitter, ctx, rhs, rhs_reg, functions, pending_calls, fn_name)?;
+    lower_expr_into(
+        emitter,
+        ctx,
+        rhs,
+        rhs_reg,
+        functions,
+        pending_calls,
+        fn_name,
+    )?;
     emitter.emit_u32(aarch64::fmov_from_gp(rd, rd));
     emitter.emit_u32(aarch64::fmov_from_gp(rhs_reg, rhs_reg));
     match op {
@@ -1965,10 +1980,20 @@ fn lower_binary(
     pending_calls: &mut Vec<PendingCall>,
     fn_name: &str,
 ) -> Result<(), String> {
-    let is_float = matches!(expr_type(lhs), Some(Typ::Float))
-        || matches!(expr_type(rhs), Some(Typ::Float));
+    let is_float =
+        matches!(expr_type(lhs), Some(Typ::Float)) || matches!(expr_type(rhs), Some(Typ::Float));
     if is_float {
-        return lower_float_binary(emitter, ctx, op, lhs, rhs, rd, functions, pending_calls, fn_name);
+        return lower_float_binary(
+            emitter,
+            ctx,
+            op,
+            lhs,
+            rhs,
+            rd,
+            functions,
+            pending_calls,
+            fn_name,
+        );
     }
     lower_expr_into(emitter, ctx, lhs, rd, functions, pending_calls, fn_name)?;
     let lhs_reg = rd;
@@ -2154,9 +2179,8 @@ fn lower_inrt_call(
     rd: u8,
     fn_name: &str,
 ) -> Result<(), String> {
-    let expected = inrt_builtin_param_slots(target).ok_or_else(|| {
-        format!("native-lower: unknown inrt builtin `{target}` in `{fn_name}`")
-    })?;
+    let expected = inrt_builtin_param_slots(target)
+        .ok_or_else(|| format!("native-lower: unknown inrt builtin `{target}` in `{fn_name}`"))?;
     if args.len() != expected {
         return Err(format!(
             "native-lower: inrt call arity mismatch for `{target}` in `{fn_name}` (expected {expected} arg(s), got {})",
@@ -2538,14 +2562,19 @@ fn expr_contains_call(expr: &Expr) -> bool {
         Expr::Field { base, .. } => expr_contains_call(base),
         Expr::ArrayLit(items) => items.iter().any(expr_contains_call),
         Expr::Index { base, index } => expr_contains_call(base) || expr_contains_call(index),
-        Expr::IntLit(_) | Expr::FloatLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Ident(_) | Expr::Closure { .. } => false,
+        Expr::IntLit(_)
+        | Expr::FloatLit(_)
+        | Expr::StringLit(_)
+        | Expr::BoolLit(_)
+        | Expr::Ident(_)
+        | Expr::Closure { .. } => false,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core_ir::{CatchArm, Decl};
+    use crate::core_ir::{CatchArm, CoreModuleIdentity, Decl};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_executable(name: &str) -> std::path::PathBuf {
@@ -2567,7 +2596,7 @@ mod tests {
                 params: vec![],
                 ret: Typ::Int,
                 body: vec![Stmt::Return(Some(Expr::IntLit(42)))],
-            type_params: vec![],
+                type_params: vec![],
             }],
         }
     }
@@ -2641,7 +2670,11 @@ mod tests {
 
     #[test]
     fn dylib_compile_emits_abi_json() {
-        let module = answer_module();
+        let mut module = answer_module();
+        module.identity = CoreModuleIdentity {
+            package: Some("sample.pkg".to_string()),
+            module: Some("sample.pkg.native".to_string()),
+        };
         let path = temp_executable("dylib");
         let dylib_path = path.with_extension("dylib");
         let result = compile_native_artifact_for_host(
@@ -2659,11 +2692,36 @@ mod tests {
             let manifest = std::fs::read_to_string(&abi_path).expect("read abi");
             assert!(manifest.contains("\"answer\""));
             assert!(manifest.contains("\"layout_hash\""));
+            let parsed: serde_json::Value = serde_json::from_str(&manifest).expect("json");
+            assert_eq!(parsed["package"], "sample.pkg");
+            assert_eq!(parsed["module"], "sample.pkg.native");
             let _ = std::fs::remove_file(dylib_path);
             let _ = std::fs::remove_file(abi_path);
         } else {
             assert_eq!(result.unwrap_err(), "native-host-unsupported");
         }
+    }
+
+    #[test]
+    fn native_abi_manifest_carries_module_identity() {
+        let mut module = answer_module();
+        module.identity = CoreModuleIdentity {
+            package: Some("sample.pkg".to_string()),
+            module: Some("sample.pkg.native".to_string()),
+        };
+        let exports = vec![ExportSymbol {
+            name: "answer".to_string(),
+            offset: 0,
+        }];
+        let boundary = boundary_from_module(&module, "App", &exports);
+        let manifest = boundary_emit::emit_abi_manifest_with_package(
+            &boundary,
+            module.identity.package.as_deref(),
+        );
+        let parsed: serde_json::Value = serde_json::from_str(&manifest).expect("json");
+
+        assert_eq!(parsed["package"], "sample.pkg");
+        assert_eq!(parsed["module"], "sample.pkg.native");
     }
 
     #[test]
@@ -2689,7 +2747,7 @@ mod tests {
                         }),
                         Stmt::Return(Some(Expr::IntLit(2))),
                     ],
-                type_params: vec![],
+                    type_params: vec![],
                 },
             ],
         };
@@ -2738,7 +2796,7 @@ mod tests {
                 name: "main".into(),
                 params: vec![],
                 ret: Typ::Int,
-                    body: vec![Stmt::Return(Some(Expr::BoolLit(true)))],
+                body: vec![Stmt::Return(Some(Expr::BoolLit(true)))],
                 type_params: vec![],
             }],
         };
@@ -2884,7 +2942,7 @@ fn main() -> Int {
                         },
                         Stmt::Return(Some(Expr::IntLit(1))),
                     ],
-                type_params: vec![],
+                    type_params: vec![],
                 },
                 Decl::Function {
                     name: "main".into(),
@@ -3234,7 +3292,7 @@ fn main() -> Int {
                             rhs: Box::new(Expr::IntLit(8)),
                         })),
                     ],
-                type_params: vec![],
+                    type_params: vec![],
                 },
             ],
         };
@@ -3486,7 +3544,7 @@ fn main() -> Int {
                         },
                         Stmt::Return(Some(Expr::IntLit(1))),
                     ],
-                type_params: vec![],
+                    type_params: vec![],
                 },
                 Decl::Function {
                     name: "main".into(),
@@ -4123,7 +4181,7 @@ fn main() -> Int {
                         ),
                         Stmt::Return(Some(Expr::IntLit(0))),
                     ],
-                type_params: vec![],
+                    type_params: vec![],
                 },
             ],
         };
@@ -4134,93 +4192,186 @@ fn main() -> Int {
     }
 
     fn code_contains_insns(code: &[u8], insns: &[u32]) -> bool {
-        let words: Vec<u32> = code.chunks_exact(4).map(|b| u32::from_le_bytes(b.try_into().unwrap())).collect();
-        for insn in insns { if !words.contains(insn) { return false; } }
+        let words: Vec<u32> = code
+            .chunks_exact(4)
+            .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
+            .collect();
+        for insn in insns {
+            if !words.contains(insn) {
+                return false;
+            }
+        }
         true
     }
 
     fn build_inrt_call_module(target: &str, args: Vec<Expr>, ret: Typ) -> UnifiedModule {
-        UnifiedModule { identity: Default::default(), decls: vec![Decl::Function {
-            name: "main".into(), params: vec![], ret,
-            body: vec![Stmt::Return(Some(Expr::Call { callee: Box::new(Expr::Ident(target.to_string())), args }))],
-            type_params: vec![],
-        }]}
+        UnifiedModule {
+            identity: Default::default(),
+            decls: vec![Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret,
+                body: vec![Stmt::Return(Some(Expr::Call {
+                    callee: Box::new(Expr::Ident(target.to_string())),
+                    args,
+                }))],
+                type_params: vec![],
+            }],
+        }
     }
 
-    #[test] fn inrt_call_emits_bl_placeholder() {
-        let m = build_inrt_call_module("__inrt_str_len", vec![Expr::StringLit("x".into())], Typ::Int);
+    #[test]
+    fn inrt_call_emits_bl_placeholder() {
+        let m = build_inrt_call_module(
+            "__inrt_str_len",
+            vec![Expr::StringLit("x".into())],
+            Typ::Int,
+        );
         let lowered = lower_module(&m, "main", NativeLinkage::Executable).expect("lower");
         assert!(lowered.code.len() > ENTRY_STUB_SIZE as usize + 4);
-        let words: Vec<u32> = lowered.code.chunks_exact(4).filter_map(|b| b.try_into().ok()).map(u32::from_le_bytes).collect();
+        let words: Vec<u32> = lowered
+            .code
+            .chunks_exact(4)
+            .filter_map(|b| b.try_into().ok())
+            .map(u32::from_le_bytes)
+            .collect();
         let has_bl = words.iter().any(|w| (*w >> 26) == 0b100101);
-        assert!(has_bl, "expected at least one bl instruction in lowered code");
+        assert!(
+            has_bl,
+            "expected at least one bl instruction in lowered code"
+        );
     }
 
-    #[test] fn lowers_array_load_on_aarch64() {
-        let m = build_inrt_call_module("__inrt_array_load", vec![Expr::IntLit(0x1000), Expr::IntLit(2)], Typ::Int);
+    #[test]
+    fn lowers_array_load_on_aarch64() {
+        let m = build_inrt_call_module(
+            "__inrt_array_load",
+            vec![Expr::IntLit(0x1000), Expr::IntLit(2)],
+            Typ::Int,
+        );
         let lowered = lower_module(&m, "main", NativeLinkage::Executable).expect("lower");
         assert!(!lowered.code.is_empty());
     }
 
-    #[test] fn lowers_array_store_on_aarch64() {
-        let m = build_inrt_call_module("__inrt_array_store", vec![Expr::IntLit(0x2000), Expr::IntLit(1), Expr::IntLit(42)], Typ::Int);
+    #[test]
+    fn lowers_array_store_on_aarch64() {
+        let m = build_inrt_call_module(
+            "__inrt_array_store",
+            vec![Expr::IntLit(0x2000), Expr::IntLit(1), Expr::IntLit(42)],
+            Typ::Int,
+        );
         lower_module(&m, "main", NativeLinkage::Executable).expect("lower");
     }
 
-    #[test] fn lowers_string_concat_on_aarch64() {
-        let m = build_inrt_call_module("__inrt_str_concat", vec![Expr::StringLit("hello".into()), Expr::StringLit("world".into())], Typ::String);
+    #[test]
+    fn lowers_string_concat_on_aarch64() {
+        let m = build_inrt_call_module(
+            "__inrt_str_concat",
+            vec![
+                Expr::StringLit("hello".into()),
+                Expr::StringLit("world".into()),
+            ],
+            Typ::String,
+        );
         let lowered = lower_module(&m, "main", NativeLinkage::Executable).expect("lower");
         assert!(lowered.code.len() > ENTRY_STUB_SIZE as usize);
     }
 
-    #[test] fn lowers_str_len_on_aarch64() {
-        let m = build_inrt_call_module("__inrt_str_len", vec![Expr::StringLit("test".into())], Typ::Int);
+    #[test]
+    fn lowers_str_len_on_aarch64() {
+        let m = build_inrt_call_module(
+            "__inrt_str_len",
+            vec![Expr::StringLit("test".into())],
+            Typ::Int,
+        );
         let lowered = lower_module(&m, "main", NativeLinkage::Executable).expect("lower");
         assert!(lowered.code.len() > ENTRY_STUB_SIZE as usize);
     }
 
-    #[test] fn lowers_array_len_on_aarch64() {
+    #[test]
+    fn lowers_array_len_on_aarch64() {
         let m = build_inrt_call_module("__inrt_array_len", vec![Expr::IntLit(0x3000)], Typ::Int);
         lower_module(&m, "main", NativeLinkage::Executable).expect("lower");
     }
 
-    #[test] fn lowers_array_push_on_aarch64() {
-        let m = build_inrt_call_module("__inrt_array_push", vec![Expr::IntLit(0x4000), Expr::IntLit(7)], Typ::Int);
+    #[test]
+    fn lowers_array_push_on_aarch64() {
+        let m = build_inrt_call_module(
+            "__inrt_array_push",
+            vec![Expr::IntLit(0x4000), Expr::IntLit(7)],
+            Typ::Int,
+        );
         lower_module(&m, "main", NativeLinkage::Executable).expect("lower");
     }
 
-    #[test] fn lowers_str_substr_on_aarch64() {
-        let m = build_inrt_call_module("__inrt_str_substr", vec![Expr::StringLit("abcdef".into()), Expr::IntLit(2), Expr::IntLit(3)], Typ::String);
+    #[test]
+    fn lowers_str_substr_on_aarch64() {
+        let m = build_inrt_call_module(
+            "__inrt_str_substr",
+            vec![
+                Expr::StringLit("abcdef".into()),
+                Expr::IntLit(2),
+                Expr::IntLit(3),
+            ],
+            Typ::String,
+        );
         lower_module(&m, "main", NativeLinkage::Executable).expect("lower");
     }
 
-    #[test] fn inrt_call_emits_runtime_blob_at_end() {
-        let m = build_inrt_call_module("__inrt_str_len", vec![Expr::StringLit("hello".into())], Typ::Int);
+    #[test]
+    fn inrt_call_emits_runtime_blob_at_end() {
+        let m = build_inrt_call_module(
+            "__inrt_str_len",
+            vec![Expr::StringLit("hello".into())],
+            Typ::Int,
+        );
         let lowered = lower_module(&m, "main", NativeLinkage::Executable).expect("lower");
         let (blob, _) = inrt::build_runtime_blob();
         assert!(lowered.code.len() > blob.len() + ENTRY_STUB_SIZE as usize);
     }
 
-    #[test] fn rejects_inrt_call_with_wrong_arity() {
-        let m = build_inrt_call_module("__inrt_str_len", vec![Expr::IntLit(1), Expr::IntLit(2)], Typ::Int);
-        assert!(lower_module(&m, "main", NativeLinkage::Executable).unwrap_err().contains("arity mismatch"));
+    #[test]
+    fn rejects_inrt_call_with_wrong_arity() {
+        let m = build_inrt_call_module(
+            "__inrt_str_len",
+            vec![Expr::IntLit(1), Expr::IntLit(2)],
+            Typ::Int,
+        );
+        assert!(
+            lower_module(&m, "main", NativeLinkage::Executable)
+                .unwrap_err()
+                .contains("arity mismatch")
+        );
     }
 
-    #[test] fn lowers_inrt_call_with_ident_arg() {
-        let m = UnifiedModule { identity: Default::default(), decls: vec![Decl::Function {
-            name: "main".into(), params: vec![("s".into(), Typ::String)], ret: Typ::Int,
-            body: vec![Stmt::Return(Some(Expr::Call { callee: Box::new(Expr::Ident("__inrt_str_len".to_string())), args: vec![Expr::Ident("s".into())] }))],
-            type_params: vec![],
-        }]};
+    #[test]
+    fn lowers_inrt_call_with_ident_arg() {
+        let m = UnifiedModule {
+            identity: Default::default(),
+            decls: vec![Decl::Function {
+                name: "main".into(),
+                params: vec![("s".into(), Typ::String)],
+                ret: Typ::Int,
+                body: vec![Stmt::Return(Some(Expr::Call {
+                    callee: Box::new(Expr::Ident("__inrt_str_len".to_string())),
+                    args: vec![Expr::Ident("s".into())],
+                }))],
+                type_params: vec![],
+            }],
+        };
         lower_module(&m, "main", NativeLinkage::Executable).expect("lower");
     }
 
-    #[test] fn all_inrt_builtins_can_be_called() {
+    #[test]
+    fn all_inrt_builtins_can_be_called() {
         for b in INRT_BUILTINS {
             let s = inrt::inrt_builtin_param_slots(b).unwrap_or(0);
             let a: Vec<Expr> = (0..s).map(|i| Expr::IntLit(i as i64)).collect();
             let m = build_inrt_call_module(b, a, Typ::Int);
-            assert!(lower_module(&m, "main", NativeLinkage::Executable).is_ok(), "failed for {b}");
+            assert!(
+                lower_module(&m, "main", NativeLinkage::Executable).is_ok(),
+                "failed for {b}"
+            );
         }
     }
 
@@ -4239,7 +4390,8 @@ fn main() -> Int {
                 type_params: vec![],
             }],
         };
-        let lowered = lower_module(&module, "main", NativeLinkage::Executable).expect("throw should lower");
+        let lowered =
+            lower_module(&module, "main", NativeLinkage::Executable).expect("throw should lower");
         assert!(code_contains_insns(
             &lowered.code,
             &[aarch64::load_i64(0, 42)[0]],
@@ -4261,7 +4413,8 @@ fn main() -> Int {
                 type_params: vec![],
             }],
         };
-        let lowered = lower_module(&module, "main", NativeLinkage::Executable).expect("try should lower");
+        let lowered =
+            lower_module(&module, "main", NativeLinkage::Executable).expect("try should lower");
         assert!(code_contains_insns(
             &lowered.code,
             &[aarch64::load_i64(0, 1)[0]],
@@ -4286,7 +4439,8 @@ fn main() -> Int {
                 type_params: vec![],
             }],
         };
-        let lowered = lower_module(&module, "main", NativeLinkage::Executable).expect("try/catch with throw should lower");
+        let lowered = lower_module(&module, "main", NativeLinkage::Executable)
+            .expect("try/catch with throw should lower");
         assert!(code_contains_insns(
             &lowered.code,
             &[aarch64::load_i64(0, 42)[0], aarch64::load_i64(0, 1)[0]],
@@ -4322,37 +4476,45 @@ fn main() -> Int {
                 type_params: vec![],
             }],
         };
-        let lowered = lower_module(&module, "main", NativeLinkage::Executable).expect("float should lower");
+        let lowered =
+            lower_module(&module, "main", NativeLinkage::Executable).expect("float should lower");
         assert!(lowered.code.len() > ENTRY_STUB_SIZE as usize);
     }
 
     #[test]
     fn lowers_float_add_instruction() {
         let module = return_float_binary_module("+", 3.0, 4.0);
-        let lowered = lower_module(&module, "main", NativeLinkage::Executable).expect("float add should lower");
+        let lowered = lower_module(&module, "main", NativeLinkage::Executable)
+            .expect("float add should lower");
         assert!(code_contains_insn(&lowered.code, aarch64::fadd_s(0, 0, 1)));
-        assert!(code_contains_insn(&lowered.code, aarch64::fmov_from_gp(0, 0)));
+        assert!(code_contains_insn(
+            &lowered.code,
+            aarch64::fmov_from_gp(0, 0)
+        ));
         assert!(code_contains_insn(&lowered.code, aarch64::fmov_to_gp(0, 0)));
     }
 
     #[test]
     fn lowers_float_mul_instruction() {
         let module = return_float_binary_module("*", 2.0, 3.0);
-        let lowered = lower_module(&module, "main", NativeLinkage::Executable).expect("float mul should lower");
+        let lowered = lower_module(&module, "main", NativeLinkage::Executable)
+            .expect("float mul should lower");
         assert!(code_contains_insn(&lowered.code, aarch64::fmul_s(0, 0, 1)));
     }
 
     #[test]
     fn lowers_float_sub_instruction() {
         let module = return_float_binary_module("-", 5.0, 2.0);
-        let lowered = lower_module(&module, "main", NativeLinkage::Executable).expect("float sub should lower");
+        let lowered = lower_module(&module, "main", NativeLinkage::Executable)
+            .expect("float sub should lower");
         assert!(code_contains_insn(&lowered.code, aarch64::fsub_s(0, 0, 1)));
     }
 
     #[test]
     fn lowers_float_div_instruction() {
         let module = return_float_binary_module("/", 10.0, 2.0);
-        let lowered = lower_module(&module, "main", NativeLinkage::Executable).expect("float div should lower");
+        let lowered = lower_module(&module, "main", NativeLinkage::Executable)
+            .expect("float div should lower");
         assert!(code_contains_insn(&lowered.code, aarch64::fdiv_s(0, 0, 1)));
     }
 }
