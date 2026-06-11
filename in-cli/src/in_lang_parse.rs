@@ -116,7 +116,7 @@ fn binding_decl(binding: &InExternBinding) -> Decl {
         "write_file" => Decl::Function {
             name: binding.name.clone(),
             params: vec![("path".into(), Typ::String), ("text".into(), Typ::String)],
-            ret: Typ::Void,
+            ret: Typ::Bool,
             body: Vec::new(),
             type_params: vec![],
         },
@@ -2924,6 +2924,36 @@ fn main() -> void { read_file("x"); return; }
         let (params, ret) = decl.expect("http_get");
         assert_eq!(params, &vec![("url".to_string(), Typ::String)]);
         assert_eq!(ret, &Typ::String);
+    }
+
+    #[test]
+    fn std_fs_import_adds_runtime_function_declarations() {
+        let src = "import std.fs;\ncapability fs.read;\ncapability fs.write;\nfn main() -> Bool { return write_file(\"/tmp/a\", \"b\"); }\n";
+        let module = parse_in_source(src).expect("std fs import");
+        let read_decl = module.decls.iter().find_map(|decl| match decl {
+            Decl::Function {
+                name, params, ret, ..
+            } if name == "read_file" => Some((params, ret)),
+            _ => None,
+        });
+        let write_decl = module.decls.iter().find_map(|decl| match decl {
+            Decl::Function {
+                name, params, ret, ..
+            } if name == "write_file" => Some((params, ret)),
+            _ => None,
+        });
+        let (read_params, read_ret) = read_decl.expect("read_file");
+        let (write_params, write_ret) = write_decl.expect("write_file");
+        assert_eq!(read_params, &vec![("path".to_string(), Typ::String)]);
+        assert_eq!(read_ret, &Typ::String);
+        assert_eq!(
+            write_params,
+            &vec![
+                ("path".to_string(), Typ::String),
+                ("text".to_string(), Typ::String)
+            ]
+        );
+        assert_eq!(write_ret, &Typ::Bool);
     }
 
     #[test]

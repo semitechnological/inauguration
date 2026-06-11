@@ -101,9 +101,16 @@ impl BytecodeVM {
 
             if self.error_state.is_some() {
                 let regions = &self.frames[frame_idx].try_regions;
-                if let Some(region) = regions.iter().rev().find(|r| ip >= r.start_ip && ip < r.end_ip) {
+                if let Some(region) = regions
+                    .iter()
+                    .rev()
+                    .find(|r| ip >= r.start_ip && ip < r.end_ip)
+                {
                     let catch_label = region.catch_label.clone();
-                    let catch_ip = label_map.get(catch_label.as_str()).copied().unwrap_or(usize::MAX);
+                    let catch_ip = label_map
+                        .get(catch_label.as_str())
+                        .copied()
+                        .unwrap_or(usize::MAX);
                     self.frames[frame_idx].ip = catch_ip;
                     self.error_state = None;
                     continue;
@@ -362,7 +369,9 @@ impl BytecodeVM {
                 vec![Value::Int(n)]
             }
             "to_string" => {
-                let s = args.first().map_or(String::new(), |a| a.to_string_display());
+                let s = args
+                    .first()
+                    .map_or(String::new(), |a| a.to_string_display());
                 vec![Value::String(s)]
             }
             "len" => {
@@ -398,6 +407,61 @@ impl BytecodeVM {
                 let haystack = iter.next().unwrap_or(Value::Nil).to_string_display();
                 let needle = iter.next().unwrap_or(Value::Nil).to_string_display();
                 vec![Value::Bool(haystack.contains(&needle))]
+            }
+            "path_join" => {
+                let mut iter = args.into_iter();
+                let base = iter.next().unwrap_or(Value::Nil).to_string_display();
+                let child = iter.next().unwrap_or(Value::Nil).to_string_display();
+                vec![Value::String(
+                    std::path::PathBuf::from(base)
+                        .join(child)
+                        .to_string_lossy()
+                        .to_string(),
+                )]
+            }
+            "path_dirname" => {
+                let path = args.first().map_or(String::new(), Value::to_string_display);
+                let dirname = std::path::Path::new(&path)
+                    .parent()
+                    .map(|parent| parent.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                vec![Value::String(dirname)]
+            }
+            "path_basename" => {
+                let path = args.first().map_or(String::new(), Value::to_string_display);
+                let basename = std::path::Path::new(&path)
+                    .file_name()
+                    .map(|name| name.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                vec![Value::String(basename)]
+            }
+            "path_extname" => {
+                let path = args.first().map_or(String::new(), Value::to_string_display);
+                let extname = std::path::Path::new(&path)
+                    .extension()
+                    .map(|name| name.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                vec![Value::String(extname)]
+            }
+            "env_get" => {
+                let name = args.first().map_or(String::new(), Value::to_string_display);
+                vec![Value::String(std::env::var(name).unwrap_or_default())]
+            }
+            "env_has" => {
+                let name = args.first().map_or(String::new(), Value::to_string_display);
+                vec![Value::Bool(std::env::var_os(name).is_some())]
+            }
+            "read_file" => {
+                let path = args.first().map_or(String::new(), Value::to_string_display);
+                vec![Value::String(
+                    std::fs::read_to_string(path).unwrap_or_default(),
+                )]
+            }
+            "write_file" => {
+                let mut iter = args.into_iter();
+                let path = iter.next().unwrap_or(Value::Nil).to_string_display();
+                let text = iter.next().unwrap_or(Value::Nil).to_string_display();
+                vec![Value::Bool(std::fs::write(path, text).is_ok())]
             }
             "array_push" => {
                 let mut iter = args.into_iter();
@@ -456,10 +520,7 @@ impl BytecodeVM {
             "||" => return Ok(Value::Bool(lhs.to_bool() || rhs.to_bool())),
             _ => {}
         }
-        if op == "+"
-            && matches!(lhs, Value::String(_))
-            && matches!(rhs, Value::String(_))
-        {
+        if op == "+" && matches!(lhs, Value::String(_)) && matches!(rhs, Value::String(_)) {
             let left = match lhs {
                 Value::String(s) => s,
                 _ => unreachable!("checked above"),
@@ -580,6 +641,66 @@ mod tests {
 
         let mut vm = BytecodeVM::new(module);
         let _ = vm.run(); // Should print "42"
+    }
+
+    #[test]
+    fn vm_std_path_builtins_execute() {
+        let mut module = BytecodeModule::new("main".to_string());
+        module.add_function(BytecodeFunction {
+            name: "main".to_string(),
+            local_count: 0,
+            instructions: vec![
+                Instruction::LoadString("/tmp".to_string()),
+                Instruction::LoadString("demo.in".to_string()),
+                Instruction::CallBuiltin("path_join".to_string(), 2),
+                Instruction::CallBuiltin("path_basename".to_string(), 1),
+                Instruction::Return,
+            ],
+        });
+        let mut vm = BytecodeVM::new(module);
+        let result = vm.run().expect("run path builtins");
+        assert_eq!(result, Value::String("demo.in".to_string()));
+    }
+
+    #[test]
+    fn vm_std_env_builtins_execute() {
+        let mut module = BytecodeModule::new("main".to_string());
+        module.add_function(BytecodeFunction {
+            name: "main".to_string(),
+            local_count: 0,
+            instructions: vec![
+                Instruction::LoadString("PATH".to_string()),
+                Instruction::CallBuiltin("env_has".to_string(), 1),
+                Instruction::Return,
+            ],
+        });
+        let mut vm = BytecodeVM::new(module);
+        let result = vm.run().expect("run env builtins");
+        assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn vm_std_fs_builtins_execute() {
+        let path = std::env::temp_dir().join("in-stdlib-fs-test.txt");
+        let path_text = path.to_string_lossy().to_string();
+        let mut module = BytecodeModule::new("main".to_string());
+        module.add_function(BytecodeFunction {
+            name: "main".to_string(),
+            local_count: 0,
+            instructions: vec![
+                Instruction::LoadString(path_text.clone()),
+                Instruction::LoadString("hello compiler".to_string()),
+                Instruction::CallBuiltin("write_file".to_string(), 2),
+                Instruction::Pop,
+                Instruction::LoadString(path_text),
+                Instruction::CallBuiltin("read_file".to_string(), 1),
+                Instruction::Return,
+            ],
+        });
+        let mut vm = BytecodeVM::new(module);
+        let result = vm.run().expect("run fs builtins");
+        assert_eq!(result, Value::String("hello compiler".to_string()));
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

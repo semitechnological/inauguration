@@ -1,0 +1,8 @@
+import std.fs;
+import std.path;
+capability fs.read;
+
+fn main() -> String {
+  let path: String = path_join("apps/in-compiler-bootstrap", "sample.expr");
+  return read_file(path);
+}

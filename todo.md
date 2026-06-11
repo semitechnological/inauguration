@@ -80,7 +80,8 @@
   - Keep `.in` simple by default: regular syntax, few special cases, explicit imports, explicit fallibility, explicit outside-world capabilities.
   - Let `.in` call or wrap symbols from language fronts that lower into Core IR.
   - First slices landed: top-level `package`, `module`, `import`, `capability`, and `extern <language> fn ...;` declarations parse in `.in`; local relative `.in` imports merge declarations; `std.io` / `std.fs` / `std.http` / `std.json` / `std.process` / `std.cli` synthesize bounded stdlib declarations; extern `requires` contracts warn when capabilities are missing; `if` / `else`, `while`, and binary expressions parse into Core IR; `in agent` and `in graph` report package/module/import facts, capabilities, orchestration facts, and extern call graph edges.
-  - `std.env` and `std.path` now synthesize bounded Core IR declarations and agent capability diagnostics, but do not execute runtime calls.
+  - `std.env` and `std.path` now synthesize bounded Core IR declarations and agent capability diagnostics; the bytecode VM executes the first self-hosting stdlib subset for `std.fs`, `std.env`, `std.path`, and `std.io`.
+  - Next self-hosting slice: grow `apps/in-compiler-bootstrap` from a stdlib file-reading fixture into a tiny expression parser that emits `.icore`.
   - Continue gradual complexity: bind `.in package` / `module` facts to Core IR names and dependency symbols, more standard library APIs, richer expression operators, and additional control flow only when shared IR needs them.
   - Prefer standard library APIs over syntax sugar so agents have one obvious path for files, network, process, JSON, HTTP, and CLI tasks.
   - Keep `icore` as the lowest common interchange format for tools and agents that cannot or should not emit `.in` directly.

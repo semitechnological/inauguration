@@ -1,0 +1,6 @@
+import std.path;
+
+fn main() -> String {
+  let joined: String = path_join("/tmp", "compiler.in");
+  return path_basename(joined);
+}

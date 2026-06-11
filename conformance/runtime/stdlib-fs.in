@@ -1,0 +1,8 @@
+import std.fs;
+capability fs.read;
+capability fs.write;
+
+fn main() -> String {
+  let ok: Bool = write_file("/tmp/in-stdlib-runtime-fixture.txt", "hello compiler");
+  return read_file("/tmp/in-stdlib-runtime-fixture.txt");
+}
