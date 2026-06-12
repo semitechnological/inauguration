@@ -1,4 +1,6 @@
 // @expect parse: ok
+// @expect bytecode: executes
+// @expect result: 6
 
 class Point3D {
     x: Int

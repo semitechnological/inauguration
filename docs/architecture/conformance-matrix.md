@@ -16,9 +16,10 @@ Run: `scripts/check-self-hosted-language-matrix.sh`
 | cpp      | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: tree-sitter scalar body lowering |
 | objc     | SKIP  | —           | —     | —                  | —                    | No sample file; parser_id objc routes at level 1 |
 | objcpp   | SKIP  | —           | —     | —                  | —                    | No sample file; parser_id objcpp routes at level 2 |
-| java     | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: tree-sitter bounded body lowering |
-| kotlin   | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: tree-sitter scalar body lowering |
-| cs       | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: tree-sitter scalar body lowering |
+| java     | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 3 metadata; bounded sample bytecode executes after family type normalization |
+| kotlin   | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: tree-sitter scalar body lowering; bounded sample bytecode executes |
+| cs       | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: tree-sitter scalar body lowering; bounded sample bytecode executes |
+| fsharp   | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 1 declaration front; bounded sample bytecode executes |
 | swift    | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: subset or swiftc textual SIL path |
 | rust     | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: dedicated bounded body lowering |
 | go       | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: dedicated bounded body lowering |
@@ -27,8 +28,9 @@ Run: `scripts/check-self-hosted-language-matrix.sh`
 | ts       | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 5: bounded entrypoint + Boundary IR + bytecode VM |
 | python   | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: tree-sitter scalar body lowering |
 | ruby     | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: tree-sitter scalar body lowering |
+| vb       | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 3 boundary front; bounded sample bytecode executes |
 
-**Verdict**: 27/27 runnable matrix entries pass the self-hosted gate. 2 languages (objc, objcpp) skipped — no sample files exist.
+**Verdict**: 28/28 runnable matrix entries pass the self-hosted gate. 2 languages (objc, objcpp) skipped — no sample files exist.
 
 ## Core IR feature conformance by frontend
 

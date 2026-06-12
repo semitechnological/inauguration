@@ -21,6 +21,10 @@ pub fn uses_family_typecheck(parser_id: ParserId) -> bool {
             | ParserId::Lua
             | ParserId::Zig
             | ParserId::Rust
+            | ParserId::Java
+            | ParserId::Kotlin
+            | ParserId::CSharp
+            | ParserId::FSharp
             | ParserId::JavaScript
             | ParserId::TypeScript
             | ParserId::Scala

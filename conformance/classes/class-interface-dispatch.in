@@ -1,4 +1,6 @@
 // @expect parse: ok
+// @expect bytecode: executes
+// @expect result: String("woof")
 
 interface Speaker {
     fn speak() -> String

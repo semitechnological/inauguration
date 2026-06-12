@@ -1,5 +1,6 @@
 // @expect parse: ok
-// @expect output: woof
+// @expect bytecode: executes
+// @expect result: String("woof")
 
 class Dog {
     name: String

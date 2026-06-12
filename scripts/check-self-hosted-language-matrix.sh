@@ -26,9 +26,10 @@ declare -a LANGS=(
   "v|sample.v||1"
   "objc|sample.m||0"           # no sample exists → skipped gracefully
   "objcpp|sample.mm||0"         # no sample exists → skipped gracefully
-  "java|Sample.java||0"         # type mapping not yet bytecode-ready
-  "kotlin|Sample.kt||0"
-  "cs|Program.cs||0"
+  "java|Sample.java||1"
+  "kotlin|Sample.kt||1"
+  "cs|Program.cs||1"
+  "fsharp|sample.fs||1"
   "swift|sample.swift|IN_NATIVE_SWIFT_SIL=only|0"
   "rust|sample.rs||0"
   "js|sample.js||1"
@@ -47,7 +48,7 @@ declare -a LANGS=(
   "d|sample.d||0"
   "crystal|sample.cr||0"
   "clojure|sample.clj||0"
-  "vb|sample.vb||0"
+  "vb|sample.vb||1"
 )
 
 FAILED=0

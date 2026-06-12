@@ -360,6 +360,20 @@ mod tests {
     }
 
     #[test]
+    fn jvm_and_dotnet_samples_reach_family_typecheck() {
+        let root = repo_root();
+        for parser_id in ["java", "kotlin", "csharp"] {
+            let entry = language_support_for_parser(parser_id).expect(parser_id);
+            let report = evaluate_language_gates(entry, &root);
+            assert!(report.evaluated_level >= 3, "{parser_id}: {report:?}");
+            assert!(
+                report.passed_gates.contains(&GATE_SEMANTIC_TYPECHECK),
+                "{parser_id}: {report:?}"
+            );
+        }
+    }
+
+    #[test]
     fn promoted_tree_and_boundary_samples_reach_declared_gates() {
         let root = repo_root();
         for parser_id in [

@@ -1985,6 +1985,73 @@ fn type_known(structs: &HashSet<&str>, t: &Typ) -> bool {
     }
 }
 
+fn method_sig_matches(required: &MethodSig, actual: &Decl) -> bool {
+    match actual {
+        Decl::Function {
+            name, params, ret, ..
+        } => name == &required.name && params == &required.params && ret == &required.ret,
+        _ => false,
+    }
+}
+
+fn validate_class_contracts(module: &UnifiedModule) -> Result<(), String> {
+    let classes: HashMap<&str, (&Option<String>, &Vec<String>, &Vec<Decl>)> = module
+        .decls
+        .iter()
+        .filter_map(|decl| match decl {
+            Decl::Class {
+                name,
+                extends,
+                implements,
+                methods,
+                ..
+            } => Some((name.as_str(), (extends, implements, methods))),
+            _ => None,
+        })
+        .collect();
+    let interfaces: HashMap<&str, &Vec<MethodSig>> = module
+        .decls
+        .iter()
+        .filter_map(|decl| match decl {
+            Decl::Interface { name, methods, .. } => Some((name.as_str(), methods)),
+            _ => None,
+        })
+        .collect();
+
+    for (class_name, (extends, implements, methods)) in classes {
+        if let Some(parent) = extends {
+            if !module.decls.iter().any(|decl| {
+                matches!(decl, Decl::Class { name, .. } if name == parent)
+                    || matches!(decl, Decl::Struct { name, .. } if name == parent)
+            }) {
+                return Err(format!(
+                    ".in: class `{class_name}` extends unknown class `{parent}`"
+                ));
+            }
+        }
+        for iface in implements {
+            let Some(required_methods) = interfaces.get(iface.as_str()) else {
+                return Err(format!(
+                    ".in: class `{class_name}` implements unknown interface `{iface}`"
+                ));
+            };
+            for required in *required_methods {
+                if !methods
+                    .iter()
+                    .any(|method| method_sig_matches(required, method))
+                {
+                    return Err(format!(
+                        ".in: class `{class_name}` does not implement `{iface}.{}`",
+                        required.name
+                    ));
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn validate_expr_shapes(
     fn_name: &str,
     structs: &HashMap<String, Vec<String>>,
@@ -2443,6 +2510,8 @@ fn validate_module(module: &UnifiedModule, require_main: bool) -> Result<(), Str
             Decl::Interface { .. } => {}
         }
     }
+
+    validate_class_contracts(module)?;
 
     Ok(())
 }
@@ -3810,6 +3879,8 @@ fn main() -> void
     #[test]
     fn parse_class_with_extends() {
         let src = r#"
+class Dog {
+}
 class Poodle extends Dog {
     fn bark() -> String {
         return "yap";
@@ -3828,6 +3899,11 @@ fn main() -> void
     #[test]
     fn parse_class_with_implements() {
         let src = r#"
+interface Speaker {
+    fn speak() -> String
+}
+interface Listener {
+}
 class Human implements Speaker, Listener {
     fn speak() -> String {
         return "hello";
@@ -3909,6 +3985,13 @@ fn main() -> void
     #[test]
     fn class_with_extends_and_implements() {
         let src = r#"
+class BaseWidget {
+}
+interface Drawable {
+    fn draw() -> void
+}
+interface Clickable {
+}
 class MyWidget extends BaseWidget implements Drawable, Clickable {
     fn draw() -> void {
         return;
@@ -3924,6 +4007,42 @@ fn main() -> void
         let (extends, implements) = info.expect("MyWidget class");
         assert_eq!(extends, Some("BaseWidget".into()));
         assert_eq!(implements, vec!["Drawable".to_string(), "Clickable".to_string()]);
+    }
+
+    #[test]
+    fn class_extends_unknown_parent_is_rejected() {
+        let src = r#"
+class Poodle extends Dog {
+}
+fn main() -> void
+"#;
+        let err = parse_in_source(src).expect_err("unknown parent");
+        assert!(err.contains("extends unknown class `Dog`"), "{err}");
+    }
+
+    #[test]
+    fn class_implements_unknown_interface_is_rejected() {
+        let src = r#"
+class Human implements Speaker {
+}
+fn main() -> void
+"#;
+        let err = parse_in_source(src).expect_err("unknown interface");
+        assert!(err.contains("implements unknown interface `Speaker`"), "{err}");
+    }
+
+    #[test]
+    fn class_missing_interface_method_is_rejected() {
+        let src = r#"
+interface Speaker {
+    fn speak() -> String
+}
+class Human implements Speaker {
+}
+fn main() -> void
+"#;
+        let err = parse_in_source(src).expect_err("missing interface method");
+        assert!(err.contains("does not implement `Speaker.speak`"), "{err}");
     }
 
     #[test]

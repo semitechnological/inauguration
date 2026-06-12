@@ -1,0 +1,7 @@
+// @expect parse: fail
+
+class Human implements Speaker {
+}
+
+fn main() -> void {
+}

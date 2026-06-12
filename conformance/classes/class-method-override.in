@@ -1,5 +1,7 @@
 // @expect parse: ok
 // @expect has-function: main
+// @expect bytecode: executes
+// @expect result: String("woof")
 
 class Animal {
     fn speak() -> String {
