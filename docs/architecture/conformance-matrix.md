@@ -14,20 +14,31 @@ Run: `scripts/check-self-hosted-language-matrix.sh`
 | icore    | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: versioned Core IR JSON |
 | c        | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: tree-sitter scalar body lowering |
 | cpp      | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: tree-sitter scalar body lowering |
+| go       | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: dedicated bounded body lowering |
+| v        | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: dedicated bounded body lowering |
 | objc     | SKIP  | —           | —     | —                  | —                    | No sample file; parser_id objc routes at level 1 |
 | objcpp   | SKIP  | —           | —     | —                  | —                    | No sample file; parser_id objcpp routes at level 2 |
 | java     | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 3 metadata; bounded sample bytecode executes after family type normalization |
 | kotlin   | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: tree-sitter scalar body lowering; bounded sample bytecode executes |
 | cs       | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: tree-sitter scalar body lowering; bounded sample bytecode executes |
-| fsharp   | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 1 declaration front; bounded sample bytecode executes |
+| fsharp   | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 1 declaration support; this matrix fixture lowers and executes through the bounded bytecode path |
 | swift    | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: subset or swiftc textual SIL path |
-| rust     | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: dedicated bounded body lowering |
-| go       | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: dedicated bounded body lowering |
-| v        | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: dedicated bounded body lowering |
+| rust     | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 3: dedicated bounded class/impl and body lowering |
 | js       | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 5: bounded entrypoint + Boundary IR + bytecode VM |
 | ts       | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 5: bounded entrypoint + Boundary IR + bytecode VM |
 | python   | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: tree-sitter scalar body lowering |
 | ruby     | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: tree-sitter scalar body lowering |
+| scala    | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: tree-sitter bounded body lowering with class/trait extraction |
+| php      | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 3: tree-sitter bounded body lowering with family typecheck |
+| lua      | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 3: tree-sitter bounded body lowering with family typecheck |
+| zig      | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 3: tree-sitter bounded body lowering with family typecheck |
+| dart     | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: tree-sitter scalar body lowering |
+| nim      | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 3: bounded proc lowering with family typecheck and optional inline boundary metadata |
+| odin     | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 3: bounded proc lowering with family typecheck and optional inline boundary metadata |
+| hare     | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 3: bounded fn lowering with family typecheck and optional inline boundary metadata |
+| d        | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 3: bounded function lowering with family typecheck and optional inline boundary metadata |
+| crystal  | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 3: bounded def lowering with family typecheck and optional inline boundary metadata |
+| clojure  | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 3: bounded defn lowering with family typecheck and optional inline boundary metadata |
 | vb       | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 3 boundary front; bounded sample bytecode executes |
 
 **Verdict**: 28/28 runnable matrix entries pass the self-hosted gate. 2 languages (objc, objcpp) skipped — no sample files exist.
@@ -72,7 +83,7 @@ Feature support at the Core IR level (data structures exist), but frontends vary
 | Core IR | ✅ Growing | Wave 1 data structures present; partial parser coverage |
 | SIL lowering | ✅ Stable | Core IR → textual SSA SIL |
 | SIL→bytecode | ✅ Stable | Textual SIL → bytecode with peephole opts |
-| VM | ✅ Stable | Stack frames, 6 builtins |
+| VM | ✅ Stable | Stack frames, 35 bytecode builtins; native runtime has 7 `inrt` entry builtins |
 | Native AArch64 | ✅ Stable | Owned Mach-O emitter for scalar subset |
 | Async | ❌ Design | Wave 3 |
 | GC/runtime | ❌ Design | Waves 2-5 |
