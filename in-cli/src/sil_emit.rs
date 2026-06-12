@@ -608,6 +608,7 @@ fn run_swiftc_typecheck(
     let swiftc_bin = swiftc_executable();
     let mut cmd = Command::new(&swiftc_bin);
     cmd.arg("-typecheck");
+    cmd.arg("-parse-as-library");
     #[cfg(target_os = "macos")]
     if let Some(sdk) = macos_sdk_path() {
         cmd.arg("-sdk").arg(sdk);
@@ -730,6 +731,7 @@ fn run_swiftc_emit_sil_batch(
 
     let mut cmd = Command::new(&swiftc_bin);
     cmd.arg("-emit-sil");
+    cmd.arg("-parse-as-library");
     cmd.arg("-O");
     cmd.arg("-suppress-warnings");
     cmd.arg("-module-name").arg(module_id);
