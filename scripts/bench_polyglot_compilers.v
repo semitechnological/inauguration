@@ -10,6 +10,12 @@ struct RunResult {
 	output string
 }
 
+struct InCompileReport {
+	success     bool
+	reason_code string
+	error       string
+}
+
 struct BenchEnv {
 	generated_at_utc string
 	bench_runs       int
@@ -127,6 +133,44 @@ fn short_err(s string) string {
 	return s[..500]
 }
 
+fn markdown_cell(s string) string {
+	return s.replace('\n', ' ').replace('|', '/').trim_space()
+}
+
+fn json_object_prefix(s string) string {
+	start := s.index('{') or { return s }
+	end := s.last_index('}') or { return s }
+	if end < start {
+		return s
+	}
+	return s[start..end + 1]
+}
+
+fn checked_in_result(res RunResult) RunResult {
+	report := json.decode(InCompileReport, json_object_prefix(res.output)) or {
+		return RunResult{
+			ok:     false
+			ms:     res.ms
+			output: res.output
+		}
+	}
+	if res.ok && report.success {
+		return res
+	}
+	message := if report.error != '' {
+		report.error
+	} else if report.reason_code != '' {
+		report.reason_code
+	} else {
+		res.output
+	}
+	return RunResult{
+		ok:     false
+		ms:     res.ms
+		output: message
+	}
+}
+
 fn gather_env(root string, bench_runs int, warmup_runs int, in_bin string) BenchEnv {
 	host_os := command_output(root, 'uname -s')
 	host_kernel := command_output(root, 'uname -r')
@@ -154,7 +198,7 @@ fn gather_env(root string, bench_runs int, warmup_runs int, in_bin string) Bench
 
 fn in_compile_cmd(in_bin string, example string, module string, out_path string, in_env string) string {
 	env_prefix := if in_env == '' { '' } else { '${in_env} ' }
-	return '${env_prefix}"${in_bin}" compile --path "${example}" --target native --entry answer --out "${out_path}" --json >/dev/null'
+	return '${env_prefix}"${in_bin}" compile --path "${example}" --target native --entry answer --out "${out_path}" --json'
 }
 
 fn main() {
@@ -368,7 +412,8 @@ fn main() {
 			if !native_last.ok {
 				native_all_ok = false
 			}
-			in_last = run_with_status('in compile ${run_name}', root, in_cmd)
+			in_last = checked_in_result(run_with_status('in compile ${run_name}', root,
+				in_cmd))
 			in_samples << in_last.ms
 			if !in_last.ok {
 				in_all_ok = false
@@ -378,7 +423,8 @@ fn main() {
 		in_ms := median_ms(in_samples)
 		native_lo, native_hi := min_max_ms(native_samples)
 		in_lo, in_hi := min_max_ms(in_samples)
-		ratio := if native_ms > 0 { in_ms / native_ms } else { 0.0 }
+		in_ok := in_last.ok && in_all_ok
+		ratio := if native_ms > 0 && in_ok { in_ms / native_ms } else { 0.0 }
 		rows << BenchRow{
 			language:                   case.language
 			example:                    case.example
@@ -390,7 +436,7 @@ fn main() {
 			native_ms:                  native_ms
 			native_ms_min:              native_lo
 			native_ms_max:              native_hi
-			in_ok:                      in_last.ok && in_all_ok
+			in_ok:                      in_ok
 			in_ms:                      in_ms
 			in_ms_min:                  in_lo
 			in_ms_max:                  in_hi
@@ -398,12 +444,13 @@ fn main() {
 			native_error:               short_err(native_last.output)
 			in_error:                   short_err(in_last.output)
 		}
-		println('  == summary ${case.language}: native=${native_ms:.2f}ms in=${in_ms:.2f}ms ratio=${ratio:.3f}')
+		ratio_summary := if in_ok { '${ratio:.3f}' } else { 'n/a' }
+		println('  == summary ${case.language}: native=${native_ms:.2f}ms in=${in_ms:.2f}ms ratio=${ratio_summary}')
 	}
 
 	env := gather_env(root, bench_runs, warmup_runs, in_bin)
-	mut easy_md := '| Language | Native compiler | Native mode | Native median (min-max ms) | in median (min-max ms) | in/native | Status |\n'
-	easy_md += '|---|---|---|---:|---:|---:|---|\n'
+	mut easy_md := '| Language | Native compiler | Native mode | Native median (min-max ms) | in median (min-max ms) | in/native | Status | Reason |\n'
+	easy_md += '|---|---|---|---:|---:|---:|---|---|\n'
 	for row in rows {
 		status := if !row.compiler_available {
 			'skipped'
@@ -414,7 +461,19 @@ fn main() {
 		} else {
 			'in failed'
 		}
-		easy_md += '| ${row.language} | `${row.compiler}` | ${row.mode} | ${row.native_ms:.2f} (${row.native_ms_min:.2f}-${row.native_ms_max:.2f}) | ${row.in_ms:.2f} (${row.in_ms_min:.2f}-${row.in_ms_max:.2f}) | ${row.speed_ratio_in_over_native:.3f} | ${status} |\n'
+		ratio_cell := if row.native_ok && row.in_ok {
+			'${row.speed_ratio_in_over_native:.3f}'
+		} else {
+			'n/a'
+		}
+		reason := if !row.native_ok {
+			markdown_cell(short_err(row.native_error))
+		} else if !row.in_ok {
+			markdown_cell(short_err(row.in_error))
+		} else {
+			''
+		}
+		easy_md += '| ${row.language} | `${row.compiler}` | ${row.mode} | ${row.native_ms:.2f} (${row.native_ms_min:.2f}-${row.native_ms_max:.2f}) | ${row.in_ms:.2f} (${row.in_ms_min:.2f}-${row.in_ms_max:.2f}) | ${ratio_cell} | ${status} | ${reason} |\n'
 	}
 
 	doc := BenchDoc{
@@ -425,7 +484,7 @@ fn main() {
 	os.write_file(out_json, json.encode_pretty(doc)) or { panic(err) }
 
 	mut md := '# Polyglot Compiler Matrix Benchmark\n\n'
-	md += 'Measured against installed native compiler checks and `in compile --target native --entry answer --json` for the same polyglot sample files. The native mode column distinguishes object compilation, bytecode compilation, typechecking, and syntax-only checks; ratios are only directly comparable within the same mode. Missing native compilers are skipped; installed compiler failures are recorded and fail the script.\n'
+	md += 'Measured against installed native compiler checks and `in compile --target native --entry answer --json` for the same polyglot sample files. The native mode column distinguishes object compilation, bytecode compilation, typechecking, and syntax-only checks; ratios are only directly comparable within the same mode. Missing native compilers are skipped; native compiler failures fail the script, while `in` failures are reported in the row.\n'
 	md += 'Wall times: median over `${bench_runs}` timed runs; min-max across those runs shown in parentheses.\n\n'
 	md += '## Benchmark Environment\n\n'
 	md += '- Generated (UTC): `${env.generated_at_utc}`\n'
@@ -448,12 +507,12 @@ fn main() {
 	println('wrote ${out_json}')
 	mut failed := false
 	for row in rows {
-		if row.compiler_available && (!row.native_ok || !row.in_ok) {
+		if row.compiler_available && !row.native_ok {
 			failed = true
 		}
 	}
 	if failed {
-		eprintln('benchmark failed: one or more installed compiler runs failed')
+		eprintln('benchmark failed: one or more native compiler runs failed')
 		exit(1)
 	}
 }
