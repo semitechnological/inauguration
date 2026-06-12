@@ -64,6 +64,8 @@ Resolution order is documented in the `parser_registry` module rustdoc. Summary:
 
 ## Current compatibility ladder
 
+The table below is the declared support ladder used for human scanning. For the full machine-readable split, run **`in languages --json`** and compare `level` (declared support), `evaluated_level` (sample-gate result), `boundary_level` (runtime/boundary gate), and `effective_level` (the level agents should treat as currently usable). A front can evaluate above its declared level while still reporting a lower effective level until its runtime boundary and docs catch up.
+
 | Level | Meaning | Current fronts |
 |-------|---------|----------------|
 | 0 | Routes to a known `ParserId`, but no compatible grammar/front is wired; callers get an `.icore` hint. | None in the current `in languages --json` matrix. |

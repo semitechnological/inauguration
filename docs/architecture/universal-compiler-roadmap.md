@@ -32,8 +32,8 @@ The target is a safe, small, fast compiler for V, Go, Rust, OCaml, TypeScript, J
 | Phase | Deliverable | Exit criteria |
 |-------|-------------|---------------|
 | 0 | Truthful language matrix | `in languages` reports every target language, front, level, example, and runtime boundary as JSON and text. |
-| 1 | Self-hosted Core IR backbone | `.in`, `.icore`, Rust, Go, V, Java/Groovy, and C-family bounded bodies lower through the same Core IR to SIL path with tests. |
-| 2 | Web and scripting bodies | JavaScript, TypeScript, Python, and Ruby move from declaration extraction to bounded body lowering. |
+| 1 | Self-hosted Core IR backbone | `.in`, `.icore`, Rust, Go, V, OCaml, Java/Groovy, Dart, C-family, and the bounded JavaScript/TypeScript/Python/Ruby body paths stay on the same Core IR to SIL path with tests. |
+| 2 | Web and scripting depth | JavaScript, TypeScript, Python, and Ruby keep their completed bounded body gates while the next work adds richer diagnostics, control flow, and runtime-boundary clarity. |
 | 3 | JVM and CLR semantics | Java, Kotlin, C#, and related fronts share class/method metadata, field access, constructor lowering, and runtime strategy docs. |
 | 4 | Systems language depth | C, C++, Zig, Odin, Hare, Nim, Rust, Go, and V gain locals, calls, modules/packages, control flow, and ABI boundary docs. |
 | 5 | Native runtime spine | Bytecode VM supports the common Core IR subset with deterministic execution, capability checks, and conformance examples. |
@@ -83,7 +83,7 @@ Dedicated boundary fronts (for example Nim/Odin comment JSON or Rust/Zig extract
 
 ## Current slice
 
-The current implementation has moved past the first matrix-only slice. OCaml has a dedicated bounded front for top-level `let` functions and simple application expressions. Ruby is level 2 for bounded scalar method bodies. `icoreVersion: 3` ingests Boundary IR from `.icore` and dedicated boundary fronts. Parser ids without a compatible wired front remain tracked level-0 `.icore` redirects until their own fronts land.
+The current implementation has moved past the first matrix-only slice. OCaml has a dedicated bounded front for top-level `let` functions and simple application expressions. Java/Groovy, Dart, JavaScript/TypeScript, Python, and Ruby have bounded body paths where wired; Ruby is level 2 for bounded scalar method bodies. `icoreVersion: 2` covers statement / expression body JSON today. Boundary IR remains the `icoreVersion: 3` Level 5 contract for current boundary work around ABI metadata, verification, and dedicated boundary-front emitters. Parser ids without a compatible wired front remain tracked level-0 `.icore` redirects until their own fronts land.
 
 ## See also
 

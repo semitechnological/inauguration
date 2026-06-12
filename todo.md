@@ -62,7 +62,7 @@
   - Java now has source to `UnifiedModule` to textual SIL to `hybrid_sil` graph coverage.
   - Java method extraction now lowers bounded returns, assignments, and call expressions into Core IR bodies.
   - Dart now shares the generic Tree-sitter scalar body path for params, return types, locals, assignment, calls, `if`, `while`, and returns, with cross-language control-flow fixture coverage.
-  - Next high-value promotion: move one remaining level-1 front (`php`, `lua`, `scala`, or `fsharp`) through the same declaration + bounded-body + lowering + diagnostics path.
+  - Next high-value promotion: move one remaining level-1 front through the same declaration + bounded-body + lowering + diagnostics path. Current level-1 candidates are Objective-C methods, `fsharp`, `elixir`, `erlang`, `haskell`, `julia`, and `r`; `php`, `lua`, and `scala` are no longer level-1 fronts.
   - Keep parser maturity labels current in `docs/architecture/parser-surface.md`.
 
 - [x] Add an agent-first compiler mode.
@@ -139,6 +139,11 @@
   - Keep `in test` as the required pre-push gate.
   - Keep Linux `in test` on `IN_TEST_SKIP_SWIFT=1` and macOS `in test` full.
   - Add staged skip flags only when a dependency proves too heavy for repeatable local or sandboxed runs.
+
+- [x] Reconcile Markdown roadmap and conformance drift.
+  - Expanded `docs/architecture/conformance-matrix.md` so its visible language table matches the reported self-hosted matrix count, current levels, F# declaration-only status, and VM runtime surface.
+  - Clarified `docs/architecture/parser-surface.md` declared, evaluated, boundary, and effective compatibility levels so family fronts such as `php`, `lua`, and `scala` do not look like stale level-1 work.
+  - Refreshed `docs/architecture/future-work-roadmap.md` and `docs/architecture/universal-compiler-roadmap.md` for landed OCaml, `.icore` v2/v3 status, completed bounded JS/TS/Python/Ruby body paths, and the next Tree-sitter promotion target.
 
 - [ ] Verification commands before pushing compiler changes.
   - `in update`
