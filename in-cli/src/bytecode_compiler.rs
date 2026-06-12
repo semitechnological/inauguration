@@ -177,6 +177,70 @@ mod tests {
     }
 
     #[test]
+    fn compiles_javascript_class_method_to_runnable_bytecode() {
+        let path = temp_file("counter.js");
+        fs::write(
+            &path,
+            r#"
+class Counter {
+  value = 0;
+  constructor(start) {
+    this.value = start;
+  }
+  inc() {
+    return this.value + 1;
+  }
+}
+function answer() {
+  const c = new Counter(41);
+  return c.inc();
+}
+function main() {
+  return answer();
+}
+"#,
+        )
+        .unwrap();
+
+        let output = compile_source_path(&path, "App", ParserCli::Auto).unwrap();
+        assert_eq!(run_bytecode_module(output.module).unwrap(), Value::Int(42));
+
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn compiles_typescript_class_method_to_runnable_bytecode() {
+        let path = temp_file("counter.ts");
+        fs::write(
+            &path,
+            r#"
+class Counter {
+  value: number;
+  constructor(start: number) {
+    this.value = start;
+  }
+  inc(): number {
+    return this.value + 1;
+  }
+}
+function answer(): number {
+  const c = new Counter(41);
+  return c.inc();
+}
+function main(): number {
+  return answer();
+}
+"#,
+        )
+        .unwrap();
+
+        let output = compile_source_path(&path, "App", ParserCli::Auto).unwrap();
+        assert_eq!(run_bytecode_module(output.module).unwrap(), Value::Int(42));
+
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn rejects_unresolved_identifier_before_lowering() {
         let path = temp_file("unresolved-ident.in");
         fs::write(&path, "fn main() -> Int { return missing; }\n").unwrap();

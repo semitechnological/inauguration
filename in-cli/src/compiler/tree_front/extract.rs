@@ -1134,6 +1134,15 @@ fn ast_stmt_or_body(
 }
 
 fn ast_expr(src: &[u8], expr: Node<'_>, shape: AstShape) -> Option<Expr> {
+    if matches!(expr.kind(), "this" | "this_expression") {
+        return Some(Expr::Ident("this".to_string()));
+    }
+    if matches!(expr.kind(), "member_expression" | "member_access_expression") {
+        return ast_member_expr(src, expr, shape);
+    }
+    if matches!(expr.kind(), "new_expression" | "object_creation_expression") {
+        return ast_new_expr(src, expr, shape);
+    }
     if expr.kind() == "identifier" {
         return Some(Expr::Ident(node_txt(src, expr).trim().to_string()));
     }
@@ -1180,6 +1189,53 @@ fn ast_expr(src: &[u8], expr: Node<'_>, shape: AstShape) -> Option<Expr> {
     None
 }
 
+fn ast_member_expr(src: &[u8], expr: Node<'_>, shape: AstShape) -> Option<Expr> {
+    let base = expr
+        .child_by_field_name("object")
+        .or_else(|| expr.child_by_field_name("expression"))
+        .or_else(|| expr.named_child(0))?;
+    let property = expr
+        .child_by_field_name("property")
+        .or_else(|| expr.child_by_field_name("name"))
+        .or_else(|| expr.named_child(expr.named_child_count().saturating_sub(1) as u32))?;
+    let name = node_txt(src, property).trim().to_string();
+    if name.is_empty() {
+        return None;
+    }
+    Some(Expr::Field {
+        base: Box::new(ast_expr(src, base, shape)?),
+        name,
+    })
+}
+
+fn ast_new_expr(src: &[u8], expr: Node<'_>, shape: AstShape) -> Option<Expr> {
+    let class_node = expr
+        .child_by_field_name("constructor")
+        .or_else(|| expr.child_by_field_name("type"))
+        .or_else(|| expr.child_by_field_name("class"))
+        .or_else(|| first_named(expr, "identifier"))
+        .or_else(|| first_named(expr, "type_identifier"))?;
+    let class_name = node_txt(src, class_node).trim();
+    if class_name.is_empty() {
+        return None;
+    }
+    let mut args = Vec::new();
+    for kind in shape.arg_container_kinds {
+        if let Some(arg_node) = expr
+            .child_by_field_name("arguments")
+            .filter(|n| n.kind() == *kind)
+            .or_else(|| named_descendant(expr, kind))
+        {
+            args.extend(ast_args(src, arg_node, shape)?);
+            break;
+        }
+    }
+    Some(Expr::Call {
+        callee: Box::new(Expr::Ident(format!("__new__{class_name}"))),
+        args,
+    })
+}
+
 fn ast_binary_expr(src: &[u8], expr: Node<'_>, shape: AstShape) -> Option<Expr> {
     let lhs = expr
         .child_by_field_name("left")
@@ -1216,6 +1272,10 @@ fn ast_call_expr(src: &[u8], call: Node<'_>, shape: AstShape) -> Option<Expr> {
     let callee = call
         .child_by_field_name("function")
         .and_then(|n| ast_expr(src, n, shape))
+        .or_else(|| {
+            call.child_by_field_name("callee")
+                .and_then(|n| ast_expr(src, n, shape))
+        })
         .or_else(|| {
             call.child_by_field_name("name")
                 .map(|n| Expr::Ident(node_txt(src, n).trim().to_string()))
@@ -3240,6 +3300,7 @@ fn extract_js_with_classes(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, Stri
         }
     }
 
+    rewrite_constructor_calls(&mut decls);
     Ok(decls)
 }
 
@@ -3311,10 +3372,11 @@ fn js_method_decl<'a>(src: &[u8], m: Node<'a>) -> Option<Decl> {
         .or_else(|| first_named(m, "property_identifier"))?;
     let name = node_txt(src, name_n).trim().to_string();
     let params = js_formal_params(src, m);
-    let body = m
+    let mut body = m
         .child_by_field_name("body")
         .map(|b| js_body(src, b))
         .unwrap_or_default();
+    rewrite_this_receiver_in_body(&mut body);
     Some(Decl::Function {
         name,
         params,
@@ -3369,6 +3431,231 @@ fn js_var_function<'a>(src: &[u8], vd: Node<'a>) -> Option<Decl> {
         body,
         type_params: vec![],
     })
+}
+
+fn rewrite_this_receiver_in_body(body: &mut [Stmt]) {
+    for stmt in body {
+        rewrite_this_receiver_in_stmt(stmt);
+    }
+}
+
+fn rewrite_this_receiver_in_stmt(stmt: &mut Stmt) {
+    match stmt {
+        Stmt::Let(_, _, expr)
+        | Stmt::Assign(_, expr)
+        | Stmt::Return(Some(expr))
+        | Stmt::Expr(expr)
+        | Stmt::Throw(expr) => rewrite_this_receiver_in_expr(expr),
+        Stmt::IndexAssign { base, index, value } => {
+            rewrite_this_receiver_in_expr(base);
+            rewrite_this_receiver_in_expr(index);
+            rewrite_this_receiver_in_expr(value);
+        }
+        Stmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            rewrite_this_receiver_in_expr(cond);
+            rewrite_this_receiver_in_body(then_body);
+            rewrite_this_receiver_in_body(else_body);
+        }
+        Stmt::Loop { cond, body, .. } => {
+            if let Some(cond) = cond {
+                rewrite_this_receiver_in_expr(cond);
+            }
+            rewrite_this_receiver_in_body(body);
+        }
+        Stmt::Match { scrutinee, arms } => {
+            rewrite_this_receiver_in_expr(scrutinee);
+            for arm in arms {
+                rewrite_this_receiver_in_body(&mut arm.body);
+            }
+        }
+        Stmt::Try { body, catches } => {
+            rewrite_this_receiver_in_body(body);
+            for catch in catches {
+                rewrite_this_receiver_in_body(&mut catch.body);
+            }
+        }
+        Stmt::Return(None) => {}
+    }
+}
+
+fn rewrite_this_receiver_in_expr(expr: &mut Expr) {
+    match expr {
+        Expr::Ident(name) if name == "this" => {
+            *name = "self".to_string();
+        }
+        Expr::Unary { expr, .. } => rewrite_this_receiver_in_expr(expr),
+        Expr::Binary { lhs, rhs, .. } => {
+            rewrite_this_receiver_in_expr(lhs);
+            rewrite_this_receiver_in_expr(rhs);
+        }
+        Expr::StructInit { fields, .. } => {
+            for (_, expr) in fields {
+                rewrite_this_receiver_in_expr(expr);
+            }
+        }
+        Expr::Field { base, .. } => rewrite_this_receiver_in_expr(base),
+        Expr::ArrayLit(items) => {
+            for item in items {
+                rewrite_this_receiver_in_expr(item);
+            }
+        }
+        Expr::Index { base, index } => {
+            rewrite_this_receiver_in_expr(base);
+            rewrite_this_receiver_in_expr(index);
+        }
+        Expr::Call { callee, args } => {
+            rewrite_this_receiver_in_expr(callee);
+            for arg in args {
+                rewrite_this_receiver_in_expr(arg);
+            }
+        }
+        Expr::Closure { body, .. } => rewrite_this_receiver_in_body(body),
+        Expr::Ident(_)
+        | Expr::IntLit(_)
+        | Expr::FloatLit(_)
+        | Expr::StringLit(_)
+        | Expr::BoolLit(_) => {}
+    }
+}
+
+fn rewrite_constructor_calls(decls: &mut [Decl]) {
+    let class_fields: HashMap<String, Vec<String>> = decls
+        .iter()
+        .filter_map(|decl| match decl {
+            Decl::Class { name, fields, .. } => Some((
+                name.clone(),
+                fields.iter().map(|(field, _)| field.clone()).collect(),
+            )),
+            _ => None,
+        })
+        .collect();
+    if class_fields.is_empty() {
+        return;
+    }
+    for decl in decls {
+        rewrite_constructor_calls_in_decl(decl, &class_fields);
+    }
+}
+
+fn rewrite_constructor_calls_in_decl(decl: &mut Decl, class_fields: &HashMap<String, Vec<String>>) {
+    match decl {
+        Decl::Function { body, .. } => rewrite_constructor_calls_in_body(body, class_fields),
+        Decl::Class { methods, .. } => {
+            for method in methods {
+                rewrite_constructor_calls_in_decl(method, class_fields);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn rewrite_constructor_calls_in_body(body: &mut [Stmt], class_fields: &HashMap<String, Vec<String>>) {
+    for stmt in body {
+        rewrite_constructor_calls_in_stmt(stmt, class_fields);
+    }
+}
+
+fn rewrite_constructor_calls_in_stmt(stmt: &mut Stmt, class_fields: &HashMap<String, Vec<String>>) {
+    match stmt {
+        Stmt::Let(_, _, expr)
+        | Stmt::Assign(_, expr)
+        | Stmt::Return(Some(expr))
+        | Stmt::Expr(expr)
+        | Stmt::Throw(expr) => rewrite_constructor_calls_in_expr(expr, class_fields),
+        Stmt::IndexAssign { base, index, value } => {
+            rewrite_constructor_calls_in_expr(base, class_fields);
+            rewrite_constructor_calls_in_expr(index, class_fields);
+            rewrite_constructor_calls_in_expr(value, class_fields);
+        }
+        Stmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            rewrite_constructor_calls_in_expr(cond, class_fields);
+            rewrite_constructor_calls_in_body(then_body, class_fields);
+            rewrite_constructor_calls_in_body(else_body, class_fields);
+        }
+        Stmt::Loop { cond, body, .. } => {
+            if let Some(cond) = cond {
+                rewrite_constructor_calls_in_expr(cond, class_fields);
+            }
+            rewrite_constructor_calls_in_body(body, class_fields);
+        }
+        Stmt::Match { scrutinee, arms } => {
+            rewrite_constructor_calls_in_expr(scrutinee, class_fields);
+            for arm in arms {
+                rewrite_constructor_calls_in_body(&mut arm.body, class_fields);
+            }
+        }
+        Stmt::Try { body, catches } => {
+            rewrite_constructor_calls_in_body(body, class_fields);
+            for catch in catches {
+                rewrite_constructor_calls_in_body(&mut catch.body, class_fields);
+            }
+        }
+        Stmt::Return(None) => {}
+    }
+}
+
+fn rewrite_constructor_calls_in_expr(expr: &mut Expr, class_fields: &HashMap<String, Vec<String>>) {
+    match expr {
+        Expr::Call { callee, args } => {
+            rewrite_constructor_calls_in_expr(callee, class_fields);
+            for arg in args.iter_mut() {
+                rewrite_constructor_calls_in_expr(arg, class_fields);
+            }
+            if let Expr::Ident(name) = callee.as_ref()
+                && let Some(class_name) = name.strip_prefix("__new__")
+                && let Some(fields) = class_fields.get(class_name)
+            {
+                let rendered = fields
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, field)| {
+                        (
+                            field.clone(),
+                            args.get(idx).cloned().unwrap_or(Expr::IntLit(0)),
+                        )
+                    })
+                    .collect();
+                *expr = Expr::StructInit {
+                    name: class_name.to_string(),
+                    fields: rendered,
+                };
+            }
+        }
+        Expr::Unary { expr, .. } => rewrite_constructor_calls_in_expr(expr, class_fields),
+        Expr::Binary { lhs, rhs, .. } => {
+            rewrite_constructor_calls_in_expr(lhs, class_fields);
+            rewrite_constructor_calls_in_expr(rhs, class_fields);
+        }
+        Expr::StructInit { fields, .. } => {
+            for (_, expr) in fields {
+                rewrite_constructor_calls_in_expr(expr, class_fields);
+            }
+        }
+        Expr::Field { base, .. } => rewrite_constructor_calls_in_expr(base, class_fields),
+        Expr::ArrayLit(items) => {
+            for item in items {
+                rewrite_constructor_calls_in_expr(item, class_fields);
+            }
+        }
+        Expr::Index { base, index } => {
+            rewrite_constructor_calls_in_expr(base, class_fields);
+            rewrite_constructor_calls_in_expr(index, class_fields);
+        }
+        Expr::Closure { body, .. } => rewrite_constructor_calls_in_body(body, class_fields),
+        Expr::Ident(_)
+        | Expr::IntLit(_)
+        | Expr::FloatLit(_)
+        | Expr::StringLit(_)
+        | Expr::BoolLit(_) => {}
+    }
 }
 
 fn js_formal_params<'a>(src: &[u8], fun: Node<'a>) -> Vec<(String, Typ)> {
@@ -3482,6 +3769,7 @@ fn extract_ts_with_classes(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, Stri
         }
     }
 
+    rewrite_constructor_calls(&mut decls);
     Ok(decls)
 }
 
@@ -3565,10 +3853,11 @@ fn ts_method_decl<'a>(src: &[u8], m: Node<'a>) -> Option<Decl> {
     let name = node_txt(src, name_n).trim().to_string();
     let params = ts_params(src, m);
     let ret = ts_return_type(src, m);
-    let body = m
+    let mut body = m
         .child_by_field_name("body")
         .map(|b| js_body(src, b))
         .unwrap_or_default();
+    rewrite_this_receiver_in_body(&mut body);
     Some(Decl::Function {
         name,
         params,
@@ -6917,6 +7206,67 @@ var multiply = function(a, b) { return a * b; };
     }
 
     #[test]
+    fn js_member_new_and_method_call_lower_to_core_ir() {
+        let src = r#"
+class Counter {
+    value = 0;
+    constructor(start) {
+        this.value = start;
+    }
+    inc() {
+        return this.value + 1;
+    }
+}
+function answer() {
+    const c = new Counter(41);
+    return c.inc();
+}
+function main() {}
+"#;
+        let m = parse_lang(
+            tree_sitter_javascript::LANGUAGE.into(),
+            src,
+            extract_js_with_classes,
+        )
+        .expect("ok");
+        let inc = m
+            .decls
+            .iter()
+            .find_map(|d| match d {
+                Decl::Class { methods, .. } => methods.iter().find_map(|method| match method {
+                    Decl::Function { name, body, .. } if name == "inc" => Some(body.clone()),
+                    _ => None,
+                }),
+                _ => None,
+            })
+            .expect("inc method");
+        assert!(matches!(
+            &inc[0],
+            Stmt::Return(Some(Expr::Binary { lhs, .. }))
+                if matches!(lhs.as_ref(), Expr::Field { base, name } if name == "value" && matches!(base.as_ref(), Expr::Ident(id) if id == "self"))
+        ));
+        let answer = m
+            .decls
+            .iter()
+            .find_map(|d| match d {
+                Decl::Function { name, body, .. } if name == "answer" => Some(body.clone()),
+                _ => None,
+            })
+            .expect("answer");
+        assert!(matches!(
+            &answer[0],
+            Stmt::Let(_, _, Expr::StructInit { name, fields })
+                if name == "Counter" && fields.iter().any(|(field, expr)| field == "value" && matches!(expr, Expr::IntLit(41)))
+        ));
+        assert!(matches!(
+            &answer[1],
+            Stmt::Return(Some(Expr::Call { callee, args }))
+                if matches!(callee.as_ref(), Expr::Field { base, name } if name == "inc" && matches!(base.as_ref(), Expr::Ident(id) if id == "c"))
+                    && args.is_empty()
+        ));
+    }
+
+    #[test]
     fn ts_interface_extraction_produces_decl_interface() {
         let src = r#"
 interface Drawable {
@@ -6994,6 +7344,50 @@ class TypedCounter {
             }
             _ => panic!("expected function"),
         }
+    }
+
+    #[test]
+    fn ts_member_new_and_method_call_lower_to_core_ir() {
+        let src = r#"
+class Counter {
+    value: number;
+    constructor(start: number) {
+        this.value = start;
+    }
+    inc(): number {
+        return this.value + 1;
+    }
+}
+function answer(): number {
+    const c = new Counter(41);
+    return c.inc();
+}
+function main(): void {}
+"#;
+        let m = parse_lang(
+            tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            src,
+            extract_ts_with_classes,
+        )
+        .expect("ok");
+        let answer = m
+            .decls
+            .iter()
+            .find_map(|d| match d {
+                Decl::Function { name, body, .. } if name == "answer" => Some(body.clone()),
+                _ => None,
+            })
+            .expect("answer");
+        assert!(matches!(
+            &answer[0],
+            Stmt::Let(_, _, Expr::StructInit { name, fields })
+                if name == "Counter" && fields.iter().any(|(field, expr)| field == "value" && matches!(expr, Expr::IntLit(41)))
+        ));
+        assert!(matches!(
+            &answer[1],
+            Stmt::Return(Some(Expr::Call { callee, .. }))
+                if matches!(callee.as_ref(), Expr::Field { name, .. } if name == "inc")
+        ));
     }
 
     #[test]

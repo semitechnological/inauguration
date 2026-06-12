@@ -81,8 +81,10 @@ fn is_builtin_fn(name: &str) -> bool {
 
 fn builtin_return_type(name: &str) -> Typ {
     match name {
-        "len" | "array_len" | "bool_to_int" | "to_int" | "str_to_int" | "str_index_of" | "str_table_get_int" => Typ::Int,
-        "str_eq" | "str_contains" | "str_starts_with" | "str_is_int" | "str_table_has" | "int_to_bool" => Typ::Bool,
+        "len" | "array_len" | "bool_to_int" | "to_int" | "str_to_int" | "str_index_of"
+        | "str_table_get_int" => Typ::Int,
+        "str_eq" | "str_contains" | "str_starts_with" | "str_is_int" | "str_table_has"
+        | "int_to_bool" => Typ::Bool,
         "str_concat" | "str_trim" | "str_slice" | "to_string" => Typ::String,
         "str_split_lines" | "str_split_spaces" | "str_tokenize_expr" => {
             Typ::Array(Box::new(Typ::String))
@@ -104,13 +106,18 @@ fn collect_module_facts(module: &UnifiedModule) -> Result<ModuleFacts, String> {
                 }
                 structs.insert(name.clone(), fields.clone());
             }
-            Decl::Class { name, fields, methods, .. } => {
+            Decl::Class {
+                name,
+                fields,
+                methods,
+                ..
+            } => {
                 // Register class fields as struct schema
                 if !top_level.insert(name.clone()) {
                     return Err(format!("duplicate top-level name `{name}`"));
                 }
                 structs.insert(name.clone(), fields.clone());
-                
+
                 // Register mangled methods for class
                 for method in methods {
                     if let Decl::Function {
@@ -126,7 +133,13 @@ fn collect_module_facts(module: &UnifiedModule) -> Result<ModuleFacts, String> {
                         }
                         let mut new_params = vec![("self".to_string(), Typ::Named(name.clone()))];
                         new_params.extend(params.iter().cloned());
-                        functions.insert(mangled, FunctionSig { params: new_params, ret: ret.clone() });
+                        functions.insert(
+                            mangled,
+                            FunctionSig {
+                                params: new_params,
+                                ret: ret.clone(),
+                            },
+                        );
                     }
                 }
             }
@@ -136,7 +149,13 @@ fn collect_module_facts(module: &UnifiedModule) -> Result<ModuleFacts, String> {
                 if !top_level.insert(name.clone()) {
                     return Err(format!("duplicate top-level name `{name}`"));
                 }
-                functions.insert(name.clone(), FunctionSig { params: params.clone(), ret: ret.clone() });
+                functions.insert(
+                    name.clone(),
+                    FunctionSig {
+                        params: params.clone(),
+                        ret: ret.clone(),
+                    },
+                );
             }
             Decl::Interface { .. } => {}
         }
@@ -170,7 +189,7 @@ fn check_stmt(
             check_expr(fn_name, expr, facts, env)?;
             let expr_typ = expr_type(expr, facts, env)?;
             if let (Some(expected), Some(actual)) = (typ, expr_typ.as_ref())
-                && expected != actual
+                && !type_compatible(expected, actual)
             {
                 return Err(format!(
                     "type mismatch for `{name}` in `{fn_name}`: expected {}, got {}",
@@ -191,7 +210,7 @@ fn check_stmt(
             };
             check_expr(fn_name, expr, facts, env)?;
             if let Some(expr_typ) = expr_type(expr, facts, env)? {
-                if existing_typ != expr_typ {
+                if !type_compatible(&existing_typ, &expr_typ) {
                     return Err(format!(
                         "type mismatch for assignment `{name}` in `{fn_name}`: expected {}, got {}",
                         type_name(&existing_typ),
@@ -210,7 +229,7 @@ fn check_stmt(
             match expr_type(base, facts, env)? {
                 Some(Typ::Array(item)) => {
                     if let Some(value_typ) = expr_type(value, facts, env)?
-                        && *item != value_typ
+                        && !type_compatible(&item, &value_typ)
                     {
                         return Err(format!(
                             "type mismatch for array assignment in `{fn_name}`: expected {}, got {}",
@@ -234,7 +253,7 @@ fn check_stmt(
                 return Err(format!("return value in void function `{fn_name}`"));
             }
             if let Some(expr_typ) = expr_type(expr, facts, env)?
-                && &expr_typ != fn_ret
+                && !type_compatible(fn_ret, &expr_typ)
             {
                 return Err(format!(
                     "return type mismatch in `{fn_name}`: expected {}, got {}",
@@ -274,7 +293,7 @@ fn check_stmt(
             }
             Ok(())
         }
-        Stmt::Throw(_) | Stmt::Try { .. } => Ok(())
+        Stmt::Throw(_) | Stmt::Try { .. } => Ok(()),
     }
 }
 
@@ -319,7 +338,7 @@ fn check_expr(
                 "==" | "!=" => {
                     if let (Some(lhs_typ), Some(rhs_typ)) =
                         (expr_type(lhs, facts, env)?, expr_type(rhs, facts, env)?)
-                        && lhs_typ != rhs_typ
+                        && !type_compatible(&lhs_typ, &rhs_typ)
                     {
                         return Err(format!(
                             "type mismatch for binary `{op}` in `{fn_name}`: left {}, right {}",
@@ -354,7 +373,7 @@ fn check_expr(
                     .iter()
                     .find(|(schema_field, _)| schema_field == field)
                     && let Some(actual) = expr_type(expr, facts, env)?
-                    && expected != &actual
+                    && !type_compatible(expected, &actual)
                 {
                     return Err(format!(
                         "type mismatch for field `{field}` in struct `{name}`: expected {}, got {}",
@@ -386,7 +405,7 @@ fn check_expr(
                 check_expr(fn_name, item, facts, env)?;
                 if let Some(item_typ) = expr_type(item, facts, env)? {
                     if let Some(expected_typ) = &expected {
-                        if expected_typ != &item_typ {
+                        if !type_compatible(expected_typ, &item_typ) {
                             return Err(format!(
                                 "array literal type mismatch in `{fn_name}`: expected {}, got {}",
                                 type_name(expected_typ),
@@ -434,7 +453,7 @@ fn check_expr(
                 for ((param_name, param_typ), arg) in sig.params.iter().zip(args) {
                     check_expr(fn_name, arg, facts, env)?;
                     if let Some(arg_typ) = expr_type(arg, facts, env)?
-                        && param_typ != &arg_typ
+                        && !type_compatible(param_typ, &arg_typ)
                     {
                         return Err(format!(
                             "argument `{param_name}` for `{name}` in `{fn_name}` expected {}, got {}",
@@ -564,7 +583,7 @@ fn require_type(
     env: &HashMap<String, Typ>,
 ) -> Result<(), String> {
     if let Some(actual) = expr_type(expr, facts, env)?
-        && &actual != expected
+        && !type_compatible(expected, &actual)
     {
         return Err(format!(
             "{context} in `{fn_name}` expected {}, got {}",
@@ -586,6 +605,14 @@ fn type_name(typ: &Typ) -> String {
         Typ::Named(name) => name.clone(),
         Typ::Generic(name) => name.clone(),
     }
+}
+
+fn type_compatible(expected: &Typ, actual: &Typ) -> bool {
+    expected == actual || is_any_type(expected) || is_any_type(actual)
+}
+
+fn is_any_type(typ: &Typ) -> bool {
+    matches!(typ, Typ::Named(name) if name == "Any")
 }
 
 #[cfg(test)]
@@ -900,6 +927,40 @@ mod tests {
     }
 
     #[test]
+    fn accepts_any_struct_field_init_and_numeric_use() {
+        typecheck_executable(&module(vec![
+            Decl::Struct {
+                name: "Boxed".to_string(),
+                fields: vec![("value".to_string(), Typ::Named("Any".to_string()))],
+                type_params: vec![],
+            },
+            function_with_ret(
+                "main",
+                Typ::Int,
+                vec![
+                    Stmt::Let(
+                        "boxed".to_string(),
+                        None,
+                        Expr::StructInit {
+                            name: "Boxed".to_string(),
+                            fields: vec![("value".to_string(), Expr::IntLit(41))],
+                        },
+                    ),
+                    Stmt::Return(Some(Expr::Binary {
+                        op: "+".to_string(),
+                        lhs: Box::new(Expr::Field {
+                            base: Box::new(Expr::Ident("boxed".to_string())),
+                            name: "value".to_string(),
+                        }),
+                        rhs: Box::new(Expr::IntLit(1)),
+                    })),
+                ],
+            ),
+        ]))
+        .expect("Any fields should accept concrete values and typed use");
+    }
+
+    #[test]
     fn rejects_unknown_struct_init_field() {
         let err = typecheck_executable(&module(vec![
             point_struct(),
@@ -1074,10 +1135,8 @@ mod tests {
     #[test]
     fn accepts_float_and_string_binary_operators() {
         typecheck_executable(
-            &crate::in_lang_parse::parse_in_source(
-                "fn main() -> Float { return 2.5 + 3.5; }\n",
-            )
-            .expect("parse float"),
+            &crate::in_lang_parse::parse_in_source("fn main() -> Float { return 2.5 + 3.5; }\n")
+                .expect("parse float"),
         )
         .expect("float add");
         typecheck_executable(

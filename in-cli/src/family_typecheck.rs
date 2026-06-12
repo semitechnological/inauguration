@@ -55,24 +55,44 @@ fn uses_polyglot_entrypoint_typecheck(parser_id: ParserId) -> bool {
 }
 
 fn typecheck_polyglot_entrypoints(module: &UnifiedModule) -> Result<(), String> {
-    let entrypoints: Vec<Decl> = module
+    let mut checked_decls: Vec<Decl> = module
         .decls
         .iter()
-        .filter(|decl| {
-            matches!(
-                decl,
-                Decl::Function { name, .. } if name == "answer" || name == "main"
-            )
-        })
+        .filter(|decl| matches!(decl, Decl::Struct { .. } | Decl::Class { .. }))
         .cloned()
         .collect();
-    if !entrypoints
+    let functions: Vec<Decl> = module
+        .decls
+        .iter()
+        .filter_map(|decl| match decl {
+            Decl::Function {
+                name,
+                params,
+                ret,
+                body,
+                type_params,
+            } => Some(Decl::Function {
+                name: name.clone(),
+                params: params.clone(),
+                ret: ret.clone(),
+                body: if name == "answer" || name == "main" {
+                    body.clone()
+                } else {
+                    Vec::new()
+                },
+                type_params: type_params.clone(),
+            }),
+            _ => None,
+        })
+        .collect();
+    if !functions
         .iter()
         .any(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
     {
         return Err("missing main function".to_string());
     }
-    core_typecheck::typecheck_executable(&UnifiedModule::new(entrypoints))
+    checked_decls.extend(functions);
+    core_typecheck::typecheck_executable(&UnifiedModule::new(checked_decls))
 }
 
 pub fn normalize_module(parser_id: ParserId, module: &UnifiedModule) -> UnifiedModule {
@@ -130,6 +150,18 @@ fn normalize_decl(parser_id: ParserId, decl: &Decl) -> Decl {
             implements: implements.clone(),
             type_params: type_params.clone(),
         },
+        Decl::Struct {
+            name,
+            fields,
+            type_params,
+        } => Decl::Struct {
+            name: name.clone(),
+            fields: fields
+                .iter()
+                .map(|(n, t)| (n.clone(), normalize_type(t)))
+                .collect(),
+            type_params: type_params.clone(),
+        },
         other => other.clone(),
     }
 }
@@ -143,6 +175,9 @@ fn normalize_function_ret(parser_id: ParserId, ret: &Typ, body: &[Stmt]) -> Typ 
     {
         if let Some(inferred) = infer_return_type_from_body(body) {
             return inferred;
+        }
+        if matches!(parser_id, ParserId::JavaScript) && body_returns_expression(body) {
+            return Typ::Named("Any".to_string());
         }
     }
     normalized
@@ -194,6 +229,12 @@ fn expr_type_hint(expr: &Expr) -> Option<Typ> {
     }
 }
 
+fn body_returns_expression(body: &[Stmt]) -> bool {
+    body.iter()
+        .rev()
+        .any(|stmt| matches!(stmt, Stmt::Return(Some(_)) | Stmt::Expr(_) | Stmt::Throw(_)))
+}
+
 fn normalize_type(typ: &Typ) -> Typ {
     match typ {
         Typ::Named(name) => {
@@ -217,7 +258,7 @@ fn normalize_type(typ: &Typ) -> Typ {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core_ir::{Decl, Expr, Stmt};
+    use crate::core_ir::{Decl, Expr, Stmt, Visibility};
 
     #[test]
     fn php_int_return_typechecks_after_normalization() {
@@ -304,6 +345,40 @@ mod tests {
     }
 
     #[test]
+    fn javascript_void_ret_with_call_return_infers_dynamic() {
+        let module = UnifiedModule::new(vec![
+            Decl::Function {
+                name: "answer".into(),
+                params: vec![],
+                ret: Typ::Void,
+                body: vec![Stmt::Return(Some(Expr::Call {
+                    callee: Box::new(Expr::Ident("helper".into())),
+                    args: vec![],
+                }))],
+                type_params: vec![],
+            },
+            Decl::Function {
+                name: "helper".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![Stmt::Return(Some(Expr::IntLit(42)))],
+                type_params: vec![],
+            },
+            Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Void,
+                body: vec![Stmt::Return(Some(Expr::Call {
+                    callee: Box::new(Expr::Ident("answer".into())),
+                    args: vec![],
+                }))],
+                type_params: vec![],
+            },
+        ]);
+        assert!(typecheck_for_parser(ParserId::JavaScript, &module).is_ok());
+    }
+
+    #[test]
     fn typescript_number_return_typechecks_after_normalization() {
         let module = UnifiedModule::new(vec![
             Decl::Function {
@@ -318,6 +393,150 @@ mod tests {
                 params: vec![],
                 ret: Typ::Named("void".into()),
                 body: vec![],
+                type_params: vec![],
+            },
+        ]);
+        assert!(typecheck_for_parser(ParserId::TypeScript, &module).is_ok());
+    }
+
+    #[test]
+    fn javascript_entrypoint_typecheck_keeps_class_context() {
+        let module = UnifiedModule::new(vec![
+            Decl::Class {
+                name: "Counter".into(),
+                fields: vec![("value".into(), Typ::Int)],
+                methods: vec![],
+                visibility: Visibility::Pub,
+                extends: None,
+                implements: vec![],
+                type_params: vec![],
+            },
+            Decl::Function {
+                name: "answer".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![
+                    Stmt::Let(
+                        "counter".into(),
+                        None,
+                        Expr::StructInit {
+                            name: "Counter".into(),
+                            fields: vec![("value".into(), Expr::IntLit(42))],
+                        },
+                    ),
+                    Stmt::Return(Some(Expr::Field {
+                        base: Box::new(Expr::Ident("counter".into())),
+                        name: "value".into(),
+                    })),
+                ],
+                type_params: vec![],
+            },
+            Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![Stmt::Return(Some(Expr::IntLit(42)))],
+                type_params: vec![],
+            },
+        ]);
+        assert!(typecheck_for_parser(ParserId::JavaScript, &module).is_ok());
+    }
+
+    #[test]
+    fn javascript_entrypoint_typecheck_keeps_helper_signatures() {
+        let module = UnifiedModule::new(vec![
+            Decl::Function {
+                name: "helper".into(),
+                params: vec![("value".into(), Typ::Int)],
+                ret: Typ::Int,
+                body: vec![Stmt::Return(Some(Expr::Ident("missing".into())))],
+                type_params: vec![],
+            },
+            Decl::Function {
+                name: "answer".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![Stmt::Return(Some(Expr::Call {
+                    callee: Box::new(Expr::Ident("helper".into())),
+                    args: vec![Expr::IntLit(42)],
+                }))],
+                type_params: vec![],
+            },
+            Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![Stmt::Return(Some(Expr::IntLit(42)))],
+                type_params: vec![],
+            },
+        ]);
+        assert!(typecheck_for_parser(ParserId::JavaScript, &module).is_ok());
+    }
+
+    #[test]
+    fn javascript_entrypoint_typecheck_still_checks_helper_call_args() {
+        let module = UnifiedModule::new(vec![
+            Decl::Function {
+                name: "helper".into(),
+                params: vec![("value".into(), Typ::Int)],
+                ret: Typ::Int,
+                body: vec![],
+                type_params: vec![],
+            },
+            Decl::Function {
+                name: "answer".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![Stmt::Return(Some(Expr::Call {
+                    callee: Box::new(Expr::Ident("helper".into())),
+                    args: vec![Expr::StringLit("bad".into())],
+                }))],
+                type_params: vec![],
+            },
+            Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![Stmt::Return(Some(Expr::IntLit(42)))],
+                type_params: vec![],
+            },
+        ]);
+        assert!(typecheck_for_parser(ParserId::JavaScript, &module).is_err());
+    }
+
+    #[test]
+    fn typescript_struct_fields_normalize_before_entrypoint_typecheck() {
+        let module = UnifiedModule::new(vec![
+            Decl::Struct {
+                name: "Counter".into(),
+                fields: vec![("value".into(), Typ::Named("number".into()))],
+                type_params: vec![],
+            },
+            Decl::Function {
+                name: "answer".into(),
+                params: vec![],
+                ret: Typ::Named("number".into()),
+                body: vec![
+                    Stmt::Let(
+                        "counter".into(),
+                        None,
+                        Expr::StructInit {
+                            name: "Counter".into(),
+                            fields: vec![("value".into(), Expr::IntLit(42))],
+                        },
+                    ),
+                    Stmt::Return(Some(Expr::Field {
+                        base: Box::new(Expr::Ident("counter".into())),
+                        name: "value".into(),
+                    })),
+                ],
+                type_params: vec![],
+            },
+            Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Named("number".into()),
+                body: vec![Stmt::Return(Some(Expr::IntLit(42)))],
                 type_params: vec![],
             },
         ]);
