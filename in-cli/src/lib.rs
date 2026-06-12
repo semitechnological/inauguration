@@ -1,3 +1,4 @@
+#![allow(clippy::too_many_arguments, clippy::type_complexity)]
 //! Library crate backing the `in` CLI — hybrid compiler wave plus embedded hotreload daemon.
 
 #[cfg(unix)]
@@ -18,9 +19,8 @@ pub mod core_ir_verifier;
 pub mod core_typecheck;
 pub mod dynamic_module;
 pub mod extension_registry;
-pub mod family_typecheck;
-pub mod typecheck;
 pub mod external_guard;
+pub mod family_typecheck;
 pub mod graph_report;
 pub mod hotreload;
 pub mod hybrid_core;
@@ -42,15 +42,16 @@ pub mod owned_compile;
 pub mod package_discover;
 pub mod package_extern;
 pub mod package_install;
-pub mod package_runtime;
 pub mod package_lock;
 pub mod package_manifest;
 pub mod package_ref;
+pub mod package_runtime;
 pub mod parser_registry;
 pub mod sil_emit;
 pub mod sil_to_bytecode;
 pub mod swift_subset;
 pub mod target;
+pub mod typecheck;
 pub mod v_native;
 pub mod vm;
 
@@ -341,7 +342,7 @@ fn main() -> void {
 
         // Should have at least 1 function (main)
         assert!(
-            bytecode_module.functions.len() >= 1,
+            !bytecode_module.functions.is_empty(),
             "expected at least main function, got {} functions",
             bytecode_module.functions.len()
         );

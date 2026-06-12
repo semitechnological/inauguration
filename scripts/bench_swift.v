@@ -200,7 +200,10 @@ fn parse_in_stages(output string) InStageBreakdown {
 	return stages
 }
 
-fn classify_loss(swiftpkg_ms f64, in_ms f64, in_driver_overhead_ms f64, in_stages InStageBreakdown) string {
+fn classify_loss(swiftpkg_ms f64, in_ms f64, in_driver_overhead_ms f64, in_stages InStageBreakdown, in_ok bool) string {
+	if !in_ok {
+		return 'in-failed'
+	}
 	if swiftpkg_ms <= 0 {
 		return 'unknown'
 	}
@@ -416,6 +419,7 @@ fn main() {
 				sil_analysis_ms: in_stage_sil_ms
 				total_ms: in_stage_total_ms
 			},
+			in_ok,
 		)
 		speed_status := if ratio > 0 && ratio <= 1.0 { 'in faster/equal vs swift build' } else { 'in slower vs swift build' }
 		println('  == summary ${module_name}: swiftc=${swiftc_ms:.2f}ms swift-build=${swiftpkg_ms:.2f}ms in=${in_ms:.2f}ms ratio=${ratio:.3f} (${speed_status})')
@@ -555,4 +559,17 @@ fn main() {
 
 	println('wrote ${out_md}')
 	println('wrote ${out_json}')
+	mut failed := false
+	for row in rows {
+		if !row.in_ok {
+			failed = true
+		}
+	}
+	if !toolchain_row.in_ok {
+		failed = true
+	}
+	if failed {
+		eprintln('benchmark failed: one or more in build runs failed')
+		exit(1)
+	}
 }

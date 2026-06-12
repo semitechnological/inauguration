@@ -33,7 +33,10 @@ pub fn parse_crystal_source(src: &str) -> Result<UnifiedModule, String> {
     if decls.is_empty() {
         return Err("crystal boundary front: no def declarations found".to_string());
     }
-    if !decls.iter().any(|d| matches!(d, Decl::Function { name, .. } if name == "main")) {
+    if !decls
+        .iter()
+        .any(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+    {
         decls.push(Decl::Function {
             name: "main".to_string(),
             params: vec![],
@@ -46,7 +49,7 @@ pub fn parse_crystal_source(src: &str) -> Result<UnifiedModule, String> {
 }
 
 pub fn extract_crystal_boundary(src: &str) -> Option<BoundaryModule> {
-    for line in src.lines() {
+    if let Some(line) = src.lines().next() {
         let trimmed = line.trim();
         let payload = trimmed
             .strip_prefix("#? in_boundary")
@@ -100,6 +103,11 @@ mod tests {
     fn parses_polyglot_crystal_shape() {
         let src = "def answer : Int32\n  42\nend\n\ndef main\nend\n";
         let module = parse_crystal_source(src).expect("parse");
-        assert!(module.decls.iter().any(|d| matches!(d, Decl::Function { name, .. } if name == "answer")));
+        assert!(
+            module
+                .decls
+                .iter()
+                .any(|d| matches!(d, Decl::Function { name, .. } if name == "answer"))
+        );
     }
 }

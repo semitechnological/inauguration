@@ -182,7 +182,8 @@ mod tests {
             ParserId::Hare,
             ParserId::VbNet,
         ] {
-            let entry = language_support_for_parser(parser_id.as_str()).expect(parser_id.as_str());
+            let entry = language_support_for_parser(parser_id.as_str())
+                .unwrap_or_else(|| panic!("{}", parser_id.as_str()));
             assert!(boundary_level_for(entry) >= 2, "{}", entry.language);
             assert_eq!(effective_level_for(entry), entry.level);
         }
@@ -198,7 +199,8 @@ mod tests {
     #[test]
     fn nim_odin_report_boundary_ir_attach_level() {
         for parser_id in [ParserId::Nim, ParserId::Odin] {
-            let entry = language_support_for_parser(parser_id.as_str()).expect(parser_id.as_str());
+            let entry = language_support_for_parser(parser_id.as_str())
+                .unwrap_or_else(|| panic!("{}", parser_id.as_str()));
             assert_eq!(boundary_level_for(entry), 3, "{}", entry.language);
             assert_eq!(
                 effective_level_for(entry),

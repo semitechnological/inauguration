@@ -33,7 +33,10 @@ pub fn parse_vb_source(src: &str) -> Result<UnifiedModule, String> {
     if decls.is_empty() {
         return Err("vb boundary front: no Function/Sub declarations found".to_string());
     }
-    if !decls.iter().any(|d| matches!(d, Decl::Function { name, .. } if name == "main")) {
+    if !decls
+        .iter()
+        .any(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+    {
         decls.push(Decl::Function {
             name: "main".to_string(),
             params: vec![],
@@ -46,7 +49,7 @@ pub fn parse_vb_source(src: &str) -> Result<UnifiedModule, String> {
 }
 
 pub fn extract_vb_boundary(src: &str) -> Option<BoundaryModule> {
-    for line in src.lines() {
+    if let Some(line) = src.lines().next() {
         let trimmed = line.trim();
         let payload = trimmed
             .strip_prefix("'? in_boundary")
@@ -71,11 +74,7 @@ fn parse_fn_line(line: &str) -> Result<Option<Decl>, String> {
     if parts.len() < 2 {
         return Ok(None);
     }
-    let name = parts[1]
-        .split('(')
-        .next()
-        .unwrap_or("")
-        .trim();
+    let name = parts[1].split('(').next().unwrap_or("").trim();
     if name.is_empty() {
         return Err("vb boundary front: missing name".to_string());
     }
@@ -104,8 +103,14 @@ mod tests {
 
     #[test]
     fn parses_polyglot_vb_shape() {
-        let src = "Function answer() As Integer\n    answer = 42\nEnd Function\nSub main()\nEnd Sub\n";
+        let src =
+            "Function answer() As Integer\n    answer = 42\nEnd Function\nSub main()\nEnd Sub\n";
         let module = parse_vb_source(src).expect("parse");
-        assert!(module.decls.iter().any(|d| matches!(d, Decl::Function { name, .. } if name == "answer")));
+        assert!(
+            module
+                .decls
+                .iter()
+                .any(|d| matches!(d, Decl::Function { name, .. } if name == "answer"))
+        );
     }
 }

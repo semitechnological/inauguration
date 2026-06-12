@@ -36,7 +36,7 @@ pub fn parse_ecmascript_artifact_source(
 }
 
 pub fn extract_ecmascript_boundary(src: &str) -> Option<BoundaryModule> {
-    for line in src.lines() {
+    if let Some(line) = src.lines().next() {
         let trimmed = line.trim();
         let payload = trimmed
             .strip_prefix("//? in_boundary")

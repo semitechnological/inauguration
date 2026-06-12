@@ -12,9 +12,9 @@ dependencies:
     source: github.com/gofiber/fiber/v2
     install_path: target/in/packages/go/github.com/gofiber/fiber/v2/v2.45.0
   npm:hono:
-    version: latest
+    version: 4.12.25
     kind: npm
-    install_path: target/in/packages/npm/hono/4.12.23
+    install_path: target/in/packages/npm/hono/4.12.25
   pypi:flask:
     version: latest
     kind: pypi

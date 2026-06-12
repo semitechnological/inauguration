@@ -149,10 +149,10 @@ fn format_stmt(stmt: &Stmt, depth: usize, out: &mut String) {
             }
         }
         Stmt::Loop {
-            kind,
+            kind: LoopKind::While,
             cond: Some(cond),
             body,
-        } if matches!(kind, LoopKind::While) => {
+        } => {
             out.push_str(&indent);
             out.push_str("while ");
             out.push_str(&format_expr(cond));
@@ -241,7 +241,7 @@ fn format_expr(expr: &Expr) -> String {
             out.push(')');
             out
         }
-        Expr::Closure { .. } => "closure".to_string()
+        Expr::Closure { .. } => "closure".to_string(),
     }
 }
 

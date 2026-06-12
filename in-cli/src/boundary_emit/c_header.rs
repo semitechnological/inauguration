@@ -21,7 +21,7 @@ pub fn emit_c_header(module: &BoundaryModule) -> Result<String, String> {
         emit_layout(&mut out, layout)?;
     }
 
-    out.push_str(&format!("\n#endif\n"));
+    out.push_str("\n#endif\n");
     Ok(out)
 }
 

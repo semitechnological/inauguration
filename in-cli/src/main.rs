@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 use clap::{Parser, Subcommand, ValueEnum};
 use inauguration::external_guard::ExternalInvocationGuard;
 use inauguration::hybrid_core::ChangeEvent;
@@ -19,6 +21,7 @@ use std::time::Instant;
 use thiserror::Error;
 
 type Result<T> = std::result::Result<T, InError>;
+const DEFAULT_BENCH_METRICS: &str = ".brisk/hotreload/metrics/latest.ndjson";
 
 #[derive(Debug, Error)]
 enum InError {
@@ -43,7 +46,11 @@ enum PackageCommands {
     Install {
         #[arg(long, default_value = ".")]
         path: String,
-        #[arg(long, default_value_t = false, help = "Reuse inauguration.lock install paths only")]
+        #[arg(
+            long,
+            default_value_t = false,
+            help = "Reuse inauguration.lock install paths only"
+        )]
         offline: bool,
         #[arg(long, default_value_t = false)]
         json: bool,
@@ -190,24 +197,38 @@ enum Commands {
         visible_aliases = ["get", "stall", "i"]
     )]
     Install {
-        #[arg(value_name = "PACKAGE", help = "Ecosystem refs such as pip:flask or cargo:serde")]
+        #[arg(
+            value_name = "PACKAGE",
+            help = "Ecosystem refs such as pip:flask or cargo:serde"
+        )]
         packages: Vec<String>,
         #[arg(long, default_value = ".")]
         path: String,
-        #[arg(long, default_value_t = false, help = "Reuse inauguration.lock install paths only")]
+        #[arg(
+            long,
+            default_value_t = false,
+            help = "Reuse inauguration.lock install paths only"
+        )]
         offline: bool,
         #[arg(long, default_value_t = false)]
         json: bool,
     },
     #[command(about = "Add packages to inauguration.package and install them")]
     Add {
-        #[arg(value_name = "PACKAGE", help = "Ecosystem refs such as pip:flask or npm:hono")]
+        #[arg(
+            value_name = "PACKAGE",
+            help = "Ecosystem refs such as pip:flask or npm:hono"
+        )]
         packages: Vec<String>,
         #[arg(long, default_value = ".")]
         path: String,
         #[arg(long, default_value = "latest")]
         version: String,
-        #[arg(long, default_value_t = false, help = "Reuse inauguration.lock install paths only")]
+        #[arg(
+            long,
+            default_value_t = false,
+            help = "Reuse inauguration.lock install paths only"
+        )]
         offline: bool,
         #[arg(long, default_value_t = false)]
         json: bool,
@@ -337,7 +358,7 @@ enum Commands {
     Doctor,
     #[command(about = "Summarize hotreload metrics")]
     Bench {
-        #[arg(long, default_value = ".brisk/hotreload/metrics/latest.ndjson")]
+        #[arg(long, default_value = DEFAULT_BENCH_METRICS)]
         metrics: String,
     },
     #[command(about = "Manage installable optimization plugins")]
@@ -445,7 +466,14 @@ fn run() -> Result<()> {
                 path: install_path,
                 offline,
                 json: install_json,
-            }) => cmd_install(&invocation_cwd, &[], &install_path, offline, install_json, "latest"),
+            }) => cmd_install(
+                &invocation_cwd,
+                &[],
+                &install_path,
+                offline,
+                install_json,
+                "latest",
+            ),
             Some(PackageCommands::Lock {
                 path: lock_path,
                 json: lock_json,
@@ -796,8 +824,8 @@ fn cmd_install(
 
 fn cmd_package_lock(invocation_cwd: &Path, path: &str, json: bool) -> Result<()> {
     let package_path = resolve_invocation_path(invocation_cwd, path);
-    let (lock_path, lock) =
-        inauguration::package_install::lock_dependencies(&package_path).map_err(InError::Message)?;
+    let (lock_path, lock) = inauguration::package_install::lock_dependencies(&package_path)
+        .map_err(InError::Message)?;
     if json {
         let raw = serde_json::json!({
             "lock_path": lock_path,
@@ -950,8 +978,8 @@ fn cmd_languages(json: bool) -> Result<()> {
     }
 
     println!(
-        "{:<12} {:<12} {:<5} {:<34} {}",
-        "language", "parser", "level", "front", "runtime"
+        "{:<12} {:<12} {:<5} {:<34} runtime",
+        "language", "parser", "level", "front"
     );
     for entry in entries {
         println!(
@@ -1707,12 +1735,7 @@ fn backend_owned_levels(
                     "owned-native-exit-stub",
                 )
             } else {
-                (
-                    spec.input_stage,
-                    "failed",
-                    spec.stage,
-                    "none",
-                )
+                (spec.input_stage, "failed", spec.stage, "none")
             }
         }
         BackendTargetCli::Bytecode => {
@@ -2240,10 +2263,13 @@ fn cmd_update_remote() -> Result<()> {
     #[cfg(unix)]
     {
         let repo = github_repo_slug_for_remote_install();
-        let url = format!("https://raw.githubusercontent.com/{repo}/master/install.sh");
+        let version = env!("CARGO_PKG_VERSION");
+        let url = format!("https://raw.githubusercontent.com/{repo}/v{version}/install.sh");
         println!("No local inauguration checkout found; running remote install.sh ...");
         println!("Fetching: {url}");
-        let snippet = format!("set -euo pipefail; curl -fsSL \"{url}\" | bash");
+        let snippet = format!(
+            "set -euo pipefail; tmp=$(mktemp); curl -fsSL \"{url}\" -o \"$tmp\"; bash \"$tmp\"; rm -f \"$tmp\""
+        );
         run_cmd(Command::new("bash").arg("-c").arg(snippet))
     }
     #[cfg(not(unix))]
@@ -2434,6 +2460,21 @@ fn percentile(mut values: Vec<u64>, p: f64) -> u64 {
 
 fn cmd_bench(root: &Path, metrics: &str) -> Result<()> {
     let path = root.join(metrics);
+    if !path.is_file() {
+        if metrics == DEFAULT_BENCH_METRICS {
+            println!("rows: 0");
+            println!("compatible_rate: 0.00%");
+            println!("cache_hit_rate: 0.00%");
+            println!("compile_check_ms_p50: 0");
+            println!("compile_check_ms_p95: 0");
+            println!("reason_counts:");
+            return Ok(());
+        }
+        return Err(InError::Message(format!(
+            "metrics file not found at {}; pass --metrics or run a command that writes benchmark metrics first",
+            path.display()
+        )));
+    }
     let content = std::fs::read_to_string(&path)?;
     let mut rows = Vec::new();
     for line in content
@@ -2725,8 +2766,8 @@ mod tests {
     #[test]
     fn parse_install_aliases_and_package_refs() {
         for alias in ["install", "get", "stall", "i"] {
-            let cli = Cli::try_parse_from(["in", alias, "pip:flask", "--path", "."])
-                .expect("cli parse");
+            let cli =
+                Cli::try_parse_from(["in", alias, "pip:flask", "--path", "."]).expect("cli parse");
             match cli.command {
                 Commands::Install { packages, path, .. } => {
                     assert_eq!(packages, vec!["pip:flask"]);
@@ -2739,13 +2780,12 @@ mod tests {
 
     #[test]
     fn parse_add_package_refs() {
-        let cli = Cli::try_parse_from(["in", "add", "pip:flask", "npm:hono", "--version", "^1.0.0"])
-            .expect("cli parse");
+        let cli =
+            Cli::try_parse_from(["in", "add", "pip:flask", "npm:hono", "--version", "^1.0.0"])
+                .expect("cli parse");
         match cli.command {
             Commands::Add {
-                packages,
-                version,
-                ..
+                packages, version, ..
             } => {
                 assert_eq!(packages, vec!["pip:flask", "npm:hono"]);
                 assert_eq!(version, "^1.0.0");

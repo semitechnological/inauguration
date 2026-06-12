@@ -69,8 +69,8 @@ mod tests {
     fn writes_magic_and_program_headers() {
         let exe = ElfExecutable {
             code: vec![
-                0x48, 0xC7, 0xC0, 0x3C, 0x00, 0x00, 0x00, 0x48, 0xC7, 0xC7, 0x2A, 0x00, 0x00,
-                0x00, 0x0F, 0x05,
+                0x48, 0xC7, 0xC0, 0x3C, 0x00, 0x00, 0x00, 0x48, 0xC7, 0xC7, 0x2A, 0x00, 0x00, 0x00,
+                0x0F, 0x05,
             ],
             entry_offset: 0,
         };
@@ -87,8 +87,7 @@ mod tests {
     #[test]
     fn roundtrip_answer_code_layout() {
         let code = vec![
-            0x48, 0xC7, 0xC0, 0x3C, 0x00, 0x00, 0x00,
-            0x48, 0xC7, 0xC7, 0x2A, 0x00, 0x00, 0x00,
+            0x48, 0xC7, 0xC0, 0x3C, 0x00, 0x00, 0x00, 0x48, 0xC7, 0xC7, 0x2A, 0x00, 0x00, 0x00,
             0x0F, 0x05,
         ];
         let exe = ElfExecutable {
@@ -101,9 +100,7 @@ mod tests {
         std::fs::write(&path, &out).unwrap();
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let status = std::process::Command::new(&path)
-            .status()
-            .expect("run");
+        let status = std::process::Command::new(&path).status().expect("run");
         match status.code() {
             Some(42) => {}
             other => panic!("unexpected native exit {other:?}"),

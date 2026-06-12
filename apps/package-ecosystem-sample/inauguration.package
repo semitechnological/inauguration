@@ -5,7 +5,7 @@ dependencies:
     version: latest
     kind: cargo
   npm:hono:
-    version: latest
+    version: 4.12.25
     kind: npm
   pypi:flask:
     version: latest

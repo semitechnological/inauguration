@@ -94,7 +94,10 @@ mod tests {
         let plan = plan_xcframework("InCore", Path::new("missing.a"), Path::new("target/mobile"));
         let report = build_xcframework(&plan).expect("report");
         assert!(!report.success);
-        assert_eq!(report.reason_code.as_deref(), Some("xcodebuild-unavailable"));
+        assert_eq!(
+            report.reason_code.as_deref(),
+            Some("xcodebuild-unavailable")
+        );
     }
 
     #[test]

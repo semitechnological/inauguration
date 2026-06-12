@@ -58,6 +58,12 @@ struct Facts {
     structs: HashMap<String, Vec<(String, Typ)>>,
 }
 
+impl Default for TypeChecker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TypeChecker {
     pub fn new() -> Self {
         Self
@@ -81,9 +87,7 @@ impl TypeChecker {
                     let mut env: HashMap<String, Typ> = params.iter().cloned().collect();
                     self.check_stmts(name, ret, body, &facts, &mut env, &mut errors);
                 }
-                Decl::Class {
-                    methods, ..
-                } => {
+                Decl::Class { methods, .. } => {
                     for method in methods {
                         if let Decl::Function {
                             name,
@@ -116,13 +120,13 @@ impl TypeChecker {
         for decl in &module.decls {
             match decl {
                 Decl::Struct { name, fields, .. } => {
-                    structs.entry(name.clone()).or_default().extend(fields.clone());
+                    structs
+                        .entry(name.clone())
+                        .or_default()
+                        .extend(fields.clone());
                 }
                 Decl::Function {
-                    name,
-                    params,
-                    ret,
-                    ..
+                    name, params, ret, ..
                 } => {
                     functions.insert(name.clone(), (params.clone(), ret.clone()));
                 }
@@ -132,7 +136,10 @@ impl TypeChecker {
                     methods,
                     ..
                 } => {
-                    structs.entry(name.clone()).or_default().extend(fields.clone());
+                    structs
+                        .entry(name.clone())
+                        .or_default()
+                        .extend(fields.clone());
                     for method in methods {
                         if let Decl::Function {
                             name: mname,
@@ -149,17 +156,10 @@ impl TypeChecker {
             }
         }
 
-        Facts {
-            functions,
-            structs,
-        }
+        Facts { functions, structs }
     }
 
-    fn check_interface_conformance(
-        &self,
-        module: &UnifiedModule,
-        errors: &mut Vec<TypeError>,
-    ) {
+    fn check_interface_conformance(&self, module: &UnifiedModule, errors: &mut Vec<TypeError>) {
         let interfaces: HashMap<String, Vec<MethodSig>> = module
             .decls
             .iter()
@@ -180,16 +180,24 @@ impl TypeChecker {
             {
                 for iface_name in implements {
                     self.check_class_against_interface(
-                        class_name, iface_name, methods, &interfaces, errors,
+                        class_name,
+                        iface_name,
+                        methods,
+                        &interfaces,
+                        errors,
                     );
                 }
 
-                if let Some(parent) = extends {
-                    if interfaces.contains_key(parent) {
-                        self.check_class_against_interface(
-                            class_name, parent, methods, &interfaces, errors,
-                        );
-                    }
+                if let Some(parent) = extends
+                    && interfaces.contains_key(parent)
+                {
+                    self.check_class_against_interface(
+                        class_name,
+                        parent,
+                        methods,
+                        &interfaces,
+                        errors,
+                    );
                 }
             }
         }
@@ -215,10 +223,9 @@ impl TypeChecker {
         };
 
         for iface_method in iface_methods {
-            let class_method = class_methods.iter().find(|decl| match decl {
-                Decl::Function { name, .. } if name == &iface_method.name => true,
-                _ => false,
-            });
+            let class_method = class_methods.iter().find(
+                |decl| matches!(decl, Decl::Function { name, .. } if name == &iface_method.name),
+            );
 
             match class_method {
                 None => {
@@ -285,14 +292,14 @@ impl TypeChecker {
             Stmt::Let(name, annot, expr) => {
                 self.check_expr(fn_name, expr, facts, env, errors);
                 let expr_typ = self.expr_type(expr, facts, env);
-                if let (Some(expected), Some(actual)) = (annot, &expr_typ) {
-                    if !is_conservative_match(expected, actual) {
-                        errors.push(TypeError::TypeMismatch {
-                            context: format!("let binding `{name}` in `{fn_name}`"),
-                            expected: expected.clone(),
-                            got: actual.clone(),
-                        });
-                    }
+                if let (Some(expected), Some(actual)) = (annot, &expr_typ)
+                    && !is_conservative_match(expected, actual)
+                {
+                    errors.push(TypeError::TypeMismatch {
+                        context: format!("let binding `{name}` in `{fn_name}`"),
+                        expected: expected.clone(),
+                        got: actual.clone(),
+                    });
                 }
                 if let Some(t) = annot {
                     env.insert(name.clone(), t.clone());
@@ -303,33 +310,30 @@ impl TypeChecker {
             Stmt::Assign(name, expr) => {
                 self.check_expr(fn_name, expr, facts, env, errors);
                 if let Some(existing_typ) = env.get(name).cloned() {
-                    if let Some(actual) = self.expr_type(expr, facts, env) {
-                        if !is_conservative_match(&existing_typ, &actual) {
-                            errors.push(TypeError::TypeMismatch {
-                                context: format!("assignment to `{name}` in `{fn_name}`"),
-                                expected: existing_typ.clone(),
-                                got: actual,
-                            });
-                        }
+                    if let Some(actual) = self.expr_type(expr, facts, env)
+                        && !is_conservative_match(&existing_typ, &actual)
+                    {
+                        errors.push(TypeError::TypeMismatch {
+                            context: format!("assignment to `{name}` in `{fn_name}`"),
+                            expected: existing_typ.clone(),
+                            got: actual,
+                        });
                     }
                 } else {
-                    errors.push(TypeError::UndefinedVariable {
-                        name: name.clone(),
-                    });
+                    errors.push(TypeError::UndefinedVariable { name: name.clone() });
                 }
             }
             Stmt::Return(Some(expr)) => {
                 self.check_expr(fn_name, expr, facts, env, errors);
-                if *fn_ret != Typ::Void {
-                    if let Some(actual) = self.expr_type(expr, facts, env) {
-                        if !is_conservative_match(fn_ret, &actual) {
-                            errors.push(TypeError::ReturnTypeMismatch {
-                                fn_name: fn_name.to_string(),
-                                expected: fn_ret.clone(),
-                                got: actual,
-                            });
-                        }
-                    }
+                if *fn_ret != Typ::Void
+                    && let Some(actual) = self.expr_type(expr, facts, env)
+                    && !is_conservative_match(fn_ret, &actual)
+                {
+                    errors.push(TypeError::ReturnTypeMismatch {
+                        fn_name: fn_name.to_string(),
+                        expected: fn_ret.clone(),
+                        got: actual,
+                    });
                 }
             }
             Stmt::Return(None) => {}
@@ -340,21 +344,21 @@ impl TypeChecker {
                 self.check_expr(fn_name, base, facts, env, errors);
                 self.check_expr(fn_name, index, facts, env, errors);
                 self.check_expr(fn_name, value, facts, env, errors);
-                if let Some(index_typ) = self.expr_type(index, facts, env) {
-                    if index_typ != Typ::Int && is_concrete(&index_typ) {
-                        errors.push(TypeError::IndexNotInt {
-                            expr: format!("index assignment index in `{fn_name}`"),
-                        });
-                    }
+                if let Some(index_typ) = self.expr_type(index, facts, env)
+                    && index_typ != Typ::Int
+                    && is_concrete(&index_typ)
+                {
+                    errors.push(TypeError::IndexNotInt {
+                        expr: format!("index assignment index in `{fn_name}`"),
+                    });
                 }
-                if let Some(base_typ) = self.expr_type(base, facts, env) {
-                    if !matches!(base_typ, Typ::Array(_) | Typ::Named(_) | Typ::Generic(_))
-                        && is_concrete(&base_typ)
-                    {
-                        errors.push(TypeError::NotArray {
-                            expr: format!("index assignment base in `{fn_name}`"),
-                        });
-                    }
+                if let Some(base_typ) = self.expr_type(base, facts, env)
+                    && !matches!(base_typ, Typ::Array(_) | Typ::Named(_) | Typ::Generic(_))
+                    && is_concrete(&base_typ)
+                {
+                    errors.push(TypeError::NotArray {
+                        expr: format!("index assignment base in `{fn_name}`"),
+                    });
                 }
             }
             Stmt::If {
@@ -363,14 +367,15 @@ impl TypeChecker {
                 else_body,
             } => {
                 self.check_expr(fn_name, cond, facts, env, errors);
-                if let Some(cond_typ) = self.expr_type(cond, facts, env) {
-                    if cond_typ != Typ::Bool && is_concrete(&cond_typ) {
-                        errors.push(TypeError::TypeMismatch {
-                            context: format!("if condition in `{fn_name}`"),
-                            expected: Typ::Bool,
-                            got: cond_typ,
-                        });
-                    }
+                if let Some(cond_typ) = self.expr_type(cond, facts, env)
+                    && cond_typ != Typ::Bool
+                    && is_concrete(&cond_typ)
+                {
+                    errors.push(TypeError::TypeMismatch {
+                        context: format!("if condition in `{fn_name}`"),
+                        expected: Typ::Bool,
+                        got: cond_typ,
+                    });
                 }
                 let mut env_then = env.clone();
                 self.check_stmts(fn_name, fn_ret, then_body, facts, &mut env_then, errors);
@@ -380,14 +385,15 @@ impl TypeChecker {
             Stmt::Loop { cond, body, .. } => {
                 if let Some(cond) = cond {
                     self.check_expr(fn_name, cond, facts, env, errors);
-                    if let Some(cond_typ) = self.expr_type(cond, facts, env) {
-                        if cond_typ != Typ::Bool && is_concrete(&cond_typ) {
-                            errors.push(TypeError::TypeMismatch {
-                                context: format!("loop condition in `{fn_name}`"),
-                                expected: Typ::Bool,
-                                got: cond_typ,
-                            });
-                        }
+                    if let Some(cond_typ) = self.expr_type(cond, facts, env)
+                        && cond_typ != Typ::Bool
+                        && is_concrete(&cond_typ)
+                    {
+                        errors.push(TypeError::TypeMismatch {
+                            context: format!("loop condition in `{fn_name}`"),
+                            expected: Typ::Bool,
+                            got: cond_typ,
+                        });
                     }
                 }
                 let mut env_body = env.clone();
@@ -423,12 +429,14 @@ impl TypeChecker {
         errors: &mut Vec<TypeError>,
     ) {
         match expr {
-            Expr::IntLit(_) | Expr::FloatLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Closure { .. } => {}
+            Expr::IntLit(_)
+            | Expr::FloatLit(_)
+            | Expr::StringLit(_)
+            | Expr::BoolLit(_)
+            | Expr::Closure { .. } => {}
             Expr::Ident(name) => {
                 if !env.contains_key(name) {
-                    errors.push(TypeError::UndefinedVariable {
-                        name: name.clone(),
-                    });
+                    errors.push(TypeError::UndefinedVariable { name: name.clone() });
                 }
             }
             Expr::Unary { expr: inner, .. } => {
@@ -443,8 +451,10 @@ impl TypeChecker {
                 ) {
                     match op.as_str() {
                         "+" => {
-                            let ok = matches!((&l, &r), (Typ::Int, Typ::Int) | (Typ::String, Typ::String))
-                                || !is_concrete(&l)
+                            let ok = matches!(
+                                (&l, &r),
+                                (Typ::Int, Typ::Int) | (Typ::String, Typ::String)
+                            ) || !is_concrete(&l)
                                 || !is_concrete(&r);
                             if !ok {
                                 errors.push(TypeError::TypeMismatch {
@@ -507,16 +517,14 @@ impl TypeChecker {
                             schema.iter().find(|(f, _)| f == field_name).map(|(_, t)| t);
                         match expected_typ {
                             Some(expected) => {
-                                if let Some(actual) = self.expr_type(field_expr, facts, env) {
-                                    if !is_conservative_match(expected, &actual) {
-                                        errors.push(TypeError::TypeMismatch {
-                                            context: format!(
-                                                "field `{field_name}` in struct `{name}`"
-                                            ),
-                                            expected: expected.clone(),
-                                            got: actual,
-                                        });
-                                    }
+                                if let Some(actual) = self.expr_type(field_expr, facts, env)
+                                    && !is_conservative_match(expected, &actual)
+                                {
+                                    errors.push(TypeError::TypeMismatch {
+                                        context: format!("field `{field_name}` in struct `{name}`"),
+                                        expected: expected.clone(),
+                                        got: actual,
+                                    });
                                 }
                             }
                             None => {
@@ -529,24 +537,20 @@ impl TypeChecker {
                     }
                 }
                 None => {
-                    errors.push(TypeError::StructNotFound {
-                        name: name.clone(),
-                    });
+                    errors.push(TypeError::StructNotFound { name: name.clone() });
                 }
             },
             Expr::Field { base, name } => {
                 self.check_expr(fn_name, base, facts, env, errors);
-                if let Some(base_typ) = self.expr_type(base, facts, env) {
-                    if let Typ::Named(struct_name) = &base_typ {
-                        if let Some(schema) = facts.structs.get(struct_name) {
-                            if !schema.iter().any(|(f, _)| f == name) {
-                                errors.push(TypeError::UnknownField {
-                                    struct_name: struct_name.clone(),
-                                    field: name.clone(),
-                                });
-                            }
-                        }
-                    }
+                if let Some(base_typ) = self.expr_type(base, facts, env)
+                    && let Typ::Named(struct_name) = &base_typ
+                    && let Some(schema) = facts.structs.get(struct_name)
+                    && !schema.iter().any(|(f, _)| f == name)
+                {
+                    errors.push(TypeError::UnknownField {
+                        struct_name: struct_name.clone(),
+                        field: name.clone(),
+                    });
                 }
             }
             Expr::ArrayLit(items) => {
@@ -572,21 +576,21 @@ impl TypeChecker {
             Expr::Index { base, index } => {
                 self.check_expr(fn_name, base, facts, env, errors);
                 self.check_expr(fn_name, index, facts, env, errors);
-                if let Some(index_typ) = self.expr_type(index, facts, env) {
-                    if index_typ != Typ::Int && is_concrete(&index_typ) {
-                        errors.push(TypeError::IndexNotInt {
-                            expr: format!("array index in `{fn_name}`"),
-                        });
-                    }
+                if let Some(index_typ) = self.expr_type(index, facts, env)
+                    && index_typ != Typ::Int
+                    && is_concrete(&index_typ)
+                {
+                    errors.push(TypeError::IndexNotInt {
+                        expr: format!("array index in `{fn_name}`"),
+                    });
                 }
-                if let Some(base_typ) = self.expr_type(base, facts, env) {
-                    if !matches!(base_typ, Typ::Array(_) | Typ::Named(_) | Typ::Generic(_))
-                        && is_concrete(&base_typ)
-                    {
-                        errors.push(TypeError::NotArray {
-                            expr: format!("indexed base in `{fn_name}`"),
-                        });
-                    }
+                if let Some(base_typ) = self.expr_type(base, facts, env)
+                    && !matches!(base_typ, Typ::Array(_) | Typ::Named(_) | Typ::Generic(_))
+                    && is_concrete(&base_typ)
+                {
+                    errors.push(TypeError::NotArray {
+                        expr: format!("indexed base in `{fn_name}`"),
+                    });
                 }
             }
             Expr::Call { callee, args } => {
@@ -601,16 +605,14 @@ impl TypeChecker {
                         }
                         for ((_, param_typ), arg) in params.iter().zip(args.iter()) {
                             self.check_expr(fn_name, arg, facts, env, errors);
-                            if let Some(arg_typ) = self.expr_type(arg, facts, env) {
-                                if !is_conservative_match(param_typ, &arg_typ) {
-                                    errors.push(TypeError::TypeMismatch {
-                                        context: format!(
-                                            "argument for `{callee_name}` in `{fn_name}`"
-                                        ),
-                                        expected: param_typ.clone(),
-                                        got: arg_typ,
-                                    });
-                                }
+                            if let Some(arg_typ) = self.expr_type(arg, facts, env)
+                                && !is_conservative_match(param_typ, &arg_typ)
+                            {
+                                errors.push(TypeError::TypeMismatch {
+                                    context: format!("argument for `{callee_name}` in `{fn_name}`"),
+                                    expected: param_typ.clone(),
+                                    got: arg_typ,
+                                });
                             }
                         }
                     }
@@ -628,12 +630,7 @@ impl TypeChecker {
         }
     }
 
-    fn expr_type(
-        &self,
-        expr: &Expr,
-        facts: &Facts,
-        env: &HashMap<String, Typ>,
-    ) -> Option<Typ> {
+    fn expr_type(&self, expr: &Expr, facts: &Facts, env: &HashMap<String, Typ>) -> Option<Typ> {
         match expr {
             Expr::IntLit(_) => Some(Typ::Int),
             Expr::FloatLit(_) => Some(Typ::Float),
@@ -642,15 +639,14 @@ impl TypeChecker {
             Expr::Ident(name) => env.get(name).cloned(),
             Expr::StructInit { name, .. } => Some(Typ::Named(name.clone())),
             Expr::Field { base, name } => {
-                if let Some(base_typ) = self.expr_type(base, facts, env) {
-                    if let Typ::Named(struct_name) = &base_typ {
-                        if let Some(schema) = facts.structs.get(struct_name) {
-                            return schema
-                                .iter()
-                                .find(|(f, _)| f == name)
-                                .map(|(_, t)| t.clone());
-                        }
-                    }
+                if let Some(base_typ) = self.expr_type(base, facts, env)
+                    && let Typ::Named(struct_name) = &base_typ
+                    && let Some(schema) = facts.structs.get(struct_name)
+                {
+                    return schema
+                        .iter()
+                        .find(|(f, _)| f == name)
+                        .map(|(_, t)| t.clone());
                 }
                 None
             }
@@ -711,9 +707,7 @@ impl TypeChecker {
                 let schema = match facts.structs.get(name) {
                     Some(s) => s,
                     None => {
-                        errors.push(TypeError::StructNotFound {
-                            name: name.clone(),
-                        });
+                        errors.push(TypeError::StructNotFound { name: name.clone() });
                         return;
                     }
                 };
@@ -856,8 +850,9 @@ mod tests {
             .check_module(&m)
             .expect_err("undefined variable should fail");
         assert!(
-            err.iter()
-                .any(|e| matches!(e, TypeError::UndefinedVariable { name } if name == "undeclared")),
+            err.iter().any(
+                |e| matches!(e, TypeError::UndefinedVariable { name } if name == "undeclared")
+            ),
             "expected UndefinedVariable, got: {err:?}"
         );
     }
@@ -977,12 +972,10 @@ mod tests {
             vec![],
             vec![Stmt::Match {
                 scrutinee: Expr::IntLit(1),
-                arms: vec![
-                    crate::core_ir::MatchArm {
-                        pattern: "_".into(),
-                        body: vec![Stmt::Return(None)],
-                    },
-                ],
+                arms: vec![crate::core_ir::MatchArm {
+                    pattern: "_".into(),
+                    body: vec![Stmt::Return(None)],
+                }],
             }],
         )]);
 
@@ -1122,8 +1115,7 @@ mod tests {
             .check_module(&m)
             .expect_err("indexing non-array should fail");
         assert!(
-            err.iter()
-                .any(|e| matches!(e, TypeError::NotArray { .. })),
+            err.iter().any(|e| matches!(e, TypeError::NotArray { .. })),
             "expected NotArray, got: {err:?}"
         );
     }

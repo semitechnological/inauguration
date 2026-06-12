@@ -63,14 +63,16 @@ pub fn is_valid_ecosystem(ecosystem: &str) -> bool {
             .chars()
             .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_')
         && (is_supported_ecosystem(ecosystem)
-            || ECOSYSTEM_ALIASES.iter().any(|(alias, _)| *alias == ecosystem))
+            || ECOSYSTEM_ALIASES
+                .iter()
+                .any(|(alias, _)| *alias == ecosystem))
 }
 
 pub fn is_valid_package_name(name: &str) -> bool {
     !name.is_empty()
-        && name.chars().all(|ch| {
-            ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '/' | '@')
-        })
+        && name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '/' | '@'))
 }
 
 pub fn is_valid_semantic_import(name: &str) -> bool {
@@ -92,7 +94,11 @@ pub fn package_ref_for_dependency(
     dependency: &PackageDependency,
 ) -> Option<PackageRef> {
     if let Some(mut parsed) = parse_package_ref(dependency_key) {
-        if let Some(source) = dependency.source.as_deref().filter(|value| !value.is_empty()) {
+        if let Some(source) = dependency
+            .source
+            .as_deref()
+            .filter(|value| !value.is_empty())
+        {
             parsed.name = source.to_string();
         }
         return Some(parsed);

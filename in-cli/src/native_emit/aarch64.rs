@@ -6,13 +6,13 @@ pub const REG_LR: u8 = 30;
 pub const REG_FP: u8 = 29;
 
 pub fn movz64(rd: u8, imm16: u16, shift: u8) -> u32 {
-    assert!(shift % 16 == 0 && shift <= 48);
+    assert!(shift.is_multiple_of(16) && shift <= 48);
     let hw = (shift / 16) as u32;
     0xD280_0000 | (hw << 21) | ((imm16 as u32) << 5) | (rd as u32)
 }
 
 pub fn movk64(rd: u8, imm16: u16, shift: u8) -> u32 {
-    assert!(shift % 16 == 0 && shift <= 48);
+    assert!(shift.is_multiple_of(16) && shift <= 48);
     let hw = (shift / 16) as u32;
     0xF280_0000 | (hw << 21) | ((imm16 as u32) << 5) | (rd as u32)
 }
@@ -102,12 +102,12 @@ pub fn ldp_post(rt: u8, rt2: u8, offset: i32) -> u32 {
 }
 
 pub fn str64(rt: u8, rn: u8, offset: u32) -> u32 {
-    let imm12 = (offset / 8) as u32;
+    let imm12 = offset / 8;
     0xF900_0000 | (imm12 << 10) | ((rn as u32) << 5) | (rt as u32)
 }
 
 pub fn ldr64(rt: u8, rn: u8, offset: u32) -> u32 {
-    let imm12 = (offset / 8) as u32;
+    let imm12 = offset / 8;
     0xF940_0000 | (imm12 << 10) | ((rn as u32) << 5) | (rt as u32)
 }
 
@@ -188,6 +188,10 @@ impl CodeEmitter {
 
     pub fn len(&self) -> u32 {
         self.bytes.len() as u32
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.bytes.is_empty()
     }
 
     pub fn emit_u32(&mut self, insn: u32) {

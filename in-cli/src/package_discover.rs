@@ -44,7 +44,10 @@ pub fn discover_installed_package(
     } else {
         discover_from_ecosystem_layout(install_path, package_ref)?
     };
-    let exports = bindings.iter().map(|binding| binding.symbol.clone()).collect();
+    let exports = bindings
+        .iter()
+        .map(|binding| binding.symbol.clone())
+        .collect();
     Ok(InstalledPackageMetadata {
         ecosystem: package_ref.ecosystem.clone(),
         name: package_ref.name.clone(),
@@ -250,7 +253,9 @@ pub fn apply_adapter_overlay(
 }
 
 fn copy_overlay_tree(source: &Path, destination: &Path) -> Result<(), String> {
-    for entry in fs::read_dir(source).map_err(|err| format!("read overlay {}: {err}", source.display()))? {
+    for entry in
+        fs::read_dir(source).map_err(|err| format!("read overlay {}: {err}", source.display()))?
+    {
         let entry = entry.map_err(|err| format!("read overlay entry: {err}"))?;
         let file_type = entry
             .file_type()
@@ -262,9 +267,8 @@ fn copy_overlay_tree(source: &Path, destination: &Path) -> Result<(), String> {
             copy_overlay_tree(&entry.path(), &target)?;
         } else if file_type.is_file() {
             if let Some(parent) = target.parent() {
-                fs::create_dir_all(parent).map_err(|err| {
-                    format!("create overlay parent {}: {err}", parent.display())
-                })?;
+                fs::create_dir_all(parent)
+                    .map_err(|err| format!("create overlay parent {}: {err}", parent.display()))?;
             }
             fs::copy(entry.path(), &target).map_err(|err| {
                 format!(

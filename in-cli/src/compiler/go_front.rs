@@ -122,7 +122,11 @@ fn lower_type_decl(bytes: &[u8], decl: Node<'_>) -> Option<Decl> {
             }
         }
     }
-    Some(Decl::Struct { name, fields, type_params: vec![] })
+    Some(Decl::Struct {
+        name,
+        fields,
+        type_params: vec![],
+    })
 }
 
 fn lower_params(bytes: &[u8], param_list: Node<'_>) -> Vec<(String, Typ)> {

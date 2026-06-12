@@ -2,11 +2,11 @@ use std::fs;
 use std::path::Path;
 
 use crate::in_lang_parse::InExternBinding;
-use crate::package_install::{InstalledPackageMetadata, INSTALLED_PACKAGE_METADATA};
-use crate::package_manifest::{
-    resolve_dependency_install_path, PackageDependency, PackageManifest, PackageSemanticImport,
-};
+use crate::package_install::{INSTALLED_PACKAGE_METADATA, InstalledPackageMetadata};
 use crate::package_lock::PackageLock;
+use crate::package_manifest::{
+    PackageDependency, PackageManifest, PackageSemanticImport, resolve_dependency_install_path,
+};
 
 pub fn extern_language_for_ecosystem(ecosystem: &str) -> &'static str {
     match ecosystem {
@@ -60,18 +60,16 @@ pub fn package_import_bindings_for_semantic_import(
     manifest: &PackageManifest,
     lock: Option<&PackageLock>,
 ) -> Vec<InExternBinding> {
-    let resolved = crate::package_manifest::resolve_semantic_imports(
-        &[import.to_string()],
-        Some(manifest),
-    )
-    .into_iter()
-    .next()
-    .unwrap_or(crate::package_manifest::PackageSemanticImport {
-        import: import.to_string(),
-        dependency: None,
-        status: "unresolved".to_string(),
-        reason: "package-manifest-missing".to_string(),
-    });
+    let resolved =
+        crate::package_manifest::resolve_semantic_imports(&[import.to_string()], Some(manifest))
+            .into_iter()
+            .next()
+            .unwrap_or(crate::package_manifest::PackageSemanticImport {
+                import: import.to_string(),
+                dependency: None,
+                status: "unresolved".to_string(),
+                reason: "package-manifest-missing".to_string(),
+            });
     if resolved.status != "resolved" {
         return Vec::new();
     }
@@ -94,7 +92,9 @@ pub fn package_import_bindings_for_source(source_path: &Path) -> Vec<InExternBin
     };
     let lock = crate::package_lock::discover_package_lock(&root.root)
         .and_then(|lock_root| crate::package_lock::load_package_lock(&lock_root.lock_path).ok());
-    let Ok(surface) = crate::in_lang_parse::parse_in_surface_info(&fs::read_to_string(source_path).unwrap_or_default()) else {
+    let Ok(surface) = crate::in_lang_parse::parse_in_surface_info(
+        &fs::read_to_string(source_path).unwrap_or_default(),
+    ) else {
         return Vec::new();
     };
     let mut bindings = Vec::new();
@@ -115,15 +115,11 @@ fn bindings_for_dependency(
     dependency: &PackageDependency,
     lock: Option<&PackageLock>,
 ) -> Vec<InExternBinding> {
-    let install_path = match resolve_dependency_install_path(
-        package_root,
-        dependency_key,
-        dependency,
-        lock,
-    ) {
-        Some(path) => path,
-        None => return Vec::new(),
-    };
+    let install_path =
+        match resolve_dependency_install_path(package_root, dependency_key, dependency, lock) {
+            Some(path) => path,
+            None => return Vec::new(),
+        };
     let metadata_path = install_path.join(INSTALLED_PACKAGE_METADATA);
     let metadata = match fs::read_to_string(&metadata_path)
         .ok()
@@ -135,12 +131,12 @@ fn bindings_for_dependency(
                 crate::package_ref::package_ref_for_dependency(dependency_key, dependency);
             let language = package_ref
                 .as_ref()
-                .map(|package_ref| extern_language_for_ecosystem(&package_ref.ecosystem).to_string())
+                .map(|package_ref| {
+                    extern_language_for_ecosystem(&package_ref.ecosystem).to_string()
+                })
                 .unwrap_or_else(|| "package".to_string());
             let exports = package_ref
-                .map(|package_ref| {
-                    vec![crate::package_install::export_symbol_for(&package_ref)]
-                })
+                .map(|package_ref| vec![crate::package_install::export_symbol_for(&package_ref)])
                 .unwrap_or_default();
             return exports
                 .into_iter()
@@ -188,19 +184,19 @@ mod tests {
             r#"{"ecosystem":"pypi","name":"flask","version":"vendor","registry":"path","install_path":"vendor/pypi/flask","exports":["flask_greet"],"bindings":[{"symbol":"flask_greet","returns":"string","invoke":{"program":"python3","args":["-c","from greet import greet; import sys; sys.stdout.write(greet())"]}}]}"#,
         )
         .expect("metadata");
-        fs::write(install_path.join("greet.py"), "def greet():\n    return 'flask'\n").expect("greet");
+        fs::write(
+            install_path.join("greet.py"),
+            "def greet():\n    return 'flask'\n",
+        )
+        .expect("greet");
         fs::write(
             temp.join(PACKAGE_MANIFEST_FILE),
             "name: demo\nversion: 0.1.0\ndependencies:\n  pypi:flask:\n    version: path:vendor/pypi/flask\n    kind: pypi\n",
         )
         .expect("manifest");
         let manifest = crate::package_manifest::load_package_manifest(&temp).expect("manifest");
-        let bindings = package_import_bindings_for_semantic_import(
-            "pip:flask",
-            &temp,
-            &manifest,
-            None,
-        );
+        let bindings =
+            package_import_bindings_for_semantic_import("pip:flask", &temp, &manifest, None);
         assert_eq!(bindings.len(), 1);
         assert_eq!(bindings[0].name, "flask_greet");
         assert_eq!(bindings[0].language, "python");

@@ -11,6 +11,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Format in-cli
+        run: cargo fmt --check
+        working-directory: in-cli
+      - name: Clippy in-cli
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
+        working-directory: in-cli
       - name: Test in-cli
         run: cargo test
         working-directory: in-cli
@@ -20,9 +26,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Format rust-driver
+        run: cargo fmt --check
+        working-directory: compiler/rust-driver
+      - name: Clippy rust-driver
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
+        working-directory: compiler/rust-driver
       - name: Test hybrid-cli package
         run: cargo test -p hybrid-cli
         working-directory: compiler/rust-driver
+
+  protocol-models:
+    name: Protocol models
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build protocol generator
+        run: cargo build --bin protocol-gen
+        working-directory: in-cli
+      - name: Add protocol generator to PATH
+        run: echo "$PWD/target/debug" >> "$GITHUB_PATH"
+        working-directory: in-cli
+      - name: Check generated protocol models
+        run: ./scripts/check-protocol-models.sh
 
   native-subset-sample:
     name: Native subset sample (no swiftc)

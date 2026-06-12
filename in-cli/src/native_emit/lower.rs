@@ -592,7 +592,7 @@ fn lower_function(
 
 fn append_static_arrays(emitter: &mut CodeEmitter, arrays: Vec<PendingStaticArray>) {
     for array in arrays {
-        while emitter.len() % 8 != 0 {
+        while !emitter.len().is_multiple_of(8) {
             emitter.bytes.push(0);
         }
         let data_offset = emitter.len();
@@ -4472,7 +4472,7 @@ fn main() -> Int {
                 name: "main".into(),
                 params: vec![],
                 ret: Typ::Float,
-                body: vec![Stmt::Return(Some(Expr::FloatLit(FloatVal(3.14))))],
+                body: vec![Stmt::Return(Some(Expr::FloatLit(FloatVal(3.125))))],
                 type_params: vec![],
             }],
         };

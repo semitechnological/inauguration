@@ -31,7 +31,9 @@ pub fn emit_swift_wrapper(module: &BoundaryModule) -> Result<String, String> {
     out.push_str(&format!(
         "    public typealias SliceU8 = {import_name}.InSliceU8\n"
     ));
-    out.push_str(&format!("    public typealias BufU8 = {import_name}.InBufU8\n"));
+    out.push_str(&format!(
+        "    public typealias BufU8 = {import_name}.InBufU8\n"
+    ));
     out.push_str(&format!(
         "    public typealias BorrowToken = {import_name}.InBorrowToken\n"
     ));
@@ -57,10 +59,7 @@ pub fn emit_swift_wrapper(module: &BoundaryModule) -> Result<String, String> {
             }
             let swift_name = super::swift_symbol_name(&symbol.name);
             let return_type = swift_symbol_return_type(&symbol.ownership);
-            out.push_str(&format!(
-                "    @_silgen_name(\"{}\")\n",
-                symbol.name
-            ));
+            out.push_str(&format!("    @_silgen_name(\"{}\")\n", symbol.name));
             out.push_str(&format!(
                 "    public static func {swift_name}() -> {return_type}\n"
             ));
@@ -218,6 +217,9 @@ mod tests {
         let module = sample_module();
         let emit = emit_swift_boundary(&module).expect("emit");
         assert!(emit.wrapper.contains("import InBoundarySamplePerson"));
-        assert!(emit.layout_probes.contains("XCTAssertEqual(MemoryLayout<Person>.size, 24)"));
+        assert!(
+            emit.layout_probes
+                .contains("XCTAssertEqual(MemoryLayout<Person>.size, 24)")
+        );
     }
 }

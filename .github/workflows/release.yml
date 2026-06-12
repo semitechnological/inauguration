@@ -11,13 +11,27 @@ permissions:
 jobs:
   prerelease-gate:
     name: Prerelease gate
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            skip_swift: "1"
+          - os: macos-latest
+            skip_swift: "0"
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 90
-    env:
-      IN_TEST_SKIP_SWIFT: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Format in-cli
+        run: cargo fmt --check
+        working-directory: in-cli
+      - name: Clippy in-cli
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
+        working-directory: in-cli
+      - name: Check generated protocol models
+        run: cargo run --manifest-path in-cli/Cargo.toml --bin protocol-gen && git diff --exit-code -- in-cli/src/hotreload/generated_protocol.rs runtime/swift-preview-host/Sources/SwiftPreviewHost/GeneratedProtocol.swift
       - name: Build in binary
         run: cargo build --release --bin in
         working-directory: in-cli
@@ -25,6 +39,8 @@ jobs:
         run: echo "$PWD/target/release" >> "$GITHUB_PATH"
         working-directory: in-cli
       - name: Run in test
+        env:
+          IN_TEST_SKIP_SWIFT: ${{ matrix.skip_swift }}
         run: in test
 
   build:

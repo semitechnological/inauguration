@@ -33,7 +33,10 @@ pub fn parse_hare_source(src: &str) -> Result<UnifiedModule, String> {
     if decls.is_empty() {
         return Err("hare boundary front: no fn declarations found".to_string());
     }
-    if !decls.iter().any(|d| matches!(d, Decl::Function { name, .. } if name == "main")) {
+    if !decls
+        .iter()
+        .any(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+    {
         decls.push(Decl::Function {
             name: "main".to_string(),
             params: vec![],
@@ -46,7 +49,7 @@ pub fn parse_hare_source(src: &str) -> Result<UnifiedModule, String> {
 }
 
 pub fn extract_hare_boundary(src: &str) -> Option<BoundaryModule> {
-    for line in src.lines() {
+    if let Some(line) = src.lines().next() {
         let trimmed = line.trim();
         let payload = trimmed
             .strip_prefix("//? in_boundary")
@@ -62,10 +65,7 @@ pub fn extract_hare_boundary(src: &str) -> Option<BoundaryModule> {
 }
 
 fn parse_fn_line(line: &str) -> Result<Option<Decl>, String> {
-    let line = line
-        .strip_prefix("export ")
-        .unwrap_or(line)
-        .trim();
+    let line = line.strip_prefix("export ").unwrap_or(line).trim();
     if !line.starts_with("fn ") {
         return Ok(None);
     }
@@ -105,6 +105,11 @@ mod tests {
     fn parses_polyglot_hare_shape() {
         let src = "fn answer() int = {\n\treturn 42;\n};\n\nexport fn main() void = {};\n";
         let module = parse_hare_source(src).expect("parse");
-        assert!(module.decls.iter().any(|d| matches!(d, Decl::Function { name, .. } if name == "answer")));
+        assert!(
+            module
+                .decls
+                .iter()
+                .any(|d| matches!(d, Decl::Function { name, .. } if name == "answer"))
+        );
     }
 }

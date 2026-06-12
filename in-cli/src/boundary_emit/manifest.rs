@@ -7,15 +7,14 @@ pub fn emit_abi_manifest(module: &BoundaryModule) -> String {
 pub fn emit_abi_manifest_with_package(module: &BoundaryModule, package: Option<&str>) -> String {
     let module = super::prepared_module(module);
     let mut value = serde_json::to_value(&module).unwrap_or(serde_json::Value::Null);
-    if let Some(package) = package {
-        if !package.is_empty() {
-            if let serde_json::Value::Object(map) = &mut value {
-                map.insert(
-                    "package".to_string(),
-                    serde_json::Value::String(package.to_string()),
-                );
-            }
-        }
+    if let Some(package) = package
+        && !package.is_empty()
+        && let serde_json::Value::Object(map) = &mut value
+    {
+        map.insert(
+            "package".to_string(),
+            serde_json::Value::String(package.to_string()),
+        );
     }
     serde_json::to_string_pretty(&value).unwrap_or_default()
 }

@@ -78,7 +78,11 @@ mod tests {
 
     #[test]
     fn plan_has_arm64_slice() {
-        let plan = plan_aar("dev.inauguration.core", Path::new("libin.so"), Path::new("target/mobile"));
+        let plan = plan_aar(
+            "dev.inauguration.core",
+            Path::new("libin.so"),
+            Path::new("target/mobile"),
+        );
         assert_eq!(plan.slices.len(), 1);
         assert_eq!(plan.slices[0].abi, "arm64-v8a");
     }

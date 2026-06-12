@@ -16,10 +16,10 @@ pub fn subset_program_to_unified(program: &[Decl]) -> UnifiedModule {
         .iter()
         .map(|d| match d {
             Decl::Struct(s) if s.methods.is_empty() => IrDecl::Struct {
-                    name: s.name.clone(),
-                    fields: s.fields.clone(),
-                    type_params: vec![],
-                },
+                name: s.name.clone(),
+                fields: s.fields.clone(),
+                type_params: vec![],
+            },
             Decl::Struct(s) => IrDecl::Class {
                 name: s.name.clone(),
                 fields: s.fields.clone(),
@@ -75,13 +75,17 @@ fn rewrite_stmt_field_refs(
             locals.insert(name.clone());
             Stmt::Let(name, ty, expr)
         }
-        Stmt::Assign(name, expr) => Stmt::Assign(name, rewrite_expr_field_refs(expr, fields, locals)),
+        Stmt::Assign(name, expr) => {
+            Stmt::Assign(name, rewrite_expr_field_refs(expr, fields, locals))
+        }
         Stmt::IndexAssign { base, index, value } => Stmt::IndexAssign {
             base: rewrite_expr_field_refs(base, fields, locals),
             index: rewrite_expr_field_refs(index, fields, locals),
             value: rewrite_expr_field_refs(value, fields, locals),
         },
-        Stmt::Return(Some(expr)) => Stmt::Return(Some(rewrite_expr_field_refs(expr, fields, locals))),
+        Stmt::Return(Some(expr)) => {
+            Stmt::Return(Some(rewrite_expr_field_refs(expr, fields, locals)))
+        }
         Stmt::If {
             cond,
             then_body,
@@ -140,11 +144,7 @@ fn rewrite_stmt_field_refs(
     }
 }
 
-fn rewrite_expr_field_refs(
-    expr: Expr,
-    fields: &HashSet<String>,
-    locals: &HashSet<String>,
-) -> Expr {
+fn rewrite_expr_field_refs(expr: Expr, fields: &HashSet<String>, locals: &HashSet<String>) -> Expr {
     match expr {
         Expr::Ident(name) if fields.contains(&name) && !locals.contains(&name) => Expr::Field {
             base: Box::new(Expr::Ident("self".to_string())),
@@ -159,7 +159,10 @@ fn rewrite_expr_field_refs(
             lhs: Box::new(rewrite_expr_field_refs(*lhs, fields, locals)),
             rhs: Box::new(rewrite_expr_field_refs(*rhs, fields, locals)),
         },
-        Expr::StructInit { name, fields: init_fields } => Expr::StructInit {
+        Expr::StructInit {
+            name,
+            fields: init_fields,
+        } => Expr::StructInit {
             name,
             fields: init_fields
                 .into_iter()

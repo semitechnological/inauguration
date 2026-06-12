@@ -33,7 +33,10 @@ pub fn parse_d_source(src: &str) -> Result<UnifiedModule, String> {
     if decls.is_empty() {
         return Err("d boundary front: no function declarations found".to_string());
     }
-    if !decls.iter().any(|d| matches!(d, Decl::Function { name, .. } if name == "main")) {
+    if !decls
+        .iter()
+        .any(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+    {
         decls.push(Decl::Function {
             name: "main".to_string(),
             params: vec![],
@@ -46,7 +49,7 @@ pub fn parse_d_source(src: &str) -> Result<UnifiedModule, String> {
 }
 
 pub fn extract_d_boundary(src: &str) -> Option<BoundaryModule> {
-    for line in src.lines() {
+    if let Some(line) = src.lines().next() {
         let trimmed = line.trim();
         let payload = trimmed
             .strip_prefix("//? in_boundary")
@@ -102,6 +105,11 @@ mod tests {
     fn parses_polyglot_d_shape() {
         let src = "int answer() { return 42; }\nvoid main() {}\n";
         let module = parse_d_source(src).expect("parse");
-        assert!(module.decls.iter().any(|d| matches!(d, Decl::Function { name, .. } if name == "answer")));
+        assert!(
+            module
+                .decls
+                .iter()
+                .any(|d| matches!(d, Decl::Function { name, .. } if name == "answer"))
+        );
     }
 }

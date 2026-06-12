@@ -537,14 +537,9 @@ dependencies:
                     && symbol.name == "postgres"
                     && symbol.detail == "database.postgres")
         );
-        assert!(
-            report
-                .symbols
-                .iter()
-                .any(|symbol| symbol.kind == "binding"
-                    && symbol.name == "postgres"
-                    && symbol.detail == "database.postgres")
-        );
+        assert!(report.symbols.iter().any(|symbol| symbol.kind == "binding"
+            && symbol.name == "postgres"
+            && symbol.detail == "database.postgres"));
         assert!(report.package_diagnostics.is_empty());
     }
 

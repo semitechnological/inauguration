@@ -60,16 +60,17 @@ fn workspace_root() -> Result<PathBuf, Box<dyn std::error::Error>> {
     )
 }
 
-fn parse_enum_values(schema: &Value, pointer: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+fn parse_enum_values(
+    schema: &Value,
+    pointer: &str,
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let arr = schema
         .pointer(pointer)
         .and_then(|v| v.as_array())
         .ok_or_else(|| format!("schema missing {pointer}"))?;
     let mut out = Vec::new();
     for item in arr {
-        let s = item
-            .as_str()
-            .ok_or("enum values must be strings")?;
+        let s = item.as_str().ok_or("enum values must be strings")?;
         out.push(s.to_string());
     }
     if out.is_empty() {
@@ -113,7 +114,10 @@ fn write_rust(
     ];
     for spec in enums {
         let values = parse_enum_values(schema, spec.schema_pointer)?;
-        lines.push("#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]".to_string());
+        lines.push(
+            "#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]"
+                .to_string(),
+        );
         lines.push("#[serde(rename_all = \"snake_case\")]".to_string());
         lines.push(format!("pub enum {} {{", spec.rust_name));
         for v in &values {

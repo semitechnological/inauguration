@@ -41,16 +41,13 @@ pub struct PackageDependency {
 
 impl PackageDependency {
     pub fn resolved_source_path(&self) -> Option<PathBuf> {
-        if let Some(source) = self.source.as_deref().filter(|value| !value.is_empty()) {
-            if self.kind.as_deref() == Some("path")
-                || self.version.strip_prefix("path:").is_some()
-            {
-                return Some(PathBuf::from(source));
-            }
+        if let Some(source) = self.source.as_deref().filter(|value| !value.is_empty())
+            && (self.kind.as_deref() == Some("path")
+                || self.version.strip_prefix("path:").is_some())
+        {
+            return Some(PathBuf::from(source));
         }
-        self.version
-            .strip_prefix("path:")
-            .map(PathBuf::from)
+        self.version.strip_prefix("path:").map(PathBuf::from)
     }
 
     pub fn resolved_install_path(&self, package_root: &Path) -> Option<PathBuf> {
@@ -330,7 +327,8 @@ pub fn compile_context_at_root(package_root: &Path) -> Option<PackageCompileCont
     let manifest = load_package_manifest(&manifest_path).ok()?;
     let lock = crate::package_lock::discover_package_lock(package_root)
         .and_then(|root| crate::package_lock::load_package_lock(&root.lock_path).ok());
-    let dependency_search_paths = dependency_search_paths_for_root(package_root, &manifest, lock.as_ref());
+    let dependency_search_paths =
+        dependency_search_paths_for_root(package_root, &manifest, lock.as_ref());
     Some(PackageCompileContext {
         name: manifest.name,
         entry: manifest.entry,
@@ -404,7 +402,9 @@ where
     );
     report
         .symbol_index
-        .extend(symbol_index_for_semantic_bindings(&report.semantic_bindings));
+        .extend(symbol_index_for_semantic_bindings(
+            &report.semantic_bindings,
+        ));
     report.diagnostics = diagnostics_for_semantic_imports(&report.semantic_imports);
     Ok(report)
 }
@@ -531,15 +531,15 @@ fn resolve_semantic_import(
     }
     if let Some(package_ref) = crate::package_ref::parse_package_ref(import) {
         for (key, dependency) in &manifest.dependencies {
-            if let Some(dep_ref) = crate::package_ref::package_ref_for_dependency(key, dependency) {
-                if dep_ref == package_ref {
-                    return PackageSemanticImport {
-                        import: import.to_string(),
-                        dependency: Some(key.clone()),
-                        status: "resolved".to_string(),
-                        reason: "dependency-ecosystem-match".to_string(),
-                    };
-                }
+            if let Some(dep_ref) = crate::package_ref::package_ref_for_dependency(key, dependency)
+                && dep_ref == package_ref
+            {
+                return PackageSemanticImport {
+                    import: import.to_string(),
+                    dependency: Some(key.clone()),
+                    status: "resolved".to_string(),
+                    reason: "dependency-ecosystem-match".to_string(),
+                };
             }
         }
     }
@@ -618,10 +618,7 @@ pub fn symbol_index_for_semantic_imports_with_context(
         });
         if let (Some(root), Some(manifest)) = (package_root, manifest) {
             let exports = crate::package_extern::export_symbols_for_resolved_import(
-                import,
-                root,
-                manifest,
-                lock,
+                import, root, manifest, lock,
             );
             for export in exports {
                 entries.push(PackageSymbolIndexEntry {
@@ -1243,9 +1240,12 @@ fn parse_dependency_nested_field(
         .get_mut(dependency_name)
         .ok_or_else(|| format!("line {line_number}: unknown dependency `{dependency_name}`"))?;
     match subsection {
-        DependencySubsection::Targets => {
-            parse_list_item(line, line_number, "dependency targets", &mut dependency.targets)
-        }
+        DependencySubsection::Targets => parse_list_item(
+            line,
+            line_number,
+            "dependency targets",
+            &mut dependency.targets,
+        ),
         DependencySubsection::Capabilities => parse_list_item(
             line,
             line_number,
@@ -1255,7 +1255,11 @@ fn parse_dependency_nested_field(
         DependencySubsection::Build => {
             let (key, value) = split_field(line, line_number)?;
             let value = required_scalar(value, line_number, key)?;
-            if dependency.build.insert(key.to_string(), value.to_string()).is_some() {
+            if dependency
+                .build
+                .insert(key.to_string(), value.to_string())
+                .is_some()
+            {
                 return Err(format!(
                     "line {line_number}: duplicate build field `{key}` for dependency `{dependency_name}`"
                 ));
@@ -1484,13 +1488,19 @@ dependencies:
         );
         assert_eq!(postgres.rev.as_deref(), Some("main"));
         assert_eq!(postgres.checksum.as_deref(), Some("sha256:abc123"));
-        assert_eq!(postgres.targets, vec!["macos".to_string(), "linux".to_string()]);
+        assert_eq!(
+            postgres.targets,
+            vec!["macos".to_string(), "linux".to_string()]
+        );
         assert_eq!(postgres.capabilities, vec!["network.http".to_string()]);
         assert_eq!(
             postgres.build.get("profile").map(String::as_str),
             Some("release")
         );
-        assert_eq!(postgres.build.get("features").map(String::as_str), Some("gpu"));
+        assert_eq!(
+            postgres.build.get("features").map(String::as_str),
+            Some("gpu")
+        );
     }
 
     #[test]
@@ -1765,12 +1775,14 @@ dependencies:
         assert_eq!(report.symbol_index.len(), 2);
         assert_eq!(report.symbol_index[0].id, "symbol:dependency:postgres");
         assert_eq!(report.symbol_index[0].source_import, "database.postgres");
-        assert!(report
-            .symbol_index
-            .iter()
-            .any(|entry| entry.id == "symbol:binding:postgres"
-                && entry.kind == "binding"
-                && entry.name == "postgres"));
+        assert!(
+            report
+                .symbol_index
+                .iter()
+                .any(|entry| entry.id == "symbol:binding:postgres"
+                    && entry.kind == "binding"
+                    && entry.name == "postgres")
+        );
         assert_eq!(report.diagnostics.len(), 1);
         assert_eq!(report.diagnostics[0].code, "INPKG001");
         assert_eq!(report.diagnostics[0].import, "cache.redis");
@@ -1829,7 +1841,10 @@ dependencies:
             Some(&manifest),
         );
         assert_eq!(imports[0].status, "resolved");
-        assert_eq!(imports[0].dependency.as_deref(), Some("cargo:crepuscularity"));
+        assert_eq!(
+            imports[0].dependency.as_deref(),
+            Some("cargo:crepuscularity")
+        );
         assert_eq!(imports[0].reason, "dependency-ecosystem-exact-match");
         assert_eq!(imports[1].status, "resolved");
         assert_eq!(imports[1].dependency.as_deref(), Some("npm:hono"));

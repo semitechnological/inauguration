@@ -90,10 +90,7 @@ pub fn parse_icore_artifact_source(raw: &str) -> Result<CompileArtifact, String>
     if let Some(ref module) = boundary {
         let report = boundary_ir_verify(module);
         if !report.ok {
-            return Err(format!(
-                "icore boundary: {}",
-                report.diagnostics.join("; ")
-            ));
+            return Err(format!("icore boundary: {}", report.diagnostics.join("; ")));
         }
     }
     let boundary_layout_names = boundary
@@ -130,7 +127,7 @@ fn parse_icore_decls(
     has_boundary: bool,
     boundary_layout_names: &HashSet<&str>,
 ) -> Result<UnifiedModule, String> {
-    if !matches!(icore_version, 1 | 2 | 3) {
+    if !matches!(icore_version, 1..=3) {
         return Err(format!(
             "icore: unsupported icoreVersion {icore_version} (only 1, 2, and 3 supported)"
         ));
@@ -144,7 +141,11 @@ fn parse_icore_decls(
                     .into_iter()
                     .map(|f| (f.name, parse_typ(&f.ty)))
                     .collect();
-                decls.push(Decl::Struct { name, fields: flds, type_params: vec![] });
+                decls.push(Decl::Struct {
+                    name,
+                    fields: flds,
+                    type_params: vec![],
+                });
             }
             IcoreDecl::Function {
                 name,
@@ -178,12 +179,7 @@ fn parse_icore_decls(
     }
 
     let module = UnifiedModule::new(decls);
-    validate_module(
-        &module,
-        icore_version,
-        has_boundary,
-        boundary_layout_names,
-    )?;
+    validate_module(&module, icore_version, has_boundary, boundary_layout_names)?;
     Ok(module)
 }
 
@@ -377,9 +373,7 @@ fn type_known_with_boundary(
         Typ::Named(name) => {
             struct_names.contains(name.as_str()) || boundary_layout_names.contains(name.as_str())
         }
-        Typ::Array(item) => {
-            type_known_with_boundary(struct_names, boundary_layout_names, item)
-        }
+        Typ::Array(item) => type_known_with_boundary(struct_names, boundary_layout_names, item),
         Typ::Int | Typ::Float | Typ::String | Typ::Bool | Typ::Void => true,
         Typ::Generic(_) => false,
     }
@@ -450,9 +444,7 @@ fn validate_module(
                     return Err(format!("icore: unknown return type in function `{name}`"));
                 }
             }
-            | Decl::Class { .. }
-            | Decl::Interface { .. }
-            => {}
+            Decl::Class { .. } | Decl::Interface { .. } => {}
         }
     }
     Ok(())

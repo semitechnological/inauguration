@@ -87,7 +87,9 @@ fn emit_zig_abi_types(out: &mut String) {
     out.push_str("const InSliceU8 = extern struct {\n    ptr: [*]const u8,\n    len: u64,\n};\n\n");
     out.push_str("const InBufU8 = extern struct {\n    ptr: [*]u8,\n    len: u64,\n    cap: u64,\n    allocator_id: u64,\n};\n\n");
     out.push_str("const InBorrowToken = extern struct {\n    arena_id: u64,\n    generation: u64,\n    start: u64,\n    len: u64,\n    flags: u64,\n};\n\n");
-    out.push_str("const InArenaHandle = extern struct {\n    id: u64,\n    generation: u64,\n};\n\n");
+    out.push_str(
+        "const InArenaHandle = extern struct {\n    id: u64,\n    generation: u64,\n};\n\n",
+    );
 }
 
 fn emit_zig_layout(out: &mut String, layout: &BoundaryLayout) -> Result<(), String> {

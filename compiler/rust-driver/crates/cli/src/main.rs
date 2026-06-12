@@ -45,7 +45,10 @@ fn main() {
                 println!("{line}");
             }
         }
-        Err(err) => eprintln!("pipeline failed: {err}"),
+        Err(err) => {
+            eprintln!("pipeline failed: {err}");
+            std::process::exit(1);
+        }
     }
 }
 
@@ -115,13 +118,10 @@ fn run_batch(root: &str) -> Result<(), String> {
     ) = files
         .par_iter()
         .map(|file| {
-            let runtime = match tokio::runtime::Builder::new_current_thread()
+            let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
-            {
-                Ok(rt) => rt,
-                Err(_) => return (0usize, 0u64, 0u64, 0u64, 0u64, 0u64),
-            };
+                .map_err(|err| format!("{file}: runtime: {err}"))?;
             let module = Path::new(file)
                 .file_stem()
                 .and_then(|s| s.to_str())
@@ -140,29 +140,29 @@ fn run_batch(root: &str) -> Result<(), String> {
                     &event,
                     "sil @main\nentry:\n%0 = function_ref @helper\ndebug_value %0",
                 ))
-                .unwrap_or_default();
-            (
+                .map_err(|err| format!("{file}: {err}"))?;
+            Ok::<_, String>((
                 count,
                 timings.ast_refresh_us,
                 timings.swift_frontend_us,
                 timings.sil_analysis_us,
                 timings.wave_us,
                 timings.pipeline_us,
+            ))
+        })
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .reduce(|a, b| {
+            (
+                a.0 + b.0,
+                a.1 + b.1,
+                a.2 + b.2,
+                a.3 + b.3,
+                a.4 + b.4,
+                a.5 + b.5,
             )
         })
-        .reduce(
-            || (0usize, 0u64, 0u64, 0u64, 0u64, 0u64),
-            |a, b| {
-                (
-                    a.0 + b.0,
-                    a.1 + b.1,
-                    a.2 + b.2,
-                    a.3 + b.3,
-                    a.4 + b.4,
-                    a.5 + b.5,
-                )
-            },
-        );
+        .unwrap_or((0usize, 0u64, 0u64, 0u64, 0u64, 0u64));
     println!("batch files: {}", files.len());
     println!(
         "    Finished batch `in` compiler pipeline (files: {}, tasks: {}) in {:.3}ms",

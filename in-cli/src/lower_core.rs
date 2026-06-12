@@ -32,8 +32,7 @@ pub fn desugar_module(module: &mut UnifiedModule) {
                     {
                         let mangled = format!("{}_{}", name, method_name);
                         method_map.insert(method_name, mangled.clone());
-                        let mut new_params =
-                            vec![("self".to_string(), Typ::Named(name.clone()))];
+                        let mut new_params = vec![("self".to_string(), Typ::Named(name.clone()))];
                         new_params.extend(params);
                         new_decls.push(Decl::Function {
                             name: mangled,
@@ -65,17 +64,10 @@ pub fn desugar_module(module: &mut UnifiedModule) {
     module.decls = new_decls;
 }
 
-fn desugar_closures_in_body(
-    body: &mut [Stmt],
-    counter: &mut usize,
-    extra_decls: &mut Vec<Decl>,
-) {
+fn desugar_closures_in_body(body: &mut [Stmt], counter: &mut usize, extra_decls: &mut Vec<Decl>) {
     for stmt in body {
         match stmt {
-            Stmt::Let(_, _, e)
-            | Stmt::Assign(_, e)
-            | Stmt::Return(Some(e))
-            | Stmt::Expr(e) => {
+            Stmt::Let(_, _, e) | Stmt::Assign(_, e) | Stmt::Return(Some(e)) | Stmt::Expr(e) => {
                 desugar_closures_in_expr(e, counter, extra_decls);
             }
             Stmt::IndexAssign { base, index, value } => {
@@ -125,7 +117,9 @@ fn collect_declared_vars_in_body(body: &[Stmt], out: &mut HashSet<String>) {
                 out.insert(name.clone());
             }
             Stmt::If {
-                then_body, else_body, ..
+                then_body,
+                else_body,
+                ..
             } => {
                 collect_declared_vars_in_body(then_body, out);
                 collect_declared_vars_in_body(else_body, out);
@@ -165,10 +159,7 @@ fn collect_free_vars(body: &[Stmt], params: &[(String, Typ)]) -> Vec<String> {
 fn rewrite_captures_in_body(body: &mut [Stmt], captures: &HashSet<String>) {
     for stmt in body {
         match stmt {
-            Stmt::Let(_, _, e)
-            | Stmt::Assign(_, e)
-            | Stmt::Return(Some(e))
-            | Stmt::Expr(e) => {
+            Stmt::Let(_, _, e) | Stmt::Assign(_, e) | Stmt::Return(Some(e)) | Stmt::Expr(e) => {
                 rewrite_captures_in_expr(e, captures);
             }
             Stmt::IndexAssign { base, index, value } => {
@@ -245,22 +236,19 @@ fn rewrite_captures_in_expr(expr: &mut Expr, captures: &HashSet<String>) {
                 rewrite_captures_in_expr(arg, captures);
             }
         }
-        Expr::Ident(_) | Expr::IntLit(_) | Expr::FloatLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => {}
+        Expr::Ident(_)
+        | Expr::IntLit(_)
+        | Expr::FloatLit(_)
+        | Expr::StringLit(_)
+        | Expr::BoolLit(_) => {}
         Expr::Closure { .. } => {}
     }
 }
 
-fn desugar_closures_in_expr(
-    expr: &mut Expr,
-    counter: &mut usize,
-    extra_decls: &mut Vec<Decl>,
-) {
+fn desugar_closures_in_expr(expr: &mut Expr, counter: &mut usize, extra_decls: &mut Vec<Decl>) {
     match expr {
         Expr::Closure {
-            params,
-            ret,
-            body,
-            ..
+            params, ret, body, ..
         } => {
             let id = *counter;
             *counter += 1;
@@ -298,9 +286,7 @@ fn desugar_closures_in_expr(
                     .collect(),
             };
         }
-        Expr::Unary { expr: inner, .. } => {
-            desugar_closures_in_expr(inner, counter, extra_decls)
-        }
+        Expr::Unary { expr: inner, .. } => desugar_closures_in_expr(inner, counter, extra_decls),
         Expr::Binary { lhs, rhs, .. } => {
             desugar_closures_in_expr(lhs, counter, extra_decls);
             desugar_closures_in_expr(rhs, counter, extra_decls);
@@ -328,17 +314,18 @@ fn desugar_closures_in_expr(
                 desugar_closures_in_expr(arg, counter, extra_decls);
             }
         }
-        Expr::IntLit(_) | Expr::FloatLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Ident(_) => {}
+        Expr::IntLit(_)
+        | Expr::FloatLit(_)
+        | Expr::StringLit(_)
+        | Expr::BoolLit(_)
+        | Expr::Ident(_) => {}
     }
 }
 
 fn rewrite_method_calls_in_body(body: &mut [Stmt], method_map: &HashMap<String, String>) {
     for stmt in body {
         match stmt {
-            Stmt::Let(_, _, e)
-            | Stmt::Assign(_, e)
-            | Stmt::Return(Some(e))
-            | Stmt::Expr(e) => {
+            Stmt::Let(_, _, e) | Stmt::Assign(_, e) | Stmt::Return(Some(e)) | Stmt::Expr(e) => {
                 rewrite_method_calls_in_expr(e, method_map);
             }
             Stmt::IndexAssign { base, index, value } => {
@@ -389,13 +376,11 @@ fn rewrite_method_calls_in_expr(expr: &mut Expr, method_map: &HashMap<String, St
             }
             if let Expr::Field { base, name } = callee.as_mut() {
                 if let Some(mangled) = method_map.get(name) {
-                    let new_args: Vec<Expr> = std::iter::once(*std::mem::replace(
-                        base,
-                        Box::new(Expr::IntLit(0)),
-                    ))
-                    .chain(args.drain(..))
-                    .collect();
-                    *callee = Box::new(Expr::Ident(mangled.clone()));
+                    let new_args: Vec<Expr> =
+                        std::iter::once(*std::mem::replace(base, Box::new(Expr::IntLit(0))))
+                            .chain(args.drain(..))
+                            .collect();
+                    **callee = Expr::Ident(mangled.clone());
                     *args = new_args;
                 } else {
                     rewrite_method_calls_in_expr(base, method_map);
@@ -428,7 +413,11 @@ fn rewrite_method_calls_in_expr(expr: &mut Expr, method_map: &HashMap<String, St
             rewrite_method_calls_in_expr(base, method_map);
             rewrite_method_calls_in_expr(index, method_map);
         }
-        Expr::IntLit(_) | Expr::FloatLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Ident(_) => {}
+        Expr::IntLit(_)
+        | Expr::FloatLit(_)
+        | Expr::StringLit(_)
+        | Expr::BoolLit(_)
+        | Expr::Ident(_) => {}
         Expr::Closure { body, .. } => {
             rewrite_method_calls_in_body(body, method_map);
         }
@@ -452,7 +441,10 @@ fn lower_expr(
         Expr::FloatLit(f) => {
             let id = *ssa;
             *ssa += 1;
-            out.push_str(&format!("%{id} = float_literal $Builtin.FPIEEE64, {}\n", f.0));
+            out.push_str(&format!(
+                "%{id} = float_literal $Builtin.FPIEEE64, {}\n",
+                f.0
+            ));
             id
         }
         Expr::BoolLit(b) => {
@@ -787,13 +779,17 @@ fn lower_pattern_into(
         MatchPattern::IntPat(n) => {
             let pat_id = *ssa;
             *ssa += 1;
-            out.push_str(&format!("%{pat_id} = integer_literal $Builtin.Int64, {n}\n"));
+            out.push_str(&format!(
+                "%{pat_id} = integer_literal $Builtin.Int64, {n}\n"
+            ));
             let cmp_id = *ssa;
             *ssa += 1;
             out.push_str(&format!(
                 "%{cmp_id} = builtin_binop \"==\" %{value_id}, %{pat_id}\n"
             ));
-            out.push_str(&format!("cond_br %{cmp_id}, {success_label}, {fail_label}\n"));
+            out.push_str(&format!(
+                "cond_br %{cmp_id}, {success_label}, {fail_label}\n"
+            ));
             vec![]
         }
         MatchPattern::BoolPat(b) => {
@@ -805,7 +801,9 @@ fn lower_pattern_into(
             out.push_str(&format!(
                 "%{cmp_id} = builtin_binop \"==\" %{value_id}, %{pat_id}\n"
             ));
-            out.push_str(&format!("cond_br %{cmp_id}, {success_label}, {fail_label}\n"));
+            out.push_str(&format!(
+                "cond_br %{cmp_id}, {success_label}, {fail_label}\n"
+            ));
             vec![]
         }
         MatchPattern::StringPat(s) => {
@@ -817,7 +815,9 @@ fn lower_pattern_into(
             out.push_str(&format!(
                 "%{cmp_id} = builtin_binop \"==\" %{value_id}, %{pat_id}\n"
             ));
-            out.push_str(&format!("cond_br %{cmp_id}, {success_label}, {fail_label}\n"));
+            out.push_str(&format!(
+                "cond_br %{cmp_id}, {success_label}, {fail_label}\n"
+            ));
             vec![]
         }
         MatchPattern::WildPat | MatchPattern::RestPat => {
@@ -847,7 +847,12 @@ fn lower_pattern_into(
                     format!("{success_label}_tup_{i}")
                 };
                 bindings.extend(lower_pattern_into(
-                    subpat, elem_id, &sub_success, fail_label, ssa, out,
+                    subpat,
+                    elem_id,
+                    &sub_success,
+                    fail_label,
+                    ssa,
+                    out,
                 ));
                 if i + 1 < pats.len() {
                     out.push_str(&format!("label {sub_success}\n"));
@@ -869,7 +874,12 @@ fn lower_pattern_into(
                     format!("{success_label}_st_{i}")
                 };
                 bindings.extend(lower_pattern_into(
-                    subpat, field_id, &sub_success, fail_label, ssa, out,
+                    subpat,
+                    field_id,
+                    &sub_success,
+                    fail_label,
+                    ssa,
+                    out,
                 ));
                 if i + 1 < fields.len() {
                     out.push_str(&format!("label {sub_success}\n"));
@@ -907,7 +917,12 @@ fn lower_pattern_into(
                             format!("{success_label}_arr_{i}")
                         };
                         bindings.extend(lower_pattern_into(
-                            subpat, elem_id, &sub_success, fail_label, ssa, out,
+                            subpat,
+                            elem_id,
+                            &sub_success,
+                            fail_label,
+                            ssa,
+                            out,
                         ));
                         if i + 1 < pats.len() {
                             out.push_str(&format!("label {sub_success}\n"));
@@ -1066,7 +1081,8 @@ fn lower_stmts_with_env(
                 let end_label = format!("bb_match_end_{label_id}");
                 let mut default_arm = None;
                 for arm in arms {
-                    let pattern = MatchPattern::parse(&arm.pattern).unwrap_or(MatchPattern::WildPat);
+                    let pattern =
+                        MatchPattern::parse(&arm.pattern).unwrap_or(MatchPattern::WildPat);
                     if pattern == MatchPattern::WildPat {
                         default_arm = Some(arm);
                         continue;
@@ -1152,16 +1168,26 @@ fn lower_stmts_with_env(
                 out.push_str(&format!("label {try_body_label}\n"));
                 let mut body_env = env.clone();
                 out.push_str(&lower_stmts_with_env(
-                    body, ssa, finish_with_return, false,
-                    &mut body_env, direct_env, force_stores,
+                    body,
+                    ssa,
+                    finish_with_return,
+                    false,
+                    &mut body_env,
+                    direct_env,
+                    force_stores,
                 ));
                 out.push_str(&format!("br {try_end_label}\n"));
                 out.push_str(&format!("label {try_catch_label}\n"));
                 for arm in catches {
                     let mut arm_env = env.clone();
                     out.push_str(&lower_stmts_with_env(
-                        &arm.body, ssa, finish_with_return, false,
-                        &mut arm_env, direct_env, force_stores,
+                        &arm.body,
+                        ssa,
+                        finish_with_return,
+                        false,
+                        &mut arm_env,
+                        direct_env,
+                        force_stores,
                     ));
                 }
                 out.push_str(&format!("label {try_end_label}\n"));
@@ -1530,26 +1556,27 @@ mod tests {
     fn desugar_class_one_method() {
         let module = UnifiedModule {
             identity: Default::default(),
-            decls: vec![
-                Decl::Class {
-                    name: "Point".into(),
-                    fields: vec![("x".into(), Typ::Int), ("y".into(), Typ::Int)],
-                    methods: vec![Decl::Function {
-                        name: "sum".into(),
-                        params: vec![],
-                        ret: Typ::Int,
-                        body: vec![Stmt::Return(Some(Expr::IntLit(0)))],
-                        type_params: vec![],
-                    }],
-                    visibility: crate::core_ir::Visibility::Pub,
-                    extends: None,
-                    implements: vec![],
+            decls: vec![Decl::Class {
+                name: "Point".into(),
+                fields: vec![("x".into(), Typ::Int), ("y".into(), Typ::Int)],
+                methods: vec![Decl::Function {
+                    name: "sum".into(),
+                    params: vec![],
+                    ret: Typ::Int,
+                    body: vec![Stmt::Return(Some(Expr::IntLit(0)))],
                     type_params: vec![],
-                },
-            ],
+                }],
+                visibility: crate::core_ir::Visibility::Pub,
+                extends: None,
+                implements: vec![],
+                type_params: vec![],
+            }],
         };
         let sil = lower_to_textual_sil(&module, "App");
-        assert!(sil.contains("sil @Point_sum"), "should contain mangled function");
+        assert!(
+            sil.contains("sil @Point_sum"),
+            "should contain mangled function"
+        );
         assert!(
             !sil.lines().any(|l| l.trim() == "sil @Point"),
             "struct should not appear as sil function"
@@ -1560,36 +1587,37 @@ mod tests {
     fn desugar_class_two_methods() {
         let module = UnifiedModule {
             identity: Default::default(),
-            decls: vec![
-                Decl::Class {
-                    name: "Point".into(),
-                    fields: vec![("x".into(), Typ::Int), ("y".into(), Typ::Int)],
-                    methods: vec![
-                        Decl::Function {
-                            name: "sum".into(),
-                            params: vec![],
-                            ret: Typ::Int,
-                            body: vec![Stmt::Return(Some(Expr::IntLit(0)))],
+            decls: vec![Decl::Class {
+                name: "Point".into(),
+                fields: vec![("x".into(), Typ::Int), ("y".into(), Typ::Int)],
+                methods: vec![
+                    Decl::Function {
+                        name: "sum".into(),
+                        params: vec![],
+                        ret: Typ::Int,
+                        body: vec![Stmt::Return(Some(Expr::IntLit(0)))],
                         type_params: vec![],
-                        },
-                        Decl::Function {
-                            name: "scale".into(),
-                            params: vec![("factor".into(), Typ::Int)],
-                            ret: Typ::Int,
-                            body: vec![Stmt::Return(Some(Expr::IntLit(0)))],
+                    },
+                    Decl::Function {
+                        name: "scale".into(),
+                        params: vec![("factor".into(), Typ::Int)],
+                        ret: Typ::Int,
+                        body: vec![Stmt::Return(Some(Expr::IntLit(0)))],
                         type_params: vec![],
-                        },
-                    ],
-                    visibility: crate::core_ir::Visibility::Pub,
-                    extends: None,
-                    implements: vec![],
-                    type_params: vec![],
-                },
-            ],
+                    },
+                ],
+                visibility: crate::core_ir::Visibility::Pub,
+                extends: None,
+                implements: vec![],
+                type_params: vec![],
+            }],
         };
         let sil = lower_to_textual_sil(&module, "App");
         assert!(sil.contains("sil @Point_sum"), "should contain Point_sum");
-        assert!(sil.contains("sil @Point_scale"), "should contain Point_scale");
+        assert!(
+            sil.contains("sil @Point_scale"),
+            "should contain Point_scale"
+        );
     }
 
     #[test]
@@ -1617,10 +1645,14 @@ mod tests {
                     params: vec![],
                     ret: Typ::Void,
                     body: vec![
-                        Stmt::Let("obj".into(), None, Expr::StructInit {
-                            name: "Point".into(),
-                            fields: vec![("x".into(), Expr::IntLit(1))],
-                        }),
+                        Stmt::Let(
+                            "obj".into(),
+                            None,
+                            Expr::StructInit {
+                                name: "Point".into(),
+                                fields: vec![("x".into(), Expr::IntLit(1))],
+                            },
+                        ),
                         Stmt::Expr(Expr::Call {
                             callee: Box::new(Expr::Field {
                                 base: Box::new(Expr::Ident("obj".into())),
@@ -1634,8 +1666,14 @@ mod tests {
             ],
         };
         let sil = lower_to_textual_sil(&module, "App");
-        assert!(sil.contains("function_ref @Point_move_x"), "should rewrite to Point_move_x");
-        assert!(sil.contains("sil @Point_move_x"), "should emit Point_move_x function");
+        assert!(
+            sil.contains("function_ref @Point_move_x"),
+            "should rewrite to Point_move_x"
+        );
+        assert!(
+            sil.contains("sil @Point_move_x"),
+            "should emit Point_move_x function"
+        );
         assert!(
             !sil.lines().any(|l| l.trim() == "sil @Point"),
             "struct should not emit as function"
@@ -1650,22 +1688,20 @@ mod tests {
                 name: "main".into(),
                 params: vec![("x".into(), Typ::Int)],
                 ret: Typ::Int,
-                body: vec![
-                    Stmt::Let(
-                        "f".into(),
-                        None,
-                        Expr::Closure {
-                            params: vec![("a".into(), Typ::Int)],
-                            ret: Typ::Int,
-                            body: vec![Stmt::Return(Some(Expr::Binary {
-                                op: "+".into(),
-                                lhs: Box::new(Expr::Ident("x".into())),
-                                rhs: Box::new(Expr::IntLit(1)),
-                            }))],
-                            captures: vec![],
-                        },
-                    ),
-                ],
+                body: vec![Stmt::Let(
+                    "f".into(),
+                    None,
+                    Expr::Closure {
+                        params: vec![("a".into(), Typ::Int)],
+                        ret: Typ::Int,
+                        body: vec![Stmt::Return(Some(Expr::Binary {
+                            op: "+".into(),
+                            lhs: Box::new(Expr::Ident("x".into())),
+                            rhs: Box::new(Expr::IntLit(1)),
+                        }))],
+                        captures: vec![],
+                    },
+                )],
                 type_params: vec![],
             }],
         };
@@ -1693,27 +1729,22 @@ mod tests {
             identity: Default::default(),
             decls: vec![Decl::Function {
                 name: "main".into(),
-                params: vec![
-                    ("x".into(), Typ::Int),
-                    ("y".into(), Typ::Int),
-                ],
+                params: vec![("x".into(), Typ::Int), ("y".into(), Typ::Int)],
                 ret: Typ::Int,
-                body: vec![
-                    Stmt::Let(
-                        "f".into(),
-                        None,
-                        Expr::Closure {
-                            params: vec![("a".into(), Typ::Int)],
-                            ret: Typ::Int,
-                            body: vec![Stmt::Return(Some(Expr::Binary {
-                                op: "+".into(),
-                                lhs: Box::new(Expr::Ident("x".into())),
-                                rhs: Box::new(Expr::Ident("y".into())),
-                            }))],
-                            captures: vec![],
-                        },
-                    ),
-                ],
+                body: vec![Stmt::Let(
+                    "f".into(),
+                    None,
+                    Expr::Closure {
+                        params: vec![("a".into(), Typ::Int)],
+                        ret: Typ::Int,
+                        body: vec![Stmt::Return(Some(Expr::Binary {
+                            op: "+".into(),
+                            lhs: Box::new(Expr::Ident("x".into())),
+                            rhs: Box::new(Expr::Ident("y".into())),
+                        }))],
+                        captures: vec![],
+                    },
+                )],
                 type_params: vec![],
             }],
         };
@@ -1748,22 +1779,20 @@ mod tests {
                 name: "main".into(),
                 params: vec![("x".into(), Typ::Int)],
                 ret: Typ::Int,
-                body: vec![
-                    Stmt::Let(
-                        "f".into(),
-                        None,
-                        Expr::Closure {
-                            params: vec![("a".into(), Typ::Int)],
-                            ret: Typ::Int,
-                            body: vec![Stmt::Return(Some(Expr::Binary {
-                                op: "+".into(),
-                                lhs: Box::new(Expr::Ident("x".into())),
-                                rhs: Box::new(Expr::IntLit(1)),
-                            }))],
-                            captures: vec![],
-                        },
-                    ),
-                ],
+                body: vec![Stmt::Let(
+                    "f".into(),
+                    None,
+                    Expr::Closure {
+                        params: vec![("a".into(), Typ::Int)],
+                        ret: Typ::Int,
+                        body: vec![Stmt::Return(Some(Expr::Binary {
+                            op: "+".into(),
+                            lhs: Box::new(Expr::Ident("x".into())),
+                            rhs: Box::new(Expr::IntLit(1)),
+                        }))],
+                        captures: vec![],
+                    },
+                )],
                 type_params: vec![],
             }],
         };
@@ -1797,22 +1826,20 @@ mod tests {
                 name: "main".into(),
                 params: vec![("x".into(), Typ::Int)],
                 ret: Typ::Int,
-                body: vec![
-                    Stmt::Let(
-                        "f".into(),
-                        None,
-                        Expr::Closure {
-                            params: vec![("a".into(), Typ::Int)],
-                            ret: Typ::Int,
-                            body: vec![Stmt::Return(Some(Expr::Binary {
-                                op: "+".into(),
-                                lhs: Box::new(Expr::Ident("x".into())),
-                                rhs: Box::new(Expr::IntLit(1)),
-                            }))],
-                            captures: vec![],
-                        },
-                    ),
-                ],
+                body: vec![Stmt::Let(
+                    "f".into(),
+                    None,
+                    Expr::Closure {
+                        params: vec![("a".into(), Typ::Int)],
+                        ret: Typ::Int,
+                        body: vec![Stmt::Return(Some(Expr::Binary {
+                            op: "+".into(),
+                            lhs: Box::new(Expr::Ident("x".into())),
+                            rhs: Box::new(Expr::IntLit(1)),
+                        }))],
+                        captures: vec![],
+                    },
+                )],
                 type_params: vec![],
             }],
         };
@@ -1834,7 +1861,10 @@ mod tests {
             "first param should be self: {params:?}"
         );
         assert!(
-            params.first().map(|(_, t)| matches!(t, Typ::Named(n) if n.contains("_captures"))).unwrap_or(false),
+            params
+                .first()
+                .map(|(_, t)| matches!(t, Typ::Named(n) if n.contains("_captures")))
+                .unwrap_or(false),
             "self param should be the captures struct type"
         );
         assert_eq!(params.len(), 2, "should have self + original param a");
@@ -1848,18 +1878,16 @@ mod tests {
                 name: "main".into(),
                 params: vec![],
                 ret: Typ::Int,
-                body: vec![
-                    Stmt::Let(
-                        "f".into(),
-                        None,
-                        Expr::Closure {
-                            params: vec![],
-                            ret: Typ::Int,
-                            body: vec![Stmt::Return(Some(Expr::IntLit(42)))],
-                            captures: vec![],
-                        },
-                    ),
-                ],
+                body: vec![Stmt::Let(
+                    "f".into(),
+                    None,
+                    Expr::Closure {
+                        params: vec![],
+                        ret: Typ::Int,
+                        body: vec![Stmt::Return(Some(Expr::IntLit(42)))],
+                        captures: vec![],
+                    },
+                )],
                 type_params: vec![],
             }],
         };
@@ -1903,8 +1931,14 @@ mod tests {
             }],
         };
         let sil = lower_to_textual_sil(&module, "App");
-        assert!(sil.contains("field_access"), "should emit field_access for struct pattern");
-        assert!(sil.contains("builtin_binop"), "should emit comparison for field");
+        assert!(
+            sil.contains("field_access"),
+            "should emit field_access for struct pattern"
+        );
+        assert!(
+            sil.contains("builtin_binop"),
+            "should emit comparison for field"
+        );
         assert!(sil.contains("store_var x"), "should store x binding");
         assert!(sil.contains("bb_match_arm_"), "should have arm labels");
         assert!(sil.contains("bb_match_end_"), "should have end label");
@@ -1939,7 +1973,10 @@ mod tests {
             }],
         };
         let sil = lower_to_textual_sil(&module, "App");
-        assert!(sil.contains("index_access"), "should emit index_access for array pattern");
+        assert!(
+            sil.contains("index_access"),
+            "should emit index_access for array pattern"
+        );
         assert!(sil.contains("builtin_binop"), "should emit comparisons");
         assert!(sil.contains("store_var a"), "should store a binding");
         assert!(sil.contains("store_var b"), "should store b binding");
@@ -1970,7 +2007,10 @@ mod tests {
             }],
         };
         let sil = lower_to_textual_sil(&module, "App");
-        assert!(sil.contains("index_access"), "should emit index_access for tuple pattern");
+        assert!(
+            sil.contains("index_access"),
+            "should emit index_access for tuple pattern"
+        );
         assert!(sil.contains("store_var x"), "should store x binding");
         assert!(sil.contains("builtin_binop"), "should emit comparisons");
     }
@@ -2008,7 +2048,10 @@ mod tests {
             ],
         };
         let sil = lower_to_textual_sil(&module, "App");
-        assert!(sil.contains("sil @Circle_draw"), "should emit Circle_draw for interface method");
+        assert!(
+            sil.contains("sil @Circle_draw"),
+            "should emit Circle_draw for interface method"
+        );
         assert!(
             !sil.lines().any(|l| l.trim() == "sil @Drawable"),
             "interface should not appear as SIL function"
@@ -2076,10 +2119,7 @@ mod tests {
             "should dispatch to Circle_draw for interface method call"
         );
         assert!(sil.contains("sil @Circle_draw"), "should emit Circle_draw");
-        assert!(
-            sil.contains("sil @main"),
-            "should emit main"
-        );
+        assert!(sil.contains("sil @main"), "should emit main");
     }
 
     #[test]
@@ -2116,15 +2156,13 @@ mod tests {
                     name: "handle".into(),
                     params: vec![("d".into(), Typ::Named("Drawable".into()))],
                     ret: Typ::Void,
-                    body: vec![
-                        Stmt::Expr(Expr::Call {
-                            callee: Box::new(Expr::Field {
-                                base: Box::new(Expr::Ident("d".into())),
-                                name: "draw".into(),
-                            }),
-                            args: vec![],
+                    body: vec![Stmt::Expr(Expr::Call {
+                        callee: Box::new(Expr::Field {
+                            base: Box::new(Expr::Ident("d".into())),
+                            name: "draw".into(),
                         }),
-                    ],
+                        args: vec![],
+                    })],
                     type_params: vec![],
                 },
             ],

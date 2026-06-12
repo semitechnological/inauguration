@@ -1,3 +1,4 @@
+#[cfg(test)]
 const DOS_MAGIC: u16 = 0x5A4D;
 const PE_SIGNATURE: u32 = 0x0000_4550;
 const MACHINE_AMD64: u16 = 0x8664;
@@ -33,7 +34,7 @@ pub fn write_dll(dll: &CoffDll, out: &mut Vec<u8>) {
         0x80, 0x00, 0x00, 0x00,
     ];
     let text_fileoff = SIZE_OF_HEADERS;
-    let text_raw_size = ((dll.code.len() as u32 + FILE_ALIGNMENT - 1) / FILE_ALIGNMENT) * FILE_ALIGNMENT;
+    let text_raw_size = (dll.code.len() as u32).div_ceil(FILE_ALIGNMENT) * FILE_ALIGNMENT;
     let image_size = TEXT_RVA + text_raw_size;
     let entry_rva = TEXT_RVA + dll.entry_offset;
 
@@ -59,7 +60,9 @@ pub fn write_dll(dll: &CoffDll, out: &mut Vec<u8>) {
     out.extend_from_slice(&SIZE_OF_HEADERS.to_le_bytes());
     out.extend_from_slice(&0u32.to_le_bytes());
     out.extend_from_slice(&SUBSYSTEM_WINDOWS_CUI.to_le_bytes());
-    out.extend_from_slice(&(DLL_CHARACTERISTICS_DYNAMIC_BASE | DLL_CHARACTERISTICS_NX_COMPAT).to_le_bytes());
+    out.extend_from_slice(
+        &(DLL_CHARACTERISTICS_DYNAMIC_BASE | DLL_CHARACTERISTICS_NX_COMPAT).to_le_bytes(),
+    );
     out.extend_from_slice(&[0u8; 20]);
     out.extend_from_slice(&SECTION_ALIGNMENT.to_le_bytes());
     out.extend_from_slice(&FILE_ALIGNMENT.to_le_bytes());
@@ -82,7 +85,9 @@ pub fn write_dll(dll: &CoffDll, out: &mut Vec<u8>) {
     out.extend_from_slice(&text_raw_size.to_le_bytes());
     out.extend_from_slice(&text_fileoff.to_le_bytes());
     out.extend_from_slice(&[0u8; 12]);
-    out.extend_from_slice(&(IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ).to_le_bytes());
+    out.extend_from_slice(
+        &(IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ).to_le_bytes(),
+    );
     out.extend_from_slice(&0u32.to_le_bytes());
 
     while out.len() < text_fileoff as usize {
@@ -122,15 +127,17 @@ mod tests {
         assert_eq!(&out[pe_off..pe_off + 4], &PE_SIGNATURE.to_le_bytes());
         let characteristics = u16::from_le_bytes([out[pe_off + 22], out[pe_off + 23]]);
         assert_eq!(characteristics & IMAGE_FILE_DLL, IMAGE_FILE_DLL);
-        assert_eq!(u16::from_le_bytes([out[pe_off + 4], out[pe_off + 5]]), MACHINE_AMD64);
+        assert_eq!(
+            u16::from_le_bytes([out[pe_off + 4], out[pe_off + 5]]),
+            MACHINE_AMD64
+        );
     }
 
     #[cfg(target_os = "windows")]
     #[test]
     fn roundtrip_dll_layout() {
         let code = vec![
-            0x48, 0xC7, 0xC0, 0x3C, 0x00, 0x00, 0x00,
-            0x48, 0xC7, 0xC7, 0x2A, 0x00, 0x00, 0x00,
+            0x48, 0xC7, 0xC0, 0x3C, 0x00, 0x00, 0x00, 0x48, 0xC7, 0xC7, 0x2A, 0x00, 0x00, 0x00,
             0x0F, 0x05,
         ];
         let dll = CoffDll {

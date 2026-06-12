@@ -343,7 +343,7 @@ fn check_stmt(
             }
             Ok(())
         }
-        Stmt::Throw(_) | Stmt::Try { .. } => Ok(())
+        Stmt::Throw(_) | Stmt::Try { .. } => Ok(()),
     }
 }
 
@@ -417,15 +417,14 @@ fn check_expr(
         }
         Expr::Field { base, name } => {
             check_expr(fn_name, base, facts, env, call_edges)?;
-            if let Some(Typ::Named(struct_name)) = expr_type(base, facts, env) {
-                if let Some(schema) = facts.structs.get(struct_name.as_str()) {
-                    if !schema.iter().any(|(field, _)| field == name) {
-                        return Err((
-                            "unknown-struct-field".to_string(),
-                            format!("unknown field `{name}` for struct `{struct_name}`"),
-                        ));
-                    }
-                }
+            if let Some(Typ::Named(struct_name)) = expr_type(base, facts, env)
+                && let Some(schema) = facts.structs.get(struct_name.as_str())
+                && !schema.iter().any(|(field, _)| field == name)
+            {
+                return Err((
+                    "unknown-struct-field".to_string(),
+                    format!("unknown field `{name}` for struct `{struct_name}`"),
+                ));
             }
             Ok(())
         }
@@ -579,12 +578,11 @@ fn expr_type(expr: &Expr, facts: &ModuleFacts<'_>, env: &HashMap<String, Typ>) -
         Expr::Ident(name) => env.get(name).cloned(),
         Expr::StructInit { name, .. } => Some(Typ::Named(name.clone())),
         Expr::Field { base, name } => {
-            if let Some(Typ::Named(struct_name)) = expr_type(base, facts, env) {
-                if let Some(schema) = facts.structs.get(struct_name.as_str()) {
-                    if let Some((_, typ)) = schema.iter().find(|(field, _)| field == name) {
-                        return Some(typ.clone());
-                    }
-                }
+            if let Some(Typ::Named(struct_name)) = expr_type(base, facts, env)
+                && let Some(schema) = facts.structs.get(struct_name.as_str())
+                && let Some((_, typ)) = schema.iter().find(|(field, _)| field == name)
+            {
+                return Some(typ.clone());
             }
             None
         }

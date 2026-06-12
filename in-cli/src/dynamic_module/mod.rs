@@ -105,15 +105,15 @@ pub fn workspace_root() -> std::path::PathBuf {
 
 pub fn fixture_manifest() -> Result<DynamicLoaderFixture, String> {
     let path = workspace_root().join("fixtures/dynamic-loader/manifest.json");
-    let source = std::fs::read_to_string(&path)
-        .map_err(|err| format!("read {}: {err}", path.display()))?;
+    let source =
+        std::fs::read_to_string(&path).map_err(|err| format!("read {}: {err}", path.display()))?;
     serde_json::from_str(&source).map_err(|err| format!("parse {}: {err}", path.display()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
+
     use std::process::Command;
 
     #[test]

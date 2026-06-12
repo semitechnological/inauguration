@@ -82,9 +82,7 @@ pub fn is_forbidden_owned_tool(program: &str) -> bool {
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or(program);
-    FORBIDDEN_OWNED_TOOLS
-        .iter()
-        .any(|tool| *tool == basename)
+    FORBIDDEN_OWNED_TOOLS.contains(&basename)
 }
 
 pub fn assert_no_forbidden_invocations(invocations: &[String]) -> Result<(), String> {

@@ -250,20 +250,22 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
     let mut module = match parser_registry::parse_with_resolved(resolved, &request.path) {
         Ok(Some(module)) => module,
         Ok(None) => {
-            if request.path.extension().map_or(false, |e| e == "swift") {
+            if request.path.extension().is_some_and(|e| e == "swift") {
                 match std::fs::read_to_string(&request.path) {
-                    Ok(source) => match crate::native_swift_sil::parse_swift_subset_to_unified(&source) {
-                        Ok(module) => {
-                            report.frontend_level = "swift-subset";
-                            module
+                    Ok(source) => {
+                        match crate::native_swift_sil::parse_swift_subset_to_unified(&source) {
+                            Ok(module) => {
+                                report.frontend_level = "swift-subset";
+                                module
+                            }
+                            Err(err) => {
+                                report.reason_code = Some("frontend-parse-failed".to_string());
+                                report.reason = Some(err.clone());
+                                report.error = Some(err);
+                                return finalize_report(&mut report, started, &cwd, &frontend_hash);
+                            }
                         }
-                        Err(err) => {
-                            report.reason_code = Some("frontend-parse-failed".to_string());
-                            report.reason = Some(err.clone());
-                            report.error = Some(err);
-                            return finalize_report(&mut report, started, &cwd, &frontend_hash);
-                        }
-                    },
+                    }
                     Err(err) => {
                         let reason = format!("failed to read Swift source: {err}");
                         report.reason_code = Some("frontend-parse-failed".to_string());
@@ -291,16 +293,14 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
 
     // Resolve multi-file imports for .in sources
     let mut pkg_entry: Option<String> = None;
-    if request.path.extension().map_or(false, |e| e == "in") {
+    if request.path.extension().is_some_and(|e| e == "in") {
         let source_dir = request.path.parent().map(PathBuf::from).unwrap_or_default();
         let mut import_resolver = crate::module_resolver::ModuleResolver::new();
         import_resolver.add_search_path(source_dir.clone());
         import_resolver.add_search_path(PathBuf::from("."));
 
         // Check for package manifest to set name and dependency search paths
-        if let Some(pkg) =
-            crate::package_manifest::compile_context_for_source(&request.path)
-        {
+        if let Some(pkg) = crate::package_manifest::compile_context_for_source(&request.path) {
             report.package_name = Some(pkg.name);
             pkg_entry = pkg.entry;
             for dep in pkg.dependency_search_paths {
@@ -355,7 +355,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
     if std::env::var("IN_TYPECHECK").is_ok() {
         let strict = std::env::var("IN_TYPECHECK").as_deref() == Ok("strict");
         match crate::typecheck::TypeChecker::new().check_module(&module) {
-            Ok(()) => {},
+            Ok(()) => {}
             Err(errors) => {
                 for err in &errors {
                     eprintln!("[typecheck] {:?}", err);
@@ -500,10 +500,10 @@ fn const_eval_entry_exit_code(
     module_id: &str,
     entry: &str,
 ) -> Result<u8, String> {
-    if crate::v_native::v_native_available() {
-        if let Some(code) = try_const_answer_entry(module, entry) {
-            return Ok(code);
-        }
+    if crate::v_native::v_native_available()
+        && let Some(code) = try_const_answer_entry(module, entry)
+    {
+        return Ok(code);
     }
     let sil = crate::compiler::driver::lower_unified_module(
         module,

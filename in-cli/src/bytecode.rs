@@ -164,7 +164,8 @@ pub struct BytecodeModule {
     pub entry_point: String,
     pub identity: Option<ModuleIdentityReport>,
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub package_exports: std::collections::BTreeMap<String, crate::package_runtime::PackageExportRuntime>,
+    pub package_exports:
+        std::collections::BTreeMap<String, crate::package_runtime::PackageExportRuntime>,
 }
 
 impl BytecodeModule {
@@ -193,15 +194,15 @@ pub fn module_to_text(module: &BytecodeModule) -> String {
         "; Bytecode module (entry: {})\n",
         module.entry_point
     ));
-    if let Some(identity) = &module.identity {
-        if let Ok(encoded) = serde_json::to_string(identity) {
-            out.push_str(&format!("; module_identity: {encoded}\n"));
-        }
+    if let Some(identity) = &module.identity
+        && let Ok(encoded) = serde_json::to_string(identity)
+    {
+        out.push_str(&format!("; module_identity: {encoded}\n"));
     }
-    if !module.package_exports.is_empty() {
-        if let Ok(encoded) = serde_json::to_string(&module.package_exports) {
-            out.push_str(&format!("; package_exports: {encoded}\n"));
-        }
+    if !module.package_exports.is_empty()
+        && let Ok(encoded) = serde_json::to_string(&module.package_exports)
+    {
+        out.push_str(&format!("; package_exports: {encoded}\n"));
     }
     out.push_str("; ---\n\n");
 
@@ -211,7 +212,7 @@ pub fn module_to_text(module: &BytecodeModule) -> String {
         for inst in &func.instructions {
             out.push_str(&format!("  {}\n", instruction_to_text(inst)));
         }
-        out.push_str("\n");
+        out.push('\n');
     }
 
     out
@@ -277,13 +278,15 @@ pub fn text_to_module(text: &str) -> Result<BytecodeModule, String> {
                 entry_point = rest.trim_end_matches(')').trim().to_string();
             } else if let Some(rest) = trimmed.strip_prefix("; module_identity:") {
                 identity = parse_module_identity_line(rest.trim());
-            } else if let Some(rest) = trimmed.strip_prefix("; package_exports:") {
-                if let Ok(parsed) = serde_json::from_str::<
-                    std::collections::BTreeMap<String, crate::package_runtime::PackageExportRuntime>,
+            } else if let Some(rest) = trimmed.strip_prefix("; package_exports:")
+                && let Ok(parsed) = serde_json::from_str::<
+                    std::collections::BTreeMap<
+                        String,
+                        crate::package_runtime::PackageExportRuntime,
+                    >,
                 >(rest.trim())
-                {
-                    package_exports = parsed;
-                }
+            {
+                package_exports = parsed;
             }
             continue;
         }
@@ -308,24 +311,23 @@ pub fn text_to_module(text: &str) -> Result<BytecodeModule, String> {
 
         // Parse locals declaration
         if trimmed.starts_with("locals:") {
-            if let Some(ref mut func) = current_func {
-                if let Ok(n) = trimmed
+            if let Some(ref mut func) = current_func
+                && let Ok(n) = trimmed
                     .strip_prefix("locals:")
                     .unwrap_or("0")
                     .trim()
                     .parse::<usize>()
-                {
-                    func.local_count = n;
-                }
+            {
+                func.local_count = n;
             }
             continue;
         }
 
         // Parse instruction
-        if let Some(ref mut func) = current_func {
-            if let Ok(inst) = parse_instruction(trimmed) {
-                func.instructions.push(inst);
-            }
+        if let Some(ref mut func) = current_func
+            && let Ok(inst) = parse_instruction(trimmed)
+        {
+            func.instructions.push(inst);
         }
     }
 
@@ -556,8 +558,8 @@ mod tests {
     fn bytecode_value_conversions() {
         assert_eq!(Value::Int(5).to_int(), 5);
         assert_eq!(Value::Bool(true).to_int(), 1);
-        assert_eq!(Value::Bool(true).to_bool(), true);
-        assert_eq!(Value::Int(0).to_bool(), false);
+        assert!(Value::Bool(true).to_bool());
+        assert!(!Value::Int(0).to_bool());
     }
 
     #[test]

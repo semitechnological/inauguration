@@ -11,6 +11,12 @@ pub struct ModuleResolver {
     search_paths: Vec<PathBuf>,
 }
 
+impl Default for ModuleResolver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ModuleResolver {
     pub fn new() -> Self {
         Self {
@@ -24,8 +30,8 @@ impl ModuleResolver {
 
     /// Resolve `use` imports declared in `source`, returning parsed modules (non-fatal).
     pub fn resolve_imports(&self, source: &str) -> Result<Vec<UnifiedModule>, String> {
-        let surface =
-            in_lang_parse::parse_in_surface_info(source).map_err(|e| format!("surface info: {e}"))?;
+        let surface = in_lang_parse::parse_in_surface_info(source)
+            .map_err(|e| format!("surface info: {e}"))?;
         let mut modules = Vec::new();
         let mut seen = HashSet::new();
         for name in &surface.semantic_imports {
@@ -64,14 +70,20 @@ impl ModuleResolver {
         let nested_source = match std::fs::read_to_string(&path) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("[import] warning: cannot read `{name}` ({}): {e}", path.display());
+                eprintln!(
+                    "[import] warning: cannot read `{name}` ({}): {e}",
+                    path.display()
+                );
                 return;
             }
         };
         let nested_surface = match in_lang_parse::parse_in_surface_info(&nested_source) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("[import] warning: surface info for `{name}` ({}): {e}", path.display());
+                eprintln!(
+                    "[import] warning: surface info for `{name}` ({}): {e}",
+                    path.display()
+                );
                 return;
             }
         };
@@ -160,7 +172,10 @@ mod tests {
         let modules = resolver.resolve_imports(&source).unwrap();
         fs::remove_dir_all(&dir).unwrap();
 
-        assert!(modules.is_empty(), "missing import should produce empty result");
+        assert!(
+            modules.is_empty(),
+            "missing import should produce empty result"
+        );
     }
 
     #[test]
@@ -193,7 +208,10 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert!(names.contains(&"base_fn"), "expected base_fn, got {names:?}");
+        assert!(
+            names.contains(&"base_fn"),
+            "expected base_fn, got {names:?}"
+        );
         assert!(names.contains(&"lib_fn"), "expected lib_fn, got {names:?}");
     }
 

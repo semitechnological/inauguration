@@ -33,7 +33,10 @@ pub fn parse_odin_source(src: &str) -> Result<UnifiedModule, String> {
     if decls.is_empty() {
         return Err("odin boundary front: no proc declarations found".to_string());
     }
-    if !decls.iter().any(|d| matches!(d, Decl::Function { name, .. } if name == "main")) {
+    if !decls
+        .iter()
+        .any(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+    {
         decls.push(Decl::Function {
             name: "main".to_string(),
             params: vec![],
@@ -46,7 +49,7 @@ pub fn parse_odin_source(src: &str) -> Result<UnifiedModule, String> {
 }
 
 pub fn extract_odin_boundary(src: &str) -> Option<BoundaryModule> {
-    for line in src.lines() {
+    if let Some(line) = src.lines().next() {
         let trimmed = line.trim();
         let payload = trimmed
             .strip_prefix("//? in_boundary")
@@ -65,11 +68,7 @@ fn parse_proc_line(line: &str) -> Result<Option<Decl>, String> {
     if !line.contains(":: proc") {
         return Ok(None);
     }
-    let name = line
-        .split("::")
-        .next()
-        .unwrap_or("")
-        .trim();
+    let name = line.split("::").next().unwrap_or("").trim();
     if name.is_empty() {
         return Err("odin boundary front: proc missing name".to_string());
     }
@@ -99,10 +98,21 @@ mod tests {
 
     #[test]
     fn parses_polyglot_odin_shape() {
-        let src = "package main\n\nanswer :: proc() -> int {\n\treturn 42\n}\n\nmain :: proc() {}\n";
+        let src =
+            "package main\n\nanswer :: proc() -> int {\n\treturn 42\n}\n\nmain :: proc() {}\n";
         let module = parse_odin_source(src).expect("parse");
-        assert!(module.decls.iter().any(|d| matches!(d, Decl::Function { name, .. } if name == "answer")));
-        assert!(module.decls.iter().any(|d| matches!(d, Decl::Function { name, .. } if name == "main")));
+        assert!(
+            module
+                .decls
+                .iter()
+                .any(|d| matches!(d, Decl::Function { name, .. } if name == "answer"))
+        );
+        assert!(
+            module
+                .decls
+                .iter()
+                .any(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+        );
     }
 
     #[test]

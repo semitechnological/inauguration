@@ -56,10 +56,7 @@ pub fn in_arena_create(reserve_bytes: u64, _flags: u32) -> InArenaHandle {
         storage: vec![0; reserve],
         cursor: 0,
     };
-    arenas()
-        .lock()
-        .expect("arena map lock")
-        .insert(id, state);
+    arenas().lock().expect("arena map lock").insert(id, state);
     InArenaHandle { id, generation: 1 }
 }
 
@@ -75,10 +72,10 @@ pub fn in_arena_reset(arena: InArenaHandle) {
 
 pub fn in_arena_destroy(arena: InArenaHandle) {
     let mut map = arenas().lock().expect("arena map lock");
-    if let Some(state) = map.get(&arena.id) {
-        if state.generation == arena.generation {
-            map.remove(&arena.id);
-        }
+    if let Some(state) = map.get(&arena.id)
+        && state.generation == arena.generation
+    {
+        map.remove(&arena.id);
     }
 }
 

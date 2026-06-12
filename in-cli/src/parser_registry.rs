@@ -389,11 +389,9 @@ pub fn parse_with_resolved(
                 .map_err(ParserRegistryError::Msg)
                 .map(Some)
         }
-        ResolvedBuildParser::CoreIr(ParserId::D) => {
-            crate::compiler::d_boundary::parse_d_file(path)
-                .map_err(ParserRegistryError::Msg)
-                .map(Some)
-        }
+        ResolvedBuildParser::CoreIr(ParserId::D) => crate::compiler::d_boundary::parse_d_file(path)
+            .map_err(ParserRegistryError::Msg)
+            .map(Some),
         ResolvedBuildParser::CoreIr(ParserId::Crystal) => {
             crate::compiler::crystal_boundary::parse_crystal_file(path)
                 .map_err(ParserRegistryError::Msg)
@@ -626,7 +624,11 @@ mod tests {
         let m = parse_with_resolved(ResolvedBuildParser::CoreIr(ParserId::Java), &path)
             .expect("parse")
             .expect("module");
-        assert!(m.decls.iter().any(|d| matches!(d, crate::core_ir::Decl::Class { name, .. } if name == "X")));
+        assert!(
+            m.decls
+                .iter()
+                .any(|d| matches!(d, crate::core_ir::Decl::Class { name, .. } if name == "X"))
+        );
         let _ = std::fs::remove_file(&path);
     }
 
@@ -639,9 +641,9 @@ mod tests {
             .expect("module");
         let _ = std::fs::remove_file(&path);
         assert!(
-            m.decls
-                .iter()
-                .any(|d| matches!(d, crate::core_ir::Decl::Function { name, .. } if name == "answer"))
+            m.decls.iter().any(
+                |d| matches!(d, crate::core_ir::Decl::Function { name, .. } if name == "answer")
+            )
         );
     }
 
@@ -658,15 +660,24 @@ mod tests {
             .expect("module");
         let _ = std::fs::remove_file(&path);
         assert!(
-            m.decls.iter().any(|d| matches!(d, crate::core_ir::Decl::Class { name, .. } if name == "X")),
-            "expected class X, got {:?}", m.decls
+            m.decls
+                .iter()
+                .any(|d| matches!(d, crate::core_ir::Decl::Class { name, .. } if name == "X")),
+            "expected class X, got {:?}",
+            m.decls
         );
-        let class_x = m.decls.iter().find_map(|d| match d {
-            crate::core_ir::Decl::Class { methods, .. } => Some(methods),
-            _ => None,
-        }).expect("class X methods");
+        let class_x = m
+            .decls
+            .iter()
+            .find_map(|d| match d {
+                crate::core_ir::Decl::Class { methods, .. } => Some(methods),
+                _ => None,
+            })
+            .expect("class X methods");
         assert!(
-            class_x.iter().any(|d| matches!(d, crate::core_ir::Decl::Function { name, .. } if name == "main")),
+            class_x.iter().any(
+                |d| matches!(d, crate::core_ir::Decl::Function { name, .. } if name == "main")
+            ),
             "expected main method in class"
         );
     }
@@ -700,9 +711,9 @@ mod tests {
             .expect("module");
         let _ = std::fs::remove_file(&path);
         assert!(
-            m.decls
-                .iter()
-                .any(|d| matches!(d, crate::core_ir::Decl::Function { name, .. } if name == "answer"))
+            m.decls.iter().any(
+                |d| matches!(d, crate::core_ir::Decl::Function { name, .. } if name == "answer")
+            )
         );
     }
 
@@ -719,9 +730,9 @@ mod tests {
             .expect("module");
         let _ = std::fs::remove_file(&path);
         assert!(
-            m.decls
-                .iter()
-                .any(|d| matches!(d, crate::core_ir::Decl::Function { name, .. } if name == "answer"))
+            m.decls.iter().any(
+                |d| matches!(d, crate::core_ir::Decl::Function { name, .. } if name == "answer")
+            )
         );
     }
 

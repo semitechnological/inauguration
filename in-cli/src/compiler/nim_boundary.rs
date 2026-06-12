@@ -33,7 +33,10 @@ pub fn parse_nim_source(src: &str) -> Result<UnifiedModule, String> {
     if decls.is_empty() {
         return Err("nim boundary front: no proc declarations found".to_string());
     }
-    if !decls.iter().any(|d| matches!(d, Decl::Function { name, .. } if name == "main")) {
+    if !decls
+        .iter()
+        .any(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+    {
         decls.push(Decl::Function {
             name: "main".to_string(),
             params: vec![],
@@ -46,7 +49,7 @@ pub fn parse_nim_source(src: &str) -> Result<UnifiedModule, String> {
 }
 
 pub fn extract_nim_boundary(src: &str) -> Option<BoundaryModule> {
-    for line in src.lines() {
+    if let Some(line) = src.lines().next() {
         let trimmed = line.trim();
         let payload = trimmed
             .strip_prefix("#? in_boundary")
@@ -95,14 +98,27 @@ fn parse_proc_line(line: &str) -> Result<Option<Decl>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::boundary_ir::{BoundaryField, BoundaryLayout, BoundaryOwnership, BoundaryRepr, BoundarySymbol, IN_ABI_VERSION};
+    use crate::boundary_ir::{
+        BoundaryField, BoundaryLayout, BoundaryOwnership, BoundaryRepr, BoundarySymbol,
+        IN_ABI_VERSION,
+    };
 
     #[test]
     fn parses_polyglot_nim_shape() {
         let src = "proc answer(): int = 42\n\nproc main() = discard\n";
         let module = parse_nim_source(src).expect("parse");
-        assert!(module.decls.iter().any(|d| matches!(d, Decl::Function { name, .. } if name == "answer")));
-        assert!(module.decls.iter().any(|d| matches!(d, Decl::Function { name, .. } if name == "main")));
+        assert!(
+            module
+                .decls
+                .iter()
+                .any(|d| matches!(d, Decl::Function { name, .. } if name == "answer"))
+        );
+        assert!(
+            module
+                .decls
+                .iter()
+                .any(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+        );
     }
 
     #[test]

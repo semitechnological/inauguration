@@ -28,7 +28,11 @@ pub fn parse_v_source(src: &str) -> Result<UnifiedModule, String> {
 
         if line.starts_with("struct ") {
             let (name, fields) = parse_struct(line, &mut lines)?;
-            decls.push(Decl::Struct { name, fields, type_params: vec![] });
+            decls.push(Decl::Struct {
+                name,
+                fields,
+                type_params: vec![],
+            });
             continue;
         }
 

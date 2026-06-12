@@ -493,7 +493,9 @@ fn build_report(path: &Path, config: &AgentModeConfig) -> Result<AgentReport, Ag
                     crate::package_manifest::load_package_manifest_from_source(path)
                 {
                     let lock = crate::package_lock::discover_package_lock(&root.root).and_then(
-                        |lock_root| crate::package_lock::load_package_lock(&lock_root.lock_path).ok(),
+                        |lock_root| {
+                            crate::package_lock::load_package_lock(&lock_root.lock_path).ok()
+                        },
                     );
                     for import in &surface.semantic_imports {
                         extern_bindings.extend(
@@ -547,7 +549,9 @@ fn build_report(path: &Path, config: &AgentModeConfig) -> Result<AgentReport, Ag
                     crate::package_manifest::load_package_manifest_from_source(path)
                 {
                     let lock = crate::package_lock::discover_package_lock(&root.root).and_then(
-                        |lock_root| crate::package_lock::load_package_lock(&lock_root.lock_path).ok(),
+                        |lock_root| {
+                            crate::package_lock::load_package_lock(&lock_root.lock_path).ok()
+                        },
                     );
                     crate::package_manifest::symbol_index_for_semantic_imports_with_context(
                         &semantic_imports,
@@ -559,9 +563,7 @@ fn build_report(path: &Path, config: &AgentModeConfig) -> Result<AgentReport, Ag
                     crate::package_manifest::symbol_index_for_semantic_imports(&semantic_imports)
                 };
                 package_symbol_index.extend(
-                    crate::package_manifest::symbol_index_for_semantic_bindings(
-                        &semantic_bindings,
-                    ),
+                    crate::package_manifest::symbol_index_for_semantic_bindings(&semantic_bindings),
                 );
                 package_diagnostics =
                     crate::package_manifest::diagnostics_for_semantic_imports(&semantic_imports);
@@ -593,13 +595,12 @@ fn build_report(path: &Path, config: &AgentModeConfig) -> Result<AgentReport, Ag
                         .into_iter()
                         .map(|import| format!("use:{}:{}", import.import, import.status)),
                 );
-                effects.extend(
-                    semantic_bindings
-                        .into_iter()
-                        .map(|binding| {
-                            format!("bind:{}:{}:{}", binding.import, binding.alias, binding.status)
-                        }),
-                );
+                effects.extend(semantic_bindings.into_iter().map(|binding| {
+                    format!(
+                        "bind:{}:{}:{}",
+                        binding.import, binding.alias, binding.status
+                    )
+                }));
                 effects.extend(
                     surface
                         .imports

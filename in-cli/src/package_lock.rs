@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::package_manifest::{PackageDependency, PackageManifest, PACKAGE_MANIFEST_FILE};
+use crate::package_manifest::{PACKAGE_MANIFEST_FILE, PackageDependency, PackageManifest};
 
 pub const PACKAGE_LOCK_FILE: &str = "inauguration.lock";
 
@@ -356,7 +356,8 @@ fn parse_lock_top_level(
     let (key, value) = split_lock_field(line, line_number)?;
     match key {
         "lock-version" => {
-            lock.lock_version = required_lock_scalar(value, line_number, "lock-version")?.to_string();
+            lock.lock_version =
+                required_lock_scalar(value, line_number, "lock-version")?.to_string();
             Ok(None)
         }
         "name" => {
@@ -367,7 +368,12 @@ fn parse_lock_top_level(
             lock.version = required_lock_scalar(value, line_number, "version")?.to_string();
             Ok(None)
         }
-        "dependencies" => parse_lock_section_header(value, line_number, "dependencies", LockSection::Dependencies),
+        "dependencies" => parse_lock_section_header(
+            value,
+            line_number,
+            "dependencies",
+            LockSection::Dependencies,
+        ),
         other => Err(format!(
             "line {line_number}: unknown top-level field `{other}`"
         )),
@@ -561,9 +567,12 @@ fn parse_lock_dependency_nested_field(
         .get_mut(dependency_name)
         .ok_or_else(|| format!("line {line_number}: unknown dependency `{dependency_name}`"))?;
     match subsection {
-        LockDependencySubsection::Targets => {
-            parse_lock_list_item(line, line_number, "dependency targets", &mut dependency.targets)
-        }
+        LockDependencySubsection::Targets => parse_lock_list_item(
+            line,
+            line_number,
+            "dependency targets",
+            &mut dependency.targets,
+        ),
         LockDependencySubsection::Capabilities => parse_lock_list_item(
             line,
             line_number,
@@ -573,7 +582,11 @@ fn parse_lock_dependency_nested_field(
         LockDependencySubsection::Build => {
             let (key, value) = split_lock_field(line, line_number)?;
             let value = required_lock_scalar(value, line_number, key)?;
-            if dependency.build.insert(key.to_string(), value.to_string()).is_some() {
+            if dependency
+                .build
+                .insert(key.to_string(), value.to_string())
+                .is_some()
+            {
                 return Err(format!(
                     "line {line_number}: duplicate build field `{key}` for dependency `{dependency_name}`"
                 ));
@@ -615,7 +628,11 @@ fn split_lock_field(line: &str, line_number: usize) -> Result<(&str, &str), Stri
     Ok((key, value.trim()))
 }
 
-fn required_lock_scalar<'a>(value: &'a str, line_number: usize, field: &str) -> Result<&'a str, String> {
+fn required_lock_scalar<'a>(
+    value: &'a str,
+    line_number: usize,
+    field: &str,
+) -> Result<&'a str, String> {
     if value.is_empty() {
         Err(format!(
             "line {line_number}: field `{field}` requires a value"
@@ -694,7 +711,12 @@ mod tests {
         assert_eq!(lock.lock_version, "1");
         assert_eq!(lock.name, "hyperchat");
         assert_eq!(lock.version, "0.1.0");
-        assert_eq!(lock.dependencies.get("postgres").map(|dep| dep.version.as_str()), Some("^1.0.0"));
+        assert_eq!(
+            lock.dependencies
+                .get("postgres")
+                .map(|dep| dep.version.as_str()),
+            Some("^1.0.0")
+        );
     }
 
     #[test]
@@ -849,8 +871,8 @@ dependencies:
 "#,
         )
         .expect("write manifest");
-        let manifest = crate::package_manifest::load_package_manifest(&temp.path)
-            .expect("load manifest");
+        let manifest =
+            crate::package_manifest::load_package_manifest(&temp.path).expect("load manifest");
         let lock = resolve_package_lock(&manifest);
         write_package_lock(&temp.path, &lock).expect("write lock");
 
@@ -858,7 +880,10 @@ dependencies:
             load_manifest_and_lock(&temp.path).expect("load manifest and lock");
 
         assert_eq!(loaded_manifest.name, "hyperchat");
-        assert_eq!(loaded_lock.as_ref().map(|entry| entry.name.as_str()), Some("hyperchat"));
+        assert_eq!(
+            loaded_lock.as_ref().map(|entry| entry.name.as_str()),
+            Some("hyperchat")
+        );
         assert!(validation.valid);
     }
 }

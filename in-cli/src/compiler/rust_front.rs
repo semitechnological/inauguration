@@ -13,6 +13,8 @@ use quote::ToTokens;
 use std::collections::HashMap;
 use std::path::Path;
 
+type RustLayoutSpecs = HashMap<String, (BoundaryRepr, Vec<(String, syn::Type)>)>;
+
 pub fn parse_rust_file(path: &Path) -> Result<UnifiedModule, String> {
     parse_rust_artifact(path).map(|artifact| artifact.semantic)
 }
@@ -65,15 +67,15 @@ fn lower_file_items(file: &syn::File) -> Result<UnifiedModule, String> {
 fn extract_boundary_module(file: &syn::File, module_id: &str) -> Option<BoundaryModule> {
     let mut layouts = Vec::new();
     let mut symbols = Vec::new();
-    let mut layout_specs: HashMap<String, (BoundaryRepr, Vec<(String, syn::Type)>)> = HashMap::new();
+    let mut layout_specs: RustLayoutSpecs = HashMap::new();
 
     for item in &file.items {
-        if let syn::Item::Struct(s) = item {
-            if let Some(repr) = repr_from_attrs(&s.attrs) {
-                let fields = boundary_struct_fields(&s.fields);
-                if !fields.is_empty() {
-                    layout_specs.insert(s.ident.to_string(), (repr, fields));
-                }
+        if let syn::Item::Struct(s) = item
+            && let Some(repr) = repr_from_attrs(&s.attrs)
+        {
+            let fields = boundary_struct_fields(&s.fields);
+            if !fields.is_empty() {
+                layout_specs.insert(s.ident.to_string(), (repr, fields));
             }
         }
     }
@@ -85,10 +87,11 @@ fn extract_boundary_module(file: &syn::File, module_id: &str) -> Option<Boundary
     }
 
     for item in &file.items {
-        if let syn::Item::Fn(f) = item {
-            if has_no_mangle(&f.attrs) && is_extern_c(&f.sig) {
-                symbols.push(boundary_symbol_from_fn(f, &layout_specs));
-            }
+        if let syn::Item::Fn(f) = item
+            && has_no_mangle(&f.attrs)
+            && is_extern_c(&f.sig)
+        {
+            symbols.push(boundary_symbol_from_fn(f, &layout_specs));
         }
     }
 
@@ -179,11 +182,7 @@ struct AbiType {
     transfer: Option<BoundaryTransfer>,
 }
 
-fn abi_type_for(
-    ty: &syn::Type,
-    layout_specs: &HashMap<String, (BoundaryRepr, Vec<(String, syn::Type)>)>,
-    packed: bool,
-) -> Option<AbiType> {
+fn abi_type_for(ty: &syn::Type, layout_specs: &RustLayoutSpecs, packed: bool) -> Option<AbiType> {
     match ty {
         syn::Type::Path(tp) => {
             if let Some(seg) = tp.path.segments.last() {
@@ -271,7 +270,7 @@ fn compute_struct_layout(
     name: &str,
     repr: BoundaryRepr,
     fields: &[(String, syn::Type)],
-    layout_specs: &HashMap<String, (BoundaryRepr, Vec<(String, syn::Type)>)>,
+    layout_specs: &RustLayoutSpecs,
 ) -> Option<BoundaryLayout> {
     let packed = matches!(repr, BoundaryRepr::Packed);
     let mut offset = 0u64;
@@ -310,16 +309,13 @@ fn compute_struct_layout(
     })
 }
 
-fn boundary_type_name(ty: &syn::Type, layout_specs: &HashMap<String, (BoundaryRepr, Vec<(String, syn::Type)>)>) -> String {
+fn boundary_type_name(ty: &syn::Type, layout_specs: &RustLayoutSpecs) -> String {
     abi_type_for(ty, layout_specs, false)
         .map(|abi| abi.boundary_type.clone())
         .unwrap_or_else(|| ty.to_token_stream().to_string())
 }
 
-fn boundary_symbol_from_fn(
-    f: &syn::ItemFn,
-    layout_specs: &HashMap<String, (BoundaryRepr, Vec<(String, syn::Type)>)>,
-) -> BoundarySymbol {
+fn boundary_symbol_from_fn(f: &syn::ItemFn, layout_specs: &RustLayoutSpecs) -> BoundarySymbol {
     let name = f.sig.ident.to_string();
     let mut parts = vec![name.clone()];
     for arg in &f.sig.inputs {

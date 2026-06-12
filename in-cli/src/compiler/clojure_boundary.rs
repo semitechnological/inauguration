@@ -33,7 +33,10 @@ pub fn parse_clojure_source(src: &str) -> Result<UnifiedModule, String> {
     if decls.is_empty() {
         return Err("clojure boundary front: no defn declarations found".to_string());
     }
-    if !decls.iter().any(|d| matches!(d, Decl::Function { name, .. } if name == "main")) {
+    if !decls
+        .iter()
+        .any(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+    {
         decls.push(Decl::Function {
             name: "main".to_string(),
             params: vec![],
@@ -46,7 +49,7 @@ pub fn parse_clojure_source(src: &str) -> Result<UnifiedModule, String> {
 }
 
 pub fn extract_clojure_boundary(src: &str) -> Option<BoundaryModule> {
-    for line in src.lines() {
+    if let Some(line) = src.lines().next() {
         let trimmed = line.trim();
         let payload = trimmed
             .strip_prefix(";? in_boundary")
@@ -69,11 +72,7 @@ fn parse_defn_line(line: &str) -> Result<Option<Decl>, String> {
         .strip_prefix("(defn ")
         .and_then(|s| s.strip_suffix(')'))
         .unwrap_or("");
-    let name = inner
-        .split_whitespace()
-        .next()
-        .unwrap_or("")
-        .trim();
+    let name = inner.split_whitespace().next().unwrap_or("").trim();
     if name.is_empty() {
         return Err("clojure boundary front: defn missing name".to_string());
     }
@@ -82,7 +81,11 @@ fn parse_defn_line(line: &str) -> Result<Option<Decl>, String> {
     } else {
         vec![Stmt::Return(None)]
     };
-    let ret = if name == "answer" { Typ::Int } else { Typ::Void };
+    let ret = if name == "answer" {
+        Typ::Int
+    } else {
+        Typ::Void
+    };
     Ok(Some(Decl::Function {
         name: name.to_string(),
         params: vec![],
@@ -100,6 +103,11 @@ mod tests {
     fn parses_polyglot_clojure_shape() {
         let src = "(defn answer [] 42)\n(defn main [] nil)\n";
         let module = parse_clojure_source(src).expect("parse");
-        assert!(module.decls.iter().any(|d| matches!(d, Decl::Function { name, .. } if name == "answer")));
+        assert!(
+            module
+                .decls
+                .iter()
+                .any(|d| matches!(d, Decl::Function { name, .. } if name == "answer"))
+        );
     }
 }

@@ -46,11 +46,13 @@ pub struct MachOImage {
     pub exports: Vec<ExportSymbol>,
 }
 
+#[cfg(test)]
 pub struct MachOExecutable {
     pub code: Vec<u8>,
     pub entry_offset: u32,
 }
 
+#[cfg(test)]
 pub fn write_executable(exe: &MachOExecutable, out: &mut Vec<u8>) {
     let image = MachOImage {
         code: exe.code.clone(),
@@ -60,7 +62,12 @@ pub fn write_executable(exe: &MachOExecutable, out: &mut Vec<u8>) {
     write_image(&image, MachOLinkage::Executable, "", out);
 }
 
-pub fn write_image(image: &MachOImage, linkage: MachOLinkage, install_name: &str, out: &mut Vec<u8>) {
+pub fn write_image(
+    image: &MachOImage,
+    linkage: MachOLinkage,
+    install_name: &str,
+    out: &mut Vec<u8>,
+) {
     match linkage {
         MachOLinkage::StaticLib => write_static_archive(image, install_name, out),
         MachOLinkage::Executable | MachOLinkage::Dylib => {
@@ -100,7 +107,10 @@ fn write_ar_member(out: &mut Vec<u8>, name: &str, payload: &[u8]) {
     let uid = b"0           ";
     let gid = b"0           ";
     let mode: &[u8] = b"644       ";
-    let size_field = format!("{:10}", payload.len() + if name.len() > 16 { name.len() } else { 0 });
+    let size_field = format!(
+        "{:10}",
+        payload.len() + if name.len() > 16 { name.len() } else { 0 }
+    );
     out.extend_from_slice(&header_name);
     out.extend_from_slice(timestamp);
     out.extend_from_slice(uid);
@@ -117,7 +127,12 @@ fn write_ar_member(out: &mut Vec<u8>, name: &str, payload: &[u8]) {
     }
 }
 
-fn write_macho_image(image: &MachOImage, linkage: MachOLinkage, install_name: &str, out: &mut Vec<u8>) {
+fn write_macho_image(
+    image: &MachOImage,
+    linkage: MachOLinkage,
+    install_name: &str,
+    out: &mut Vec<u8>,
+) {
     let (file_type, flags, text_vmaddr) = match linkage {
         MachOLinkage::Executable => (MH_EXECUTE, MH_NOUNDEFS | MH_PIE | MH_DYLDLINK, TEXT_VMADDR),
         MachOLinkage::Dylib => (MH_DYLIB, MH_NOUNDEFS | MH_DYLDLINK, TEXT_VMADDR),
@@ -145,16 +160,8 @@ fn write_macho_image(image: &MachOImage, linkage: MachOLinkage, install_name: &s
     } else {
         0
     };
-    let symtab_cmd_size = if image.exports.is_empty() {
-        0
-    } else {
-        24
-    };
-    let dysymtab_cmd_size = if image.exports.is_empty() {
-        0
-    } else {
-        80
-    };
+    let symtab_cmd_size = if image.exports.is_empty() { 0 } else { 24 };
+    let dysymtab_cmd_size = if image.exports.is_empty() { 0 } else { 80 };
     let build_version_cmd_size = if linkage == MachOLinkage::StaticLib {
         0
     } else {
@@ -471,9 +478,17 @@ mod tests {
     fn dylib_uses_mh_dylib_file_type() {
         let image = sample_image();
         let mut out = Vec::new();
-        write_image(&image, MachOLinkage::Dylib, "@rpath/libsample.dylib", &mut out);
+        write_image(
+            &image,
+            MachOLinkage::Dylib,
+            "@rpath/libsample.dylib",
+            &mut out,
+        );
         assert_eq!(&out[0..4], &MH_MAGIC_64.to_le_bytes());
-        assert_eq!(u32::from_le_bytes(out[12..16].try_into().unwrap()), MH_DYLIB);
+        assert_eq!(
+            u32::from_le_bytes(out[12..16].try_into().unwrap()),
+            MH_DYLIB
+        );
     }
 
     #[test]
@@ -488,7 +503,12 @@ mod tests {
     fn dylib_exports_symbols_in_linkedit() {
         let image = sample_image();
         let mut out = Vec::new();
-        write_image(&image, MachOLinkage::Dylib, "@rpath/libsample.dylib", &mut out);
+        write_image(
+            &image,
+            MachOLinkage::Dylib,
+            "@rpath/libsample.dylib",
+            &mut out,
+        );
         let haystack = String::from_utf8_lossy(&out);
         assert!(haystack.contains("_answer"));
     }
@@ -497,9 +517,7 @@ mod tests {
     #[test]
     fn roundtrip_answer_code_layout() {
         let code = vec![
-            0x40, 0x05, 0x80, 0xd2,
-            0x20, 0x00, 0x80, 0xd2,
-            0x01, 0x10, 0x00, 0xd4,
+            0x40, 0x05, 0x80, 0xd2, 0x20, 0x00, 0x80, 0xd2, 0x01, 0x10, 0x00, 0xd4,
         ];
         let exe = MachOExecutable {
             code,

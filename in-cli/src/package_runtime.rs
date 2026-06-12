@@ -6,12 +6,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::bytecode::Value;
 use crate::package_install::{
-    InstalledPackageMetadata, PackageExportBinding, PackageInvokeSpec, INSTALLED_PACKAGE_METADATA,
-};
-use crate::package_manifest::{
-    load_package_manifest_from_source, resolve_dependency_install_path, PackageManifest,
+    INSTALLED_PACKAGE_METADATA, InstalledPackageMetadata, PackageExportBinding, PackageInvokeSpec,
 };
 use crate::package_lock::PackageLock;
+use crate::package_manifest::{
+    PackageManifest, load_package_manifest_from_source, resolve_dependency_install_path,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PackageExportRuntime {
@@ -20,7 +20,9 @@ pub struct PackageExportRuntime {
     pub invoke: PackageInvokeSpec,
 }
 
-pub fn collect_package_exports_for_source(source_path: &Path) -> BTreeMap<String, PackageExportRuntime> {
+pub fn collect_package_exports_for_source(
+    source_path: &Path,
+) -> BTreeMap<String, PackageExportRuntime> {
     let Ok((root, manifest)) = load_package_manifest_from_source(source_path) else {
         return BTreeMap::new();
     };
@@ -36,12 +38,9 @@ pub fn collect_package_exports_for_manifest(
 ) -> BTreeMap<String, PackageExportRuntime> {
     let mut exports = BTreeMap::new();
     for (dependency_key, dependency) in &manifest.dependencies {
-        let Some(install_path) = resolve_dependency_install_path(
-            package_root,
-            dependency_key,
-            dependency,
-            lock,
-        ) else {
+        let Some(install_path) =
+            resolve_dependency_install_path(package_root, dependency_key, dependency, lock)
+        else {
             continue;
         };
         let metadata_path = install_path.join(INSTALLED_PACKAGE_METADATA);

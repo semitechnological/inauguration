@@ -53,10 +53,13 @@ fn main() {
         let status = Command::new("v")
             .args([
                 "-shared",
-                "-gc", "none",
+                "-gc",
+                "none",
                 "-prod",
-                "-backend", "c",
-                "-o", c_file.to_str().unwrap_or("out.c"),
+                "-backend",
+                "c",
+                "-o",
+                c_file.to_str().unwrap_or("out.c"),
                 v_file.to_str().unwrap_or(""),
             ])
             .status();
@@ -66,17 +69,27 @@ fn main() {
                 println!("cargo:warning=compiled {} to C", v_file.display());
             }
             Ok(s) => {
-                println!("cargo:warning=v failed for {} with exit {:?}", v_file.display(), s.code());
+                println!(
+                    "cargo:warning=v failed for {} with exit {:?}",
+                    v_file.display(),
+                    s.code()
+                );
                 return;
             }
             Err(e) => {
-                println!("cargo:warning=v invocation failed for {}: {e}", v_file.display());
+                println!(
+                    "cargo:warning=v invocation failed for {}: {e}",
+                    v_file.display()
+                );
                 return;
             }
         }
 
         if !c_file.exists() {
-            println!("cargo:warning=expected C output {} not found", c_file.display());
+            println!(
+                "cargo:warning=expected C output {} not found",
+                c_file.display()
+            );
             return;
         }
 
@@ -85,7 +98,8 @@ fn main() {
             .args([
                 "-c",
                 c_file.to_str().unwrap_or(""),
-                "-o", obj_file.to_str().unwrap_or(""),
+                "-o",
+                obj_file.to_str().unwrap_or(""),
                 "-O2",
             ])
             .status();
@@ -96,7 +110,11 @@ fn main() {
                 c_objects.push(obj_file);
             }
             Ok(s) => {
-                println!("cargo:warning=cc failed for {} with exit {:?}", c_file.display(), s.code());
+                println!(
+                    "cargo:warning=cc failed for {} with exit {:?}",
+                    c_file.display(),
+                    s.code()
+                );
                 return;
             }
             Err(e) => {
@@ -129,5 +147,8 @@ fn main() {
     println!("cargo:rustc-link-search=native={}", out_dir.display());
     println!("cargo:rustc-link-lib=static=inc_compiler");
     println!("cargo:rustc-cfg=has_v_native");
-    println!("cargo:warning=V native build complete -> {}", lib_path.display());
+    println!(
+        "cargo:warning=V native build complete -> {}",
+        lib_path.display()
+    );
 }

@@ -1,15 +1,9 @@
 use crate::boundary_ir::{
-    BoundaryLayout, BoundaryModule, BoundaryOwnership, BoundaryRepr, BoundaryTransfer, IN_ABI_VERSION,
+    BoundaryLayout, BoundaryModule, BoundaryOwnership, BoundaryRepr, BoundaryTransfer,
+    IN_ABI_VERSION,
 };
 
-const MANAGED_ABI_TYPES: &[&str] = &[
-    "Vec",
-    "String",
-    "Array",
-    "seq",
-    "string",
-    "InBufU8",
-];
+const MANAGED_ABI_TYPES: &[&str] = &["Vec", "String", "Array", "seq", "string", "InBufU8"];
 
 pub struct BoundaryVerifyReport {
     pub ok: bool,
@@ -39,10 +33,7 @@ pub fn boundary_ir_verify(module: &BoundaryModule) -> BoundaryVerifyReport {
             diagnostics.push("symbol name is empty".to_string());
         }
         if symbol.signature_hash.is_empty() {
-            diagnostics.push(format!(
-                "symbol `{}` missing signature_hash",
-                symbol.name
-            ));
+            diagnostics.push(format!("symbol `{}` missing signature_hash", symbol.name));
         }
         if matches!(symbol.ownership, BoundaryOwnership::Borrowed)
             && symbol.calling_convention != "c"
@@ -98,13 +89,14 @@ fn verify_layout(layout: &BoundaryLayout, diagnostics: &mut Vec<String>) {
         ));
     }
 
-    if let Some(repr) = &layout.repr {
-        if matches!(repr, BoundaryRepr::Packed) && layout.align > 1 {
-            diagnostics.push(format!(
-                "layout `{}` packed repr with align > 1",
-                layout.name
-            ));
-        }
+    if let Some(repr) = &layout.repr
+        && matches!(repr, BoundaryRepr::Packed)
+        && layout.align > 1
+    {
+        diagnostics.push(format!(
+            "layout `{}` packed repr with align > 1",
+            layout.name
+        ));
     }
 
     let mut prev_end = 0u64;
@@ -121,13 +113,14 @@ fn verify_layout(layout: &BoundaryLayout, diagnostics: &mut Vec<String>) {
                 layout.name, field.name, field.typ
             ));
         }
-        if let Some(transfer) = &field.transfer {
-            if matches!(transfer, BoundaryTransfer::Borrow) && field.typ != "InSliceU8" {
-                diagnostics.push(format!(
-                    "layout `{}` field `{}` borrow transfer requires InSliceU8",
-                    layout.name, field.name
-                ));
-            }
+        if let Some(transfer) = &field.transfer
+            && matches!(transfer, BoundaryTransfer::Borrow)
+            && field.typ != "InSliceU8"
+        {
+            diagnostics.push(format!(
+                "layout `{}` field `{}` borrow transfer requires InSliceU8",
+                layout.name, field.name
+            ));
         }
         prev_end = field.offset.saturating_add(size_hint_for_type(&field.typ));
     }
@@ -221,10 +214,12 @@ mod tests {
         };
         let report = boundary_ir_verify(&module);
         assert!(!report.ok);
-        assert!(report
-            .diagnostics
-            .iter()
-            .any(|d| d.contains("managed type")));
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|d| d.contains("managed type"))
+        );
     }
 
     #[test]

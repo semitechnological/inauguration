@@ -3,7 +3,7 @@ use std::path::Path;
 use libloading::Library;
 
 use super::{
-    DynamicModule, DynamicModuleError, InCallStatus, IN_MODULE_ENTRY_SYMBOL, ModuleDescriptor,
+    DynamicModule, DynamicModuleError, IN_MODULE_ENTRY_SYMBOL, InCallStatus, ModuleDescriptor,
     validate_descriptor,
 };
 
@@ -62,11 +62,7 @@ impl DynamicModule for UnixDynamicModule {
         unsafe {
             let lookup = (*self.vtable).symbol?;
             let ptr = lookup(name.as_ptr(), name.len() as u64);
-            if ptr.is_null() {
-                None
-            } else {
-                Some(ptr)
-            }
+            if ptr.is_null() { None } else { Some(ptr) }
         }
     }
 }

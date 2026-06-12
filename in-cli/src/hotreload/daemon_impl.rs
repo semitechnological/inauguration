@@ -277,7 +277,8 @@ pub fn plan_patch_with_sil_graph(
     };
     if matches!(patch_type, PatchType::FullModule) && !is_app_entry_path(path) {
         let should_upgrade = if callee_driven {
-            sil_graph.is_some_and(|graph| graph.changed_symbol_is_called_by_view_body(changed_symbols))
+            sil_graph
+                .is_some_and(|graph| graph.changed_symbol_is_called_by_view_body(changed_symbols))
         } else {
             sil_graph.is_some_and(|graph| graph.has_changed_callee(changed_symbols))
         };
@@ -923,8 +924,12 @@ mod tests {
     fn sil_graph_does_not_downgrade_without_changed_callee() {
         let graph =
             SilGraphDetail::from_call_edges(vec![("main".to_string(), "helper".to_string())]);
-        let p =
-            plan_patch_with_sil_graph("Sources/Helper.swift", &["other".to_string()], Some(&graph), false);
+        let p = plan_patch_with_sil_graph(
+            "Sources/Helper.swift",
+            &["other".to_string()],
+            Some(&graph),
+            false,
+        );
         assert_eq!(p.patch_type, PatchType::FullModule);
         assert!(!p.compatible);
     }
@@ -933,8 +938,12 @@ mod tests {
     fn sil_graph_does_not_downgrade_app_swift() {
         let graph =
             SilGraphDetail::from_call_edges(vec![("main".to_string(), "helper".to_string())]);
-        let p =
-            plan_patch_with_sil_graph("Sources/App.swift", &["helper".to_string()], Some(&graph), false);
+        let p = plan_patch_with_sil_graph(
+            "Sources/App.swift",
+            &["helper".to_string()],
+            Some(&graph),
+            false,
+        );
         assert_eq!(p.patch_type, PatchType::FullModule);
         assert!(!p.compatible);
     }
@@ -1273,10 +1282,8 @@ mod tests {
 
     #[test]
     fn callee_driven_upgrades_view_body_when_called_by_body_function() {
-        let graph = SilGraphDetail::from_call_edges(vec![(
-            "body".to_string(),
-            "state".to_string(),
-        )]);
+        let graph =
+            SilGraphDetail::from_call_edges(vec![("body".to_string(), "state".to_string())]);
         let p = plan_patch_with_sil_graph(
             "Sources/StateManager.swift",
             &["state".to_string()],
@@ -1289,10 +1296,7 @@ mod tests {
 
     #[test]
     fn callee_driven_does_not_upgrade_for_non_body_caller() {
-        let graph = SilGraphDetail::from_call_edges(vec![(
-            "main".to_string(),
-            "util".to_string(),
-        )]);
+        let graph = SilGraphDetail::from_call_edges(vec![("main".to_string(), "util".to_string())]);
         let p = plan_patch_with_sil_graph(
             "Sources/Util.swift",
             &["util".to_string()],

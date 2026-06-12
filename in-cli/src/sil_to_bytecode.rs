@@ -26,7 +26,7 @@ pub fn lower_sil_to_bytecode(artifact: &SilArtifact) -> Result<BytecodeModule, S
 
         functions_map
             .entry(current_func.clone())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(line.to_string());
     }
 
@@ -498,130 +498,132 @@ fn parse_sil_instruction_to_bytecode(
     }
 
     // %0 = float_literal $Builtin.FPIEEE64, 3.14
-    if line.contains("=") && line.contains("float_literal") {
-        if let Some(before_eq) = line.split('=').next() {
-            let reg = before_eq.trim();
-            if reg.starts_with('%') {
-                if let Some(rest) = line.split('=').nth(1) {
-                    let rest = rest.trim();
-                    if let Some(f_str) = rest.strip_prefix("float_literal $Builtin.FPIEEE64,") {
-                        if let Ok(f) = f_str.trim().parse::<f64>() {
-                            out.push(Instruction::LoadFloat(FloatVal(f)));
-                            let slot = *local_counter;
-                            *local_counter += 1;
-                            value_map.insert(reg.to_string(), slot);
-                            clear_value_constants(reg, value_ints, value_bools);
-                            out.push(Instruction::Store(slot));
-                            return Ok(out);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // %0 = integer_literal $Builtin.Int64, 42
-    if line.contains("=") && line.contains("integer_literal") {
-        if let Some(before_eq) = line.split('=').next() {
-            let reg = before_eq.trim();
-            if reg.starts_with('%') {
-                if let Some(rest) = line.split('=').nth(1) {
-                    let rest = rest.trim();
-                    if let Some(n_str) = rest.strip_prefix("integer_literal $Builtin.Int64,") {
-                        if let Ok(n) = n_str.trim().parse::<i64>() {
-                            out.push(Instruction::LoadInt(n));
-                            // Store in "register" (local)
-                            let slot = *local_counter;
-                            *local_counter += 1;
-                            value_map.insert(reg.to_string(), slot);
-                            value_ints.insert(reg.to_string(), n);
-                            out.push(Instruction::Store(slot));
-                            return Ok(out);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // integer_literal $Builtin.Int64, 42 (standalone)
-    if let Some(rest) = line.strip_prefix("integer_literal $Builtin.Int64,") {
-        if let Ok(n) = rest.trim().parse::<i64>() {
-            out.push(Instruction::LoadInt(n));
-            return Ok(out);
-        }
-    }
-
-    // float_literal $Builtin.FPIEEE64, 3.14 (standalone)
-    if let Some(rest) = line.strip_prefix("float_literal $Builtin.FPIEEE64,") {
-        if let Ok(f) = rest.trim().parse::<f64>() {
-            out.push(Instruction::LoadFloat(FloatVal(f)));
-            return Ok(out);
-        }
-    }
-
-    if line.contains("=") && line.contains("argument ") {
-        if let Some(before_eq) = line.split('=').next() {
-            let reg = before_eq.trim();
-            if reg.starts_with('%') {
+    if line.contains("=")
+        && line.contains("float_literal")
+        && let Some(before_eq) = line.split('=').next()
+    {
+        let reg = before_eq.trim();
+        if reg.starts_with('%')
+            && let Some(rest) = line.split('=').nth(1)
+        {
+            let rest = rest.trim();
+            if let Some(f_str) = rest.strip_prefix("float_literal $Builtin.FPIEEE64,")
+                && let Ok(f) = f_str.trim().parse::<f64>()
+            {
+                out.push(Instruction::LoadFloat(FloatVal(f)));
                 let slot = *local_counter;
                 *local_counter += 1;
                 value_map.insert(reg.to_string(), slot);
                 clear_value_constants(reg, value_ints, value_bools);
+                out.push(Instruction::Store(slot));
                 return Ok(out);
             }
         }
     }
 
+    // %0 = integer_literal $Builtin.Int64, 42
+    if line.contains("=")
+        && line.contains("integer_literal")
+        && let Some(before_eq) = line.split('=').next()
+    {
+        let reg = before_eq.trim();
+        if reg.starts_with('%')
+            && let Some(rest) = line.split('=').nth(1)
+        {
+            let rest = rest.trim();
+            if let Some(n_str) = rest.strip_prefix("integer_literal $Builtin.Int64,")
+                && let Ok(n) = n_str.trim().parse::<i64>()
+            {
+                out.push(Instruction::LoadInt(n));
+                // Store in "register" (local)
+                let slot = *local_counter;
+                *local_counter += 1;
+                value_map.insert(reg.to_string(), slot);
+                value_ints.insert(reg.to_string(), n);
+                out.push(Instruction::Store(slot));
+                return Ok(out);
+            }
+        }
+    }
+
+    // integer_literal $Builtin.Int64, 42 (standalone)
+    if let Some(rest) = line.strip_prefix("integer_literal $Builtin.Int64,")
+        && let Ok(n) = rest.trim().parse::<i64>()
+    {
+        out.push(Instruction::LoadInt(n));
+        return Ok(out);
+    }
+
+    // float_literal $Builtin.FPIEEE64, 3.14 (standalone)
+    if let Some(rest) = line.strip_prefix("float_literal $Builtin.FPIEEE64,")
+        && let Ok(f) = rest.trim().parse::<f64>()
+    {
+        out.push(Instruction::LoadFloat(FloatVal(f)));
+        return Ok(out);
+    }
+
+    if line.contains("=")
+        && line.contains("argument ")
+        && let Some(before_eq) = line.split('=').next()
+    {
+        let reg = before_eq.trim();
+        if reg.starts_with('%') {
+            let slot = *local_counter;
+            *local_counter += 1;
+            value_map.insert(reg.to_string(), slot);
+            clear_value_constants(reg, value_ints, value_bools);
+            return Ok(out);
+        }
+    }
+
     // %0 = apply %1(%2, %3) : $... (function call)
-    if line.contains("= apply") {
-        if let Some(eq_split) = line.split('=').nth(1) {
-            if let Some(apply_rest) = eq_split.trim().strip_prefix("apply").map(str::trim) {
-                // Extract function ref
-                if let Some(paren_idx) = apply_rest.find('(') {
-                    let func_ref = &apply_rest[..paren_idx].trim();
+    if line.contains("= apply")
+        && let Some(eq_split) = line.split('=').nth(1)
+        && let Some(apply_rest) = eq_split.trim().strip_prefix("apply").map(str::trim)
+    {
+        // Extract function ref
+        if let Some(paren_idx) = apply_rest.find('(') {
+            let func_ref = &apply_rest[..paren_idx].trim();
 
-                    // Extract arguments between parens
-                    if let Some(close_paren) = apply_rest.find(')') {
-                        let args_str = &apply_rest[paren_idx + 1..close_paren];
-                        for arg in args_str.split(',') {
-                            let arg = arg.trim();
-                            if arg.starts_with('%') {
-                                if let Some(slot) = value_map.get(arg) {
-                                    out.push(Instruction::Load(*slot));
-                                }
-                            }
-                        }
-                        let callee = function_refs
-                            .get(*func_ref)
-                            .cloned()
-                            .unwrap_or_else(|| "user_func".to_string());
-                        let argc = args_str
-                            .split(',')
-                            .map(str::trim)
-                            .filter(|arg| !arg.is_empty())
-                            .count();
-                        let ret_count = builtin_return_count(&callee);
-                        if is_builtin_function(&callee) {
-                            out.push(Instruction::CallBuiltin(callee.clone(), argc));
-                        } else {
-                            out.push(Instruction::CallFunction(callee.clone(), argc));
-                        }
-
-                        if let Some(before_eq) = line.split('=').next() {
-                            let res_reg = before_eq.trim();
-                            if res_reg.starts_with('%') {
-                                store_register(res_reg, local_counter, value_map, &mut out);
-                                for _ in 1..ret_count {
-                                    out.push(Instruction::Pop);
-                                }
-                                clear_value_constants(res_reg, value_ints, value_bools);
-                            }
-                        }
+            // Extract arguments between parens
+            if let Some(close_paren) = apply_rest.find(')') {
+                let args_str = &apply_rest[paren_idx + 1..close_paren];
+                for arg in args_str.split(',') {
+                    let arg = arg.trim();
+                    if arg.starts_with('%')
+                        && let Some(slot) = value_map.get(arg)
+                    {
+                        out.push(Instruction::Load(*slot));
                     }
-                    return Ok(out);
+                }
+                let callee = function_refs
+                    .get(*func_ref)
+                    .cloned()
+                    .unwrap_or_else(|| "user_func".to_string());
+                let argc = args_str
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|arg| !arg.is_empty())
+                    .count();
+                let ret_count = builtin_return_count(&callee);
+                if is_builtin_function(&callee) {
+                    out.push(Instruction::CallBuiltin(callee.clone(), argc));
+                } else {
+                    out.push(Instruction::CallFunction(callee.clone(), argc));
+                }
+
+                if let Some(before_eq) = line.split('=').next() {
+                    let res_reg = before_eq.trim();
+                    if res_reg.starts_with('%') {
+                        store_register(res_reg, local_counter, value_map, &mut out);
+                        for _ in 1..ret_count {
+                            out.push(Instruction::Pop);
+                        }
+                        clear_value_constants(res_reg, value_ints, value_bools);
+                    }
                 }
             }
+            return Ok(out);
         }
     }
 
@@ -652,16 +654,17 @@ fn parse_sil_instruction_to_bytecode(
 
     // return %0 or return
     if line.starts_with("return") {
-        if let Some(rest) = line.strip_prefix("return").map(str::trim) {
-            if !rest.is_empty() && rest.starts_with('%') {
-                let reg = rest
-                    .split(|c: char| c.is_whitespace() || c == ':')
-                    .next()
-                    .unwrap_or(rest);
-                // Load the return value
-                if let Some(slot) = value_map.get(reg) {
-                    out.push(Instruction::Load(*slot));
-                }
+        if let Some(rest) = line.strip_prefix("return").map(str::trim)
+            && !rest.is_empty()
+            && rest.starts_with('%')
+        {
+            let reg = rest
+                .split(|c: char| c.is_whitespace() || c == ':')
+                .next()
+                .unwrap_or(rest);
+            // Load the return value
+            if let Some(slot) = value_map.get(reg) {
+                out.push(Instruction::Load(*slot));
             }
         }
         out.push(Instruction::Return);

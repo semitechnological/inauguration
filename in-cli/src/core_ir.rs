@@ -187,36 +187,37 @@ impl MatchPattern {
             let pats: Result<Vec<_>, _> = parts.iter().map(|p| MatchPattern::parse(p)).collect();
             return Ok(MatchPattern::ArrayPat(pats?));
         }
-        if let Some(open) = s.find('{') {
-            if s.ends_with('}') {
-                let name = trim_match_pat(&s[..open]);
-                if !name.is_empty()
-                    && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-                {
-                    let inner = &s[open + 1..s.len() - 1];
-                    let field_strs = split_match_pat_args(inner);
-                    let mut fields = Vec::new();
-                    for f in field_strs {
-                        if let Some((field_name, field_pat)) = f.split_once(':') {
-                            let fn_trim = trim_match_pat(field_name);
-                            let fp_trim = trim_match_pat(field_pat);
-                            if fn_trim.is_empty() {
-                                return Err(format!(".in: empty field name in struct pattern `{s}`"));
-                            }
-                            fields.push((fn_trim.to_string(), MatchPattern::parse(fp_trim)?));
-                        } else {
-                            let fn_trim = trim_match_pat(&f);
-                            if fn_trim.is_empty() {
-                                return Err(format!(".in: empty field name in struct pattern `{s}`"));
-                            }
-                            fields.push((fn_trim.to_string(), MatchPattern::IdentPat(fn_trim.to_string())));
+        if let Some(open) = s.find('{')
+            && s.ends_with('}')
+        {
+            let name = trim_match_pat(&s[..open]);
+            if !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                let inner = &s[open + 1..s.len() - 1];
+                let field_strs = split_match_pat_args(inner);
+                let mut fields = Vec::new();
+                for f in field_strs {
+                    if let Some((field_name, field_pat)) = f.split_once(':') {
+                        let fn_trim = trim_match_pat(field_name);
+                        let fp_trim = trim_match_pat(field_pat);
+                        if fn_trim.is_empty() {
+                            return Err(format!(".in: empty field name in struct pattern `{s}`"));
                         }
+                        fields.push((fn_trim.to_string(), MatchPattern::parse(fp_trim)?));
+                    } else {
+                        let fn_trim = trim_match_pat(&f);
+                        if fn_trim.is_empty() {
+                            return Err(format!(".in: empty field name in struct pattern `{s}`"));
+                        }
+                        fields.push((
+                            fn_trim.to_string(),
+                            MatchPattern::IdentPat(fn_trim.to_string()),
+                        ));
                     }
-                    return Ok(MatchPattern::StructPat {
-                        name: name.to_string(),
-                        fields,
-                    });
                 }
+                return Ok(MatchPattern::StructPat {
+                    name: name.to_string(),
+                    fields,
+                });
             }
         }
         if s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {

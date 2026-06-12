@@ -456,11 +456,7 @@ impl BytecodeVM {
                 let mut tokens = Vec::new();
                 let mut current = String::new();
                 for ch in text.chars() {
-                    if ch.is_whitespace() {
-                        if !current.is_empty() {
-                            tokens.push(Value::String(std::mem::take(&mut current)));
-                        }
-                    } else if matches!(ch, '(' | ')') {
+                    if ch.is_whitespace() || matches!(ch, '(' | ')') {
                         if !current.is_empty() {
                             tokens.push(Value::String(std::mem::take(&mut current)));
                         }
@@ -572,14 +568,22 @@ impl BytecodeVM {
             "read_file" => {
                 let path = args.first().map_or(String::new(), Value::to_string_display);
                 vec![Value::String(
-                    std::fs::read_to_string(path).unwrap_or_default(),
+                    std::fs::read_to_string(&path)
+                        .unwrap_or_else(|err| format!("read_file error for {path}: {err}")),
                 )]
             }
             "write_file" => {
                 let mut iter = args.into_iter();
                 let path = iter.next().unwrap_or(Value::Nil).to_string_display();
                 let text = iter.next().unwrap_or(Value::Nil).to_string_display();
-                vec![Value::Bool(std::fs::write(path, text).is_ok())]
+                let ok = match std::fs::write(&path, text) {
+                    Ok(()) => true,
+                    Err(err) => {
+                        eprintln!("write_file error for {path}: {err}");
+                        false
+                    }
+                };
+                vec![Value::Bool(ok)]
             }
             "array_push" => {
                 let mut iter = args.into_iter();

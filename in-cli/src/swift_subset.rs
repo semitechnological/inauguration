@@ -446,10 +446,9 @@ fn parse_struct_field_list(inner: &str) -> Vec<(String, Typ)> {
     }
     inner
         .split([',', ';', '\n'])
-        .into_iter()
         .map(trim)
         .filter(|t| !t.is_empty())
-        .map(|t| parse_param(&t))
+        .map(parse_param)
         .collect()
 }
 
@@ -519,20 +518,20 @@ fn parse_enum_decl(block: &str) -> StructDecl {
     // Parse cases with associated values: "case success(Int)" -> payload field
     for case_line in split_body_statements(body) {
         let case_line = trim(&case_line);
-        if let Some(after_case) = case_line.strip_prefix("case ") {
-            if let Some(paren) = after_case.find('(') {
-                let case_name = trim(&after_case[..paren]);
-                let after_paren = &after_case[paren + 1..];
-                if let Some(close) = after_paren.find(')') {
-                    let payload_types = trim(&after_paren[..close]);
-                    let payload_type = if !payload_types.is_empty() {
-                        parse_type(payload_types)
-                    } else {
-                        Typ::Void
-                    };
-                    let payload_field = format!("{}_{}_payload", name, case_name);
-                    fields.push((payload_field, payload_type));
-                }
+        if let Some(after_case) = case_line.strip_prefix("case ")
+            && let Some(paren) = after_case.find('(')
+        {
+            let case_name = trim(&after_case[..paren]);
+            let after_paren = &after_case[paren + 1..];
+            if let Some(close) = after_paren.find(')') {
+                let payload_types = trim(&after_paren[..close]);
+                let payload_type = if !payload_types.is_empty() {
+                    parse_type(payload_types)
+                } else {
+                    Typ::Void
+                };
+                let payload_field = format!("{}_{}_payload", name, case_name);
+                fields.push((payload_field, payload_type));
             }
         }
     }
