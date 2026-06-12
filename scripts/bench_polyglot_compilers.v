@@ -26,6 +26,7 @@ struct CompilerCase {
 	example    string
 	module     string
 	compiler   string
+	mode       string
 	native_cmd string
 	in_env     string
 }
@@ -35,6 +36,7 @@ struct BenchRow {
 	example                    string
 	module                     string
 	compiler                   string
+	mode                       string
 	compiler_available         bool
 	native_ok                  bool
 	native_ms                  f64
@@ -191,27 +193,31 @@ fn main() {
 			example:    'apps/polyglot-sample/sample.c'
 			module:     'SampleC'
 			compiler:   'clang'
-			native_cmd: 'clang -fsyntax-only "__PATH__"'
+			mode:       'object'
+			native_cmd: 'clang -c "__PATH__" -o "__NATIVE_OUT__"'
 		},
 		CompilerCase{
 			language:   'C++'
 			example:    'apps/polyglot-sample/sample.cpp'
 			module:     'SampleCpp'
 			compiler:   'clang++'
-			native_cmd: 'clang++ -fsyntax-only "__PATH__"'
+			mode:       'object'
+			native_cmd: 'clang++ -c "__PATH__" -o "__NATIVE_OUT__"'
 		},
 		CompilerCase{
 			language:   'Rust'
 			example:    'apps/polyglot-sample/sample.rs'
 			module:     'SampleRust'
 			compiler:   'rustc'
-			native_cmd: 'rustc --emit=metadata "__PATH__" -o "__NATIVE_OUT__"'
+			mode:       'object'
+			native_cmd: 'rustc --emit=obj "__PATH__" -o "__NATIVE_OUT__"'
 		},
 		CompilerCase{
 			language:   'Go'
 			example:    'apps/polyglot-sample/sample.go'
 			module:     'SampleGo'
 			compiler:   'go'
+			mode:       'object'
 			native_cmd: 'go tool compile -o "__NATIVE_OUT__" "__PATH__"'
 		},
 		CompilerCase{
@@ -219,7 +225,8 @@ fn main() {
 			example:    'apps/polyglot-sample/sample.swift'
 			module:     'SampleSwift'
 			compiler:   'swiftc'
-			native_cmd: 'swiftc -typecheck "__PATH__"'
+			mode:       'object'
+			native_cmd: 'swiftc -parse-as-library -c "__PATH__" -o "__NATIVE_OUT__"'
 			in_env:     'IN_NATIVE_SWIFT_SIL=only'
 		},
 		CompilerCase{
@@ -227,6 +234,7 @@ fn main() {
 			example:    'apps/polyglot-sample/sample.v'
 			module:     'SampleV'
 			compiler:   'v'
+			mode:       'syntax'
 			native_cmd: 'v -check-syntax "__PATH__"'
 		},
 		CompilerCase{
@@ -234,6 +242,7 @@ fn main() {
 			example:    'apps/polyglot-sample/sample.js'
 			module:     'SampleJavaScript'
 			compiler:   'node'
+			mode:       'syntax'
 			native_cmd: 'node --check "__PATH__"'
 		},
 		CompilerCase{
@@ -241,6 +250,7 @@ fn main() {
 			example:    'apps/polyglot-sample/sample.ts'
 			module:     'SampleTypeScript'
 			compiler:   'bun'
+			mode:       'typecheck'
 			native_cmd: 'bunx --bun tsc --noEmit --allowJs false "__PATH__"'
 		},
 		CompilerCase{
@@ -248,6 +258,7 @@ fn main() {
 			example:    'apps/polyglot-sample/sample.py'
 			module:     'SamplePython'
 			compiler:   'python3'
+			mode:       'bytecode'
 			native_cmd: 'python3 -c "import py_compile; py_compile.compile(\'__PATH__\', cfile=\'__NATIVE_OUT__\', doraise=True)"'
 		},
 		CompilerCase{
@@ -255,6 +266,7 @@ fn main() {
 			example:    'apps/polyglot-sample/sample.rb'
 			module:     'SampleRuby'
 			compiler:   'ruby'
+			mode:       'syntax'
 			native_cmd: 'ruby -c "__PATH__"'
 		},
 		CompilerCase{
@@ -262,6 +274,7 @@ fn main() {
 			example:    'apps/polyglot-sample/sample.zig'
 			module:     'SampleZig'
 			compiler:   'zig'
+			mode:       'syntax'
 			native_cmd: 'zig ast-check "__PATH__"'
 		},
 		CompilerCase{
@@ -269,6 +282,7 @@ fn main() {
 			example:    'apps/polyglot-sample/sample.php'
 			module:     'SamplePhp'
 			compiler:   'php'
+			mode:       'syntax'
 			native_cmd: 'php -l "__PATH__"'
 		},
 		CompilerCase{
@@ -276,6 +290,7 @@ fn main() {
 			example:    'apps/polyglot-sample/Sample.java'
 			module:     'SampleJava'
 			compiler:   'javac'
+			mode:       'bytecode'
 			native_cmd: 'javac -d "__NATIVE_OUT_DIR__" "__PATH__"'
 		},
 		CompilerCase{
@@ -283,6 +298,7 @@ fn main() {
 			example:    'apps/polyglot-sample/sample.nim'
 			module:     'SampleNim'
 			compiler:   'nim'
+			mode:       'typecheck'
 			native_cmd: 'nim check --hints:off "__PATH__"'
 		},
 		CompilerCase{
@@ -290,6 +306,7 @@ fn main() {
 			example:    'apps/polyglot-sample/sample.d'
 			module:     'SampleD'
 			compiler:   'ldc2'
+			mode:       'object'
 			native_cmd: 'ldc2 -o- -c "__PATH__"'
 		},
 	]
@@ -306,6 +323,7 @@ fn main() {
 				example:  case.example
 				module:   case.module
 				compiler: case.compiler
+				mode:     case.mode
 			}
 			continue
 		}
@@ -315,6 +333,7 @@ fn main() {
 				example:            case.example
 				module:             case.module
 				compiler:           case.compiler
+				mode:               case.mode
 				compiler_available: true
 				native_error:       'sample file missing'
 				in_error:           'sample file missing'
@@ -365,6 +384,7 @@ fn main() {
 			example:                    case.example
 			module:                     case.module
 			compiler:                   case.compiler
+			mode:                       case.mode
 			compiler_available:         true
 			native_ok:                  native_last.ok && native_all_ok
 			native_ms:                  native_ms
@@ -382,8 +402,8 @@ fn main() {
 	}
 
 	env := gather_env(root, bench_runs, warmup_runs, in_bin)
-	mut easy_md := '| Language | Native compiler | Native median (min-max ms) | in median (min-max ms) | in/native | Status |\n'
-	easy_md += '|---|---|---:|---:|---:|---|\n'
+	mut easy_md := '| Language | Native compiler | Native mode | Native median (min-max ms) | in median (min-max ms) | in/native | Status |\n'
+	easy_md += '|---|---|---|---:|---:|---:|---|\n'
 	for row in rows {
 		status := if !row.compiler_available {
 			'skipped'
@@ -394,7 +414,7 @@ fn main() {
 		} else {
 			'in failed'
 		}
-		easy_md += '| ${row.language} | `${row.compiler}` | ${row.native_ms:.2f} (${row.native_ms_min:.2f}-${row.native_ms_max:.2f}) | ${row.in_ms:.2f} (${row.in_ms_min:.2f}-${row.in_ms_max:.2f}) | ${row.speed_ratio_in_over_native:.3f} | ${status} |\n'
+		easy_md += '| ${row.language} | `${row.compiler}` | ${row.mode} | ${row.native_ms:.2f} (${row.native_ms_min:.2f}-${row.native_ms_max:.2f}) | ${row.in_ms:.2f} (${row.in_ms_min:.2f}-${row.in_ms_max:.2f}) | ${row.speed_ratio_in_over_native:.3f} | ${status} |\n'
 	}
 
 	doc := BenchDoc{
@@ -405,7 +425,7 @@ fn main() {
 	os.write_file(out_json, json.encode_pretty(doc)) or { panic(err) }
 
 	mut md := '# Polyglot Compiler Matrix Benchmark\n\n'
-	md += 'Measured against native compiler frontend checks for installed tools and `in compile --target native --entry answer --json` for the same polyglot sample files. Missing native compilers are skipped; installed compiler failures are recorded and fail the script.\n'
+	md += 'Measured against installed native compiler checks and `in compile --target native --entry answer --json` for the same polyglot sample files. The native mode column distinguishes object compilation, bytecode compilation, typechecking, and syntax-only checks; ratios are only directly comparable within the same mode. Missing native compilers are skipped; installed compiler failures are recorded and fail the script.\n'
 	md += 'Wall times: median over `${bench_runs}` timed runs; min-max across those runs shown in parentheses.\n\n'
 	md += '## Benchmark Environment\n\n'
 	md += '- Generated (UTC): `${env.generated_at_utc}`\n'
@@ -420,6 +440,10 @@ fn main() {
 	md += easy_md + '\n'
 	os.write_file(out_md, md) or { panic(err) }
 
+	println('')
+	println('Polyglot compiler matrix')
+	println(easy_md.trim_space())
+	println('')
 	println('wrote ${out_md}')
 	println('wrote ${out_json}')
 	mut failed := false

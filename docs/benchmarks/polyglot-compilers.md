@@ -1,11 +1,11 @@
 # Polyglot Compiler Matrix Benchmark
 
-Measured against native compiler frontend checks for installed tools and `in compile --target native --entry answer --json` for the same polyglot sample files. Missing native compilers are skipped; installed compiler failures are recorded and fail the script.
+Measured against installed native compiler checks and `in compile --target native --entry answer --json` for the same polyglot sample files. The native mode column distinguishes object compilation, bytecode compilation, typechecking, and syntax-only checks; ratios are only directly comparable within the same mode. Missing native compilers are skipped; installed compiler failures are recorded and fail the script.
 Wall times: median over `3` timed runs; min-max across those runs shown in parentheses.
 
 ## Benchmark Environment
 
-- Generated (UTC): `2026-06-12T05:22:51Z`
+- Generated (UTC): `2026-06-12T05:33:35Z`
 - Host OS: `Darwin`
 - Kernel: `27.0.0`
 - CPU: `Apple M5 Pro`
@@ -16,21 +16,21 @@ Wall times: median over `3` timed runs; min-max across those runs shown in paren
 
 ## Results
 
-| Language | Native compiler | Native median (min-max ms) | in median (min-max ms) | in/native | Status |
-|---|---|---:|---:|---:|---|
-| C | `clang` | 61.56 (54.10-71.40) | 12.84 (11.95-14.35) | 0.209 | ok |
-| C++ | `clang++` | 58.09 (56.94-58.97) | 10.94 (10.84-14.11) | 0.188 | ok |
-| Rust | `rustc` | 37.19 (37.11-37.49) | 11.00 (10.29-11.20) | 0.296 | ok |
-| Go | `go` | 18.64 (18.49-19.06) | 10.11 (9.74-11.08) | 0.542 | ok |
-| Swift | `swiftc` | 127.95 (127.51-129.43) | 10.17 (9.86-10.40) | 0.079 | ok |
-| V | `v` | 19.10 (18.65-19.77) | 10.12 (9.73-10.25) | 0.530 | ok |
-| JavaScript | `node` | 32.08 (31.62-32.58) | 10.93 (10.51-11.13) | 0.341 | ok |
-| TypeScript | `bun` | 519.15 (514.58-534.88) | 11.99 (11.61-12.50) | 0.023 | ok |
-| Python | `python3` | 34.78 (34.35-48.67) | 12.42 (12.28-13.24) | 0.357 | ok |
-| Ruby | `ruby` | 40.57 (39.01-41.65) | 11.20 (10.74-11.61) | 0.276 | ok |
-| Zig | `zig` | 58.34 (57.95-58.48) | 10.71 (10.65-10.97) | 0.184 | ok |
-| PHP | `php` | 54.51 (54.15-56.46) | 10.65 (10.46-11.31) | 0.195 | ok |
-| Java | `javac` | 203.54 (198.91-301.69) | 10.83 (10.38-14.90) | 0.053 | ok |
-| Nim | `nim` | 162.86 (138.21-188.02) | 12.11 (11.33-53.52) | 0.074 | ok |
-| D | `ldc2` | 42.74 (41.44-44.32) | 10.38 (10.30-10.53) | 0.243 | ok |
+| Language | Native compiler | Native mode | Native median (min-max ms) | in median (min-max ms) | in/native | Status |
+|---|---|---|---:|---:|---:|---|
+| C | `clang` | object | 64.74 (61.42-81.89) | 11.40 (10.62-19.96) | 0.176 | ok |
+| C++ | `clang++` | object | 58.08 (55.70-58.44) | 10.27 (9.78-10.90) | 0.177 | ok |
+| Rust | `rustc` | object | 38.68 (38.34-42.71) | 9.81 (9.23-11.37) | 0.254 | ok |
+| Go | `go` | object | 40.73 (23.60-40.91) | 13.23 (12.05-137.70) | 0.325 | ok |
+| Swift | `swiftc` | object | 151.22 (147.31-173.78) | 12.24 (11.23-12.96) | 0.081 | ok |
+| V | `v` | syntax | 24.59 (23.27-134.92) | 10.95 (10.58-19.07) | 0.445 | ok |
+| JavaScript | `node` | syntax | 39.59 (35.16-64.15) | 14.04 (13.04-16.19) | 0.355 | ok |
+| TypeScript | `bun` | typecheck | 689.77 (570.59-761.71) | 12.11 (11.91-13.43) | 0.018 | ok |
+| Python | `python3` | bytecode | 37.95 (35.41-57.27) | 10.74 (10.60-12.62) | 0.283 | ok |
+| Ruby | `ruby` | syntax | 42.62 (41.09-43.17) | 11.00 (10.48-11.81) | 0.258 | ok |
+| Zig | `zig` | syntax | 64.39 (61.39-70.21) | 10.89 (10.04-11.44) | 0.169 | ok |
+| PHP | `php` | syntax | 56.25 (53.78-57.61) | 10.71 (10.44-11.27) | 0.190 | ok |
+| Java | `javac` | bytecode | 258.97 (208.07-292.80) | 11.25 (10.80-14.54) | 0.043 | ok |
+| Nim | `nim` | typecheck | 147.62 (145.32-156.99) | 11.23 (11.06-12.33) | 0.076 | ok |
+| D | `ldc2` | object | 40.41 (40.26-41.37) | 9.74 (9.70-10.03) | 0.241 | ok |
 
