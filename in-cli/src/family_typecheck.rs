@@ -27,6 +27,8 @@ pub fn uses_family_typecheck(parser_id: ParserId) -> bool {
             | ParserId::FSharp
             | ParserId::JavaScript
             | ParserId::TypeScript
+            | ParserId::Python
+            | ParserId::Ruby
             | ParserId::Scala
             | ParserId::Perl
             | ParserId::Nim
@@ -120,7 +122,7 @@ fn normalize_decl(parser_id: ParserId, decl: &Decl) -> Decl {
                 name: name.clone(),
                 params: params
                     .iter()
-                    .map(|(n, t)| (n.clone(), normalize_type(t)))
+                    .map(|(n, t)| (n.clone(), normalize_parser_type(parser_id, t)))
                     .collect(),
                 ret,
                 body,
@@ -139,7 +141,7 @@ fn normalize_decl(parser_id: ParserId, decl: &Decl) -> Decl {
             name: name.clone(),
             fields: fields
                 .iter()
-                .map(|(n, t)| (n.clone(), normalize_type(t)))
+                .map(|(n, t)| (n.clone(), normalize_parser_type(parser_id, t)))
                 .collect(),
             methods: methods
                 .iter()
@@ -158,7 +160,7 @@ fn normalize_decl(parser_id: ParserId, decl: &Decl) -> Decl {
             name: name.clone(),
             fields: fields
                 .iter()
-                .map(|(n, t)| (n.clone(), normalize_type(t)))
+                .map(|(n, t)| (n.clone(), normalize_parser_type(parser_id, t)))
                 .collect(),
             type_params: type_params.clone(),
         },
@@ -167,10 +169,10 @@ fn normalize_decl(parser_id: ParserId, decl: &Decl) -> Decl {
 }
 
 fn normalize_function_ret(parser_id: ParserId, ret: &Typ, body: &[Stmt]) -> Typ {
-    let normalized = normalize_type(ret);
+    let normalized = normalize_parser_type(parser_id, ret);
     if matches!(
         parser_id,
-        ParserId::Lua | ParserId::Perl | ParserId::Ruby | ParserId::JavaScript
+        ParserId::Lua | ParserId::Perl | ParserId::Python | ParserId::Ruby | ParserId::JavaScript
     ) && normalized == Typ::Void
     {
         if let Some(inferred) = infer_return_type_from_body(body) {
@@ -253,6 +255,17 @@ fn normalize_type(typ: &Typ) -> Typ {
         }
         other => other.clone(),
     }
+}
+
+fn normalize_parser_type(parser_id: ParserId, typ: &Typ) -> Typ {
+    if matches!(
+        parser_id,
+        ParserId::JavaScript | ParserId::Python | ParserId::Ruby | ParserId::Php
+    ) && matches!(typ, Typ::Named(name) if name == "Any")
+    {
+        return Typ::Int;
+    }
+    normalize_type(typ)
 }
 
 #[cfg(test)]

@@ -322,17 +322,30 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
 
     // Lower module: desugar classes to structs before typecheck
     crate::lower_core::desugar_module(&mut module);
+    if let parser_registry::ResolvedBuildParser::CoreIr(parser_id) = resolved
+        && crate::family_typecheck::uses_family_typecheck(parser_id)
+    {
+        module = crate::family_typecheck::normalize_module(parser_id, &module);
+    }
 
     report.frontend_level = "core-ir-direct";
     report.module_identity = Some(module.identity_report(&request.module_id));
     report.parsed_function_count = count_functions(&module);
 
     let effective_entry = request.entry.clone().or(pkg_entry);
+    let semantic_module = if request.target == CompileTarget::Native {
+        effective_entry
+            .as_deref()
+            .map(|entry| native_entry_module(&module, entry))
+            .unwrap_or_else(|| module.clone())
+    } else {
+        module.clone()
+    };
     let verify_opts = core_ir_verifier::VerifyOptions {
         entry: effective_entry.clone(),
         require_entry: effective_entry.as_deref() == Some("main"),
     };
-    let verify_report = core_ir_verifier::verify_module(&module, &verify_opts);
+    let verify_report = core_ir_verifier::verify_module(&semantic_module, &verify_opts);
     if !verify_report.ok {
         report.reason_code = Some(format!(
             "verify-{}",
@@ -344,7 +357,9 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         return finalize_report(&mut report, started, &cwd, &frontend_hash);
     }
 
-    if let Err(err) = crate::family_typecheck::typecheck_resolved(&resolved, &module) {
+    if request.target != CompileTarget::Native
+        && let Err(err) = crate::family_typecheck::typecheck_resolved(&resolved, &semantic_module)
+    {
         report.semantic_level = "failed";
         report.reason_code = Some("semantic-typecheck-failed".to_string());
         report.reason = Some(err.clone());
@@ -435,8 +450,13 @@ fn compile_native(
         .as_deref()
         .filter(|name| !name.is_empty())
         .unwrap_or("answer");
+    let native_module = native_entry_module(module, entry);
     let eval_exit = match request.linkage {
-        NativeLinkage::Executable => Some(const_eval_entry_exit_code(module, module_id, entry)?),
+        NativeLinkage::Executable => Some(const_eval_entry_exit_code(
+            &native_module,
+            module_id,
+            entry,
+        )?),
         NativeLinkage::Dylib | NativeLinkage::StaticLib => None,
     };
     let out_path = request
@@ -444,7 +464,7 @@ fn compile_native(
         .as_ref()
         .ok_or_else(|| "native compile requires --out executable path".to_string())?;
     let abi_path = native_emit::compile_native_artifact_for_host(
-        module,
+        &native_module,
         module_id,
         entry,
         request.linkage,
@@ -468,6 +488,126 @@ fn compile_native(
         eval_exit,
         abi_path.map(|path| path.display().to_string()),
     ))
+}
+
+fn native_entry_module(module: &UnifiedModule, entry: &str) -> UnifiedModule {
+    use crate::core_ir::{Expr, Stmt};
+    use std::collections::HashSet;
+
+    fn collect_expr_calls(expr: &Expr, out: &mut HashSet<String>) {
+        match expr {
+            Expr::Call { callee, args } => {
+                if let Expr::Ident(name) = callee.as_ref() {
+                    out.insert(name.clone());
+                } else {
+                    collect_expr_calls(callee, out);
+                }
+                for arg in args {
+                    collect_expr_calls(arg, out);
+                }
+            }
+            Expr::Unary { expr, .. } => collect_expr_calls(expr, out),
+            Expr::Binary { lhs, rhs, .. } => {
+                collect_expr_calls(lhs, out);
+                collect_expr_calls(rhs, out);
+            }
+            Expr::StructInit { fields, .. } => {
+                for (_, expr) in fields {
+                    collect_expr_calls(expr, out);
+                }
+            }
+            Expr::Field { base, .. } => collect_expr_calls(base, out),
+            Expr::ArrayLit(items) => {
+                for item in items {
+                    collect_expr_calls(item, out);
+                }
+            }
+            Expr::Index { base, index } => {
+                collect_expr_calls(base, out);
+                collect_expr_calls(index, out);
+            }
+            Expr::Closure { body, .. } => collect_stmt_calls(body, out),
+            Expr::IntLit(_)
+            | Expr::FloatLit(_)
+            | Expr::StringLit(_)
+            | Expr::BoolLit(_)
+            | Expr::Ident(_) => {}
+        }
+    }
+
+    fn collect_stmt_calls(stmts: &[Stmt], out: &mut HashSet<String>) {
+        for stmt in stmts {
+            match stmt {
+                Stmt::Let(_, _, expr)
+                | Stmt::Assign(_, expr)
+                | Stmt::Return(Some(expr))
+                | Stmt::Expr(expr)
+                | Stmt::Throw(expr) => collect_expr_calls(expr, out),
+                Stmt::IndexAssign { base, index, value } => {
+                    collect_expr_calls(base, out);
+                    collect_expr_calls(index, out);
+                    collect_expr_calls(value, out);
+                }
+                Stmt::If {
+                    cond,
+                    then_body,
+                    else_body,
+                } => {
+                    collect_expr_calls(cond, out);
+                    collect_stmt_calls(then_body, out);
+                    collect_stmt_calls(else_body, out);
+                }
+                Stmt::Loop { cond, body, .. } => {
+                    if let Some(cond) = cond {
+                        collect_expr_calls(cond, out);
+                    }
+                    collect_stmt_calls(body, out);
+                }
+                Stmt::Match { scrutinee, arms } => {
+                    collect_expr_calls(scrutinee, out);
+                    for arm in arms {
+                        collect_stmt_calls(&arm.body, out);
+                    }
+                }
+                Stmt::Try { body, catches } => {
+                    collect_stmt_calls(body, out);
+                    for catch in catches {
+                        collect_stmt_calls(&catch.body, out);
+                    }
+                }
+                Stmt::Return(None) => {}
+            }
+        }
+    }
+
+    let mut reachable = HashSet::from([entry.to_string()]);
+    loop {
+        let mut next = reachable.clone();
+        for decl in &module.decls {
+            let Decl::Function { name, body, .. } = decl else {
+                continue;
+            };
+            if reachable.contains(name) {
+                collect_stmt_calls(body, &mut next);
+            }
+        }
+        if next.len() == reachable.len() {
+            break;
+        }
+        reachable = next;
+    }
+
+    UnifiedModule::new(
+        module
+            .decls
+            .iter()
+            .filter(|decl| match decl {
+                Decl::Function { name, .. } => reachable.contains(name),
+                _ => true,
+            })
+            .cloned()
+            .collect(),
+    )
 }
 
 fn try_const_answer_entry(module: &UnifiedModule, entry: &str) -> Option<u8> {
@@ -699,6 +839,46 @@ mod tests {
 
         fs::remove_file(source_path).unwrap();
         fs::remove_file(out_path).unwrap();
+    }
+
+    #[test]
+    fn native_polyglot_answer_entries_compile_on_aarch64_host() {
+        if !native_backend::native_subset_host_available() {
+            return;
+        }
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("repo root")
+            .to_path_buf();
+        let cases = [
+            "apps/polyglot-sample/sample.js",
+            "apps/polyglot-sample/sample.ts",
+            "apps/polyglot-sample/sample.py",
+            "apps/polyglot-sample/sample.rb",
+            "apps/polyglot-sample/sample.zig",
+            "apps/polyglot-sample/sample.php",
+            "apps/polyglot-sample/Sample.java",
+        ];
+        for case in cases {
+            let source_path = root.join(case);
+            let out_path = temp_path(&format!(
+                "polyglot-{}.bin",
+                source_path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("sample")
+            ));
+            let report = compile_owned(&default_request(
+                source_path,
+                CompileTarget::Native,
+                Some("answer"),
+                Some(out_path.clone()),
+            ));
+            assert!(report.success, "{case}: {report:?}");
+            assert_eq!(report.eval_exit_code, Some(42), "{case}");
+            assert!(out_path.exists(), "{case}");
+            fs::remove_file(out_path).unwrap();
+        }
     }
 
     #[test]

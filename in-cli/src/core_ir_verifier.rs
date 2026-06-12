@@ -358,7 +358,7 @@ fn check_expr(
         Expr::IntLit(_) | Expr::FloatLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => Ok(()),
         Expr::Closure { .. } => Ok(()),
         Expr::Ident(name) => {
-            if env.contains_key(name) {
+            if env.contains_key(name) || facts.functions.contains_key(name.as_str()) {
                 Ok(())
             } else {
                 Err((
@@ -575,7 +575,12 @@ fn expr_type(expr: &Expr, facts: &ModuleFacts<'_>, env: &HashMap<String, Typ>) -
         Expr::FloatLit(_) => Some(Typ::Float),
         Expr::StringLit(_) => Some(Typ::String),
         Expr::BoolLit(_) => Some(Typ::Bool),
-        Expr::Ident(name) => env.get(name).cloned(),
+        Expr::Ident(name) => env.get(name).cloned().or_else(|| {
+            facts
+                .functions
+                .get(name.as_str())
+                .map(|sig| sig.ret.clone())
+        }),
         Expr::StructInit { name, .. } => Some(Typ::Named(name.clone())),
         Expr::Field { base, name } => {
             if let Some(Typ::Named(struct_name)) = expr_type(base, facts, env)

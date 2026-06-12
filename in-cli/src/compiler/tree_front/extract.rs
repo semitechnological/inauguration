@@ -2852,7 +2852,10 @@ fn python_function_decl<'a>(src: &[u8], n: Node<'a>) -> Option<Decl> {
         .map(|t| Typ::Named(node_txt(src, t).trim().to_string()))
         .unwrap_or(Typ::Void);
     let plist = n.child_by_field_name("parameters")?;
-    let params = simple_param_names(src, plist);
+    let mut params = simple_param_names(src, plist);
+    if params.first().is_some_and(|(name, _)| name == "self") {
+        params.remove(0);
+    }
     let body = n
         .child_by_field_name("body")
         .or_else(|| first_named(n, "block"))
