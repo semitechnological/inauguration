@@ -3,6 +3,7 @@ use std::sync::OnceLock;
 
 pub const NATIVE_BACKEND_NOT_IMPLEMENTED: &str = "native-backend-not-implemented";
 pub const NATIVE_AARCH64_SUBSET: &str = "native-aarch64-subset";
+pub const NATIVE_OBJECT_SUBSET: &str = "native-object-subset";
 pub const BYTECODE_BACKEND_SUBSET: &str = "bytecode-vm-subset";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -440,14 +441,37 @@ fn build_target_registry() -> Vec<TargetSpec> {
         }
         specs.push(TargetSpec {
             name: target,
-            implemented: false,
-            stage: "contract-only",
-            reason_code: NATIVE_BACKEND_NOT_IMPLEMENTED,
-            reason: RUST_STYLE_TARGET_REASON,
+            implemented: matches!(target, "x86_64-unknown-linux-gnu" | "wasm32-unknown-unknown"),
+            stage: if matches!(target, "x86_64-unknown-linux-gnu" | "wasm32-unknown-unknown") {
+                "owned-object-subset"
+            } else {
+                "contract-only"
+            },
+            reason_code: if matches!(target, "x86_64-unknown-linux-gnu" | "wasm32-unknown-unknown") {
+                NATIVE_OBJECT_SUBSET
+            } else {
+                NATIVE_BACKEND_NOT_IMPLEMENTED
+            },
+            reason: if target == "x86_64-unknown-linux-gnu" {
+                "inauguration owns ELF64 relocatable object emission for const-evaluable scalar entry functions on this target"
+            } else if target == "wasm32-unknown-unknown" {
+                "inauguration owns WebAssembly module emission for const-evaluable scalar entry functions on this target"
+            } else {
+                RUST_STYLE_TARGET_REASON
+            },
             input_stage: "core-ir-or-textual-sil",
-            artifact_kind: "none",
+            artifact_kind: if target == "x86_64-unknown-linux-gnu" {
+                "elf-relocatable-object"
+            } else if target == "wasm32-unknown-unknown" {
+                "wasm-module"
+            } else {
+                "none"
+            },
             host_triple: Some(target),
-            backend_artifact_supported: false,
+            backend_artifact_supported: matches!(
+                target,
+                "x86_64-unknown-linux-gnu" | "wasm32-unknown-unknown"
+            ),
         });
     }
     specs
@@ -479,6 +503,20 @@ mod tests {
         ] {
             assert!(names.contains(&target), "{target}");
             let spec = target_spec_by_name(target).expect("target spec");
+            if target == "x86_64-unknown-linux-gnu" {
+                assert!(spec.implemented, "{target}");
+                assert_eq!(spec.stage, "owned-object-subset");
+                assert_eq!(spec.artifact_kind, "elf-relocatable-object");
+                assert!(spec.backend_artifact_supported);
+                continue;
+            }
+            if target == "wasm32-unknown-unknown" {
+                assert!(spec.implemented, "{target}");
+                assert_eq!(spec.stage, "owned-object-subset");
+                assert_eq!(spec.artifact_kind, "wasm-module");
+                assert!(spec.backend_artifact_supported);
+                continue;
+            }
             assert!(!spec.implemented, "{target}");
             assert_eq!(spec.stage, "contract-only");
             assert_eq!(spec.reason_code, NATIVE_BACKEND_NOT_IMPLEMENTED);

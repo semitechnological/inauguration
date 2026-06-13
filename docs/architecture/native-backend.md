@@ -34,6 +34,8 @@ On Apple Silicon macOS, `in compile --path apps/polyglot-sample/sample.in --targ
 
 The target registry also carries checked-in In target equivalents for the Rust target triple matrix. These names are compiler target identities for planning, reports, manifests, and future lowering work. They do not imply object emission, linking, ABI lowering, or a native runtime until a target-specific backend is implemented and tested in this repository.
 
+The first non-host object backends are `x86_64-unknown-linux-gnu` and `wasm32-unknown-unknown` for const-evaluable scalar entry functions. `in compile --target native --target-triple x86_64-unknown-linux-gnu --linkage static-lib --entry answer --out target/answer.o` emits an ELF64 relocatable object with x86_64 machine code returning the evaluated scalar value. `in compile --target native --target-triple wasm32-unknown-unknown --linkage static-lib --entry answer --out target/answer.wasm` emits a WebAssembly module exporting the scalar function. This is object/module support only: it does not run a linker, provide libc, define a process runtime, or claim general native execution.
+
 ## Compile cache (Wave 6)
 
 `in compile` hashes source path + content into `target/in/cache/<frontend_hash>/metadata.json`, storing the serialized owned compile report (including `frontend_hash`). Repeated compiles with the same frontend input reuse cached metadata when target, entry, and module id match.

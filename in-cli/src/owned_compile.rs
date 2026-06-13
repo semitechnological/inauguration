@@ -29,6 +29,7 @@ pub struct OwnedCompileRequest {
     pub entry: Option<String>,
     pub out: Option<PathBuf>,
     pub linkage: NativeLinkage,
+    pub target_triple: Option<String>,
     pub jobs: usize,
 }
 
@@ -42,6 +43,8 @@ pub struct OwnedCompileReport {
     pub package_name: Option<String>,
     pub module_identity: Option<ModuleIdentityReport>,
     pub target: String,
+    #[serde(default)]
+    pub target_triple: Option<String>,
     pub entry: Option<String>,
     #[serde(default = "default_linkage_label")]
     pub linkage: String,
@@ -151,6 +154,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
                 module_identity: None,
                 package_name: None,
                 target: target_label(request.target).to_string(),
+                target_triple: request.target_triple.clone(),
                 entry: request.entry.clone(),
                 linkage: linkage_label(request.linkage).to_string(),
                 frontend_level: "unsupported",
@@ -192,6 +196,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
             .or_else(|| cached.artifact_path.clone());
         if cached.target == target_label(request.target)
             && cached.entry == request.entry
+            && cached.target_triple == request.target_triple
             && cached.module_id == request.module_id
             && cached.linkage == linkage_label(request.linkage)
             && requested_out == cached_out
@@ -215,6 +220,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         module_identity: None,
         package_name: None,
         target: target_label(request.target).to_string(),
+        target_triple: request.target_triple.clone(),
         entry: request.entry.clone(),
         linkage: linkage_label(request.linkage).to_string(),
         frontend_level: "unsupported",
@@ -405,8 +411,13 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         }
         CompileTarget::Native => match compile_native(&module, &request.module_id, request) {
             Ok((artifact_path, eval_exit, abi_path)) => {
-                report.backend_level = "owned-native-subset";
-                report.runtime_level = "inrt-native";
+                if request.linkage == NativeLinkage::StaticLib && request.target_triple.is_some() {
+                    report.backend_level = "owned-object-subset";
+                    report.runtime_level = "none";
+                } else {
+                    report.backend_level = "owned-native-subset";
+                    report.runtime_level = "inrt-native";
+                }
                 let status = native_backend::native_backend_status();
                 report.reason_code = Some(status.reason_code.to_string());
                 report.reason = Some(status.reason.to_string());
@@ -463,6 +474,52 @@ fn compile_native(
         .out
         .as_ref()
         .ok_or_else(|| "native compile requires --out executable path".to_string())?;
+    if request.linkage == NativeLinkage::StaticLib
+        && request.target_triple.as_deref() == Some(native_emit::ELF_LINUX_TRIPLE)
+    {
+        let exit = const_eval_entry_exit_code(&native_module, module_id, entry)?;
+        let object = native_emit::ElfObject {
+            code: native_emit::x86_64_return_i32_object_code(exit),
+        };
+        let mut bytes = Vec::new();
+        native_emit::write_x86_64_relocatable_object(&object, &mut bytes);
+        fs::write(out_path, bytes)
+            .map_err(|err| format!("native object write `{}`: {err}", out_path.display()))?;
+        let boundary = crate::boundary_emit::emit_abi_manifest_with_package(
+            &crate::boundary_ir::BoundaryModule {
+                abi_version: crate::boundary_ir::IN_ABI_VERSION,
+                module: module.effective_module_id(module_id).to_string(),
+                layouts: Vec::new(),
+                symbols: Vec::new(),
+                allocators: Vec::new(),
+                layout_hash: String::new(),
+            }
+            .with_layout_hash(),
+            module.identity.package.as_deref(),
+        );
+        let abi_path = out_path.with_extension("abi.json");
+        fs::write(&abi_path, boundary)
+            .map_err(|err| format!("write abi manifest `{}`: {err}", abi_path.display()))?;
+        return Ok((
+            out_path.display().to_string(),
+            None,
+            Some(abi_path.display().to_string()),
+        ));
+    }
+    if request.linkage == NativeLinkage::StaticLib
+        && request.target_triple.as_deref() == Some(native_emit::WASM32_UNKNOWN_TRIPLE)
+    {
+        let exit = const_eval_entry_exit_code(&native_module, module_id, entry)?;
+        let module = native_emit::WasmModule {
+            export_name: entry.to_string(),
+            value: exit,
+        };
+        let mut bytes = Vec::new();
+        native_emit::write_scalar_i32_module(&module, &mut bytes);
+        fs::write(out_path, bytes)
+            .map_err(|err| format!("native wasm write `{}`: {err}", out_path.display()))?;
+        return Ok((out_path.display().to_string(), None, None));
+    }
     let abi_path = native_emit::compile_native_artifact_for_host(
         &native_module,
         module_id,
@@ -743,6 +800,7 @@ mod tests {
             entry: entry.map(str::to_string),
             out,
             linkage: NativeLinkage::Executable,
+            target_triple: None,
             jobs: 1,
         }
     }
@@ -778,7 +836,7 @@ mod tests {
         assert!(out_path.exists());
 
         fs::remove_file(source_path).unwrap();
-        fs::remove_file(out_path).unwrap();
+        fs::remove_file(&out_path).unwrap();
     }
 
     #[test]
@@ -810,6 +868,74 @@ mod tests {
         }
 
         fs::remove_file(source_path).unwrap();
+    }
+
+    #[test]
+    fn native_staticlib_emits_x86_64_linux_object_file() {
+        let source_path = temp_path("x86-object.in");
+        let out_path = temp_path("x86-object.o");
+        fs::write(
+            &source_path,
+            "fn answer() -> Int { return 42; }\nfn main() -> void { return; }\n",
+        )
+        .unwrap();
+        let mut request = default_request(
+            source_path.clone(),
+            CompileTarget::Native,
+            Some("answer"),
+            Some(out_path.clone()),
+        );
+        request.linkage = NativeLinkage::StaticLib;
+        request.target_triple = Some("x86_64-unknown-linux-gnu".to_string());
+
+        let report = compile_owned(&request);
+
+        assert!(report.success, "{:?}", report);
+        assert_eq!(report.backend_level, "owned-object-subset");
+        assert_eq!(report.runtime_level, "none");
+        assert_eq!(
+            report.artifact_path.as_deref(),
+            Some(out_path.to_str().unwrap())
+        );
+        let bytes = fs::read(&out_path).expect("object bytes");
+        assert_eq!(&bytes[0..4], b"\x7FELF");
+        assert_eq!(u16::from_le_bytes([bytes[16], bytes[17]]), 1);
+        assert_eq!(u16::from_le_bytes([bytes[18], bytes[19]]), 62);
+
+        fs::remove_file(source_path).unwrap();
+        fs::remove_file(&out_path).unwrap();
+        let _ = fs::remove_file(out_path.with_extension("abi.json"));
+    }
+
+    #[test]
+    fn native_staticlib_emits_wasm32_module() {
+        let source_path = temp_path("wasm-object.in");
+        let out_path = temp_path("wasm-object.wasm");
+        fs::write(
+            &source_path,
+            "fn answer() -> Int { return 42; }\nfn main() -> void { return; }\n",
+        )
+        .unwrap();
+        let mut request = default_request(
+            source_path.clone(),
+            CompileTarget::Native,
+            Some("answer"),
+            Some(out_path.clone()),
+        );
+        request.linkage = NativeLinkage::StaticLib;
+        request.target_triple = Some("wasm32-unknown-unknown".to_string());
+
+        let report = compile_owned(&request);
+
+        assert!(report.success, "{:?}", report);
+        assert_eq!(report.backend_level, "owned-object-subset");
+        assert_eq!(report.runtime_level, "none");
+        let bytes = fs::read(&out_path).expect("wasm bytes");
+        assert_eq!(&bytes[0..4], b"\0asm");
+        assert!(bytes.windows(6).any(|window| window == b"answer"));
+
+        fs::remove_file(source_path).unwrap();
+        fs::remove_file(&out_path).unwrap();
     }
 
     #[test]

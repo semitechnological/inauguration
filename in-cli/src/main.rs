@@ -309,6 +309,8 @@ enum Commands {
         parser: ParserCli,
         #[arg(long)]
         entry: Option<String>,
+        #[arg(long)]
+        target_triple: Option<String>,
         #[arg(long, value_enum, default_value_t = NativeLinkageCli::Executable)]
         linkage: NativeLinkageCli,
         #[arg(long, default_value = "1")]
@@ -516,6 +518,7 @@ fn run() -> Result<()> {
             module_id,
             parser,
             entry,
+            target_triple,
             linkage,
             jobs,
             json,
@@ -527,6 +530,7 @@ fn run() -> Result<()> {
             &module_id,
             parser,
             entry.as_deref(),
+            target_triple.as_deref(),
             linkage,
             jobs,
             json,
@@ -1465,6 +1469,7 @@ fn cmd_compile(
     module_id: &str,
     parser: ParserCli,
     entry: Option<&str>,
+    target_triple: Option<&str>,
     linkage: NativeLinkageCli,
     jobs: usize,
     json: bool,
@@ -1486,6 +1491,7 @@ fn cmd_compile(
         entry: entry.map(str::to_string),
         out: Some(out_path),
         linkage: compile_linkage_cli_to_owned(linkage),
+        target_triple: target_triple.map(str::to_string),
         jobs: jobs.max(1),
     };
     let report = compile_owned(&request);
@@ -1517,6 +1523,9 @@ fn cmd_compile(
             }
         }
         println!("target: {}", report.target);
+        if let Some(target_triple) = &report.target_triple {
+            println!("target_triple: {target_triple}");
+        }
         if let Some(entry) = &report.entry {
             println!("entry: {entry}");
         }
@@ -2861,6 +2870,7 @@ mod tests {
                 module_id,
                 parser,
                 entry,
+                target_triple,
                 linkage,
                 jobs,
                 json,
@@ -2871,6 +2881,7 @@ mod tests {
                 assert_eq!(module_id, "Hello");
                 assert!(matches!(parser, ParserCli::In));
                 assert_eq!(entry.as_deref(), Some("main"));
+                assert!(target_triple.is_none());
                 assert!(matches!(linkage, NativeLinkageCli::Executable));
                 assert_eq!(jobs, 1);
                 assert!(json);
@@ -2918,6 +2929,36 @@ mod tests {
         match cli.command {
             Commands::Compile { linkage, .. } => {
                 assert!(matches!(linkage, NativeLinkageCli::Dylib));
+            }
+            _ => panic!("expected compile command"),
+        }
+    }
+
+    #[test]
+    fn parse_compile_native_target_triple_subcommand() {
+        let cli = Cli::try_parse_from([
+            "in",
+            "compile",
+            "--path",
+            "apps/in-sample/hello.in",
+            "--target",
+            "native",
+            "--target-triple",
+            "x86_64-unknown-linux-gnu",
+            "--linkage",
+            "static-lib",
+            "--out",
+            "target/hello.o",
+        ])
+        .expect("cli parse");
+        match cli.command {
+            Commands::Compile {
+                target_triple,
+                linkage,
+                ..
+            } => {
+                assert_eq!(target_triple.as_deref(), Some("x86_64-unknown-linux-gnu"));
+                assert!(matches!(linkage, NativeLinkageCli::StaticLib));
             }
             _ => panic!("expected compile command"),
         }

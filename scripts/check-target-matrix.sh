@@ -28,4 +28,46 @@ for triple in [
     if triple not in target:
         raise SystemExit(f"missing in target equivalent: {triple}")
 PY
+tmpdir="$(mktemp -d)"
+trap 'rm -rf "$tmpdir"' EXIT
+cat > "$tmpdir/object.in" <<'SRC'
+fn answer() -> Int { return 42; }
+fn main() -> void { return; }
+SRC
+env in compile \
+  --path "$tmpdir/object.in" \
+  --target native \
+  --target-triple x86_64-unknown-linux-gnu \
+  --linkage static-lib \
+  --entry answer \
+  --out "$tmpdir/object.o" \
+  --json >/dev/null
+python3 - "$tmpdir/object.o" <<'PY'
+from pathlib import Path
+import sys
+data = Path(sys.argv[1]).read_bytes()
+if data[:4] != b"\x7fELF":
+    raise SystemExit("x86_64 object missing ELF magic")
+if int.from_bytes(data[16:18], "little") != 1:
+    raise SystemExit("x86_64 object is not ET_REL")
+if int.from_bytes(data[18:20], "little") != 62:
+    raise SystemExit("x86_64 object is not EM_X86_64")
+PY
+env in compile \
+  --path "$tmpdir/object.in" \
+  --target native \
+  --target-triple wasm32-unknown-unknown \
+  --linkage static-lib \
+  --entry answer \
+  --out "$tmpdir/object.wasm" \
+  --json >/dev/null
+python3 - "$tmpdir/object.wasm" <<'PY'
+from pathlib import Path
+import sys
+data = Path(sys.argv[1]).read_bytes()
+if data[:4] != b"\0asm":
+    raise SystemExit("wasm32 module missing wasm magic")
+if b"answer" not in data:
+    raise SystemExit("wasm32 module missing answer export")
+PY
 echo "target-matrix checks passed"

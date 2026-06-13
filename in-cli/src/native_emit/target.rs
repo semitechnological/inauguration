@@ -52,12 +52,22 @@ const ELF_LINUX_TARGET: NativeEmitTargetStatus = NativeEmitTargetStatus {
     triple: "x86_64-unknown-linux-gnu",
     format: "elf",
     implemented: true,
-    stage: "object-format-skeleton",
-    reason_code: NATIVE_EMIT_SKELETON,
-    artifact_kind: "elf-executable",
+    stage: "owned-object-subset",
+    reason_code: NATIVE_EMIT_IMPLEMENTED,
+    artifact_kind: "elf-relocatable-object",
 };
 
-const NATIVE_EMIT_TARGETS: &[NativeEmitTargetStatus] = &[MACHO_TARGET, ELF_LINUX_TARGET];
+const WASM32_TARGET: NativeEmitTargetStatus = NativeEmitTargetStatus {
+    triple: "wasm32-unknown-unknown",
+    format: "wasm",
+    implemented: true,
+    stage: "owned-object-subset",
+    reason_code: NATIVE_EMIT_IMPLEMENTED,
+    artifact_kind: "wasm-module",
+};
+
+const NATIVE_EMIT_TARGETS: &[NativeEmitTargetStatus] =
+    &[MACHO_TARGET, ELF_LINUX_TARGET, WASM32_TARGET];
 
 pub fn all_native_emit_targets() -> &'static [NativeEmitTargetStatus] {
     NATIVE_EMIT_TARGETS
@@ -110,19 +120,21 @@ mod tests {
     #[test]
     fn registry_lists_macho_and_elf_targets() {
         let targets = all_native_emit_targets();
-        assert_eq!(targets.len(), 2);
+        assert_eq!(targets.len(), 3);
         assert_eq!(targets[0].format, "mach-o");
         assert_eq!(targets[1].triple, "x86_64-unknown-linux-gnu");
         assert_eq!(targets[1].format, "elf");
+        assert_eq!(targets[2].triple, "wasm32-unknown-unknown");
+        assert_eq!(targets[2].format, "wasm");
     }
 
     #[test]
     fn reports_elf_linux_skeleton_status() {
         let status = elf_linux_target_status();
         assert!(status.implemented);
-        assert_eq!(status.stage, "object-format-skeleton");
-        assert_eq!(status.reason_code, NATIVE_EMIT_SKELETON);
-        assert_eq!(status.artifact_kind, "elf-executable");
+        assert_eq!(status.stage, "owned-object-subset");
+        assert_eq!(status.reason_code, NATIVE_EMIT_IMPLEMENTED);
+        assert_eq!(status.artifact_kind, "elf-relocatable-object");
         assert_eq!(status.triple, "x86_64-unknown-linux-gnu");
     }
 

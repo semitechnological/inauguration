@@ -19,6 +19,8 @@ struct CachedOwnedCompileReport {
     #[serde(default)]
     module_identity: Option<crate::core_ir::ModuleIdentityReport>,
     target: String,
+    #[serde(default)]
+    target_triple: Option<String>,
     entry: Option<String>,
     #[serde(default = "default_cached_linkage")]
     linkage: String,
@@ -55,6 +57,7 @@ impl From<&OwnedCompileReport> for CachedOwnedCompileReport {
             module_identity: report.module_identity.clone(),
             package_name: report.package_name.clone(),
             target: report.target.clone(),
+            target_triple: report.target_triple.clone(),
             entry: report.entry.clone(),
             linkage: report.linkage.clone(),
             frontend_level: report.frontend_level.to_string(),
@@ -92,6 +95,7 @@ impl From<CachedOwnedCompileReport> for OwnedCompileReport {
             module_identity: cached.module_identity,
             package_name: cached.package_name,
             target: cached.target,
+            target_triple: cached.target_triple,
             entry: cached.entry,
             linkage: cached.linkage,
             frontend_level: leak_static(cached.frontend_level),
@@ -251,6 +255,7 @@ mod tests {
                 effective_module_id: "agents.video.main".to_string(),
             }),
             target: "bytecode".to_string(),
+            target_triple: None,
             entry: None,
             linkage: "executable".to_string(),
             frontend_level: "core-ir-direct",

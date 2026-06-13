@@ -3,6 +3,7 @@ const ELFCLASS64: u8 = 2;
 const ELFDATA2LSB: u8 = 1;
 const EV_CURRENT: u8 = 1;
 const ET_EXEC: u16 = 2;
+const ET_REL: u16 = 1;
 const EM_X86_64: u16 = 62;
 const PT_LOAD: u32 = 1;
 const PF_R: u32 = 4;
@@ -17,6 +18,96 @@ pub const ELF_LINUX_TRIPLE: &str = "x86_64-unknown-linux-gnu";
 pub struct ElfExecutable {
     pub code: Vec<u8>,
     pub entry_offset: u32,
+}
+
+pub struct ElfObject {
+    pub code: Vec<u8>,
+}
+
+pub fn x86_64_return_i32_object_code(value: u8) -> Vec<u8> {
+    vec![0xB8, value, 0x00, 0x00, 0x00, 0xC3]
+}
+
+pub fn write_x86_64_relocatable_object(object: &ElfObject, out: &mut Vec<u8>) {
+    let shstrtab = b"\0.text\0.shstrtab\0";
+    let text_name = 1u32;
+    let shstrtab_name = 7u32;
+    let text_offset = EHDR_SIZE;
+    let shstrtab_offset = text_offset + object.code.len() as u64;
+    let shoff = shstrtab_offset + shstrtab.len() as u64;
+    let shentsize = 64u16;
+    let shnum = 3u16;
+    let shstrndx = 2u16;
+
+    out.clear();
+    out.extend_from_slice(&ELF_MAGIC);
+    out.push(ELFCLASS64);
+    out.push(ELFDATA2LSB);
+    out.push(EV_CURRENT);
+    out.extend_from_slice(&[0u8; 9]);
+    out.extend_from_slice(&ET_REL.to_le_bytes());
+    out.extend_from_slice(&EM_X86_64.to_le_bytes());
+    out.extend_from_slice(&1u32.to_le_bytes());
+    out.extend_from_slice(&0u64.to_le_bytes());
+    out.extend_from_slice(&0u64.to_le_bytes());
+    out.extend_from_slice(&shoff.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&(EHDR_SIZE as u16).to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&shentsize.to_le_bytes());
+    out.extend_from_slice(&shnum.to_le_bytes());
+    out.extend_from_slice(&shstrndx.to_le_bytes());
+
+    out.extend_from_slice(&object.code);
+    out.extend_from_slice(shstrtab);
+
+    write_section_header(out, 0, 0, 0, 0, 0, 0, 0, 0);
+    write_section_header(
+        out,
+        text_name,
+        1,
+        0x6,
+        0,
+        text_offset,
+        object.code.len() as u64,
+        16,
+        0,
+    );
+    write_section_header(
+        out,
+        shstrtab_name,
+        3,
+        0,
+        0,
+        shstrtab_offset,
+        shstrtab.len() as u64,
+        1,
+        0,
+    );
+}
+
+fn write_section_header(
+    out: &mut Vec<u8>,
+    name: u32,
+    typ: u32,
+    flags: u64,
+    addr: u64,
+    offset: u64,
+    size: u64,
+    addralign: u64,
+    entsize: u64,
+) {
+    out.extend_from_slice(&name.to_le_bytes());
+    out.extend_from_slice(&typ.to_le_bytes());
+    out.extend_from_slice(&flags.to_le_bytes());
+    out.extend_from_slice(&addr.to_le_bytes());
+    out.extend_from_slice(&offset.to_le_bytes());
+    out.extend_from_slice(&size.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&addralign.to_le_bytes());
+    out.extend_from_slice(&entsize.to_le_bytes());
 }
 
 pub fn write_executable(exe: &ElfExecutable, out: &mut Vec<u8>) {
@@ -81,6 +172,20 @@ mod tests {
         assert_eq!(out[4], ELFCLASS64);
         assert_eq!(u16::from_le_bytes([out[16], out[17]]), ET_EXEC);
         assert_eq!(u16::from_le_bytes([out[18], out[19]]), EM_X86_64);
+    }
+
+    #[test]
+    fn writes_x86_64_relocatable_object() {
+        let object = ElfObject {
+            code: x86_64_return_i32_object_code(42),
+        };
+        let mut out = Vec::new();
+        write_x86_64_relocatable_object(&object, &mut out);
+        assert_eq!(&out[0..4], &ELF_MAGIC);
+        assert_eq!(u16::from_le_bytes([out[16], out[17]]), ET_REL);
+        assert_eq!(u16::from_le_bytes([out[18], out[19]]), EM_X86_64);
+        assert!(out.windows(5).any(|window| window == b".text"));
+        assert!(out.windows(9).any(|window| window == b".shstrtab"));
     }
 
     #[cfg(target_os = "linux")]
