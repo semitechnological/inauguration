@@ -5,6 +5,7 @@ pub mod coff;
 pub mod elf;
 mod lower;
 mod macho;
+pub mod object;
 pub mod raw;
 pub mod target;
 pub mod wasm;
@@ -19,6 +20,10 @@ pub use lower::{
     compile_native_executable_for_host, host_supports_native_subset,
 };
 pub use macho::{ExportSymbol, MachOLinkage};
+pub use object::{
+    NATIVE_OBJECT_SUBSET as NATIVE_OBJECT_REASON, NativeObjectArtifact, NativeObjectRequest,
+    emit_native_object,
+};
 pub use target::{
     NATIVE_EMIT_CONTRACT, NATIVE_EMIT_IMPLEMENTED, NATIVE_EMIT_SKELETON, NativeEmitTargetStatus,
     NativeTarget, NativeTargetKind, all_native_emit_targets, elf_linux_target_status,

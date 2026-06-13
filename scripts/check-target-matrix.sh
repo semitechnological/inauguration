@@ -41,17 +41,24 @@ env in compile \
   --linkage static-lib \
   --entry answer \
   --out "$tmpdir/object.o" \
-  --json >/dev/null
-python3 - "$tmpdir/object.o" <<'PY'
+  --json > "$tmpdir/object.json"
+python3 - "$tmpdir/object.o" "$tmpdir/object.json" <<'PY'
 from pathlib import Path
+import json
 import sys
 data = Path(sys.argv[1]).read_bytes()
+report = json.loads(Path(sys.argv[2]).read_text())
 if data[:4] != b"\x7fELF":
     raise SystemExit("x86_64 object missing ELF magic")
 if int.from_bytes(data[16:18], "little") != 1:
     raise SystemExit("x86_64 object is not ET_REL")
 if int.from_bytes(data[18:20], "little") != 62:
     raise SystemExit("x86_64 object is not EM_X86_64")
+for needle in [b".text", b".symtab", b".strtab", b".shstrtab", b"answer"]:
+    if needle not in data:
+        raise SystemExit(f"x86_64 object missing {needle!r}")
+if report.get("reason_code") != "native-object-subset":
+    raise SystemExit("x86_64 object report has wrong reason_code")
 PY
 env in compile \
   --path "$tmpdir/object.in" \
@@ -60,14 +67,18 @@ env in compile \
   --linkage static-lib \
   --entry answer \
   --out "$tmpdir/object.wasm" \
-  --json >/dev/null
-python3 - "$tmpdir/object.wasm" <<'PY'
+  --json > "$tmpdir/wasm.json"
+python3 - "$tmpdir/object.wasm" "$tmpdir/wasm.json" <<'PY'
 from pathlib import Path
+import json
 import sys
 data = Path(sys.argv[1]).read_bytes()
+report = json.loads(Path(sys.argv[2]).read_text())
 if data[:4] != b"\0asm":
     raise SystemExit("wasm32 module missing wasm magic")
 if b"answer" not in data:
     raise SystemExit("wasm32 module missing answer export")
+if report.get("reason_code") != "native-object-subset":
+    raise SystemExit("wasm32 module report has wrong reason_code")
 PY
 echo "target-matrix checks passed"

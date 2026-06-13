@@ -410,26 +410,20 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
             }
         }
         CompileTarget::Native => match compile_native(&module, &request.module_id, request) {
-            Ok((artifact_path, eval_exit, abi_path)) => {
-                if request.linkage == NativeLinkage::StaticLib && request.target_triple.is_some() {
-                    report.backend_level = "owned-object-subset";
-                    report.runtime_level = "none";
-                } else {
-                    report.backend_level = "owned-native-subset";
-                    report.runtime_level = "inrt-native";
-                }
-                let status = native_backend::native_backend_status();
-                report.reason_code = Some(status.reason_code.to_string());
-                report.reason = Some(status.reason.to_string());
+            Ok(native_result) => {
+                report.backend_level = native_result.backend_level;
+                report.runtime_level = native_result.runtime_level;
+                report.reason_code = Some(native_result.reason_code.to_string());
+                report.reason = Some(native_result.reason.to_string());
                 report.success = true;
-                report.eval_exit_code = eval_exit;
+                report.eval_exit_code = native_result.eval_exit_code;
                 report.executable_path = if request.linkage == NativeLinkage::Executable {
-                    Some(artifact_path.clone())
+                    Some(native_result.artifact_path.clone())
                 } else {
                     None
                 };
-                report.artifact_path = Some(artifact_path);
-                report.abi_path = abi_path;
+                report.artifact_path = Some(native_result.artifact_path);
+                report.abi_path = native_result.abi_path;
             }
             Err(err) if err == "native-host-unsupported" => {
                 let status = native_backend::native_backend_status();
@@ -455,7 +449,7 @@ fn compile_native(
     module: &UnifiedModule,
     module_id: &str,
     request: &OwnedCompileRequest,
-) -> Result<(String, Option<u8>, Option<String>), String> {
+) -> Result<NativeCompileResult, String> {
     let entry = request
         .entry
         .as_deref()
@@ -475,50 +469,38 @@ fn compile_native(
         .as_ref()
         .ok_or_else(|| "native compile requires --out executable path".to_string())?;
     if request.linkage == NativeLinkage::StaticLib
-        && request.target_triple.as_deref() == Some(native_emit::ELF_LINUX_TRIPLE)
+        && let Some(target_triple) = request.target_triple.as_deref()
     {
         let exit = const_eval_entry_exit_code(&native_module, module_id, entry)?;
-        let object = native_emit::ElfObject {
-            code: native_emit::x86_64_return_i32_object_code(exit),
+        let object_request = native_emit::NativeObjectRequest {
+            target_triple,
+            linkage: request.linkage,
+            entry,
+            exit_code: exit,
+            module,
+            module_id,
         };
-        let mut bytes = Vec::new();
-        native_emit::write_x86_64_relocatable_object(&object, &mut bytes);
-        fs::write(out_path, bytes)
-            .map_err(|err| format!("native object write `{}`: {err}", out_path.display()))?;
-        let boundary = crate::boundary_emit::emit_abi_manifest_with_package(
-            &crate::boundary_ir::BoundaryModule {
-                abi_version: crate::boundary_ir::IN_ABI_VERSION,
-                module: module.effective_module_id(module_id).to_string(),
-                layouts: Vec::new(),
-                symbols: Vec::new(),
-                allocators: Vec::new(),
-                layout_hash: String::new(),
-            }
-            .with_layout_hash(),
-            module.identity.package.as_deref(),
-        );
-        let abi_path = out_path.with_extension("abi.json");
-        fs::write(&abi_path, boundary)
-            .map_err(|err| format!("write abi manifest `{}`: {err}", abi_path.display()))?;
-        return Ok((
-            out_path.display().to_string(),
-            None,
-            Some(abi_path.display().to_string()),
-        ));
-    }
-    if request.linkage == NativeLinkage::StaticLib
-        && request.target_triple.as_deref() == Some(native_emit::WASM32_UNKNOWN_TRIPLE)
-    {
-        let exit = const_eval_entry_exit_code(&native_module, module_id, entry)?;
-        let module = native_emit::WasmModule {
-            export_name: entry.to_string(),
-            value: exit,
-        };
-        let mut bytes = Vec::new();
-        native_emit::write_scalar_i32_module(&module, &mut bytes);
-        fs::write(out_path, bytes)
-            .map_err(|err| format!("native wasm write `{}`: {err}", out_path.display()))?;
-        return Ok((out_path.display().to_string(), None, None));
+        if let Some(artifact) = native_emit::emit_native_object(&object_request) {
+            fs::write(out_path, artifact.bytes)
+                .map_err(|err| format!("native object write `{}`: {err}", out_path.display()))?;
+            let abi_path = if let Some(manifest) = artifact.abi_manifest {
+                let abi_path = out_path.with_extension("abi.json");
+                fs::write(&abi_path, manifest)
+                    .map_err(|err| format!("write abi manifest `{}`: {err}", abi_path.display()))?;
+                Some(abi_path.display().to_string())
+            } else {
+                None
+            };
+            return Ok(NativeCompileResult {
+                artifact_path: out_path.display().to_string(),
+                eval_exit_code: None,
+                abi_path,
+                backend_level: artifact.backend_level,
+                runtime_level: artifact.runtime_level,
+                reason_code: artifact.reason_code,
+                reason: artifact.reason,
+            });
+        }
     }
     let abi_path = native_emit::compile_native_artifact_for_host(
         &native_module,
@@ -540,11 +522,26 @@ fn compile_native(
         fs::set_permissions(out_path, perms)
             .map_err(|err| format!("chmod native artifact: {err}"))?;
     }
-    Ok((
-        out_path.display().to_string(),
-        eval_exit,
-        abi_path.map(|path| path.display().to_string()),
-    ))
+    let status = native_backend::native_backend_status();
+    Ok(NativeCompileResult {
+        artifact_path: out_path.display().to_string(),
+        eval_exit_code: eval_exit,
+        abi_path: abi_path.map(|path| path.display().to_string()),
+        backend_level: "owned-native-subset",
+        runtime_level: "inrt-native",
+        reason_code: status.reason_code,
+        reason: status.reason,
+    })
+}
+
+struct NativeCompileResult {
+    artifact_path: String,
+    eval_exit_code: Option<u8>,
+    abi_path: Option<String>,
+    backend_level: &'static str,
+    runtime_level: &'static str,
+    reason_code: &'static str,
+    reason: &'static str,
 }
 
 fn native_entry_module(module: &UnifiedModule, entry: &str) -> UnifiedModule {
@@ -893,6 +890,7 @@ mod tests {
         assert!(report.success, "{:?}", report);
         assert_eq!(report.backend_level, "owned-object-subset");
         assert_eq!(report.runtime_level, "none");
+        assert_eq!(report.reason_code.as_deref(), Some("native-object-subset"));
         assert_eq!(
             report.artifact_path.as_deref(),
             Some(out_path.to_str().unwrap())
@@ -930,6 +928,7 @@ mod tests {
         assert!(report.success, "{:?}", report);
         assert_eq!(report.backend_level, "owned-object-subset");
         assert_eq!(report.runtime_level, "none");
+        assert_eq!(report.reason_code.as_deref(), Some("native-object-subset"));
         let bytes = fs::read(&out_path).expect("wasm bytes");
         assert_eq!(&bytes[0..4], b"\0asm");
         assert!(bytes.windows(6).any(|window| window == b"answer"));
