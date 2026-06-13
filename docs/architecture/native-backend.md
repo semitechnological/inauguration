@@ -32,6 +32,8 @@ On Apple Silicon macOS, `in compile --path apps/polyglot-sample/sample.in --targ
 
 `in backend --path <file> --target bytecode --json` reports the owned bytecode backend and artifact facts for supported inputs. `in backend --target native --json` mirrors the host-specific native status above.
 
+The target registry also carries checked-in In target equivalents for the Rust target triple matrix. These names are compiler target identities for planning, reports, manifests, and future lowering work. They do not imply object emission, linking, ABI lowering, or a native runtime until a target-specific backend is implemented and tested in this repository.
+
 ## Compile cache (Wave 6)
 
 `in compile` hashes source path + content into `target/in/cache/<frontend_hash>/metadata.json`, storing the serialized owned compile report (including `frontend_hash`). Repeated compiles with the same frontend input reuse cached metadata when target, entry, and module id match.
