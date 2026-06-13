@@ -1,9 +1,10 @@
 # Native backend contract
 
-`inauguration` owns two executable backend paths today:
+`inauguration` owns these backend paths today:
 
 1. **Bytecode VM subset** (all hosts): supported Core IR fronts lower to textual SIL, then to `.bca` bytecode assembly, then execute in the in-tree stack VM.
 2. **Native exit-stub subset** (`aarch64-apple-darwin` only): scalar-return entry functions in the Core IR subset are const-evaluated through the bytecode pipeline and emitted as a tiny owned Mach-O executable that exits with the evaluated code. No `swiftc`, `clang`, or linker invocation occurs on this path.
+3. **Target-triple object/module subsets**: selected non-host triples emit inspectable object, archive, module, or minimal executable artifacts for const-evaluable scalar entry functions without invoking an external linker or language compiler.
 
 Swift sources can still use `swiftc` for textual SIL or SwiftPM staging via `in build`, but that is a toolchain escape hatch, not the owned native backend. Use `in compile --target native` for owned native output; pass `--allow-external-toolchain` on `in build` only when external Swift/swiftc fallback is intentional.
 
@@ -25,7 +26,13 @@ Swift sources can still use `swiftc` for textual SIL or SwiftPM staging via `in 
 
 | Host | `implemented` | `stage` | `reason_code` | `artifact_kind` |
 |------|---------------|---------|---------------|-----------------|
-| `aarch64-apple-darwin` | `true` | `owned-native-subset-aarch64` | `native-subset-aarch64` | `executable` |
+| `aarch64-apple-darwin` host executable | `true` | `owned-native-subset` | `native-aarch64-subset` | `mach-o-executable` |
+| `aarch64-apple-darwin` staticlib | `true` | `owned-object-subset` | `native-object-subset` | `mach-o-static-archive` |
+| `x86_64-unknown-linux-gnu` staticlib | `true` | `owned-object-subset` | `native-object-subset` | `elf-relocatable-object` |
+| `x86_64-unknown-linux-gnu` executable | `true` | `owned-native-subset-x86_64` | `native-x86_64-linux-exit-subset` | `elf-executable` |
+| `aarch64-unknown-linux-gnu` staticlib | `true` | `owned-object-subset` | `native-object-subset` | `elf-relocatable-object` |
+| `armv7-unknown-linux-gnueabihf` staticlib | `true` | `owned-object-subset` | `native-object-subset` | `elf32-relocatable-object` |
+| `wasm32-unknown-unknown` staticlib | `true` | `owned-object-subset` | `native-object-subset` | `wasm-module` |
 | other | `false` | `contract-only` | `native-backend-not-implemented` | `none` |
 
 On Apple Silicon macOS, `in compile --path apps/polyglot-sample/sample.in --target native --entry answer --out target/in/answer-sample` produces an owned executable that exits `42`. On Linux and other hosts, the same command reports `native-backend-not-implemented` and bytecode remains the primary owned executable path.
@@ -34,7 +41,13 @@ On Apple Silicon macOS, `in compile --path apps/polyglot-sample/sample.in --targ
 
 The target registry also carries checked-in In target equivalents for the Rust target triple matrix. These names are compiler target identities for planning, reports, manifests, and future lowering work. They do not imply object emission, linking, ABI lowering, or a native runtime until a target-specific backend is implemented and tested in this repository.
 
-The first non-host object backends are `x86_64-unknown-linux-gnu` and `wasm32-unknown-unknown` for const-evaluable scalar entry functions. `in compile --target native --target-triple x86_64-unknown-linux-gnu --linkage static-lib --entry answer --out target/answer.o` emits an ELF64 relocatable object with x86_64 machine code returning the evaluated scalar value. `in compile --target native --target-triple wasm32-unknown-unknown --linkage static-lib --entry answer --out target/answer.wasm` emits a WebAssembly module exporting the scalar function. This is object/module support only: it does not run a linker, provide libc, define a process runtime, or claim general native execution.
+The first non-host object backends are `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `armv7-unknown-linux-gnueabihf`, and `wasm32-unknown-unknown` for const-evaluable scalar entry functions. `in compile --target native --target-triple x86_64-unknown-linux-gnu --linkage static-lib --entry answer --out target/answer.o` emits an ELF64 relocatable object with x86_64 machine code returning the evaluated scalar value. `aarch64-unknown-linux-gnu` emits an ELF64 AArch64 relocatable object for the same scalar subset. `armv7-unknown-linux-gnueabihf` emits an ELF32 ARM relocatable object for the same scalar subset. `wasm32-unknown-unknown` emits a WebAssembly module exporting the scalar function.
+
+`in compile --target native --target-triple aarch64-apple-darwin --linkage static-lib --entry answer --out target/libanswer.a` emits an `ar` archive containing a Mach-O ARM64 object member with an exported `_answer` symbol. This is a static archive route, not a bare Mach-O object route.
+
+`in compile --target native --target-triple x86_64-unknown-linux-gnu --linkage executable --entry answer --out target/answer` emits a minimal ELF64 Linux executable that exits with the const-evaluated scalar value through the Linux `exit` syscall. This is not general x86_64 native lowering: it has no linker, libc, dynamic loader, relocations, argv/envp contract, heap, imports, or general function ABI support.
+
+Explicit `--target-triple` requests fail closed when the owned backend has no target/linkage implementation. They do not fall through to the host Mach-O path.
 
 ## Compile cache (Wave 6)
 

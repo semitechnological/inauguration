@@ -497,6 +497,28 @@ mod tests {
         let mut out = Vec::new();
         write_image(&image, MachOLinkage::StaticLib, "sample", &mut out);
         assert_eq!(&out[..8], b"!<arch>\n");
+        let object_offset = 82;
+        assert_eq!(
+            u32::from_le_bytes(out[object_offset..object_offset + 4].try_into().unwrap()),
+            MH_MAGIC_64
+        );
+        assert_eq!(
+            i32::from_le_bytes(
+                out[object_offset + 4..object_offset + 8]
+                    .try_into()
+                    .unwrap()
+            ),
+            CPU_TYPE_ARM64
+        );
+        assert_eq!(
+            u32::from_le_bytes(
+                out[object_offset + 12..object_offset + 16]
+                    .try_into()
+                    .unwrap()
+            ),
+            MH_OBJECT
+        );
+        assert!(String::from_utf8_lossy(&out).contains("_answer"));
     }
 
     #[test]

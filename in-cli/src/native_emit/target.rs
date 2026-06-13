@@ -52,9 +52,36 @@ const ELF_LINUX_TARGET: NativeEmitTargetStatus = NativeEmitTargetStatus {
     triple: "x86_64-unknown-linux-gnu",
     format: "elf",
     implemented: true,
+    stage: "owned-native-and-object-subset",
+    reason_code: NATIVE_EMIT_IMPLEMENTED,
+    artifact_kind: "elf-relocatable-object+elf-executable",
+};
+
+const AARCH64_ELF_LINUX_TARGET: NativeEmitTargetStatus = NativeEmitTargetStatus {
+    triple: "aarch64-unknown-linux-gnu",
+    format: "elf",
+    implemented: true,
     stage: "owned-object-subset",
     reason_code: NATIVE_EMIT_IMPLEMENTED,
     artifact_kind: "elf-relocatable-object",
+};
+
+const AARCH64_MACHO_STATICLIB_TARGET: NativeEmitTargetStatus = NativeEmitTargetStatus {
+    triple: "aarch64-apple-darwin",
+    format: "mach-o",
+    implemented: true,
+    stage: "owned-object-subset",
+    reason_code: NATIVE_EMIT_IMPLEMENTED,
+    artifact_kind: "mach-o-static-archive",
+};
+
+const ARM32_ELF_LINUX_TARGET: NativeEmitTargetStatus = NativeEmitTargetStatus {
+    triple: "armv7-unknown-linux-gnueabihf",
+    format: "elf",
+    implemented: true,
+    stage: "owned-object-subset",
+    reason_code: NATIVE_EMIT_IMPLEMENTED,
+    artifact_kind: "elf32-relocatable-object",
 };
 
 const WASM32_TARGET: NativeEmitTargetStatus = NativeEmitTargetStatus {
@@ -66,8 +93,14 @@ const WASM32_TARGET: NativeEmitTargetStatus = NativeEmitTargetStatus {
     artifact_kind: "wasm-module",
 };
 
-const NATIVE_EMIT_TARGETS: &[NativeEmitTargetStatus] =
-    &[MACHO_TARGET, ELF_LINUX_TARGET, WASM32_TARGET];
+const NATIVE_EMIT_TARGETS: &[NativeEmitTargetStatus] = &[
+    MACHO_TARGET,
+    AARCH64_MACHO_STATICLIB_TARGET,
+    ELF_LINUX_TARGET,
+    AARCH64_ELF_LINUX_TARGET,
+    ARM32_ELF_LINUX_TARGET,
+    WASM32_TARGET,
+];
 
 pub fn all_native_emit_targets() -> &'static [NativeEmitTargetStatus] {
     NATIVE_EMIT_TARGETS
@@ -120,21 +153,27 @@ mod tests {
     #[test]
     fn registry_lists_macho_and_elf_targets() {
         let targets = all_native_emit_targets();
-        assert_eq!(targets.len(), 3);
+        assert_eq!(targets.len(), 6);
         assert_eq!(targets[0].format, "mach-o");
-        assert_eq!(targets[1].triple, "x86_64-unknown-linux-gnu");
-        assert_eq!(targets[1].format, "elf");
-        assert_eq!(targets[2].triple, "wasm32-unknown-unknown");
-        assert_eq!(targets[2].format, "wasm");
+        assert_eq!(targets[1].artifact_kind, "mach-o-static-archive");
+        assert_eq!(targets[2].triple, "x86_64-unknown-linux-gnu");
+        assert_eq!(targets[2].format, "elf");
+        assert_eq!(targets[3].triple, "aarch64-unknown-linux-gnu");
+        assert_eq!(targets[4].triple, "armv7-unknown-linux-gnueabihf");
+        assert_eq!(targets[5].triple, "wasm32-unknown-unknown");
+        assert_eq!(targets[5].format, "wasm");
     }
 
     #[test]
     fn reports_elf_linux_skeleton_status() {
         let status = elf_linux_target_status();
         assert!(status.implemented);
-        assert_eq!(status.stage, "owned-object-subset");
+        assert_eq!(status.stage, "owned-native-and-object-subset");
         assert_eq!(status.reason_code, NATIVE_EMIT_IMPLEMENTED);
-        assert_eq!(status.artifact_kind, "elf-relocatable-object");
+        assert_eq!(
+            status.artifact_kind,
+            "elf-relocatable-object+elf-executable"
+        );
         assert_eq!(status.triple, "x86_64-unknown-linux-gnu");
     }
 

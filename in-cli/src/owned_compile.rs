@@ -432,6 +432,13 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
                 report.reason_code = Some(status.reason_code.to_string());
                 report.reason = Some(status.reason.to_string());
             }
+            Err(err) if err.starts_with("native-target-not-implemented:") => {
+                report.backend_level = "contract-only";
+                report.runtime_level = "none";
+                report.reason_code = Some("native-target-not-implemented".to_string());
+                report.reason = Some(err.clone());
+                report.error = Some(err);
+            }
             Err(err) => {
                 report.backend_level = "owned-native-subset";
                 report.runtime_level = "inrt-native";
@@ -468,9 +475,7 @@ fn compile_native(
         .out
         .as_ref()
         .ok_or_else(|| "native compile requires --out executable path".to_string())?;
-    if request.linkage == NativeLinkage::StaticLib
-        && let Some(target_triple) = request.target_triple.as_deref()
-    {
+    if let Some(target_triple) = request.target_triple.as_deref() {
         let exit = const_eval_entry_exit_code(&native_module, module_id, entry)?;
         let object_request = native_emit::NativeObjectRequest {
             target_triple,
@@ -483,6 +488,7 @@ fn compile_native(
         if let Some(artifact) = native_emit::emit_native_object(&object_request) {
             fs::write(out_path, artifact.bytes)
                 .map_err(|err| format!("native object write `{}`: {err}", out_path.display()))?;
+            set_native_artifact_permissions(out_path, request.linkage)?;
             let abi_path = if let Some(manifest) = artifact.abi_manifest {
                 let abi_path = out_path.with_extension("abi.json");
                 fs::write(&abi_path, manifest)
@@ -493,7 +499,11 @@ fn compile_native(
             };
             return Ok(NativeCompileResult {
                 artifact_path: out_path.display().to_string(),
-                eval_exit_code: None,
+                eval_exit_code: if request.linkage == NativeLinkage::Executable {
+                    Some(exit)
+                } else {
+                    None
+                },
                 abi_path,
                 backend_level: artifact.backend_level,
                 runtime_level: artifact.runtime_level,
@@ -501,6 +511,10 @@ fn compile_native(
                 reason: artifact.reason,
             });
         }
+        return Err(format!(
+            "native-target-not-implemented: target `{target_triple}` with linkage `{}` is not implemented by the owned backend",
+            linkage_label(request.linkage)
+        ));
     }
     let abi_path = native_emit::compile_native_artifact_for_host(
         &native_module,
@@ -509,19 +523,7 @@ fn compile_native(
         request.linkage,
         out_path,
     )?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(out_path)
-            .map_err(|err| format!("native artifact metadata: {err}"))?
-            .permissions();
-        perms.set_mode(match request.linkage {
-            NativeLinkage::StaticLib => 0o644,
-            NativeLinkage::Executable | NativeLinkage::Dylib => 0o755,
-        });
-        fs::set_permissions(out_path, perms)
-            .map_err(|err| format!("chmod native artifact: {err}"))?;
-    }
+    set_native_artifact_permissions(out_path, request.linkage)?;
     let status = native_backend::native_backend_status();
     Ok(NativeCompileResult {
         artifact_path: out_path.display().to_string(),
@@ -532,6 +534,24 @@ fn compile_native(
         reason_code: status.reason_code,
         reason: status.reason,
     })
+}
+
+#[cfg(unix)]
+fn set_native_artifact_permissions(path: &Path, linkage: NativeLinkage) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    let mut perms = fs::metadata(path)
+        .map_err(|err| format!("native artifact metadata: {err}"))?
+        .permissions();
+    perms.set_mode(match linkage {
+        NativeLinkage::StaticLib => 0o644,
+        NativeLinkage::Executable | NativeLinkage::Dylib => 0o755,
+    });
+    fs::set_permissions(path, perms).map_err(|err| format!("chmod native artifact: {err}"))
+}
+
+#[cfg(not(unix))]
+fn set_native_artifact_permissions(_path: &Path, _linkage: NativeLinkage) -> Result<(), String> {
+    Ok(())
 }
 
 struct NativeCompileResult {
@@ -903,6 +923,214 @@ mod tests {
         fs::remove_file(source_path).unwrap();
         fs::remove_file(&out_path).unwrap();
         let _ = fs::remove_file(out_path.with_extension("abi.json"));
+    }
+
+    #[test]
+    fn native_staticlib_emits_aarch64_linux_object_file() {
+        let source_path = temp_path("aarch64-object.in");
+        let out_path = temp_path("aarch64-object.o");
+        fs::write(
+            &source_path,
+            "fn answer() -> Int { return 42; }\nfn main() -> void { return; }\n",
+        )
+        .unwrap();
+        let mut request = default_request(
+            source_path.clone(),
+            CompileTarget::Native,
+            Some("answer"),
+            Some(out_path.clone()),
+        );
+        request.linkage = NativeLinkage::StaticLib;
+        request.target_triple = Some("aarch64-unknown-linux-gnu".to_string());
+
+        let report = compile_owned(&request);
+
+        assert!(report.success, "{:?}", report);
+        assert_eq!(report.backend_level, "owned-object-subset");
+        assert_eq!(report.runtime_level, "none");
+        assert_eq!(report.reason_code.as_deref(), Some("native-object-subset"));
+        let bytes = fs::read(&out_path).expect("object bytes");
+        assert_eq!(&bytes[0..4], b"\x7FELF");
+        assert_eq!(u16::from_le_bytes([bytes[16], bytes[17]]), 1);
+        assert_eq!(u16::from_le_bytes([bytes[18], bytes[19]]), 183);
+
+        fs::remove_file(source_path).unwrap();
+        fs::remove_file(&out_path).unwrap();
+        let _ = fs::remove_file(out_path.with_extension("abi.json"));
+    }
+
+    #[test]
+    fn native_staticlib_emits_arm32_linux_object_file() {
+        let source_path = temp_path("arm32-object.in");
+        let out_path = temp_path("arm32-object.o");
+        fs::write(
+            &source_path,
+            "fn answer() -> Int { return 42; }\nfn main() -> void { return; }\n",
+        )
+        .unwrap();
+        let mut request = default_request(
+            source_path.clone(),
+            CompileTarget::Native,
+            Some("answer"),
+            Some(out_path.clone()),
+        );
+        request.linkage = NativeLinkage::StaticLib;
+        request.target_triple = Some("armv7-unknown-linux-gnueabihf".to_string());
+
+        let report = compile_owned(&request);
+
+        assert!(report.success, "{:?}", report);
+        assert_eq!(report.backend_level, "owned-object-subset");
+        assert_eq!(report.runtime_level, "none");
+        assert_eq!(report.reason_code.as_deref(), Some("native-object-subset"));
+        let bytes = fs::read(&out_path).expect("object bytes");
+        assert_eq!(&bytes[0..4], b"\x7FELF");
+        assert_eq!(bytes[4], 1);
+        assert_eq!(u16::from_le_bytes([bytes[16], bytes[17]]), 1);
+        assert_eq!(u16::from_le_bytes([bytes[18], bytes[19]]), 40);
+
+        fs::remove_file(source_path).unwrap();
+        fs::remove_file(&out_path).unwrap();
+        let _ = fs::remove_file(out_path.with_extension("abi.json"));
+    }
+
+    #[test]
+    fn native_staticlib_emits_aarch64_macho_archive() {
+        let source_path = temp_path("macho-staticlib.in");
+        let out_path = temp_path("macho-staticlib.a");
+        fs::write(
+            &source_path,
+            "fn answer() -> Int { return 42; }\nfn main() -> void { return; }\n",
+        )
+        .unwrap();
+        let mut request = default_request(
+            source_path.clone(),
+            CompileTarget::Native,
+            Some("answer"),
+            Some(out_path.clone()),
+        );
+        request.linkage = NativeLinkage::StaticLib;
+        request.target_triple = Some("aarch64-apple-darwin".to_string());
+
+        let report = compile_owned(&request);
+
+        assert!(report.success, "{:?}", report);
+        assert_eq!(report.backend_level, "owned-object-subset");
+        assert_eq!(report.runtime_level, "none");
+        assert_eq!(report.reason_code.as_deref(), Some("native-object-subset"));
+        let bytes = fs::read(&out_path).expect("archive bytes");
+        assert_eq!(&bytes[..8], b"!<arch>\n");
+        assert!(bytes.windows(7).any(|window| window == b"_answer"));
+
+        fs::remove_file(source_path).unwrap();
+        fs::remove_file(&out_path).unwrap();
+        let _ = fs::remove_file(out_path.with_extension("abi.json"));
+    }
+
+    #[test]
+    fn native_executable_emits_x86_64_linux_elf_file() {
+        let source_path = temp_path("x86-executable.in");
+        let out_path = temp_path("x86-executable");
+        fs::write(
+            &source_path,
+            "fn answer() -> Int { return 42; }\nfn main() -> void { return; }\n",
+        )
+        .unwrap();
+        let mut request = default_request(
+            source_path.clone(),
+            CompileTarget::Native,
+            Some("answer"),
+            Some(out_path.clone()),
+        );
+        request.linkage = NativeLinkage::Executable;
+        request.target_triple = Some("x86_64-unknown-linux-gnu".to_string());
+
+        let report = compile_owned(&request);
+
+        assert!(report.success, "{:?}", report);
+        assert_eq!(report.backend_level, "owned-native-subset-x86_64");
+        assert_eq!(report.runtime_level, "linux-syscall-exit");
+        assert_eq!(
+            report.reason_code.as_deref(),
+            Some("native-x86_64-linux-exit-subset")
+        );
+        let bytes = fs::read(&out_path).expect("executable bytes");
+        assert_eq!(&bytes[0..4], b"\x7FELF");
+        assert_eq!(u16::from_le_bytes([bytes[16], bytes[17]]), 2);
+        assert_eq!(u16::from_le_bytes([bytes[18], bytes[19]]), 62);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&out_path).unwrap().permissions().mode() & 0o777,
+                0o755
+            );
+        }
+
+        fs::remove_file(source_path).unwrap();
+        fs::remove_file(&out_path).unwrap();
+    }
+
+    #[test]
+    fn explicit_unsupported_native_target_fails_closed() {
+        let source_path = temp_path("unsupported-target.in");
+        let out_path = temp_path("unsupported-target.o");
+        fs::write(
+            &source_path,
+            "fn answer() -> Int { return 42; }\nfn main() -> void { return; }\n",
+        )
+        .unwrap();
+        let mut request = default_request(
+            source_path.clone(),
+            CompileTarget::Native,
+            Some("answer"),
+            Some(out_path.clone()),
+        );
+        request.linkage = NativeLinkage::StaticLib;
+        request.target_triple = Some("riscv64gc-unknown-none-elf".to_string());
+
+        let report = compile_owned(&request);
+
+        assert!(!report.success, "{:?}", report);
+        assert_eq!(report.backend_level, "contract-only");
+        assert_eq!(
+            report.reason_code.as_deref(),
+            Some("native-target-not-implemented")
+        );
+        assert!(!out_path.exists());
+
+        fs::remove_file(source_path).unwrap();
+    }
+
+    #[test]
+    fn explicit_aarch64_darwin_executable_target_fails_closed() {
+        let source_path = temp_path("unsupported-macho-executable.in");
+        let out_path = temp_path("unsupported-macho-executable");
+        fs::write(
+            &source_path,
+            "fn answer() -> Int { return 42; }\nfn main() -> void { return; }\n",
+        )
+        .unwrap();
+        let mut request = default_request(
+            source_path.clone(),
+            CompileTarget::Native,
+            Some("answer"),
+            Some(out_path.clone()),
+        );
+        request.linkage = NativeLinkage::Executable;
+        request.target_triple = Some("aarch64-apple-darwin".to_string());
+
+        let report = compile_owned(&request);
+
+        assert!(!report.success, "{:?}", report);
+        assert_eq!(report.backend_level, "contract-only");
+        assert_eq!(
+            report.reason_code.as_deref(),
+            Some("native-target-not-implemented")
+        );
+        assert!(!out_path.exists());
+
+        fs::remove_file(source_path).unwrap();
     }
 
     #[test]

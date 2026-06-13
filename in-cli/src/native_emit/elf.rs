@@ -1,19 +1,25 @@
 const ELF_MAGIC: [u8; 4] = [0x7F, b'E', b'L', b'F'];
+const ELFCLASS32: u8 = 1;
 const ELFCLASS64: u8 = 2;
 const ELFDATA2LSB: u8 = 1;
 const EV_CURRENT: u8 = 1;
 const ET_EXEC: u16 = 2;
 const ET_REL: u16 = 1;
+const EM_ARM: u16 = 40;
 const EM_X86_64: u16 = 62;
+const EM_AARCH64: u16 = 183;
 const PT_LOAD: u32 = 1;
 const PF_R: u32 = 4;
 const PF_X: u32 = 1;
+const EHDR32_SIZE: u32 = 52;
 const EHDR_SIZE: u64 = 64;
 const PHDR_SIZE: u64 = 56;
 const TEXT_VADDR: u64 = 0x400_000;
 const PAGE_SIZE: u64 = 0x1000;
 
 pub const ELF_LINUX_TRIPLE: &str = "x86_64-unknown-linux-gnu";
+pub const AARCH64_LINUX_TRIPLE: &str = "aarch64-unknown-linux-gnu";
+pub const ARMV7_LINUX_GNUEABIHF_TRIPLE: &str = "armv7-unknown-linux-gnueabihf";
 
 pub struct ElfExecutable {
     pub code: Vec<u8>,
@@ -29,7 +35,36 @@ pub fn x86_64_return_i32_object_code(value: u8) -> Vec<u8> {
     vec![0xB8, value, 0x00, 0x00, 0x00, 0xC3]
 }
 
+pub fn aarch64_return_i32_object_code(value: u8) -> Vec<u8> {
+    let mut code = Vec::new();
+    code.extend_from_slice(&(0xD280_0000u32 | ((value as u32) << 5)).to_le_bytes());
+    code.extend_from_slice(&0xD65F_03C0u32.to_le_bytes());
+    code
+}
+
+pub fn arm32_return_i32_object_code(value: u8) -> Vec<u8> {
+    let mut code = Vec::new();
+    code.extend_from_slice(&(0xE3A0_0000u32 | value as u32).to_le_bytes());
+    code.extend_from_slice(&0xE12F_FF1Eu32.to_le_bytes());
+    code
+}
+
+pub fn x86_64_linux_exit_code(status: u8) -> Vec<u8> {
+    vec![
+        0x48, 0xC7, 0xC0, 0x3C, 0x00, 0x00, 0x00, 0x48, 0xC7, 0xC7, status, 0x00, 0x00, 0x00, 0x0F,
+        0x05,
+    ]
+}
+
 pub fn write_x86_64_relocatable_object(object: &ElfObject, out: &mut Vec<u8>) {
+    write_elf64_relocatable_object(object, EM_X86_64, out);
+}
+
+pub fn write_aarch64_relocatable_object(object: &ElfObject, out: &mut Vec<u8>) {
+    write_elf64_relocatable_object(object, EM_AARCH64, out);
+}
+
+fn write_elf64_relocatable_object(object: &ElfObject, machine: u16, out: &mut Vec<u8>) {
     let shstrtab = b"\0.text\0.symtab\0.strtab\0.shstrtab\0";
     let strtab = format!("\0{}\0", object.export_name).into_bytes();
     let symtab_size = 48u64;
@@ -53,7 +88,7 @@ pub fn write_x86_64_relocatable_object(object: &ElfObject, out: &mut Vec<u8>) {
     out.push(EV_CURRENT);
     out.extend_from_slice(&[0u8; 9]);
     out.extend_from_slice(&ET_REL.to_le_bytes());
-    out.extend_from_slice(&EM_X86_64.to_le_bytes());
+    out.extend_from_slice(&machine.to_le_bytes());
     out.extend_from_slice(&1u32.to_le_bytes());
     out.extend_from_slice(&0u64.to_le_bytes());
     out.extend_from_slice(&0u64.to_le_bytes());
@@ -127,6 +162,118 @@ pub fn write_x86_64_relocatable_object(object: &ElfObject, out: &mut Vec<u8>) {
     );
 }
 
+pub fn write_arm32_relocatable_object(object: &ElfObject, out: &mut Vec<u8>) {
+    let shstrtab = b"\0.text\0.symtab\0.strtab\0.shstrtab\0";
+    let strtab = format!("\0{}\0", object.export_name).into_bytes();
+    let symtab_size = 32u32;
+    let text_name = 1u32;
+    let symtab_name = 7u32;
+    let strtab_name = 15u32;
+    let shstrtab_name = 23u32;
+    let text_offset = EHDR32_SIZE;
+    let symtab_offset = text_offset + object.code.len() as u32;
+    let strtab_offset = symtab_offset + symtab_size;
+    let shstrtab_offset = strtab_offset + strtab.len() as u32;
+    let shoff = shstrtab_offset + shstrtab.len() as u32;
+
+    out.clear();
+    out.extend_from_slice(&ELF_MAGIC);
+    out.push(ELFCLASS32);
+    out.push(ELFDATA2LSB);
+    out.push(EV_CURRENT);
+    out.extend_from_slice(&[0u8; 9]);
+    out.extend_from_slice(&ET_REL.to_le_bytes());
+    out.extend_from_slice(&EM_ARM.to_le_bytes());
+    out.extend_from_slice(&1u32.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&shoff.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&(EHDR32_SIZE as u16).to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&40u16.to_le_bytes());
+    out.extend_from_slice(&5u16.to_le_bytes());
+    out.extend_from_slice(&4u16.to_le_bytes());
+
+    out.extend_from_slice(&object.code);
+    write_symbol32(out, 0, 0, 0, 0, 0, 0);
+    write_symbol32(out, 1, 0, object.code.len() as u32, 0x12, 0, 1);
+    out.extend_from_slice(&strtab);
+    out.extend_from_slice(shstrtab);
+
+    write_section_header32(out, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    write_section_header32(
+        out,
+        text_name,
+        1,
+        0x6,
+        0,
+        text_offset,
+        object.code.len() as u32,
+        0,
+        0,
+        4,
+        0,
+    );
+    write_section_header32(
+        out,
+        symtab_name,
+        2,
+        0,
+        0,
+        symtab_offset,
+        symtab_size,
+        3,
+        1,
+        4,
+        16,
+    );
+    write_section_header32(
+        out,
+        strtab_name,
+        3,
+        0,
+        0,
+        strtab_offset,
+        strtab.len() as u32,
+        0,
+        0,
+        1,
+        0,
+    );
+    write_section_header32(
+        out,
+        shstrtab_name,
+        3,
+        0,
+        0,
+        shstrtab_offset,
+        shstrtab.len() as u32,
+        0,
+        0,
+        1,
+        0,
+    );
+}
+
+fn write_symbol32(
+    out: &mut Vec<u8>,
+    name: u32,
+    value: u32,
+    size: u32,
+    info: u8,
+    other: u8,
+    shndx: u16,
+) {
+    out.extend_from_slice(&name.to_le_bytes());
+    out.extend_from_slice(&value.to_le_bytes());
+    out.extend_from_slice(&size.to_le_bytes());
+    out.push(info);
+    out.push(other);
+    out.extend_from_slice(&shndx.to_le_bytes());
+}
+
 fn write_symbol(
     out: &mut Vec<u8>,
     name: u32,
@@ -169,9 +316,35 @@ fn write_section_header(
     out.extend_from_slice(&entsize.to_le_bytes());
 }
 
+fn write_section_header32(
+    out: &mut Vec<u8>,
+    name: u32,
+    typ: u32,
+    flags: u32,
+    addr: u32,
+    offset: u32,
+    size: u32,
+    link: u32,
+    info: u32,
+    addralign: u32,
+    entsize: u32,
+) {
+    out.extend_from_slice(&name.to_le_bytes());
+    out.extend_from_slice(&typ.to_le_bytes());
+    out.extend_from_slice(&flags.to_le_bytes());
+    out.extend_from_slice(&addr.to_le_bytes());
+    out.extend_from_slice(&offset.to_le_bytes());
+    out.extend_from_slice(&size.to_le_bytes());
+    out.extend_from_slice(&link.to_le_bytes());
+    out.extend_from_slice(&info.to_le_bytes());
+    out.extend_from_slice(&addralign.to_le_bytes());
+    out.extend_from_slice(&entsize.to_le_bytes());
+}
+
 pub fn write_executable(exe: &ElfExecutable, out: &mut Vec<u8>) {
     let text_fileoff = PAGE_SIZE;
-    let file_size = text_fileoff + PAGE_SIZE;
+    let text_size = exe.code.len() as u64;
+    let file_size = text_fileoff + text_size;
     let entry_vaddr = TEXT_VADDR + u64::from(exe.entry_offset);
 
     out.clear();
@@ -192,14 +365,15 @@ pub fn write_executable(exe: &ElfExecutable, out: &mut Vec<u8>) {
     out.extend_from_slice(&1u16.to_le_bytes());
     out.extend_from_slice(&0u16.to_le_bytes());
     out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
 
     out.extend_from_slice(&PT_LOAD.to_le_bytes());
     out.extend_from_slice(&(PF_R | PF_X).to_le_bytes());
     out.extend_from_slice(&text_fileoff.to_le_bytes());
     out.extend_from_slice(&TEXT_VADDR.to_le_bytes());
     out.extend_from_slice(&TEXT_VADDR.to_le_bytes());
-    out.extend_from_slice(&(exe.code.len() as u64).to_le_bytes());
-    out.extend_from_slice(&PAGE_SIZE.to_le_bytes());
+    out.extend_from_slice(&text_size.to_le_bytes());
+    out.extend_from_slice(&text_size.to_le_bytes());
     out.extend_from_slice(&PAGE_SIZE.to_le_bytes());
 
     while (out.len() as u64) < text_fileoff {
@@ -227,7 +401,7 @@ mod tests {
         let mut out = Vec::new();
         write_executable(&exe, &mut out);
         assert_eq!(&out[0..4], &ELF_MAGIC);
-        assert_eq!(out.len(), (PAGE_SIZE * 2) as usize);
+        assert_eq!(out.len(), PAGE_SIZE as usize + exe.code.len());
         assert_eq!(out[4], ELFCLASS64);
         assert_eq!(u16::from_le_bytes([out[16], out[17]]), ET_EXEC);
         assert_eq!(u16::from_le_bytes([out[18], out[19]]), EM_X86_64);
@@ -249,6 +423,75 @@ mod tests {
         assert!(out.windows(7).any(|window| window == b".strtab"));
         assert!(out.windows(9).any(|window| window == b".shstrtab"));
         assert!(out.windows(6).any(|window| window == b"answer"));
+    }
+
+    #[test]
+    fn writes_aarch64_relocatable_object() {
+        let object = ElfObject {
+            code: aarch64_return_i32_object_code(42),
+            export_name: "answer".to_string(),
+        };
+        let mut out = Vec::new();
+        write_aarch64_relocatable_object(&object, &mut out);
+        assert_eq!(&out[0..4], &ELF_MAGIC);
+        assert_eq!(out[4], ELFCLASS64);
+        assert_eq!(u16::from_le_bytes([out[16], out[17]]), ET_REL);
+        assert_eq!(u16::from_le_bytes([out[18], out[19]]), EM_AARCH64);
+        assert!(out.windows(5).any(|window| window == b".text"));
+        assert!(out.windows(7).any(|window| window == b".symtab"));
+        assert!(out.windows(7).any(|window| window == b".strtab"));
+        assert!(out.windows(9).any(|window| window == b".shstrtab"));
+        assert!(out.windows(6).any(|window| window == b"answer"));
+        assert!(
+            out.windows(8)
+                .any(|window| window == [0x40, 0x05, 0x80, 0xD2, 0xC0, 0x03, 0x5F, 0xD6])
+        );
+    }
+
+    #[test]
+    fn writes_arm32_relocatable_object() {
+        let object = ElfObject {
+            code: arm32_return_i32_object_code(42),
+            export_name: "answer".to_string(),
+        };
+        let mut out = Vec::new();
+        write_arm32_relocatable_object(&object, &mut out);
+        assert_eq!(&out[0..4], &ELF_MAGIC);
+        assert_eq!(out[4], ELFCLASS32);
+        assert_eq!(u16::from_le_bytes([out[16], out[17]]), ET_REL);
+        assert_eq!(u16::from_le_bytes([out[18], out[19]]), EM_ARM);
+        assert!(out.windows(5).any(|window| window == b".text"));
+        assert!(out.windows(7).any(|window| window == b".symtab"));
+        assert!(out.windows(7).any(|window| window == b".strtab"));
+        assert!(out.windows(9).any(|window| window == b".shstrtab"));
+        assert!(out.windows(6).any(|window| window == b"answer"));
+        assert!(
+            out.windows(8)
+                .any(|window| window == [0x2A, 0x00, 0xA0, 0xE3, 0x1E, 0xFF, 0x2F, 0xE1])
+        );
+    }
+
+    #[test]
+    fn writes_x86_64_exit_executable() {
+        let exe = ElfExecutable {
+            code: x86_64_linux_exit_code(42),
+            entry_offset: 0,
+        };
+        let mut out = Vec::new();
+        write_executable(&exe, &mut out);
+        assert_eq!(&out[0..4], &ELF_MAGIC);
+        assert_eq!(u16::from_le_bytes([out[16], out[17]]), ET_EXEC);
+        assert_eq!(u16::from_le_bytes([out[18], out[19]]), EM_X86_64);
+        assert_eq!(u32::from_le_bytes(out[64..68].try_into().unwrap()), PT_LOAD);
+        assert_eq!(
+            u32::from_le_bytes(out[68..72].try_into().unwrap()),
+            PF_R | PF_X
+        );
+        assert!(out.windows(16).any(|window| window
+            == [
+                0x48, 0xC7, 0xC0, 0x3C, 0x00, 0x00, 0x00, 0x48, 0xC7, 0xC7, 0x2A, 0x00, 0x00, 0x00,
+                0x0F, 0x05
+            ]));
     }
 
     #[cfg(target_os = "linux")]

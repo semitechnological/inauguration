@@ -441,19 +441,27 @@ fn build_target_registry() -> Vec<TargetSpec> {
         }
         specs.push(TargetSpec {
             name: target,
-            implemented: matches!(target, "x86_64-unknown-linux-gnu" | "wasm32-unknown-unknown"),
-            stage: if matches!(target, "x86_64-unknown-linux-gnu" | "wasm32-unknown-unknown") {
+            implemented: implemented_target(target),
+            stage: if target == "x86_64-unknown-linux-gnu" {
+                "owned-native-and-object-subset"
+            } else if implemented_target(target) {
                 "owned-object-subset"
             } else {
                 "contract-only"
             },
-            reason_code: if matches!(target, "x86_64-unknown-linux-gnu" | "wasm32-unknown-unknown") {
+            reason_code: if implemented_target(target) {
                 NATIVE_OBJECT_SUBSET
             } else {
                 NATIVE_BACKEND_NOT_IMPLEMENTED
             },
             reason: if target == "x86_64-unknown-linux-gnu" {
-                "inauguration owns ELF64 relocatable object emission for const-evaluable scalar entry functions on this target"
+                "inauguration owns ELF64 relocatable object emission and a Linux syscall-exit executable subset for const-evaluable scalar entry functions on this target"
+            } else if target == "aarch64-unknown-linux-gnu" {
+                "inauguration owns ELF64 AArch64 relocatable object emission for const-evaluable scalar entry functions on this target"
+            } else if target == "aarch64-apple-darwin" {
+                "inauguration owns Mach-O static archive emission for const-evaluable scalar entry functions on this target"
+            } else if target == "armv7-unknown-linux-gnueabihf" {
+                "inauguration owns ELF32 ARM relocatable object emission for const-evaluable scalar entry functions on this target"
             } else if target == "wasm32-unknown-unknown" {
                 "inauguration owns WebAssembly module emission for const-evaluable scalar entry functions on this target"
             } else {
@@ -461,20 +469,34 @@ fn build_target_registry() -> Vec<TargetSpec> {
             },
             input_stage: "core-ir-or-textual-sil",
             artifact_kind: if target == "x86_64-unknown-linux-gnu" {
+                "elf-relocatable-object+elf-executable"
+            } else if target == "aarch64-unknown-linux-gnu" {
                 "elf-relocatable-object"
+            } else if target == "aarch64-apple-darwin" {
+                "mach-o-static-archive"
+            } else if target == "armv7-unknown-linux-gnueabihf" {
+                "elf32-relocatable-object"
             } else if target == "wasm32-unknown-unknown" {
                 "wasm-module"
             } else {
                 "none"
             },
             host_triple: Some(target),
-            backend_artifact_supported: matches!(
-                target,
-                "x86_64-unknown-linux-gnu" | "wasm32-unknown-unknown"
-            ),
+            backend_artifact_supported: implemented_target(target),
         });
     }
     specs
+}
+
+fn implemented_target(target: &str) -> bool {
+    matches!(
+        target,
+        "x86_64-unknown-linux-gnu"
+            | "aarch64-unknown-linux-gnu"
+            | "aarch64-apple-darwin"
+            | "armv7-unknown-linux-gnueabihf"
+            | "wasm32-unknown-unknown"
+    )
 }
 
 #[cfg(test)]
@@ -498,6 +520,8 @@ mod tests {
             "x86_64-unknown-none",
             "x86_64-unknown-linux-gnu",
             "aarch64-apple-darwin",
+            "aarch64-unknown-linux-gnu",
+            "armv7-unknown-linux-gnueabihf",
             "wasm32-unknown-unknown",
             "riscv64gc-unknown-none-elf",
         ] {
@@ -505,8 +529,29 @@ mod tests {
             let spec = target_spec_by_name(target).expect("target spec");
             if target == "x86_64-unknown-linux-gnu" {
                 assert!(spec.implemented, "{target}");
+                assert_eq!(spec.stage, "owned-native-and-object-subset");
+                assert_eq!(spec.artifact_kind, "elf-relocatable-object+elf-executable");
+                assert!(spec.backend_artifact_supported);
+                continue;
+            }
+            if target == "aarch64-apple-darwin" {
+                assert!(spec.implemented, "{target}");
+                assert_eq!(spec.stage, "owned-object-subset");
+                assert_eq!(spec.artifact_kind, "mach-o-static-archive");
+                assert!(spec.backend_artifact_supported);
+                continue;
+            }
+            if target == "aarch64-unknown-linux-gnu" {
+                assert!(spec.implemented, "{target}");
                 assert_eq!(spec.stage, "owned-object-subset");
                 assert_eq!(spec.artifact_kind, "elf-relocatable-object");
+                assert!(spec.backend_artifact_supported);
+                continue;
+            }
+            if target == "armv7-unknown-linux-gnueabihf" {
+                assert!(spec.implemented, "{target}");
+                assert_eq!(spec.stage, "owned-object-subset");
+                assert_eq!(spec.artifact_kind, "elf32-relocatable-object");
                 assert!(spec.backend_artifact_supported);
                 continue;
             }
