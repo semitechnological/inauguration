@@ -20,7 +20,6 @@ if "TARGET_TRIPLE" not in lower or triple not in lower:
 target = (root / "in-cli/src/target.rs").read_text()
 for triple in [
     "x86_64-unknown-none",
-    "x86_64-space",
     "x86_64-unknown-linux-gnu",
     "aarch64-apple-darwin",
     "aarch64-unknown-linux-gnu",
