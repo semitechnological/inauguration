@@ -1178,6 +1178,80 @@ mod tests {
     }
 
     #[test]
+    fn native_executable_emits_aarch64_linux_elf_file() {
+        let source_path = temp_path("aarch64-linux-executable.in");
+        let out_path = temp_path("aarch64-linux-executable");
+        fs::write(
+            &source_path,
+            "fn answer() -> Int { return 42; }\nfn main() -> void { return; }\n",
+        )
+        .unwrap();
+        let mut request = default_request(
+            source_path.clone(),
+            CompileTarget::Native,
+            Some("answer"),
+            Some(out_path.clone()),
+        );
+        request.linkage = NativeLinkage::Executable;
+        request.target_triple = Some("aarch64-unknown-linux-gnu".to_string());
+
+        let report = compile_owned(&request);
+
+        assert!(report.success, "{:?}", report);
+        assert_eq!(report.backend_level, "owned-native-subset-aarch64");
+        assert_eq!(report.runtime_level, "linux-syscall-exit");
+        assert_eq!(
+            report.reason_code.as_deref(),
+            Some("native-aarch64-linux-exit-subset")
+        );
+        let bytes = fs::read(&out_path).expect("executable bytes");
+        assert_eq!(&bytes[0..4], b"\x7FELF");
+        assert_eq!(bytes[4], 2);
+        assert_eq!(u16::from_le_bytes([bytes[16], bytes[17]]), 2);
+        assert_eq!(u16::from_le_bytes([bytes[18], bytes[19]]), 183);
+
+        fs::remove_file(source_path).unwrap();
+        fs::remove_file(&out_path).unwrap();
+    }
+
+    #[test]
+    fn native_executable_emits_arm32_linux_elf_file() {
+        let source_path = temp_path("arm32-linux-executable.in");
+        let out_path = temp_path("arm32-linux-executable");
+        fs::write(
+            &source_path,
+            "fn answer() -> Int { return 42; }\nfn main() -> void { return; }\n",
+        )
+        .unwrap();
+        let mut request = default_request(
+            source_path.clone(),
+            CompileTarget::Native,
+            Some("answer"),
+            Some(out_path.clone()),
+        );
+        request.linkage = NativeLinkage::Executable;
+        request.target_triple = Some("armv7-unknown-linux-gnueabihf".to_string());
+
+        let report = compile_owned(&request);
+
+        assert!(report.success, "{:?}", report);
+        assert_eq!(report.backend_level, "owned-native-subset-arm32");
+        assert_eq!(report.runtime_level, "linux-syscall-exit");
+        assert_eq!(
+            report.reason_code.as_deref(),
+            Some("native-armv7-linux-exit-subset")
+        );
+        let bytes = fs::read(&out_path).expect("executable bytes");
+        assert_eq!(&bytes[0..4], b"\x7FELF");
+        assert_eq!(bytes[4], 1);
+        assert_eq!(u16::from_le_bytes([bytes[16], bytes[17]]), 2);
+        assert_eq!(u16::from_le_bytes([bytes[18], bytes[19]]), 40);
+
+        fs::remove_file(source_path).unwrap();
+        fs::remove_file(&out_path).unwrap();
+    }
+
+    #[test]
     fn native_executable_emits_windows_pe_exe_file() {
         let source_path = temp_path("windows-executable.in");
         let out_path = temp_path("windows-executable.exe");

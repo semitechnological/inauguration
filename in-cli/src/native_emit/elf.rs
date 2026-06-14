@@ -56,6 +56,22 @@ pub fn x86_64_linux_exit_code(status: u8) -> Vec<u8> {
     ]
 }
 
+pub fn aarch64_linux_exit_code(status: u8) -> Vec<u8> {
+    let mut code = Vec::new();
+    code.extend_from_slice(&(0xD280_0000u32 | (93u32 << 5) | 8).to_le_bytes());
+    code.extend_from_slice(&(0xD280_0000u32 | ((status as u32) << 5)).to_le_bytes());
+    code.extend_from_slice(&0xD400_0001u32.to_le_bytes());
+    code
+}
+
+pub fn arm32_linux_exit_code(status: u8) -> Vec<u8> {
+    let mut code = Vec::new();
+    code.extend_from_slice(&(0xE3A0_7000u32 | 1).to_le_bytes());
+    code.extend_from_slice(&(0xE3A0_0000u32 | status as u32).to_le_bytes());
+    code.extend_from_slice(&0xEF00_0000u32.to_le_bytes());
+    code
+}
+
 pub fn write_x86_64_relocatable_object(object: &ElfObject, out: &mut Vec<u8>) {
     write_elf64_relocatable_object(object, EM_X86_64, out);
 }
@@ -342,6 +358,14 @@ fn write_section_header32(
 }
 
 pub fn write_executable(exe: &ElfExecutable, out: &mut Vec<u8>) {
+    write_elf64_executable(exe, EM_X86_64, out);
+}
+
+pub fn write_aarch64_executable(exe: &ElfExecutable, out: &mut Vec<u8>) {
+    write_elf64_executable(exe, EM_AARCH64, out);
+}
+
+fn write_elf64_executable(exe: &ElfExecutable, machine: u16, out: &mut Vec<u8>) {
     let text_fileoff = PAGE_SIZE;
     let text_size = exe.code.len() as u64;
     let file_size = text_fileoff + text_size;
@@ -354,7 +378,7 @@ pub fn write_executable(exe: &ElfExecutable, out: &mut Vec<u8>) {
     out.push(EV_CURRENT);
     out.extend_from_slice(&[0u8; 9]);
     out.extend_from_slice(&ET_EXEC.to_le_bytes());
-    out.extend_from_slice(&EM_X86_64.to_le_bytes());
+    out.extend_from_slice(&machine.to_le_bytes());
     out.extend_from_slice(&1u32.to_le_bytes());
     out.extend_from_slice(&entry_vaddr.to_le_bytes());
     out.extend_from_slice(&EHDR_SIZE.to_le_bytes());
@@ -381,6 +405,51 @@ pub fn write_executable(exe: &ElfExecutable, out: &mut Vec<u8>) {
     }
     out.extend_from_slice(&exe.code);
     while (out.len() as u64) < file_size {
+        out.push(0);
+    }
+}
+
+pub fn write_arm32_executable(exe: &ElfExecutable, out: &mut Vec<u8>) {
+    let text_fileoff = 0x1000u32;
+    let text_vaddr = 0x10000u32;
+    let text_size = exe.code.len() as u32;
+    let file_size = text_fileoff + text_size;
+    let entry_vaddr = text_vaddr + exe.entry_offset;
+
+    out.clear();
+    out.extend_from_slice(&ELF_MAGIC);
+    out.push(ELFCLASS32);
+    out.push(ELFDATA2LSB);
+    out.push(EV_CURRENT);
+    out.extend_from_slice(&[0u8; 9]);
+    out.extend_from_slice(&ET_EXEC.to_le_bytes());
+    out.extend_from_slice(&EM_ARM.to_le_bytes());
+    out.extend_from_slice(&1u32.to_le_bytes());
+    out.extend_from_slice(&entry_vaddr.to_le_bytes());
+    out.extend_from_slice(&EHDR32_SIZE.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&0x0500_0000u32.to_le_bytes());
+    out.extend_from_slice(&(EHDR32_SIZE as u16).to_le_bytes());
+    out.extend_from_slice(&32u16.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+
+    out.extend_from_slice(&PT_LOAD.to_le_bytes());
+    out.extend_from_slice(&text_fileoff.to_le_bytes());
+    out.extend_from_slice(&text_vaddr.to_le_bytes());
+    out.extend_from_slice(&text_vaddr.to_le_bytes());
+    out.extend_from_slice(&text_size.to_le_bytes());
+    out.extend_from_slice(&text_size.to_le_bytes());
+    out.extend_from_slice(&(PF_R | PF_X).to_le_bytes());
+    out.extend_from_slice(&0x1000u32.to_le_bytes());
+
+    while (out.len() as u32) < text_fileoff {
+        out.push(0);
+    }
+    out.extend_from_slice(&exe.code);
+    while (out.len() as u32) < file_size {
         out.push(0);
     }
 }
@@ -491,6 +560,52 @@ mod tests {
             == [
                 0x48, 0xC7, 0xC0, 0x3C, 0x00, 0x00, 0x00, 0x48, 0xC7, 0xC7, 0x2A, 0x00, 0x00, 0x00,
                 0x0F, 0x05
+            ]));
+    }
+
+    #[test]
+    fn writes_aarch64_exit_executable() {
+        let exe = ElfExecutable {
+            code: aarch64_linux_exit_code(42),
+            entry_offset: 0,
+        };
+        let mut out = Vec::new();
+        write_aarch64_executable(&exe, &mut out);
+        assert_eq!(&out[0..4], &ELF_MAGIC);
+        assert_eq!(out[4], ELFCLASS64);
+        assert_eq!(u16::from_le_bytes([out[16], out[17]]), ET_EXEC);
+        assert_eq!(u16::from_le_bytes([out[18], out[19]]), EM_AARCH64);
+        assert_eq!(u32::from_le_bytes(out[64..68].try_into().unwrap()), PT_LOAD);
+        assert_eq!(
+            u32::from_le_bytes(out[68..72].try_into().unwrap()),
+            PF_R | PF_X
+        );
+        assert!(out.windows(12).any(|window| window
+            == [
+                0xA8, 0x0B, 0x80, 0xD2, 0x40, 0x05, 0x80, 0xD2, 0x01, 0x00, 0x00, 0xD4
+            ]));
+    }
+
+    #[test]
+    fn writes_arm32_exit_executable() {
+        let exe = ElfExecutable {
+            code: arm32_linux_exit_code(42),
+            entry_offset: 0,
+        };
+        let mut out = Vec::new();
+        write_arm32_executable(&exe, &mut out);
+        assert_eq!(&out[0..4], &ELF_MAGIC);
+        assert_eq!(out[4], ELFCLASS32);
+        assert_eq!(u16::from_le_bytes([out[16], out[17]]), ET_EXEC);
+        assert_eq!(u16::from_le_bytes([out[18], out[19]]), EM_ARM);
+        assert_eq!(u32::from_le_bytes(out[52..56].try_into().unwrap()), PT_LOAD);
+        assert_eq!(
+            u32::from_le_bytes(out[76..80].try_into().unwrap()),
+            PF_R | PF_X
+        );
+        assert!(out.windows(12).any(|window| window
+            == [
+                0x01, 0x70, 0xA0, 0xE3, 0x2A, 0x00, 0xA0, 0xE3, 0x00, 0x00, 0x00, 0xEF
             ]));
     }
 

@@ -13,6 +13,8 @@ Artifacts are written under `target/in/native-artifact-sample/`.
 Supported outputs:
 
 - `answer-linux-x86_64`: ELF64 Linux executable for `x86_64-unknown-linux-gnu`
+- `answer-linux-aarch64`: ELF64 Linux executable for `aarch64-unknown-linux-gnu`
+- `answer-linux-armv7`: ELF32 Linux executable for `armv7-unknown-linux-gnueabihf`
 - `Answer.AppDir`: Linux AppDir containing an ELF64 `AppRun`
 - `answer.exe`: PE32+ executable for `x86_64-pc-windows-msvc`
 - `Answer.app`: macOS app bundle containing an AArch64 Mach-O executable

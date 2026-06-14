@@ -61,9 +61,9 @@ const AARCH64_ELF_LINUX_TARGET: NativeEmitTargetStatus = NativeEmitTargetStatus 
     triple: "aarch64-unknown-linux-gnu",
     format: "elf",
     implemented: true,
-    stage: "owned-object-subset",
+    stage: "owned-native-and-object-subset",
     reason_code: NATIVE_EMIT_IMPLEMENTED,
-    artifact_kind: "elf-relocatable-object",
+    artifact_kind: "elf-relocatable-object+elf-executable",
 };
 
 const AARCH64_MACHO_STATICLIB_TARGET: NativeEmitTargetStatus = NativeEmitTargetStatus {
@@ -79,9 +79,9 @@ const ARM32_ELF_LINUX_TARGET: NativeEmitTargetStatus = NativeEmitTargetStatus {
     triple: "armv7-unknown-linux-gnueabihf",
     format: "elf",
     implemented: true,
-    stage: "owned-object-subset",
+    stage: "owned-native-and-object-subset",
     reason_code: NATIVE_EMIT_IMPLEMENTED,
-    artifact_kind: "elf32-relocatable-object",
+    artifact_kind: "elf32-relocatable-object+elf32-executable",
 };
 
 const X86_64_WINDOWS_TARGET: NativeEmitTargetStatus = NativeEmitTargetStatus {

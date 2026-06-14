@@ -34,7 +34,9 @@ Swift sources can still use `swiftc` for textual SIL or SwiftPM staging via `in 
 | `x86_64-unknown-linux-gnu` AppDir | `true` | `owned-native-subset-x86_64-appdir` | `native-x86_64-linux-appdir-subset` | `AppDir` |
 | `x86_64-pc-windows-msvc` executable | `true` | `owned-native-subset-x86_64` | `native-x86_64-windows-exe-subset` | `pe-executable` |
 | `aarch64-unknown-linux-gnu` staticlib | `true` | `owned-object-subset` | `native-object-subset` | `elf-relocatable-object` |
+| `aarch64-unknown-linux-gnu` executable | `true` | `owned-native-subset-aarch64` | `native-aarch64-linux-exit-subset` | `elf-executable` |
 | `armv7-unknown-linux-gnueabihf` staticlib | `true` | `owned-object-subset` | `native-object-subset` | `elf32-relocatable-object` |
+| `armv7-unknown-linux-gnueabihf` executable | `true` | `owned-native-subset-arm32` | `native-armv7-linux-exit-subset` | `elf32-executable` |
 | `wasm32-unknown-unknown` staticlib | `true` | `owned-object-subset` | `native-object-subset` | `wasm-module` |
 | other | `false` | `contract-only` | `native-backend-not-implemented` | `none` |
 
@@ -49,6 +51,8 @@ The first non-host object backends are `x86_64-unknown-linux-gnu`, `aarch64-unkn
 `in compile --target native --target-triple aarch64-apple-darwin --linkage static-lib --entry answer --out target/libanswer.a` emits an `ar` archive containing a Mach-O ARM64 object member with an exported `_answer` symbol. This is a static archive route, not a bare Mach-O object route.
 
 `in compile --target native --target-triple x86_64-unknown-linux-gnu --linkage executable --entry answer --out target/answer` emits a minimal ELF64 Linux executable that exits with the const-evaluated scalar value through the Linux `exit` syscall. This is not general x86_64 native lowering: it has no linker, libc, dynamic loader, relocations, argv/envp contract, heap, imports, or general function ABI support.
+
+`aarch64-unknown-linux-gnu` and `armv7-unknown-linux-gnueabihf` also emit minimal Linux executables for the same const-evaluated scalar subset. They use target-native Linux `exit` syscalls and are checked structurally on all hosts, with QEMU runtime checks when `qemu-aarch64` or `qemu-arm` is installed.
 
 `in compile --target native --target-triple x86_64-pc-windows-msvc --linkage executable --entry answer --out target/answer.exe` emits a PE32+ AMD64 console executable whose entry returns the const-evaluated scalar value. It does not import `kernel32`, link a CRT, or claim Windows ABI/runtime coverage beyond this minimal entry-return artifact.
 

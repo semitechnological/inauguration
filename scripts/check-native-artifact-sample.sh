@@ -10,6 +10,8 @@ mkdir -p "$OUT"
 rm -rf "$OUT/Answer.app" "$OUT/Answer.AppDir"
 
 env in compile --path "$SRC" --target native --target-triple x86_64-unknown-linux-gnu --linkage executable --entry answer --out "$OUT/answer-linux-x86_64" --json > "$OUT/linux-exe.json"
+env in compile --path "$SRC" --target native --target-triple aarch64-unknown-linux-gnu --linkage executable --entry answer --out "$OUT/answer-linux-aarch64" --json > "$OUT/aarch64-linux-exe.json"
+env in compile --path "$SRC" --target native --target-triple armv7-unknown-linux-gnueabihf --linkage executable --entry answer --out "$OUT/answer-linux-armv7" --json > "$OUT/armv7-linux-exe.json"
 env in compile --path "$SRC" --target native --target-triple x86_64-unknown-linux-gnu --linkage executable --entry answer --out "$OUT/Answer.AppDir" --json > "$OUT/appdir.json"
 env in compile --path "$SRC" --target native --target-triple x86_64-pc-windows-msvc --linkage executable --entry answer --out "$OUT/answer.exe" --json > "$OUT/windows-exe.json"
 env in compile --path "$SRC" --target native --target-triple aarch64-apple-darwin --linkage executable --entry answer --out "$OUT/Answer.app" --json > "$OUT/app.json"
@@ -36,6 +38,16 @@ def require(condition, message):
 
 require(report("linux-exe.json").get("reason_code") == "native-x86_64-linux-exit-subset", "linux exe reason mismatch")
 require((out / "answer-linux-x86_64").read_bytes()[:4] == b"\x7fELF", "linux exe missing ELF magic")
+require(report("aarch64-linux-exe.json").get("reason_code") == "native-aarch64-linux-exit-subset", "aarch64 linux exe reason mismatch")
+aarch64_exe = (out / "answer-linux-aarch64").read_bytes()
+require(aarch64_exe[:4] == b"\x7fELF", "aarch64 linux exe missing ELF magic")
+require(aarch64_exe[4] == 2, "aarch64 linux exe class mismatch")
+require(int.from_bytes(aarch64_exe[18:20], "little") == 183, "aarch64 linux exe machine mismatch")
+require(report("armv7-linux-exe.json").get("reason_code") == "native-armv7-linux-exit-subset", "armv7 linux exe reason mismatch")
+armv7_exe = (out / "answer-linux-armv7").read_bytes()
+require(armv7_exe[:4] == b"\x7fELF", "armv7 linux exe missing ELF magic")
+require(armv7_exe[4] == 1, "armv7 linux exe class mismatch")
+require(int.from_bytes(armv7_exe[18:20], "little") == 40, "armv7 linux exe machine mismatch")
 require(report("appdir.json").get("reason_code") == "native-x86_64-linux-appdir-subset", "AppDir reason mismatch")
 require((out / "Answer.AppDir" / "AppRun").read_bytes()[:4] == b"\x7fELF", "AppDir AppRun missing ELF magic")
 require(report("windows-exe.json").get("reason_code") == "native-x86_64-windows-exe-subset", "windows exe reason mismatch")

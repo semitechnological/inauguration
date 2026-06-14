@@ -5,9 +5,10 @@ use crate::native_emit::NativeLinkage;
 use crate::native_emit::coff::{COFF_WINDOWS_TRIPLE, CoffExe, write_exe};
 use crate::native_emit::elf::{
     AARCH64_LINUX_TRIPLE, ARMV7_LINUX_GNUEABIHF_TRIPLE, ELF_LINUX_TRIPLE, ElfExecutable, ElfObject,
-    aarch64_return_i32_object_code, arm32_return_i32_object_code, write_aarch64_relocatable_object,
-    write_arm32_relocatable_object, write_executable, write_x86_64_relocatable_object,
-    x86_64_linux_exit_code, x86_64_return_i32_object_code,
+    aarch64_linux_exit_code, aarch64_return_i32_object_code, arm32_linux_exit_code,
+    arm32_return_i32_object_code, write_aarch64_executable, write_aarch64_relocatable_object,
+    write_arm32_executable, write_arm32_relocatable_object, write_executable,
+    write_x86_64_relocatable_object, x86_64_linux_exit_code, x86_64_return_i32_object_code,
 };
 use crate::native_emit::macho::{ExportSymbol, MachOImage, MachOLinkage, write_image};
 use crate::native_emit::wasm::{WASM32_UNKNOWN_TRIPLE, WasmModule, write_scalar_i32_module};
@@ -41,11 +42,17 @@ pub fn emit_native_object(request: &NativeObjectRequest<'_>) -> Option<NativeObj
             Some(emit_x86_64_pe_executable(request))
         }
         (AARCH64_LINUX_TRIPLE, NativeLinkage::StaticLib) => Some(emit_aarch64_elf_object(request)),
+        (AARCH64_LINUX_TRIPLE, NativeLinkage::Executable) => {
+            Some(emit_aarch64_elf_executable(request))
+        }
         ("aarch64-apple-darwin", NativeLinkage::StaticLib) => {
             Some(emit_aarch64_macho_archive(request))
         }
         (ARMV7_LINUX_GNUEABIHF_TRIPLE, NativeLinkage::StaticLib) => {
             Some(emit_arm32_elf_object(request))
+        }
+        (ARMV7_LINUX_GNUEABIHF_TRIPLE, NativeLinkage::Executable) => {
+            Some(emit_arm32_elf_executable(request))
         }
         (WASM32_UNKNOWN_TRIPLE, NativeLinkage::StaticLib) => Some(emit_wasm32_module(request)),
         _ => None,
@@ -106,6 +113,24 @@ fn emit_aarch64_elf_object(request: &NativeObjectRequest<'_>) -> NativeObjectArt
     }
 }
 
+fn emit_aarch64_elf_executable(request: &NativeObjectRequest<'_>) -> NativeObjectArtifact {
+    let exe = ElfExecutable {
+        code: aarch64_linux_exit_code(request.exit_code),
+        entry_offset: 0,
+    };
+    let mut bytes = Vec::new();
+    write_aarch64_executable(&exe, &mut bytes);
+    NativeObjectArtifact {
+        bytes,
+        artifact_kind: "elf-executable",
+        backend_level: "owned-native-subset-aarch64",
+        runtime_level: "linux-syscall-exit",
+        reason_code: "native-aarch64-linux-exit-subset",
+        reason: "inauguration owns ELF64 AArch64 Linux executable emission for const-evaluable scalar entry functions on this target",
+        abi_manifest: None,
+    }
+}
+
 fn emit_arm32_elf_object(request: &NativeObjectRequest<'_>) -> NativeObjectArtifact {
     let object = ElfObject {
         code: arm32_return_i32_object_code(request.exit_code),
@@ -121,6 +146,24 @@ fn emit_arm32_elf_object(request: &NativeObjectRequest<'_>) -> NativeObjectArtif
         reason_code: NATIVE_OBJECT_SUBSET,
         reason: "inauguration owns ELF32 ARM relocatable object emission for const-evaluable scalar entry functions on this target",
         abi_manifest: Some(object_abi_manifest(request)),
+    }
+}
+
+fn emit_arm32_elf_executable(request: &NativeObjectRequest<'_>) -> NativeObjectArtifact {
+    let exe = ElfExecutable {
+        code: arm32_linux_exit_code(request.exit_code),
+        entry_offset: 0,
+    };
+    let mut bytes = Vec::new();
+    write_arm32_executable(&exe, &mut bytes);
+    NativeObjectArtifact {
+        bytes,
+        artifact_kind: "elf32-executable",
+        backend_level: "owned-native-subset-arm32",
+        runtime_level: "linux-syscall-exit",
+        reason_code: "native-armv7-linux-exit-subset",
+        reason: "inauguration owns ELF32 ARM Linux executable emission for const-evaluable scalar entry functions on this target",
+        abi_manifest: None,
     }
 }
 
@@ -331,6 +374,47 @@ mod tests {
         assert_eq!(
             u16::from_le_bytes([artifact.bytes[16], artifact.bytes[17]]),
             2
+        );
+    }
+
+    #[test]
+    fn dispatches_aarch64_linux_executable() {
+        let module = UnifiedModule::new(Vec::new());
+        let request = NativeObjectRequest {
+            target_triple: AARCH64_LINUX_TRIPLE,
+            linkage: NativeLinkage::Executable,
+            entry: "answer",
+            exit_code: 42,
+            module: &module,
+            module_id: "App",
+        };
+        let artifact = emit_native_object(&request).expect("aarch64 executable artifact");
+        assert_eq!(artifact.artifact_kind, "elf-executable");
+        assert_eq!(artifact.reason_code, "native-aarch64-linux-exit-subset");
+        assert_eq!(
+            u16::from_le_bytes([artifact.bytes[18], artifact.bytes[19]]),
+            183
+        );
+    }
+
+    #[test]
+    fn dispatches_arm32_linux_executable() {
+        let module = UnifiedModule::new(Vec::new());
+        let request = NativeObjectRequest {
+            target_triple: ARMV7_LINUX_GNUEABIHF_TRIPLE,
+            linkage: NativeLinkage::Executable,
+            entry: "answer",
+            exit_code: 42,
+            module: &module,
+            module_id: "App",
+        };
+        let artifact = emit_native_object(&request).expect("arm32 executable artifact");
+        assert_eq!(artifact.artifact_kind, "elf32-executable");
+        assert_eq!(artifact.reason_code, "native-armv7-linux-exit-subset");
+        assert_eq!(artifact.bytes[4], 1);
+        assert_eq!(
+            u16::from_le_bytes([artifact.bytes[18], artifact.bytes[19]]),
+            40
         );
     }
 }
