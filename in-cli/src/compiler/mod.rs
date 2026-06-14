@@ -1,10 +1,19 @@
-//! Multi-language compiler **driver**: shared lowering and interchange formats.
+//! Inauguration compiler — multi-language frontends, Core IR, passes, and backends.
 //!
-//! Language-specific parsers: `.in` ([`crate::in_lang_parse`]), [`icore`], and [`tree_front`]
-//! (Tree-sitter polyglot). All converge on [`crate::core_ir::UnifiedModule`] before
-//! [`driver::lower_unified_module`] emits textual SIL for the hybrid pipeline.
+//! This is the proper compiler that replaces LLVM:
+//!
+//! 1. **Frontend**: `.in` parser (`in_lang_parse`), Tree-sitter polyglot (`tree_front`),
+//!    language-specific parsers all produce [`crate::core_ir::UnifiedModule`]
+//! 2. **Core IR**: [`compiler::pipeline::lower_unified_to_ir`] converts AST to SSA-like `IrModule`
+//! 3. **Type Check**: type checking on the IR
+//! 4. **Lower**: additional IR transforms
+//! 5. **Optimize**: [`PassManager`] runs `SimplifyCFG`, `ConstantFolding`, `DCE`, `SROA`, `Cleanup`
+//! 6. **Codegen**: [`CodegenBackend`] emits machine code via `native_emit/*`
+//! 7. **Metadata**: [`ComponentMetadata`] JSON sidecar with imports, exports, capabilities
 
+pub mod backend;
 pub mod clojure_boundary;
+pub mod core;
 pub mod crystal_boundary;
 pub mod d_boundary;
 pub mod driver;
@@ -12,9 +21,12 @@ pub mod ecmascript_boundary;
 pub mod go_front;
 pub mod hare_boundary;
 pub mod icore;
+pub mod metadata;
 pub mod nim_boundary;
 pub mod ocaml_front;
 pub mod odin_boundary;
+pub mod passes;
+pub mod pipeline;
 pub mod rust_front;
 pub mod tree_front;
 pub mod v_front;
