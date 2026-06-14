@@ -1944,12 +1944,13 @@ fn cmd_test(root: &Path, options: TestOptions) -> Result<()> {
     run_test_groups(groups, options.serial)
 }
 
-fn owned_native_test_step_names() -> [&'static str; 8] {
+fn owned_native_test_step_names() -> [&'static str; 9] {
     [
         "owned native compiler (scripts/check-owned-native-compiler.sh)",
         "native answer sample (scripts/check-native-answer-sample.sh)",
         "native artifact sample (scripts/check-native-artifact-sample.sh)",
         "native ARM Linux executables (scripts/check-native-arm-linux-executables.sh)",
+        "native linkable objects (scripts/check-native-linkable-objects.sh)",
         "owned polyglot samples (scripts/check-polyglot-sample.sh)",
         "abi layouts (scripts/check-abi-layouts.sh)",
         "dynamic loader (scripts/check-dynamic-loader.sh)",
@@ -1966,6 +1967,8 @@ fn owned_native_script_for_step(name: &str) -> &'static str {
         "scripts/check-native-artifact-sample.sh"
     } else if name.contains("native ARM") {
         "scripts/check-native-arm-linux-executables.sh"
+    } else if name.contains("native linkable") {
+        "scripts/check-native-linkable-objects.sh"
     } else if name.contains("polyglot") {
         "scripts/check-polyglot-sample.sh"
     } else if name.contains("abi layouts") {
@@ -3128,6 +3131,11 @@ mod tests {
             steps
                 .iter()
                 .any(|step| step.contains("check-native-arm-linux-executables.sh"))
+        );
+        assert!(
+            steps
+                .iter()
+                .any(|step| step.contains("check-native-linkable-objects.sh"))
         );
         assert!(
             steps
