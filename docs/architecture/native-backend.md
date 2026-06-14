@@ -58,6 +58,8 @@ The first non-host object backends are `x86_64-unknown-linux-gnu`, `aarch64-unkn
 
 Explicit `--target-triple` requests fail closed when the owned backend has no target/linkage implementation. They do not fall through to the host Mach-O path.
 
+The runnable cross-artifact example lives in `apps/native-artifact-sample/`. Run `bash scripts/check-native-artifact-sample.sh` to build and inspect the supported ELF, PE, Mach-O bundle, AppDir, object, archive, and WASM outputs from one `.in` source file.
+
 ## Compile cache (Wave 6)
 
 `in compile` hashes source path + content into `target/in/cache/<frontend_hash>/metadata.json`, storing the serialized owned compile report (including `frontend_hash`). Repeated compiles with the same frontend input reuse cached metadata when target, entry, and module id match.

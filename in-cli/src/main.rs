@@ -1944,10 +1944,11 @@ fn cmd_test(root: &Path, options: TestOptions) -> Result<()> {
     run_test_groups(groups, options.serial)
 }
 
-fn owned_native_test_step_names() -> [&'static str; 6] {
+fn owned_native_test_step_names() -> [&'static str; 7] {
     [
         "owned native compiler (scripts/check-owned-native-compiler.sh)",
         "native answer sample (scripts/check-native-answer-sample.sh)",
+        "native artifact sample (scripts/check-native-artifact-sample.sh)",
         "owned polyglot samples (scripts/check-polyglot-sample.sh)",
         "abi layouts (scripts/check-abi-layouts.sh)",
         "dynamic loader (scripts/check-dynamic-loader.sh)",
@@ -1960,6 +1961,8 @@ fn owned_native_script_for_step(name: &str) -> &'static str {
         "scripts/check-owned-native-compiler.sh"
     } else if name.contains("native-answer") {
         "scripts/check-native-answer-sample.sh"
+    } else if name.contains("native-artifact") {
+        "scripts/check-native-artifact-sample.sh"
     } else if name.contains("polyglot") {
         "scripts/check-polyglot-sample.sh"
     } else if name.contains("abi layouts") {
@@ -3112,6 +3115,11 @@ mod tests {
             steps
                 .iter()
                 .any(|step| step.contains("check-polyglot-sample.sh"))
+        );
+        assert!(
+            steps
+                .iter()
+                .any(|step| step.contains("check-native-artifact-sample.sh"))
         );
         assert!(
             steps
