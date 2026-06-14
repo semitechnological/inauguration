@@ -377,6 +377,7 @@ const IN_EQUIVALENT_TARGETS: &[&str] = &[
     "x86_64-unknown-none",
     "x86_64-unknown-openbsd",
     "x86_64-unknown-redox",
+    "x86_64-space",
     "x86_64-unknown-trusty",
     "x86_64-unknown-uefi",
     "x86_64-uwp-windows-gnu",
@@ -393,6 +394,7 @@ const IN_EQUIVALENT_TARGETS: &[&str] = &[
     "xtensa-esp32s3-none-elf",
 ];
 const RUST_STYLE_TARGET_REASON: &str = "inauguration recognizes this Rust-style target triple as a compiler target identity, but it has no in-tree object-file emitter, linker driver, ABI lowering, or owned machine runtime for this target yet";
+const SPACE_TARGET_REASON: &str = "inauguration recognizes x86_64-space as the freestanding Space component target for SCI metadata and future kernel codegen, but it has no freestanding ABI lowering, SCI writer, linker, boot image, or owned machine runtime yet";
 static TARGET_REGISTRY: OnceLock<Vec<TargetSpec>> = OnceLock::new();
 
 #[must_use]
@@ -458,6 +460,8 @@ fn build_target_registry() -> Vec<TargetSpec> {
             },
             reason: if target == "x86_64-unknown-linux-gnu" {
                 "inauguration owns ELF64 relocatable object emission and a Linux syscall-exit executable subset for const-evaluable scalar entry functions on this target"
+            } else if target == "x86_64-space" {
+                SPACE_TARGET_REASON
             } else if target == "aarch64-unknown-linux-gnu" {
                 "inauguration owns ELF64 AArch64 relocatable object emission for const-evaluable scalar entry functions on this target"
             } else if target == "aarch64-apple-darwin" {
@@ -525,6 +529,7 @@ mod tests {
         let names: Vec<&str> = specs.iter().map(|spec| spec.name).collect();
         for target in [
             "x86_64-unknown-none",
+            "x86_64-space",
             "x86_64-unknown-linux-gnu",
             "aarch64-apple-darwin",
             "aarch64-unknown-linux-gnu",
@@ -540,6 +545,14 @@ mod tests {
                 assert_eq!(spec.stage, "owned-native-and-object-subset");
                 assert_eq!(spec.artifact_kind, "elf-relocatable-object+elf-executable");
                 assert!(spec.backend_artifact_supported);
+                continue;
+            }
+            if target == "x86_64-space" {
+                assert!(!spec.implemented, "{target}");
+                assert_eq!(spec.stage, "contract-only");
+                assert_eq!(spec.reason, SPACE_TARGET_REASON);
+                assert_eq!(spec.artifact_kind, "none");
+                assert!(!spec.backend_artifact_supported);
                 continue;
             }
             if target == "aarch64-apple-darwin" {
