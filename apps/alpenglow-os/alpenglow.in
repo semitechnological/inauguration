@@ -1,0 +1,52 @@
+package alpenglow_os;
+module alpenglow_os.contract;
+
+struct InstallBackend {
+  String id
+  String libc
+  String init
+  String package_manager
+  String bootstrap_package_manager
+}
+
+struct KernelSurface {
+  String filesystem
+  String module
+  String capability
+}
+
+fn default_backend() -> String {
+  return "void-musl-runit";
+}
+
+fn package_manager() -> String {
+  return "oil";
+}
+
+fn bootstrap_package_manager() -> String {
+  return "xbps";
+}
+
+fn root_filesystem() -> String {
+  return "glowfs";
+}
+
+fn kernel_module() -> String {
+  return "glowfs.ko";
+}
+
+fn installer_source() -> String {
+  return "../oil";
+}
+
+fn os_repository() -> String {
+  return "../alpenglow";
+}
+
+fn desktop_repository() -> String {
+  return "../soliloquy";
+}
+
+fn main() -> String {
+  return default_backend();
+}
