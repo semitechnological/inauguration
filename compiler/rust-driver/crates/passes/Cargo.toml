@@ -1,10 +1,9 @@
 [package]
-name = "hybrid-core"
+name = "hybrid-passes"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-serde.workspace = true
-serde_json.workspace = true
+hybrid-core = { path = "../core" }
 thiserror.workspace = true

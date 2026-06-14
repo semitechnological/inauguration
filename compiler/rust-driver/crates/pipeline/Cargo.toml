@@ -5,7 +5,9 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+hybrid-backend = { path = "../backend" }
 hybrid-core = { path = "../core" }
+hybrid-passes = { path = "../passes" }
 hybrid-scheduler = { path = "../scheduler" }
 hybrid-sil = { path = "../sil" }
 serde_json.workspace = true

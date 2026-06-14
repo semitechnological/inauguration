@@ -6,8 +6,10 @@ license.workspace = true
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+hybrid-backend = { path = "../backend" }
 hybrid-core = { path = "../core" }
 hybrid-pipeline = { path = "../pipeline" }
 hybrid-scheduler = { path = "../scheduler" }
 rayon = "1"
+serde_json.workspace = true
 tokio.workspace = true

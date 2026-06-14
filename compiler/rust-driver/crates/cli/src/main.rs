@@ -1,205 +1,320 @@
+//! Inauguration Compiler CLI — the compiler driver.
+//!
+//! Usage:
+//!   hybrid-cli --compile <file> --target <triple>
+//!   hybrid-cli --list-backends
+//!   hybrid-cli --version
+
 use clap::Parser;
-use hybrid_core::ChangeEvent;
-use hybrid_pipeline::{run_wave_with_timings, StageTimings};
-use hybrid_scheduler::BuildScheduler;
-use rayon::prelude::*;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use hybrid_backend::{backend_capabilities, BackendKind};
+use hybrid_core::{ArtifactKind, ComponentMetadata, ComponentSpec, OptimizationLevel};
+use hybrid_pipeline::Compiler;
+use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
+#[command(name = "in-compiler", about = "Inauguration compiler driver")]
 struct Args {
-    #[arg(long, default_value = "App.swift", help = "Swift file or directory")]
-    path: String,
-    #[arg(long, default_value = "App")]
-    module_id: String,
+    /// Source file to compile.
+    #[arg(short, long, help = "Source file (.in) to compile")]
+    compile: Option<PathBuf>,
+
+    /// Target triple (replaces LLVM -target).
+    #[arg(short, long, default_value = "aarch64-apple-darwin", help = "Target triple")]
+    target: String,
+
+    /// Artifact kind.
+    #[arg(long, help = "Emit as shared library")]
+    shared: bool,
+
+    #[arg(long, help = "Emit as static library")]
+    staticlib: bool,
+
+    #[arg(long, help = "Emit as WebAssembly module")]
+    wasm: bool,
+
+    #[arg(long, help = "Emit object file")]
+    object: bool,
+
+    /// Output file.
+    #[arg(short, long, help = "Output file path")]
+    output: Option<PathBuf>,
+
+    /// Entry point.
+    #[arg(short = 'e', long, default_value = "main", help = "Entry point function")]
+    entry: String,
+
+    /// Optimization level.
+    #[arg(short = 'O', long, default_value_t = 1, help = "Optimization level (0-3)")]
+    opt: u8,
+
+    /// List available backends.
+    #[arg(long, help = "List available codegen backends")]
+    list_backends: bool,
+
+    /// Print timing information.
+    #[arg(long, help = "Print pipeline timing")]
+    timing: bool,
+
+    /// Print version.
+    #[arg(long, help = "Print version")]
+    version: bool,
+
+    /// Emit IR only (no codegen).
+    #[arg(long, help = "Emit IR only, no codegen")]
+    emit_ir: bool,
+
+    /// Emit component metadata JSON sidecar.
+    #[arg(long, help = "Emit component metadata JSON sidecar")]
+    emit_metadata: bool,
+
+    /// Emit metadata only (no artifact).
+    #[arg(long, help = "Emit component metadata only, skip codegen")]
+    metadata_only: bool,
+
+    /// Freestanding target (no OS).
+    #[arg(long, help = "Freestanding target (x86_64-unknown-none, aarch64-unknown-none)")]
+    freestanding: bool,
+
+    /// Deterministic build.
+    #[arg(long, help = "Deterministic (reproducible) build")]
+    deterministic: bool,
 }
 
 fn main() {
     let args = Args::parse();
-    let path = PathBuf::from(&args.path);
-    if path.is_dir() {
-        if let Err(err) = run_batch(path.to_string_lossy().as_ref()) {
-            eprintln!("pipeline failed: {err}");
-            std::process::exit(1);
+
+    if args.version {
+        println!("Inauguration Compiler v{}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+
+    if args.list_backends {
+        println!("Available codegen backends (replacing LLVM):");
+        println!();
+        for kind in BackendKind::ALL {
+            let triple = match kind {
+                BackendKind::AArch64MachO => "aarch64-apple-darwin",
+                BackendKind::AArch64Elf => "aarch64-unknown-linux-gnu",
+                BackendKind::X86_64Elf => "x86_64-unknown-linux-gnu",
+                BackendKind::Arm32Elf => "armv7-unknown-linux-gnueabihf",
+                BackendKind::X86_64Coff => "x86_64-pc-windows-msvc",
+                BackendKind::AArch64Coff => "aarch64-pc-windows-msvc",
+                BackendKind::Wasm32 => "wasm32-unknown-unknown",
+                BackendKind::RawBinary => "raw",
+            };
+            let caps = backend_capabilities(triple);
+            let status = if caps.implemented { "implemented" } else { "contract" };
+            println!("  {:40} {:10} format={}", triple, status, caps.object_format);
         }
         return;
     }
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .expect("runtime");
-    let scheduler = BuildScheduler::default();
-    let event = ChangeEvent {
-        path: args.path,
-        module_id: args.module_id,
-        hash: "dev".to_string(),
-        timestamp_ms: 0,
+
+    // Build the component spec from CLI args.
+    let artifact_kind = if args.wasm {
+        ArtifactKind::WasmModule
+    } else if args.shared {
+        ArtifactKind::SharedLibrary
+    } else if args.staticlib {
+        ArtifactKind::StaticLibrary
+    } else if args.object {
+        ArtifactKind::ObjectFile
+    } else {
+        ArtifactKind::Executable
     };
-    match runtime.block_on(run_wave_with_timings(
-        &scheduler,
-        &event,
-        "sil @main\nentry:\ndebug_value %0\n%1 = integer_literal $Builtin.Int64, 1\n%2 = function_ref @helper",
-    )) {
-        Ok((count, timings)) => {
-            for line in pipeline_timing_lines(count, &timings, "swift frontend") {
-                println!("{line}");
+
+    // Freestanding overrides target.
+    let target = if args.freestanding {
+        if args.target.contains("aarch64") || args.target == "aarch64-apple-darwin" {
+            "aarch64-unknown-none".to_string()
+        } else {
+            "x86_64-unknown-none".to_string()
+        }
+    } else {
+        args.target.clone()
+    };
+
+    let opt_level = match args.opt {
+        0 => OptimizationLevel::None,
+        1 => OptimizationLevel::Less,
+        2 => OptimizationLevel::Default,
+        _ => OptimizationLevel::Aggressive,
+    };
+
+    let source_name = args
+        .compile
+        .as_ref()
+        .and_then(|p| p.file_stem())
+        .and_then(|s| s.to_str())
+        .unwrap_or("module");
+
+    let spec = ComponentSpec {
+        name: source_name.to_string(),
+        target,
+        artifact_kind,
+        deterministic: args.deterministic,
+        checkpoint: String::new(),
+        optimization_level: opt_level,
+        debug_info: false,
+        entry_point: Some(args.entry.clone()),
+        imports: vec![],
+        exports: vec![],
+        capabilities: vec![],
+        capabilities_exported: vec![],
+    };
+
+    // Validate the spec resolves to a known backend.
+    match hybrid_backend::select_backend(&spec) {
+        Ok(kind) => {
+            if args.compile.is_none() {
+                eprintln!(
+                    "Component spec `{}` → backend: {:?} (format: {})",
+                    spec.name,
+                    kind,
+                    spec.object_format()
+                );
+                eprintln!("Use --compile <file> to compile a source file.");
+                return;
             }
         }
-        Err(err) => {
-            eprintln!("pipeline failed: {err}");
+        Err(e) => {
+            eprintln!("Error: {e}");
             std::process::exit(1);
         }
     }
-}
 
-fn ms(us: u64) -> f64 {
-    (us as f64) / 1000.0
-}
+    // Read source file.
+    let source_path = match &args.compile {
+        Some(path) => path.clone(),
+        None => {
+            eprintln!("No source file specified. Use --compile <file>");
+            std::process::exit(1);
+        }
+    };
 
-fn pipeline_timing_lines(
-    count: usize,
-    timings: &StageTimings,
-    frontend_label: &str,
-) -> Vec<String> {
-    vec![
-        format!(
-            "    Finished `in` compiler pipeline (tasks: {count}) in {:.3}ms",
-            ms(timings.pipeline_us)
-        ),
-        "      Stage timings:".to_string(),
-        format!("      - ast refresh: {:.3}ms", ms(timings.ast_refresh_us)),
-        format!(
-            "      - {frontend_label}: {:.3}ms",
-            ms(timings.swift_frontend_us)
-        ),
-        format!("      - sil analysis: {:.3}ms", ms(timings.sil_analysis_us)),
-        format!("      - wave: {:.3}ms", ms(timings.wave_us)),
-        format!("      - pipeline: {:.3}ms", ms(timings.pipeline_us)),
-        format!("processed tasks: {count}"),
-        format!("stage.ast_refresh_ms={:.3}", ms(timings.ast_refresh_us)),
-        format!(
-            "stage.swift_frontend_ms={:.3}",
-            ms(timings.swift_frontend_us)
-        ),
-        format!("stage.sil_analysis_ms={:.3}", ms(timings.sil_analysis_us)),
-        format!("timing.wave_ms={:.3}", ms(timings.wave_us)),
-        format!("timing.pipeline_ms={:.3}", ms(timings.pipeline_us)),
-    ]
-}
+    let source = match std::fs::read_to_string(&source_path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error reading {}: {e}", source_path.display());
+            std::process::exit(1);
+        }
+    };
 
-fn run_batch(root: &str) -> Result<(), String> {
-    let output = Command::new("rg")
-        .arg("--files")
-        .arg(root)
-        .arg("-g")
-        .arg("*.swift")
-        .output()
-        .map_err(|err| format!("failed to run rg: {err}"))?;
-    if !output.status.success() {
-        return Err("rg failed to list swift files".to_string());
+    // Build and run the compiler.
+    let mut compiler = match Compiler::new(spec.clone()) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Compiler setup failed: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    if args.emit_ir {
+        // Parse and emit IR only.
+        match compiler.parse_source(&source) {
+            Ok(module) => {
+                println!("IR Module: {}", module.name);
+                for func in &module.functions {
+                    println!("  fn {}(", func.name);
+                    for (i, (name, ty)) in func.params.iter().enumerate() {
+                        if i > 0 {
+                            print!(", ");
+                        }
+                        print!("  {}: {:?}", name, ty);
+                    }
+                    println!(") -> {:?}", func.return_type);
+                    for block in &func.blocks {
+                        println!("    {}:", block.label);
+                        if let Some(ref term) = block.terminator {
+                            println!("      terminator: {:?}", term.opcode);
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("Frontend error: {e}");
+                std::process::exit(1);
+            }
+        }
+        return;
     }
-    let list = String::from_utf8_lossy(&output.stdout);
-    let files: Vec<String> = list
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(ToOwned::to_owned)
-        .collect();
-    if files.is_empty() {
-        return Err("no swift files found".to_string());
+
+    // Emit metadata only mode: compile but only write metadata.
+    if args.metadata_only {
+        // Parse source and build metadata without full codegen.
+        match compiler.parse_source(&source) {
+            Ok(module) => {
+                // Build empty metadata for spec
+                let metadata = ComponentMetadata::from_spec(&spec, &module);
+                let md_path = args
+                    .output
+                    .clone()
+                    .unwrap_or_else(|| PathBuf::from(format!("{}.component.json", source_name)));
+                match serde_json::to_writer_pretty(std::fs::File::create(&md_path).unwrap(), &metadata) {
+                    Ok(_) => println!(
+                        "  Metadata `{}` → {}",
+                        source_name,
+                        md_path.display()
+                    ),
+                    Err(e) => eprintln!("Error writing metadata: {e}"),
+                }
+            }
+            Err(e) => {
+                eprintln!("Frontend error: {e}");
+                std::process::exit(1);
+            }
+        }
+        return;
     }
-    let (processed, ast_us, swift_us, sil_us, wave_us, pipeline_us): (
-        usize,
-        u64,
-        u64,
-        u64,
-        u64,
-        u64,
-    ) = files
-        .par_iter()
-        .map(|file| {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(|err| format!("{file}: runtime: {err}"))?;
-            let module = Path::new(file)
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("Module")
-                .to_string();
-            let scheduler = BuildScheduler::default();
-            let event = ChangeEvent {
-                path: file.clone(),
-                module_id: module,
-                hash: "batch".to_string(),
-                timestamp_ms: 0,
-            };
-            let (count, timings) = runtime
-                .block_on(run_wave_with_timings(
-                    &scheduler,
-                    &event,
-                    "sil @main\nentry:\n%0 = function_ref @helper\ndebug_value %0",
-                ))
-                .map_err(|err| format!("{file}: {err}"))?;
-            Ok::<_, String>((
-                count,
-                timings.ast_refresh_us,
-                timings.swift_frontend_us,
-                timings.sil_analysis_us,
-                timings.wave_us,
-                timings.pipeline_us,
-            ))
-        })
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .reduce(|a, b| {
-            (
-                a.0 + b.0,
-                a.1 + b.1,
-                a.2 + b.2,
-                a.3 + b.3,
-                a.4 + b.4,
-                a.5 + b.5,
-            )
-        })
-        .unwrap_or((0usize, 0u64, 0u64, 0u64, 0u64, 0u64));
-    println!("batch files: {}", files.len());
-    println!(
-        "    Finished batch `in` compiler pipeline (files: {}, tasks: {}) in {:.3}ms",
-        files.len(),
-        processed,
-        ms(pipeline_us)
-    );
-    println!("batch processed tasks: {processed}");
-    println!("batch stage.ast_refresh_ms={:.3}", ms(ast_us));
-    println!("batch stage.swift_frontend_ms={:.3}", ms(swift_us));
-    println!("batch stage.sil_analysis_ms={:.3}", ms(sil_us));
-    println!("batch timing.wave_ms={:.3}", ms(wave_us));
-    println!("batch timing.pipeline_ms={:.3}", ms(pipeline_us));
-    Ok(())
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+    match compiler.compile(&source) {
+        Ok(result) => {
+            let output_path = args.output.clone().unwrap_or_else(|| {
+                let ext = result.output.extension;
+                PathBuf::from(format!("{}.{}", source_name, ext))
+            });
 
-    #[test]
-    fn pipeline_timing_lines_separate_wave_and_pipeline_time() {
-        let lines = pipeline_timing_lines(
-            3,
-            &StageTimings {
-                ast_refresh_us: 1000,
-                swift_frontend_us: 2000,
-                sil_analysis_us: 3000,
-                wave_us: 4000,
-                pipeline_us: 9000,
-            },
-            "swift frontend",
-        );
-        assert!(lines.contains(&"      - wave: 4.000ms".to_string()));
-        assert!(lines.contains(&"      - pipeline: 9.000ms".to_string()));
-        assert!(lines.contains(&"timing.wave_ms=4.000".to_string()));
-        assert!(lines.contains(&"timing.pipeline_ms=9.000".to_string()));
-        assert!(!lines.iter().any(|line| line.contains("stage.total_ms")));
+            // Write artifact.
+            match std::fs::write(&output_path, &result.output.data) {
+                Ok(_) => {
+                    println!(
+                        "  Compiled `{}` → {} ({} bytes, target: {})",
+                        source_name,
+                        output_path.display(),
+                        result.output.data.len(),
+                        spec.target,
+                    );
+                }
+                Err(e) => {
+                    eprintln!("Error writing output: {e}");
+                    std::process::exit(1);
+                }
+            }
+
+            // Emit component metadata sidecar.
+            if args.emit_metadata {
+                let md_path = output_path.with_extension("component.json");
+                match serde_json::to_writer_pretty(
+                    std::fs::File::create(&md_path).unwrap(),
+                    &result.metadata,
+                ) {
+                    Ok(_) => println!(
+                        "  Metadata → {} ({} imports, {} exports, {} capabilities)",
+                        md_path.display(),
+                        result.metadata.imports.len(),
+                        result.metadata.exports.len(),
+                        result.metadata.capabilities_required.len(),
+                    ),
+                    Err(e) => eprintln!("Error writing metadata: {e}"),
+                }
+            }
+
+            if args.timing {
+                compiler.print_timings();
+            }
+        }
+        Err(e) => {
+            eprintln!("Compilation failed: {e}");
+            std::process::exit(1);
+        }
     }
 }

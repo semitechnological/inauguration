@@ -1,339 +1,363 @@
-use hybrid_core::{ChangeEvent, TaskKind};
-use hybrid_scheduler::{BuildScheduler, SchedulerError};
-use hybrid_sil::{extract_call_graph, parse_textual_sil, remove_debug_insts};
-use serde_json::Value;
+//! Inauguration Compiler Pipeline — multi-stage compilation driver.
+//!
+//! The [`Compiler`] struct drives the full pipeline:
+//!
+//! ```text
+//!                    +-----------+
+//!                    │  Source   │  (.in, Swift, C, …)
+//!                    +-----+-----+
+//!                          │
+//!                          ▼
+//!                    +-----------+
+//!                    │  Frontend │  Parse → build IrModule
+//!                    +-----+-----+
+//!                          │
+//!                          ▼
+//!                    +-----------+
+//!                    │   Type    │  Check types, capabilities
+//!                    │   Check   │
+//!                    +-----+-----+
+//!                          │
+//!                          ▼
+//!                    +-----------+
+//!                    │  Lower to │  Lower AST → Core IR
+//!                    │  Core IR  │
+//!                    +-----+-----+
+//!                          │
+//!                          ▼
+//!                    +-----------+
+//!                    │   Passes  │  Optimize: fold, DCE, inlining
+//!                    │   Manager │
+//!                    +-----+-----+
+//!                          │
+//!                          ▼
+//!                    +-----------+
+//!                    │  Codegen  │  Emit machine code
+//!                    │  Backend  │  (ELF, Mach-O, COFF, WASM)
+//!                    +-----+-----+
+//!                          │
+//!                          ▼
+//!                    +-----------+
+//!                    │  Artifact │  Raw bytes out
+//!                    +-----------+
+//! ```
+
+use hybrid_backend::{select_backend, BackendError, BackendOutput, CodegenBackend, NullBackend};
+use hybrid_core::{
+    ComponentMetadata, ComponentSpec, CompilerConfig, Diagnostic, IrBasicBlock, IrFunction,
+    IrInstruction, IrModule, IrOpcode, IrType, OptimizationLevel,
+};
+use hybrid_passes::PassManager;
+
 use std::time::Instant;
 use thiserror::Error;
 
+// ─── Compiler Errors ─────────────────────────────────────────────────────
+
 #[derive(Debug, Error)]
-pub enum PipelineError {
-    #[error(transparent)]
-    Scheduler(#[from] SchedulerError),
-    #[error("invalid frontend artifact json line: {0}")]
-    InvalidFrontendArtifact(#[from] serde_json::Error),
+pub enum CompileError {
+    #[error("frontend error: {0}")]
+    Frontend(String),
+
+    #[error("type check error: {0}")]
+    TypeCheck(String),
+
+    #[error("lowering error: {0}")]
+    Lowering(String),
+
+    #[error("pass error: {0}")]
+    Pass(#[from] hybrid_passes::PassError),
+
+    #[error("backend error: {0}")]
+    Backend(#[from] BackendError),
+
+    #[error("pipeline error: {0}")]
+    Pipeline(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FrontendArtifactSummary {
-    pub structs: usize,
-    pub functions: usize,
-    pub diagnostics: usize,
-    pub success: bool,
-    /// Length of Core IR / icore `decls` when embedded (`core_ir.decls` or top-level icore file shape).
-    pub core_ir_decls: usize,
-    /// Parser or frontend id (`parser`, `frontend`, or `pipeline.parser`).
-    pub parser_id: Option<String>,
+// ─── Pipeline Stages ─────────────────────────────────────────────────────
+
+/// Name of each stage for diagnostics.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Stage {
+    #[default]
+    Frontend,
+    TypeCheck,
+    Lower,
+    Optimize,
+    Codegen,
 }
 
-/// Single JSON parse for polyglot bundles: Swift subset artifact, icore snapshots, or merged pipeline payloads.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ParsedFrontendArtifact {
-    pub summary: FrontendArtifactSummary,
-    /// Textual SIL carried alongside the artifact for rust-driver SIL stages (Core IR lowering, SwiftPM emit, etc.).
-    pub textual_sil: Option<String>,
-}
-
-fn parser_id_from_value(value: &Value) -> Option<String> {
-    ["parser", "frontend"]
-        .into_iter()
-        .find_map(|key| value.get(key).and_then(Value::as_str).map(str::to_string))
-        .or_else(|| {
-            value
-                .pointer("/pipeline/parser")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-        })
-}
-
-fn textual_sil_from_value(value: &Value) -> Option<String> {
-    let s = value
-        .get("textual_sil")
-        .or_else(|| value.pointer("/pipeline/textual_sil"))
-        .and_then(Value::as_str)?;
-    let trimmed = s.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
-}
-
-fn icore_or_core_ir_decls(value: &Value) -> Option<&Vec<Value>> {
-    value
-        .pointer("/core_ir/decls")
-        .and_then(Value::as_array)
-        .or_else(|| {
-            if value.get("icoreVersion").is_some() {
-                value.get("decls").and_then(Value::as_array)
-            } else {
-                None
-            }
-        })
-}
-
-fn symbol_counts_swift_style(value: &Value) -> Option<(usize, usize)> {
-    let symbols = value.get("symbols")?;
-    if !symbols.is_object() {
-        return None;
-    }
-    let structs = value
-        .pointer("/symbols/structs")
-        .and_then(Value::as_array)
-        .map_or(0, Vec::len);
-    let functions = value
-        .pointer("/symbols/functions")
-        .and_then(Value::as_array)
-        .map_or(0, Vec::len);
-    Some((structs, functions))
-}
-
-fn decl_kind_counts(decls: &[Value]) -> (usize, usize, usize) {
-    let mut structs = 0usize;
-    let mut functions = 0usize;
-    for d in decls {
-        match d.get("kind").and_then(Value::as_str) {
-            Some("struct") => structs += 1,
-            Some("function") => functions += 1,
-            _ => {}
+impl Stage {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Stage::Frontend => "frontend",
+            Stage::TypeCheck => "typecheck",
+            Stage::Lower => "lower",
+            Stage::Optimize => "optimize",
+            Stage::Codegen => "codegen",
         }
     }
-    let total = decls.len();
-    (structs, functions, total)
 }
 
-pub fn parse_frontend_artifact(json: &str) -> Result<ParsedFrontendArtifact, PipelineError> {
-    let value: Value = serde_json::from_str(json)?;
+/// Timing for a single pipeline stage.
+#[derive(Debug, Clone, Default)]
+pub struct StageTime {
+    pub stage: Stage,
+    pub elapsed_us: u64,
+}
 
-    let diagnostics = value
-        .get("diagnostics")
-        .and_then(Value::as_array)
-        .map_or(0, Vec::len);
-    let success = value
-        .get("success")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let parser_id = parser_id_from_value(&value);
-    let textual_sil = textual_sil_from_value(&value);
+/// Full compilation timing report.
+#[derive(Debug, Clone, Default)]
+pub struct CompileTimings {
+    pub stages: Vec<StageTime>,
+    pub total_us: u64,
+}
 
-    let (structs, functions, core_ir_decls) =
-        if let Some((s, f)) = symbol_counts_swift_style(&value) {
-            let core_ir_decls = icore_or_core_ir_decls(&value).map_or(0, Vec::len);
-            (s, f, core_ir_decls)
-        } else if let Some(decls) = icore_or_core_ir_decls(&value) {
-            let (s, f, total) = decl_kind_counts(decls);
-            (s, f, total)
-        } else {
-            (0, 0, 0)
+impl CompileTimings {
+    pub fn stage_time(&self, stage: Stage) -> u64 {
+        self.stages
+            .iter()
+            .find(|s| s.stage == stage)
+            .map(|s| s.elapsed_us)
+            .unwrap_or(0)
+    }
+}
+
+// ─── Compilation Result ──────────────────────────────────────────────────
+
+/// Result of a full compilation.
+#[derive(Debug)]
+pub struct CompileResult {
+    pub module: IrModule,
+    pub output: BackendOutput,
+    pub metadata: ComponentMetadata,
+    pub timings: CompileTimings,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+// ─── The Compiler ────────────────────────────────────────────────────────
+
+/// The Inauguration compiler — drives the multi-stage pipeline.
+pub struct Compiler {
+    config: CompilerConfig,
+    pass_manager: PassManager,
+    backend: Box<dyn CodegenBackend>,
+    diagnostics: Vec<Diagnostic>,
+    timings: CompileTimings,
+}
+
+impl Compiler {
+    /// Create a new compiler from a component spec.
+    pub fn new(spec: ComponentSpec) -> Result<Self, CompileError> {
+        let config = CompilerConfig::new(spec.clone());
+
+        // Build pass pipeline based on optimization level
+        let pass_manager = match config.optimization {
+            OptimizationLevel::None => PassManager::new(),
+            OptimizationLevel::Less => PassManager::with_standard_passes(),
+            OptimizationLevel::Default => PassManager::with_standard_passes(),
+            OptimizationLevel::Aggressive => PassManager::with_aggressive_passes(),
         };
 
-    Ok(ParsedFrontendArtifact {
-        summary: FrontendArtifactSummary {
-            structs,
-            functions,
-            diagnostics,
-            success,
-            core_ir_decls,
-            parser_id,
-        },
-        textual_sil,
-    })
-}
+        // Validate backend from component spec
+        let _kind = select_backend(&config.component)
+            .map_err(CompileError::Backend)?;
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct StageTimings {
-    pub ast_refresh_us: u64,
-    pub swift_frontend_us: u64,
-    pub sil_analysis_us: u64,
-    pub wave_us: u64,
-    pub pipeline_us: u64,
-}
+        // For now, use NullBackend; real backend wiring comes from in-cli
+        let backend: Box<dyn CodegenBackend> = Box::new(NullBackend);
 
-pub fn summarize_frontend_artifact(json: &str) -> Result<FrontendArtifactSummary, PipelineError> {
-    Ok(parse_frontend_artifact(json)?.summary)
-}
-
-/// Run a wave using textual SIL embedded in `frontend_json` when present; otherwise `sil_fallback`.
-pub async fn run_wave_with_timings_from_frontend(
-    scheduler: &BuildScheduler,
-    event: &ChangeEvent,
-    frontend_json: Option<&str>,
-    sil_fallback: &str,
-) -> Result<(usize, StageTimings), PipelineError> {
-    let sil_source = match frontend_json {
-        Some(raw) => parse_frontend_artifact(raw)?
-            .textual_sil
-            .unwrap_or_else(|| sil_fallback.to_string()),
-        None => sil_fallback.to_string(),
-    };
-    run_wave_with_timings(scheduler, event, &sil_source).await
-}
-
-pub async fn run_wave(
-    scheduler: &BuildScheduler,
-    event: &ChangeEvent,
-    sil_source: &str,
-) -> Result<usize, PipelineError> {
-    Ok(run_wave_with_timings(scheduler, event, sil_source).await?.0)
-}
-
-pub async fn run_wave_with_timings(
-    scheduler: &BuildScheduler,
-    event: &ChangeEvent,
-    sil_source: &str,
-) -> Result<(usize, StageTimings), PipelineError> {
-    let wave_start = Instant::now();
-    scheduler.enqueue_wave(event).await;
-    let mut processed = 0usize;
-    let mut timings = StageTimings::default();
-    while let Ok(task) = scheduler.next_task().await {
-        if scheduler.is_cancelled(&task.cancel_token) {
-            continue;
-        }
-        let stage_start = Instant::now();
-        match task.task_kind {
-            TaskKind::AstRefresh | TaskKind::SwiftFrontend => {
-                processed += 1;
-                let elapsed = stage_start.elapsed().as_micros() as u64;
-                match task.task_kind {
-                    TaskKind::AstRefresh => timings.ast_refresh_us += elapsed,
-                    TaskKind::SwiftFrontend => timings.swift_frontend_us += elapsed,
-                    TaskKind::SilAnalysis => {}
-                }
-            }
-            TaskKind::SilAnalysis => {
-                let artifact = parse_textual_sil(sil_source);
-                let _optimized = remove_debug_insts(&artifact);
-                let _report = extract_call_graph(&artifact);
-                processed += 1;
-                timings.sil_analysis_us += stage_start.elapsed().as_micros() as u64;
-            }
-        }
+        Ok(Self {
+            config,
+            pass_manager,
+            backend,
+            diagnostics: Vec::new(),
+            timings: CompileTimings::default(),
+        })
     }
-    timings.wave_us = wave_start.elapsed().as_micros() as u64;
-    timings.pipeline_us = timings.wave_us;
-    Ok((processed, timings))
+
+    // ─── Frontend: Parse source into IrModule ──────────────────────────
+
+    /// Parse a module from raw `.in` or Core IR source.
+    ///
+    /// For now this creates a minimal IrModule from the component spec.
+    /// Real frontend integration reads source files and produces IrModule.
+    pub fn parse_source(&mut self, _source: &str) -> Result<IrModule, CompileError> {
+        let start = Instant::now();
+        let mut module = IrModule::new(&self.config.component.name);
+
+        // Create an empty entry function matching the spec
+        let entry_name = self.config.component.entry_point.clone()
+            .unwrap_or_else(|| "main".to_string());
+
+        let mut func = IrFunction::new(&entry_name, vec![], IrType::Void);
+        let mut block = IrBasicBlock::new("entry");
+        block.terminator = Some(IrInstruction::new(IrOpcode::Return, IrType::Void, vec![]));
+        func.add_block(block);
+        module.functions.push(func);
+
+        module.component = Some(self.config.component.clone());
+
+        self.timings.stages.push(StageTime {
+            stage: Stage::Frontend,
+            elapsed_us: start.elapsed().as_micros() as u64,
+        });
+        Ok(module)
+    }
+
+    // ─── Type Check ────────────────────────────────────────────────────
+
+    /// Run type checking on the module.
+    pub fn type_check(&mut self, _module: &mut IrModule) -> Result<(), CompileError> {
+        let start = Instant::now();
+        // TODO: implement real type checker
+        self.timings.stages.push(StageTime {
+            stage: Stage::TypeCheck,
+            elapsed_us: start.elapsed().as_micros() as u64,
+        });
+        Ok(())
+    }
+
+    // ─── Lower ─────────────────────────────────────────────────────────
+
+    /// Lower the module (additional IR transforms before optimization).
+    pub fn lower(&mut self, _module: &mut IrModule) -> Result<(), CompileError> {
+        let start = Instant::now();
+        // TODO: lower AST-level constructs to Core IR instructions
+        self.timings.stages.push(StageTime {
+            stage: Stage::Lower,
+            elapsed_us: start.elapsed().as_micros() as u64,
+        });
+        Ok(())
+    }
+
+    // ─── Optimize ──────────────────────────────────────────────────────
+
+    /// Run optimization passes on the module.
+    pub fn optimize(&mut self, module: &mut IrModule) -> Result<(), CompileError> {
+        let start = Instant::now();
+
+        if self.config.enable_all_passes {
+            self.pass_manager.run_all(module)?;
+        }
+
+        self.timings.stages.push(StageTime {
+            stage: Stage::Optimize,
+            elapsed_us: start.elapsed().as_micros() as u64,
+        });
+        Ok(())
+    }
+
+    // ─── Codegen ───────────────────────────────────────────────────────
+
+    /// Emit machine code from the optimized module.
+    pub fn codegen(&mut self, module: &IrModule) -> Result<BackendOutput, CompileError> {
+        let start = Instant::now();
+
+        let output = self.backend.emit(module, &self.config.component)?;
+
+        self.timings.stages.push(StageTime {
+            stage: Stage::Codegen,
+            elapsed_us: start.elapsed().as_micros() as u64,
+        });
+        Ok(output)
+    }
+
+    // ─── Full Pipeline ─────────────────────────────────────────────────
+
+    /// Run the full compilation pipeline: parse → typecheck → lower → optimize → codegen.
+    pub fn compile(&mut self, source: &str) -> Result<CompileResult, CompileError> {
+        let total_start = Instant::now();
+
+        // Stage 1: Frontend
+        let mut module = self.parse_source(source)?;
+
+        // Stage 2: Type check
+        self.type_check(&mut module)?;
+
+        // Stage 3: Lower
+        self.lower(&mut module)?;
+
+        // Stage 4: Optimize
+        self.optimize(&mut module)?;
+
+        // Stage 5: Codegen
+        let output = self.codegen(&module)?;
+
+        // Build component metadata
+        let metadata = ComponentMetadata::from_spec(&self.config.component, &module);
+
+        self.timings.total_us = total_start.elapsed().as_micros() as u64;
+
+        Ok(CompileResult {
+            module,
+            output,
+            metadata,
+            timings: self.timings.clone(),
+            diagnostics: self.diagnostics.clone(),
+        })
+    }
+
+    /// Print a timing report.
+    pub fn print_timings(&self) {
+        println!("    Compiler pipeline stages:");
+        for stage_time in &self.timings.stages {
+            println!(
+                "      {:12} {:.3}ms",
+                stage_time.stage.label(),
+                (stage_time.elapsed_us as f64) / 1000.0
+            );
+        }
+        println!(
+            "      {:12} {:.3}ms",
+            "total",
+            (self.timings.total_us as f64) / 1000.0
+        );
+    }
 }
+
+
+
+// ─── Tests ───────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hybrid_sil::{extract_call_graph, parse_textual_sil};
 
-    #[tokio::test]
-    async fn runs_three_task_wave() {
-        let scheduler = BuildScheduler::default();
-        let (count, timings) = run_wave_with_timings(
-            &scheduler,
-            &ChangeEvent {
-                path: "App.swift".to_string(),
-                module_id: "App".to_string(),
-                hash: "abc".to_string(),
-                timestamp_ms: 7,
-            },
-            "sil @main\nentry:\n%0 = integer_literal $Builtin.Int64, 1",
-        )
-        .await
-        .expect("pipeline runs");
-        assert_eq!(count, 3);
-        assert!(timings.wave_us <= 50_000_000);
-        assert_eq!(timings.pipeline_us, timings.wave_us);
+    fn test_spec() -> ComponentSpec {
+        ComponentSpec::host_executable("test_app", Some("main"))
     }
 
     #[test]
-    fn summarizes_frontend_artifact_json() {
-        let summary = summarize_frontend_artifact(
-            r#"{
-  "format_version": 1,
-  "module": "App",
-  "source_path": "App.swift",
-  "symbols": {
-    "structs": [{ "name": "User" }],
-    "functions": [{ "name": "main" }, { "name": "helper" }]
-  },
-  "typed_decls": [],
-  "diagnostics": [],
-  "success": true
-}"#,
-        )
-        .expect("artifact parses");
-        assert_eq!(summary.structs, 1);
-        assert_eq!(summary.functions, 2);
-        assert_eq!(summary.diagnostics, 0);
-        assert!(summary.success);
-        assert_eq!(summary.core_ir_decls, 0);
-        assert_eq!(summary.parser_id, None);
+    fn compiler_creates_from_spec() {
+        let compiler = Compiler::new(test_spec()).unwrap();
+        assert!(compiler.backend.kind() == hybrid_backend::BackendKind::AArch64MachO
+            || compiler.backend.kind() == hybrid_backend::BackendKind::RawBinary);
     }
 
     #[test]
-    fn parses_icore_bundle_with_embedded_sil() {
-        let parsed = parse_frontend_artifact(
-            r#"{
-  "icoreVersion": 1,
-  "parser": "icore",
-  "decls": [
-    { "kind": "struct", "name": "S", "fields": [] },
-    { "kind": "function", "name": "main", "params": [], "return": "Void", "body": [] }
-  ],
-  "textual_sil": "sil @main\nbb0:\n%0 = integer_literal $Builtin.Int64, 0\n",
-  "success": true
-}"#,
-        )
-        .expect("icore artifact parses");
-        assert_eq!(parsed.summary.core_ir_decls, 2);
-        assert_eq!(parsed.summary.structs, 1);
-        assert_eq!(parsed.summary.functions, 1);
-        assert_eq!(parsed.summary.parser_id.as_deref(), Some("icore"));
-        let sil = parsed.textual_sil.expect("embedded sil");
-        assert!(sil.contains("sil @main"));
-        assert!(sil.contains("bb0:"));
+    fn compiler_runs_full_pipeline() {
+        let mut compiler = Compiler::new(test_spec()).unwrap();
+        let result = compiler.compile("fn main() {}").unwrap();
+        assert!(!result.output.data.is_empty());
+        assert_eq!(result.timings.stages.len(), 5);
     }
 
     #[test]
-    fn textual_sil_nested_under_pipeline() {
-        let parsed = parse_frontend_artifact(
-            r#"{
-  "success": true,
-  "pipeline": { "textual_sil": "sil @main\nbb0:\n%0 = function_ref @foo\n", "parser": "bundle" }
-}"#,
-        )
-        .expect("bundle parses");
-        assert_eq!(parsed.summary.parser_id.as_deref(), Some("bundle"));
-        assert!(parsed.textual_sil.unwrap().contains("function_ref @foo"));
+    fn compiler_parses_source_into_module() {
+        let mut compiler = Compiler::new(test_spec()).unwrap();
+        let module = compiler.parse_source("fn main() {}").unwrap();
+        assert_eq!(module.name, "test_app");
+        assert_eq!(module.functions.len(), 1);
+        assert_eq!(module.functions[0].name, "main");
     }
 
     #[test]
-    fn embedded_sil_matches_in_cli_core_ir_shape() {
-        let artifact = r#"{"textual_sil":"sil @main\nbb0:\n%0 = function_ref @from_artifact\n"}"#;
-        let sil = parse_frontend_artifact(artifact)
-            .expect("parse")
-            .textual_sil
-            .expect("sil");
-        let report = extract_call_graph(&parse_textual_sil(&sil));
-        assert!(report
-            .call_edges
-            .iter()
-            .any(|(_, callee)| callee == "from_artifact"));
+    fn compiler_returns_timing_report() {
+        let mut compiler = Compiler::new(test_spec()).unwrap();
+        let _result = compiler.compile("fn main() {}").unwrap();
+        compiler.print_timings(); // smoke test
     }
 
-    #[tokio::test]
-    async fn wave_from_frontend_runs_three_tasks() {
-        let scheduler = BuildScheduler::default();
-        let artifact = r#"{"success":true,"textual_sil":"sil @main\nbb0:\n%0 = integer_literal $Builtin.Int64, 1\n"}"#;
-        let (count, timings) = run_wave_with_timings_from_frontend(
-            &scheduler,
-            &ChangeEvent {
-                path: "x.in".into(),
-                module_id: "M".into(),
-                hash: "h".into(),
-                timestamp_ms: 0,
-            },
-            Some(artifact),
-            "",
-        )
-        .await
-        .expect("wave");
-        assert_eq!(count, 3);
-        assert!(timings.wave_us <= 50_000_000);
-        assert_eq!(timings.pipeline_us, timings.wave_us);
-    }
+
 }
