@@ -24,6 +24,7 @@ for triple in [
     "aarch64-apple-darwin",
     "aarch64-unknown-linux-gnu",
     "armv7-unknown-linux-gnueabihf",
+    "x86_64-pc-windows-msvc",
     "wasm32-unknown-unknown",
     "riscv64gc-unknown-none-elf",
 ]:
@@ -170,6 +171,103 @@ if bytes([0x48, 0xC7, 0xC0, 0x3C, 0, 0, 0, 0x48, 0xC7, 0xC7, 0x2A, 0, 0, 0, 0x0F
     raise SystemExit("x86_64 executable missing syscall exit stub")
 if report.get("reason_code") != "native-x86_64-linux-exit-subset":
     raise SystemExit("x86_64 executable report has wrong reason_code")
+PY
+env in compile \
+  --path "$tmpdir/object.in" \
+  --target native \
+  --target-triple x86_64-pc-windows-msvc \
+  --linkage executable \
+  --entry answer \
+  --out "$tmpdir/answer.exe" \
+  --json > "$tmpdir/windows-exe.json"
+python3 - "$tmpdir/answer.exe" "$tmpdir/windows-exe.json" <<'PY'
+from pathlib import Path
+import json
+import sys
+data = Path(sys.argv[1]).read_bytes()
+report = json.loads(Path(sys.argv[2]).read_text())
+if data[:2] != b"MZ":
+    raise SystemExit("windows exe missing MZ magic")
+pe_off = int.from_bytes(data[0x3C:0x40], "little")
+if data[pe_off:pe_off + 4] != b"PE\0\0":
+    raise SystemExit("windows exe missing PE signature")
+if int.from_bytes(data[pe_off + 4:pe_off + 6], "little") != 0x8664:
+    raise SystemExit("windows exe is not AMD64")
+characteristics = int.from_bytes(data[pe_off + 22:pe_off + 24], "little")
+if characteristics & 0x2000:
+    raise SystemExit("windows exe incorrectly marked DLL")
+if report.get("reason_code") != "native-x86_64-windows-exe-subset":
+    raise SystemExit("windows exe report has wrong reason_code")
+PY
+env in compile \
+  --path "$tmpdir/object.in" \
+  --target native \
+  --target-triple aarch64-apple-darwin \
+  --linkage executable \
+  --entry answer \
+  --out "$tmpdir/Answer.app" \
+  --json > "$tmpdir/app.json"
+python3 - "$tmpdir/Answer.app" "$tmpdir/app.json" <<'PY'
+from pathlib import Path
+import json
+import sys
+bundle = Path(sys.argv[1])
+report = json.loads(Path(sys.argv[2]).read_text())
+exe = bundle / "Contents" / "MacOS" / "Answer"
+plist = bundle / "Contents" / "Info.plist"
+if not exe.exists():
+    raise SystemExit("app bundle missing executable")
+if not plist.exists():
+    raise SystemExit("app bundle missing Info.plist")
+if exe.read_bytes()[:4] != (0xFEEDFACF).to_bytes(4, "little"):
+    raise SystemExit("app executable missing Mach-O magic")
+if report.get("reason_code") != "native-aarch64-darwin-app-subset":
+    raise SystemExit("app bundle report has wrong reason_code")
+PY
+env in compile \
+  --path "$tmpdir/object.in" \
+  --target native \
+  --target-triple x86_64-unknown-linux-gnu \
+  --linkage executable \
+  --entry answer \
+  --out "$tmpdir/Answer.AppDir" \
+  --json > "$tmpdir/appdir.json"
+python3 - "$tmpdir/Answer.AppDir" "$tmpdir/appdir.json" <<'PY'
+from pathlib import Path
+import json
+import sys
+appdir = Path(sys.argv[1])
+report = json.loads(Path(sys.argv[2]).read_text())
+apprun = appdir / "AppRun"
+desktop = appdir / "answer.desktop"
+if not apprun.exists():
+    raise SystemExit("AppDir missing AppRun")
+if not desktop.exists():
+    raise SystemExit("AppDir missing desktop file")
+if apprun.read_bytes()[:4] != b"\x7fELF":
+    raise SystemExit("AppDir AppRun missing ELF magic")
+if report.get("reason_code") != "native-x86_64-linux-appdir-subset":
+    raise SystemExit("AppDir report has wrong reason_code")
+PY
+env in compile \
+  --path "$tmpdir/object.in" \
+  --target native \
+  --target-triple x86_64-unknown-linux-gnu \
+  --linkage executable \
+  --entry answer \
+  --out "$tmpdir/Answer.AppImage" \
+  --json > "$tmpdir/appimage.json"
+python3 - "$tmpdir/Answer.AppImage" "$tmpdir/appimage.json" <<'PY'
+from pathlib import Path
+import json
+import sys
+report = json.loads(Path(sys.argv[2]).read_text())
+if Path(sys.argv[1]).exists():
+    raise SystemExit("AppImage fail-closed path unexpectedly wrote artifact")
+if report.get("success") is not False:
+    raise SystemExit("AppImage fail-closed report unexpectedly succeeded")
+if report.get("reason_code") != "native-package-not-implemented":
+    raise SystemExit("AppImage fail-closed report has wrong reason_code")
 PY
 env in compile \
   --path "$tmpdir/object.in" \

@@ -2,6 +2,7 @@ use crate::boundary_emit;
 use crate::boundary_ir::{BoundaryModule, IN_ABI_VERSION};
 use crate::core_ir::UnifiedModule;
 use crate::native_emit::NativeLinkage;
+use crate::native_emit::coff::{COFF_WINDOWS_TRIPLE, CoffExe, write_exe};
 use crate::native_emit::elf::{
     AARCH64_LINUX_TRIPLE, ARMV7_LINUX_GNUEABIHF_TRIPLE, ELF_LINUX_TRIPLE, ElfExecutable, ElfObject,
     aarch64_return_i32_object_code, arm32_return_i32_object_code, write_aarch64_relocatable_object,
@@ -36,6 +37,9 @@ pub fn emit_native_object(request: &NativeObjectRequest<'_>) -> Option<NativeObj
     match (request.target_triple, request.linkage) {
         (ELF_LINUX_TRIPLE, NativeLinkage::StaticLib) => Some(emit_x86_64_elf_object(request)),
         (ELF_LINUX_TRIPLE, NativeLinkage::Executable) => Some(emit_x86_64_elf_executable(request)),
+        (COFF_WINDOWS_TRIPLE, NativeLinkage::Executable) => {
+            Some(emit_x86_64_pe_executable(request))
+        }
         (AARCH64_LINUX_TRIPLE, NativeLinkage::StaticLib) => Some(emit_aarch64_elf_object(request)),
         ("aarch64-apple-darwin", NativeLinkage::StaticLib) => {
             Some(emit_aarch64_macho_archive(request))
@@ -45,6 +49,24 @@ pub fn emit_native_object(request: &NativeObjectRequest<'_>) -> Option<NativeObj
         }
         (WASM32_UNKNOWN_TRIPLE, NativeLinkage::StaticLib) => Some(emit_wasm32_module(request)),
         _ => None,
+    }
+}
+
+fn emit_x86_64_pe_executable(request: &NativeObjectRequest<'_>) -> NativeObjectArtifact {
+    let exe = CoffExe {
+        code: x86_64_return_i32_object_code(request.exit_code),
+        entry_offset: 0,
+    };
+    let mut bytes = Vec::new();
+    write_exe(&exe, &mut bytes);
+    NativeObjectArtifact {
+        bytes,
+        artifact_kind: "pe-executable",
+        backend_level: "owned-native-subset-x86_64",
+        runtime_level: "windows-entry-return",
+        reason_code: "native-x86_64-windows-exe-subset",
+        reason: "inauguration owns PE32+ executable emission for const-evaluable scalar entry functions on this target",
+        abi_manifest: None,
     }
 }
 

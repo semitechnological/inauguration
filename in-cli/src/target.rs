@@ -444,6 +444,8 @@ fn build_target_registry() -> Vec<TargetSpec> {
             implemented: implemented_target(target),
             stage: if target == "x86_64-unknown-linux-gnu" {
                 "owned-native-and-object-subset"
+            } else if target == "x86_64-pc-windows-msvc" {
+                "owned-native-subset"
             } else if implemented_target(target) {
                 "owned-object-subset"
             } else {
@@ -459,7 +461,9 @@ fn build_target_registry() -> Vec<TargetSpec> {
             } else if target == "aarch64-unknown-linux-gnu" {
                 "inauguration owns ELF64 AArch64 relocatable object emission for const-evaluable scalar entry functions on this target"
             } else if target == "aarch64-apple-darwin" {
-                "inauguration owns Mach-O static archive emission for const-evaluable scalar entry functions on this target"
+                "inauguration owns Mach-O static archive and .app bundle emission for const-evaluable scalar entry functions on this target"
+            } else if target == "x86_64-pc-windows-msvc" {
+                "inauguration owns PE32+ .exe emission for const-evaluable scalar entry functions on this target"
             } else if target == "armv7-unknown-linux-gnueabihf" {
                 "inauguration owns ELF32 ARM relocatable object emission for const-evaluable scalar entry functions on this target"
             } else if target == "wasm32-unknown-unknown" {
@@ -473,7 +477,9 @@ fn build_target_registry() -> Vec<TargetSpec> {
             } else if target == "aarch64-unknown-linux-gnu" {
                 "elf-relocatable-object"
             } else if target == "aarch64-apple-darwin" {
-                "mach-o-static-archive"
+                "mach-o-static-archive+app-bundle"
+            } else if target == "x86_64-pc-windows-msvc" {
+                "pe-executable"
             } else if target == "armv7-unknown-linux-gnueabihf" {
                 "elf32-relocatable-object"
             } else if target == "wasm32-unknown-unknown" {
@@ -495,6 +501,7 @@ fn implemented_target(target: &str) -> bool {
             | "aarch64-unknown-linux-gnu"
             | "aarch64-apple-darwin"
             | "armv7-unknown-linux-gnueabihf"
+            | "x86_64-pc-windows-msvc"
             | "wasm32-unknown-unknown"
     )
 }
@@ -522,6 +529,7 @@ mod tests {
             "aarch64-apple-darwin",
             "aarch64-unknown-linux-gnu",
             "armv7-unknown-linux-gnueabihf",
+            "x86_64-pc-windows-msvc",
             "wasm32-unknown-unknown",
             "riscv64gc-unknown-none-elf",
         ] {
@@ -537,7 +545,14 @@ mod tests {
             if target == "aarch64-apple-darwin" {
                 assert!(spec.implemented, "{target}");
                 assert_eq!(spec.stage, "owned-object-subset");
-                assert_eq!(spec.artifact_kind, "mach-o-static-archive");
+                assert_eq!(spec.artifact_kind, "mach-o-static-archive+app-bundle");
+                assert!(spec.backend_artifact_supported);
+                continue;
+            }
+            if target == "x86_64-pc-windows-msvc" {
+                assert!(spec.implemented, "{target}");
+                assert_eq!(spec.stage, "owned-native-subset");
+                assert_eq!(spec.artifact_kind, "pe-executable");
                 assert!(spec.backend_artifact_supported);
                 continue;
             }

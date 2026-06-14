@@ -439,6 +439,13 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
                 report.reason = Some(err.clone());
                 report.error = Some(err);
             }
+            Err(err) if err.starts_with("native-package-not-implemented:") => {
+                report.backend_level = "contract-only";
+                report.runtime_level = "none";
+                report.reason_code = Some("native-package-not-implemented".to_string());
+                report.reason = Some(err.clone());
+                report.error = Some(err);
+            }
             Err(err) => {
                 report.backend_level = "owned-native-subset";
                 report.runtime_level = "inrt-native";
@@ -477,6 +484,42 @@ fn compile_native(
         .ok_or_else(|| "native compile requires --out executable path".to_string())?;
     if let Some(target_triple) = request.target_triple.as_deref() {
         let exit = const_eval_entry_exit_code(&native_module, module_id, entry)?;
+        if request.linkage == NativeLinkage::Executable
+            && target_triple == "aarch64-apple-darwin"
+            && path_extension_is(out_path, "app")
+        {
+            emit_macos_app_bundle(&native_module, module_id, entry, out_path)?;
+            return Ok(NativeCompileResult {
+                artifact_path: out_path.display().to_string(),
+                eval_exit_code: Some(exit),
+                abi_path: None,
+                backend_level: "owned-native-subset-aarch64-app",
+                runtime_level: "macos-app-bundle",
+                reason_code: "native-aarch64-darwin-app-subset",
+                reason: "inauguration owns macOS .app bundle emission around its AArch64 Mach-O executable subset",
+            });
+        }
+        if request.linkage == NativeLinkage::Executable
+            && target_triple == "x86_64-unknown-linux-gnu"
+            && path_extension_is(out_path, "AppImage")
+        {
+            return Err("native-package-not-implemented: AppImage requires an owned AppImage runtime and SquashFS writer before this backend can claim .AppImage artifacts".to_string());
+        }
+        if request.linkage == NativeLinkage::Executable
+            && target_triple == "x86_64-unknown-linux-gnu"
+            && path_extension_is(out_path, "AppDir")
+        {
+            emit_linux_appdir(exit, out_path)?;
+            return Ok(NativeCompileResult {
+                artifact_path: out_path.display().to_string(),
+                eval_exit_code: Some(exit),
+                abi_path: None,
+                backend_level: "owned-native-subset-x86_64-appdir",
+                runtime_level: "linux-appdir",
+                reason_code: "native-x86_64-linux-appdir-subset",
+                reason: "inauguration owns Linux AppDir emission around its x86_64 ELF executable subset",
+            });
+        }
         let object_request = native_emit::NativeObjectRequest {
             target_triple,
             linkage: request.linkage,
@@ -534,6 +577,69 @@ fn compile_native(
         reason_code: status.reason_code,
         reason: status.reason,
     })
+}
+
+fn path_extension_is(path: &Path, extension: &str) -> bool {
+    path.extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| value.eq_ignore_ascii_case(extension))
+}
+
+fn artifact_stem(path: &Path, fallback: &str) -> String {
+    path.file_stem()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .unwrap_or(fallback)
+        .to_string()
+}
+
+fn emit_macos_app_bundle(
+    module: &UnifiedModule,
+    module_id: &str,
+    entry: &str,
+    out_path: &Path,
+) -> Result<(), String> {
+    let name = artifact_stem(out_path, "App");
+    let contents = out_path.join("Contents");
+    let macos = contents.join("MacOS");
+    fs::create_dir_all(&macos)
+        .map_err(|err| format!("create app bundle `{}`: {err}", macos.display()))?;
+    let executable = macos.join(&name);
+    native_emit::compile_native_artifact(
+        module,
+        module_id,
+        entry,
+        NativeLinkage::Executable,
+        &executable,
+    )?;
+    set_native_artifact_permissions(&executable, NativeLinkage::Executable)?;
+    let plist = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n<key>CFBundleExecutable</key>\n<string>{name}</string>\n<key>CFBundleIdentifier</key>\n<string>inauguration.{name}</string>\n<key>CFBundleName</key>\n<string>{name}</string>\n<key>CFBundlePackageType</key>\n<string>APPL</string>\n</dict>\n</plist>\n"
+    );
+    fs::write(contents.join("Info.plist"), plist)
+        .map_err(|err| format!("write app Info.plist `{}`: {err}", out_path.display()))?;
+    fs::write(contents.join("PkgInfo"), "APPL????")
+        .map_err(|err| format!("write app PkgInfo `{}`: {err}", out_path.display()))
+}
+
+fn emit_linux_appdir(exit: u8, out_path: &Path) -> Result<(), String> {
+    fs::create_dir_all(out_path)
+        .map_err(|err| format!("create AppDir `{}`: {err}", out_path.display()))?;
+    let app_run = out_path.join("AppRun");
+    let exe = native_emit::ElfExecutable {
+        code: native_emit::x86_64_linux_exit_code(exit),
+        entry_offset: 0,
+    };
+    let mut bytes = Vec::new();
+    native_emit::write_elf_executable(&exe, &mut bytes);
+    fs::write(&app_run, bytes)
+        .map_err(|err| format!("write AppRun `{}`: {err}", app_run.display()))?;
+    set_native_artifact_permissions(&app_run, NativeLinkage::Executable)?;
+    fs::write(
+        out_path.join("answer.desktop"),
+        "[Desktop Entry]\nType=Application\nName=answer\nExec=AppRun\n",
+    )
+    .map_err(|err| format!("write AppDir desktop file `{}`: {err}", out_path.display()))
 }
 
 #[cfg(unix)]
@@ -1069,6 +1175,148 @@ mod tests {
 
         fs::remove_file(source_path).unwrap();
         fs::remove_file(&out_path).unwrap();
+    }
+
+    #[test]
+    fn native_executable_emits_windows_pe_exe_file() {
+        let source_path = temp_path("windows-executable.in");
+        let out_path = temp_path("windows-executable.exe");
+        fs::write(
+            &source_path,
+            "fn answer() -> Int { return 42; }\nfn main() -> void { return; }\n",
+        )
+        .unwrap();
+        let mut request = default_request(
+            source_path.clone(),
+            CompileTarget::Native,
+            Some("answer"),
+            Some(out_path.clone()),
+        );
+        request.linkage = NativeLinkage::Executable;
+        request.target_triple = Some("x86_64-pc-windows-msvc".to_string());
+
+        let report = compile_owned(&request);
+
+        assert!(report.success, "{:?}", report);
+        assert_eq!(report.backend_level, "owned-native-subset-x86_64");
+        assert_eq!(report.runtime_level, "windows-entry-return");
+        assert_eq!(
+            report.reason_code.as_deref(),
+            Some("native-x86_64-windows-exe-subset")
+        );
+        let bytes = fs::read(&out_path).expect("exe bytes");
+        assert_eq!(&bytes[0..2], b"MZ");
+        let pe_off = u32::from_le_bytes(bytes[0x3C..0x40].try_into().unwrap()) as usize;
+        assert_eq!(&bytes[pe_off..pe_off + 4], b"PE\0\0");
+        assert_eq!(
+            u16::from_le_bytes(bytes[pe_off + 4..pe_off + 6].try_into().unwrap()),
+            0x8664
+        );
+
+        fs::remove_file(source_path).unwrap();
+        fs::remove_file(&out_path).unwrap();
+    }
+
+    #[test]
+    fn native_executable_emits_aarch64_darwin_app_bundle() {
+        let source_path = temp_path("darwin-app.in");
+        let out_path = temp_path("Answer.app");
+        fs::write(
+            &source_path,
+            "fn answer() -> Int { return 42; }\nfn main() -> void { return; }\n",
+        )
+        .unwrap();
+        let mut request = default_request(
+            source_path.clone(),
+            CompileTarget::Native,
+            Some("answer"),
+            Some(out_path.clone()),
+        );
+        request.linkage = NativeLinkage::Executable;
+        request.target_triple = Some("aarch64-apple-darwin".to_string());
+
+        let report = compile_owned(&request);
+
+        assert!(report.success, "{:?}", report);
+        assert_eq!(report.backend_level, "owned-native-subset-aarch64-app");
+        assert_eq!(report.runtime_level, "macos-app-bundle");
+        assert_eq!(
+            report.reason_code.as_deref(),
+            Some("native-aarch64-darwin-app-subset")
+        );
+        let executable = out_path
+            .join("Contents/MacOS")
+            .join(artifact_stem(&out_path, "App"));
+        assert!(executable.exists());
+        assert!(out_path.join("Contents/Info.plist").exists());
+
+        fs::remove_file(source_path).unwrap();
+        let _ = fs::remove_dir_all(&out_path);
+    }
+
+    #[test]
+    fn native_executable_emits_linux_appdir() {
+        let source_path = temp_path("linux-appdir.in");
+        let out_path = temp_path("Answer.AppDir");
+        fs::write(
+            &source_path,
+            "fn answer() -> Int { return 42; }\nfn main() -> void { return; }\n",
+        )
+        .unwrap();
+        let mut request = default_request(
+            source_path.clone(),
+            CompileTarget::Native,
+            Some("answer"),
+            Some(out_path.clone()),
+        );
+        request.linkage = NativeLinkage::Executable;
+        request.target_triple = Some("x86_64-unknown-linux-gnu".to_string());
+
+        let report = compile_owned(&request);
+
+        assert!(report.success, "{:?}", report);
+        assert_eq!(report.backend_level, "owned-native-subset-x86_64-appdir");
+        assert_eq!(report.runtime_level, "linux-appdir");
+        assert_eq!(
+            report.reason_code.as_deref(),
+            Some("native-x86_64-linux-appdir-subset")
+        );
+        assert!(out_path.join("AppRun").exists());
+        assert!(out_path.join("answer.desktop").exists());
+
+        fs::remove_file(source_path).unwrap();
+        let _ = fs::remove_dir_all(&out_path);
+    }
+
+    #[test]
+    fn native_executable_appimage_fails_closed() {
+        let source_path = temp_path("linux-appimage.in");
+        let out_path = temp_path("Answer.AppImage");
+        fs::write(
+            &source_path,
+            "fn answer() -> Int { return 42; }\nfn main() -> void { return; }\n",
+        )
+        .unwrap();
+        let mut request = default_request(
+            source_path.clone(),
+            CompileTarget::Native,
+            Some("answer"),
+            Some(out_path.clone()),
+        );
+        request.linkage = NativeLinkage::Executable;
+        request.target_triple = Some("x86_64-unknown-linux-gnu".to_string());
+
+        let report = compile_owned(&request);
+
+        assert!(!report.success, "{:?}", report);
+        assert_eq!(report.backend_level, "contract-only");
+        assert_eq!(
+            report.reason_code.as_deref(),
+            Some("native-package-not-implemented")
+        );
+        assert!(!out_path.exists());
+
+        fs::remove_file(source_path).unwrap();
     }
 
     #[test]

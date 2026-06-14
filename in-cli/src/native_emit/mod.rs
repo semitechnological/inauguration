@@ -10,14 +10,14 @@ pub mod raw;
 pub mod target;
 pub mod wasm;
 
-pub use coff::{COFF_WINDOWS_TRIPLE, CoffDll, write_dll};
+pub use coff::{COFF_WINDOWS_TRIPLE, CoffDll, CoffExe, write_dll, write_exe};
 pub use elf::{
     ELF_LINUX_TRIPLE, ElfExecutable, ElfObject, write_executable as write_elf_executable,
-    write_x86_64_relocatable_object, x86_64_return_i32_object_code,
+    write_x86_64_relocatable_object, x86_64_linux_exit_code, x86_64_return_i32_object_code,
 };
 pub use lower::{
-    NativeLinkage, TARGET_TRIPLE, compile_native_artifact_for_host, compile_native_executable,
-    compile_native_executable_for_host, host_supports_native_subset,
+    NativeLinkage, TARGET_TRIPLE, compile_native_artifact, compile_native_artifact_for_host,
+    compile_native_executable, compile_native_executable_for_host, host_supports_native_subset,
 };
 pub use macho::{ExportSymbol, MachOLinkage};
 pub use object::{

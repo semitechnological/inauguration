@@ -28,8 +28,11 @@ Swift sources can still use `swiftc` for textual SIL or SwiftPM staging via `in 
 |------|---------------|---------|---------------|-----------------|
 | `aarch64-apple-darwin` host executable | `true` | `owned-native-subset` | `native-aarch64-subset` | `mach-o-executable` |
 | `aarch64-apple-darwin` staticlib | `true` | `owned-object-subset` | `native-object-subset` | `mach-o-static-archive` |
+| `aarch64-apple-darwin` app bundle | `true` | `owned-native-subset-aarch64-app` | `native-aarch64-darwin-app-subset` | `.app` bundle |
 | `x86_64-unknown-linux-gnu` staticlib | `true` | `owned-object-subset` | `native-object-subset` | `elf-relocatable-object` |
 | `x86_64-unknown-linux-gnu` executable | `true` | `owned-native-subset-x86_64` | `native-x86_64-linux-exit-subset` | `elf-executable` |
+| `x86_64-unknown-linux-gnu` AppDir | `true` | `owned-native-subset-x86_64-appdir` | `native-x86_64-linux-appdir-subset` | `AppDir` |
+| `x86_64-pc-windows-msvc` executable | `true` | `owned-native-subset-x86_64` | `native-x86_64-windows-exe-subset` | `pe-executable` |
 | `aarch64-unknown-linux-gnu` staticlib | `true` | `owned-object-subset` | `native-object-subset` | `elf-relocatable-object` |
 | `armv7-unknown-linux-gnueabihf` staticlib | `true` | `owned-object-subset` | `native-object-subset` | `elf32-relocatable-object` |
 | `wasm32-unknown-unknown` staticlib | `true` | `owned-object-subset` | `native-object-subset` | `wasm-module` |
@@ -46,6 +49,12 @@ The first non-host object backends are `x86_64-unknown-linux-gnu`, `aarch64-unkn
 `in compile --target native --target-triple aarch64-apple-darwin --linkage static-lib --entry answer --out target/libanswer.a` emits an `ar` archive containing a Mach-O ARM64 object member with an exported `_answer` symbol. This is a static archive route, not a bare Mach-O object route.
 
 `in compile --target native --target-triple x86_64-unknown-linux-gnu --linkage executable --entry answer --out target/answer` emits a minimal ELF64 Linux executable that exits with the const-evaluated scalar value through the Linux `exit` syscall. This is not general x86_64 native lowering: it has no linker, libc, dynamic loader, relocations, argv/envp contract, heap, imports, or general function ABI support.
+
+`in compile --target native --target-triple x86_64-pc-windows-msvc --linkage executable --entry answer --out target/answer.exe` emits a PE32+ AMD64 console executable whose entry returns the const-evaluated scalar value. It does not import `kernel32`, link a CRT, or claim Windows ABI/runtime coverage beyond this minimal entry-return artifact.
+
+`in compile --target native --target-triple aarch64-apple-darwin --linkage executable --entry answer --out target/Answer.app` emits a macOS `.app` bundle containing the owned AArch64 Mach-O executable plus `Info.plist` and `PkgInfo`. A normal host executable path without `.app` remains the host native route.
+
+`in compile --target native --target-triple x86_64-unknown-linux-gnu --linkage executable --entry answer --out target/Answer.AppDir` emits a Linux AppDir with an `AppRun` ELF executable and desktop entry. `.AppImage` remains fail-closed with `native-package-not-implemented` until the repository owns an AppImage runtime and SquashFS writer.
 
 Explicit `--target-triple` requests fail closed when the owned backend has no target/linkage implementation. They do not fall through to the host Mach-O path.
 
