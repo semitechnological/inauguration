@@ -196,6 +196,10 @@ if int.from_bytes(data[pe_off + 4:pe_off + 6], "little") != 0x8664:
 characteristics = int.from_bytes(data[pe_off + 22:pe_off + 24], "little")
 if characteristics & 0x2000:
     raise SystemExit("windows exe incorrectly marked DLL")
+if b"KERNEL32.dll" not in data:
+    raise SystemExit("windows exe missing kernel32 import")
+if b"ExitProcess" not in data:
+    raise SystemExit("windows exe missing ExitProcess import")
 if report.get("reason_code") != "native-x86_64-windows-exe-subset":
     raise SystemExit("windows exe report has wrong reason_code")
 PY

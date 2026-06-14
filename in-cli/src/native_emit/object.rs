@@ -2,7 +2,7 @@ use crate::boundary_emit;
 use crate::boundary_ir::{BoundaryModule, IN_ABI_VERSION};
 use crate::core_ir::UnifiedModule;
 use crate::native_emit::NativeLinkage;
-use crate::native_emit::coff::{COFF_WINDOWS_TRIPLE, CoffExe, write_exe};
+use crate::native_emit::coff::{COFF_WINDOWS_TRIPLE, write_exit_process_exe};
 use crate::native_emit::elf::{
     AARCH64_LINUX_TRIPLE, ARMV7_LINUX_GNUEABIHF_TRIPLE, ELF_LINUX_TRIPLE, ElfExecutable, ElfObject,
     aarch64_linux_exit_code, aarch64_return_i32_object_code, arm32_linux_exit_code,
@@ -60,19 +60,15 @@ pub fn emit_native_object(request: &NativeObjectRequest<'_>) -> Option<NativeObj
 }
 
 fn emit_x86_64_pe_executable(request: &NativeObjectRequest<'_>) -> NativeObjectArtifact {
-    let exe = CoffExe {
-        code: x86_64_return_i32_object_code(request.exit_code),
-        entry_offset: 0,
-    };
     let mut bytes = Vec::new();
-    write_exe(&exe, &mut bytes);
+    write_exit_process_exe(request.exit_code, &mut bytes);
     NativeObjectArtifact {
         bytes,
         artifact_kind: "pe-executable",
         backend_level: "owned-native-subset-x86_64",
-        runtime_level: "windows-entry-return",
+        runtime_level: "windows-exitprocess",
         reason_code: "native-x86_64-windows-exe-subset",
-        reason: "inauguration owns PE32+ executable emission for const-evaluable scalar entry functions on this target",
+        reason: "inauguration owns PE32+ executable emission with kernel32 ExitProcess import for const-evaluable scalar entry functions on this target",
         abi_manifest: None,
     }
 }

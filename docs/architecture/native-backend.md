@@ -54,7 +54,7 @@ The first non-host object backends are `x86_64-unknown-linux-gnu`, `aarch64-unkn
 
 `aarch64-unknown-linux-gnu` and `armv7-unknown-linux-gnueabihf` also emit minimal Linux executables for the same const-evaluated scalar subset. They use target-native Linux `exit` syscalls and are checked structurally on all hosts, with QEMU runtime checks when `qemu-aarch64` or `qemu-arm` is installed.
 
-`in compile --target native --target-triple x86_64-pc-windows-msvc --linkage executable --entry answer --out target/answer.exe` emits a PE32+ AMD64 console executable whose entry returns the const-evaluated scalar value. It does not import `kernel32`, link a CRT, or claim Windows ABI/runtime coverage beyond this minimal entry-return artifact.
+`in compile --target native --target-triple x86_64-pc-windows-msvc --linkage executable --entry answer --out target/answer.exe` emits a PE32+ AMD64 console executable whose entry imports `kernel32.dll!ExitProcess` and exits with the const-evaluated scalar value. It does not link a CRT, emit unwind metadata, or claim Windows ABI/runtime coverage beyond this minimal process-exit artifact.
 
 `in compile --target native --target-triple aarch64-apple-darwin --linkage executable --entry answer --out target/Answer.app` emits a macOS `.app` bundle containing the owned AArch64 Mach-O executable plus `Info.plist` and `PkgInfo`. A normal host executable path without `.app` remains the host native route.
 
@@ -65,6 +65,8 @@ Explicit `--target-triple` requests fail closed when the owned backend has no ta
 The runnable cross-artifact example lives in `apps/native-artifact-sample/`. Run `bash scripts/check-native-artifact-sample.sh` to build and inspect the supported ELF, PE, Mach-O bundle, AppDir, object, archive, and WASM outputs from one `.in` source file.
 
 `bash scripts/check-native-linkable-objects.sh` links the x86_64 ELF relocatable object into a C harness and runs it on Linux x86_64 hosts with `cc`; other hosts skip that runtime gate.
+
+`bash scripts/check-native-windows-executable.sh` validates the PE32+ import table and runs the generated `.exe` through Wine when Wine or Docker is available. This is a runtime smoke test, not a replacement for native Windows CI.
 
 ## Compile cache (Wave 6)
 

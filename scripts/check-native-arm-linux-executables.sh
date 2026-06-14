@@ -49,8 +49,17 @@ if command -v qemu-aarch64 >/dev/null 2>&1; then
     echo "qemu-aarch64 exit mismatch: $code" >&2
     exit 1
   fi
+elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+  set +e
+  docker run --rm --platform linux/arm64 -v "$ROOT/$OUT:/work:ro" alpine:3.20 /work/answer-aarch64
+  code=$?
+  set -e
+  if [[ "$code" -ne 42 ]]; then
+    echo "docker linux/arm64 exit mismatch: $code" >&2
+    exit 1
+  fi
 else
-  echo "native-arm-linux-executables: skip qemu-aarch64 runtime (not installed)"
+  echo "native-arm-linux-executables: skip aarch64 runtime (qemu-aarch64 and Docker unavailable)"
 fi
 
 if command -v qemu-arm >/dev/null 2>&1; then
@@ -63,8 +72,17 @@ if command -v qemu-arm >/dev/null 2>&1; then
     echo "qemu-arm exit mismatch: $code" >&2
     exit 1
   fi
+elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+  set +e
+  docker run --rm --platform linux/arm/v7 -v "$ROOT/$OUT:/work:ro" alpine:3.20 /work/answer-armv7
+  code=$?
+  set -e
+  if [[ "$code" -ne 42 ]]; then
+    echo "docker linux/arm/v7 exit mismatch: $code" >&2
+    exit 1
+  fi
 else
-  echo "native-arm-linux-executables: skip qemu-arm runtime (not installed)"
+  echo "native-arm-linux-executables: skip armv7 runtime (qemu-arm and Docker unavailable)"
 fi
 
 echo "native ARM Linux executable checks passed"

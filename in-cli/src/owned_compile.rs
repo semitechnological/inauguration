@@ -1273,7 +1273,7 @@ mod tests {
 
         assert!(report.success, "{:?}", report);
         assert_eq!(report.backend_level, "owned-native-subset-x86_64");
-        assert_eq!(report.runtime_level, "windows-entry-return");
+        assert_eq!(report.runtime_level, "windows-exitprocess");
         assert_eq!(
             report.reason_code.as_deref(),
             Some("native-x86_64-windows-exe-subset")
@@ -1286,6 +1286,8 @@ mod tests {
             u16::from_le_bytes(bytes[pe_off + 4..pe_off + 6].try_into().unwrap()),
             0x8664
         );
+        assert!(bytes.windows(12).any(|window| window == b"KERNEL32.dll"));
+        assert!(bytes.windows(11).any(|window| window == b"ExitProcess"));
 
         fs::remove_file(source_path).unwrap();
         fs::remove_file(&out_path).unwrap();
