@@ -93,6 +93,15 @@ const X86_64_WINDOWS_TARGET: NativeEmitTargetStatus = NativeEmitTargetStatus {
     artifact_kind: "pe-executable",
 };
 
+const X86_64_FREESTANDING_TARGET: NativeEmitTargetStatus = NativeEmitTargetStatus {
+    triple: "x86_64-unknown-none",
+    format: "elf",
+    implemented: true,
+    stage: "owned-object-subset-freestanding",
+    reason_code: NATIVE_EMIT_IMPLEMENTED,
+    artifact_kind: "elf-relocatable-object",
+};
+
 const WASM32_TARGET: NativeEmitTargetStatus = NativeEmitTargetStatus {
     triple: "wasm32-unknown-unknown",
     format: "wasm",
@@ -105,6 +114,7 @@ const WASM32_TARGET: NativeEmitTargetStatus = NativeEmitTargetStatus {
 const NATIVE_EMIT_TARGETS: &[NativeEmitTargetStatus] = &[
     MACHO_TARGET,
     AARCH64_MACHO_STATICLIB_TARGET,
+    X86_64_FREESTANDING_TARGET,
     ELF_LINUX_TARGET,
     AARCH64_ELF_LINUX_TARGET,
     ARM32_ELF_LINUX_TARGET,
@@ -163,16 +173,18 @@ mod tests {
     #[test]
     fn registry_lists_macho_and_elf_targets() {
         let targets = all_native_emit_targets();
-        assert_eq!(targets.len(), 7);
+        assert_eq!(targets.len(), 8);
         assert_eq!(targets[0].format, "mach-o");
         assert_eq!(targets[1].artifact_kind, "mach-o-static-archive+app-bundle");
-        assert_eq!(targets[2].triple, "x86_64-unknown-linux-gnu");
+        assert_eq!(targets[2].triple, "x86_64-unknown-none");
         assert_eq!(targets[2].format, "elf");
-        assert_eq!(targets[3].triple, "aarch64-unknown-linux-gnu");
-        assert_eq!(targets[4].triple, "armv7-unknown-linux-gnueabihf");
-        assert_eq!(targets[5].triple, "x86_64-pc-windows-msvc");
-        assert_eq!(targets[6].triple, "wasm32-unknown-unknown");
-        assert_eq!(targets[6].format, "wasm");
+        assert_eq!(targets[3].triple, "x86_64-unknown-linux-gnu");
+        assert_eq!(targets[3].format, "elf");
+        assert_eq!(targets[4].triple, "aarch64-unknown-linux-gnu");
+        assert_eq!(targets[5].triple, "armv7-unknown-linux-gnueabihf");
+        assert_eq!(targets[6].triple, "x86_64-pc-windows-msvc");
+        assert_eq!(targets[7].triple, "wasm32-unknown-unknown");
+        assert_eq!(targets[7].format, "wasm");
     }
 
     #[test]

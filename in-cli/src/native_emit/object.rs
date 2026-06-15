@@ -12,6 +12,7 @@ use crate::native_emit::elf::{
 };
 use crate::native_emit::macho::{ExportSymbol, MachOImage, MachOLinkage, write_image};
 use crate::native_emit::wasm::{WASM32_UNKNOWN_TRIPLE, WasmModule, write_scalar_i32_module};
+use crate::native_emit::x86_64_lower::{X86_64_TRIPLE, lower_module};
 
 pub const NATIVE_OBJECT_SUBSET: &str = "native-object-subset";
 
@@ -55,6 +56,7 @@ pub fn emit_native_object(request: &NativeObjectRequest<'_>) -> Option<NativeObj
             Some(emit_arm32_elf_executable(request))
         }
         (WASM32_UNKNOWN_TRIPLE, NativeLinkage::StaticLib) => Some(emit_wasm32_module(request)),
+        (X86_64_TRIPLE, NativeLinkage::StaticLib) => Some(emit_x86_64_freestanding_object(request)),
         _ => None,
     }
 }
@@ -200,6 +202,47 @@ fn emit_x86_64_elf_executable(request: &NativeObjectRequest<'_>) -> NativeObject
         reason_code: "native-x86_64-linux-exit-subset",
         reason: "inauguration owns ELF64 Linux executable emission for const-evaluable scalar entry functions on this target",
         abi_manifest: None,
+    }
+}
+
+fn emit_x86_64_freestanding_object(request: &NativeObjectRequest<'_>) -> NativeObjectArtifact {
+    // Use real x86_64 lowering for freestanding targets
+    match lower_module(request.module, request.entry) {
+        Ok(result) => {
+            let mut bytes = Vec::new();
+            let object = ElfObject {
+                code: result.code,
+                export_name: request.entry.to_string(),
+            };
+            write_x86_64_relocatable_object(&object, &mut bytes);
+            NativeObjectArtifact {
+                bytes,
+                artifact_kind: "elf-relocatable-object",
+                backend_level: "owned-native-subset-freestanding",
+                runtime_level: "freestanding-none",
+                reason_code: "native-x86_64-unknown-none-freestanding",
+                reason: "inauguration owns ELF64 relocatable object emission for real x86_64 freestanding function bodies",
+                abi_manifest: Some(object_abi_manifest(request)),
+            }
+        }
+        Err(_err) => {
+            // Fallback to const-evaluated exit code for trivial functions
+            let object = ElfObject {
+                code: x86_64_return_i32_object_code(request.exit_code),
+                export_name: request.entry.to_string(),
+            };
+            let mut bytes = Vec::new();
+            write_x86_64_relocatable_object(&object, &mut bytes);
+            NativeObjectArtifact {
+                bytes,
+                artifact_kind: "elf-relocatable-object",
+                backend_level: "owned-object-subset",
+                runtime_level: "freestanding-none",
+                reason_code: "native-object-subset",
+                reason: "inauguration owns ELF64 relocatable object emission for const-evaluable scalar entry functions on freestanding target",
+                abi_manifest: Some(object_abi_manifest(request)),
+            }
+        }
     }
 }
 

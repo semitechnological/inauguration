@@ -158,6 +158,7 @@ fn collect_module_facts(module: &UnifiedModule) -> Result<ModuleFacts, String> {
                 );
             }
             Decl::Interface { .. } => {}
+            Decl::Component { .. } => {}
         }
     }
 

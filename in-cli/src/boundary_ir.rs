@@ -141,3 +141,108 @@ impl CompileArtifact {
         }
     }
 }
+
+// ── Component Metadata (generic SCI-like sidecar) ──────────────
+
+/// Code section descriptor for a compiled component.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeSection {
+    pub name: String,
+    pub offset: u64,
+    pub size: u64,
+    pub flags: String,
+}
+
+/// Data section descriptor for a compiled component.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DataSection {
+    pub name: String,
+    pub offset: u64,
+    pub size: u64,
+    pub flags: String,
+}
+
+/// Capability declaration in component metadata.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CapabilityDecl {
+    pub name: String,
+    pub capability_type: String,
+    pub args: Vec<String>,
+}
+
+/// Object schema (struct layout) referenced by a component.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ObjectSchema {
+    pub name: String,
+    pub fields: Vec<ObjectField>,
+    pub size: u64,
+    pub align: u64,
+}
+
+/// Field within an object schema.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ObjectField {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub typ: String,
+    pub offset: u64,
+    pub size: u64,
+}
+
+/// Memory requirements for a component.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryRequirements {
+    pub stack: u64,
+    pub heap: u64,
+    pub static_data: u64,
+}
+
+/// Build provenance metadata.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Provenance {
+    pub compiler: String,
+    pub compiler_version: String,
+    pub source_hash: String,
+}
+
+/// Service import declaration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServiceImport {
+    pub name: String,
+    pub interface: String,
+}
+
+/// Service export declaration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServiceExport {
+    pub name: String,
+    pub interface: String,
+}
+
+/// Generic component metadata sidecar.
+///
+/// Emitted alongside compiled artifacts when the source contains
+/// component declarations. This is the generic metadata shape
+/// that SCI (Space Component Image) and other component-loading
+/// contracts can consume.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ComponentMetadata {
+    pub component: String,
+    pub target: String,
+    pub entry: Option<String>,
+    pub code_sections: Vec<CodeSection>,
+    pub data_sections: Vec<DataSection>,
+    pub imports: Vec<ServiceImport>,
+    pub exports: Vec<ServiceExport>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capabilities_required: Vec<CapabilityDecl>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capabilities_exported: Vec<CapabilityDecl>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub object_schemas: Vec<ObjectSchema>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory: Option<MemoryRequirements>,
+    pub checkpoint: String,
+    pub deterministic: bool,
+    pub provenance: Provenance,
+}

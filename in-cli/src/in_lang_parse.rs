@@ -1,7 +1,8 @@
 //! `.in` v0.2: top-level `struct` / `fn` with multiline struct bodies and minimal `fn` bodies.
 
 use crate::core_ir::{
-    CoreModuleIdentity, Decl, FloatVal, MethodSig, Typ, UnifiedModule, Visibility,
+    ComponentCapability, ComponentExport, ComponentImport, CoreModuleIdentity, Decl, FloatVal,
+    MethodSig, Typ, UnifiedModule, Visibility,
 };
 use crate::core_ir::{Expr, LoopKind, Stmt};
 use std::collections::{HashMap, HashSet};
@@ -243,7 +244,8 @@ pub fn split_top_level_decl_blocks(source: &str) -> Vec<String> {
                     || t.starts_with("struct ")
                     || t.starts_with("extern ")
                     || t.starts_with("class ")
-                    || t.starts_with("interface "))
+                    || t.starts_with("interface ")
+                    || t.starts_with("component "))
             {
                 current = Some(vec![t.to_string()]);
                 depth += delta;
@@ -646,6 +648,114 @@ fn parse_class_block(block: &str) -> Result<Decl, String> {
         extends,
         implements,
         type_params: vec![],
+    })
+}
+
+fn parse_component_block(block: &str) -> Result<Decl, String> {
+    let t = trim(block);
+    let rest = t
+        .strip_prefix("component ")
+        .ok_or_else(|| ".in: expected `component`".to_string())?;
+    let open = rest
+        .find('{')
+        .ok_or_else(|| ".in: component must contain `{`".to_string())?;
+    let name = trim(&rest[..open]).to_string();
+    if name.is_empty() {
+        return Err(".in: component name missing".into());
+    }
+    let inner = brace_content_after_open(rest, open)
+        .ok_or_else(|| ".in: unclosed `component { ... }`".to_string())?;
+
+    let mut target = String::new();
+    let mut deterministic = false;
+    let mut checkpoint = String::new();
+    let mut imports = Vec::new();
+    let mut exports = Vec::new();
+    let mut capabilities = Vec::new();
+
+    for raw_line in inner.lines() {
+        let line = trim(strip_line_comment_outside_strings(raw_line));
+        if line.is_empty() || line.starts_with("//") {
+            continue;
+        }
+        if let Some(val) = line.strip_prefix("target ") {
+            let val = trim(val);
+            target = val
+                .trim_matches('"')
+                .trim_matches('\'')
+                .trim_end_matches(';')
+                .trim()
+                .to_string();
+            if target.is_empty() {
+                return Err(".in: component target missing".into());
+            }
+        } else if let Some(val) = line.strip_prefix("deterministic ") {
+            deterministic = match trim(val).trim_end_matches(';').trim() {
+                "true" => true,
+                "false" => false,
+                other => {
+                    return Err(format!(
+                        ".in: component deterministic must be true/false, got `{other}`"
+                    ));
+                }
+            };
+        } else if let Some(val) = line.strip_prefix("checkpoint ") {
+            checkpoint = trim(val).trim_end_matches(';').trim().to_string();
+            if checkpoint.is_empty() {
+                return Err(".in: component checkpoint policy missing".into());
+            }
+        } else if let Some(val) = line.strip_prefix("import ") {
+            let val = trim(val).trim_end_matches(';').trim();
+            let (name, interface) = val.split_once(':').ok_or_else(|| {
+                format!(".in: component import must be `name: Interface`, got `{val}`")
+            })?;
+            imports.push(ComponentImport {
+                name: trim(name).to_string(),
+                interface: trim(interface).to_string(),
+            });
+        } else if let Some(val) = line.strip_prefix("export ") {
+            let val = trim(val).trim_end_matches(';').trim();
+            let (name, interface) = val.split_once(':').ok_or_else(|| {
+                format!(".in: component export must be `name: Interface`, got `{val}`")
+            })?;
+            exports.push(ComponentExport {
+                name: trim(name).to_string(),
+                interface: trim(interface).to_string(),
+            });
+        } else if let Some(val) = line.strip_prefix("capability ") {
+            let val = trim(val).trim_end_matches(';').trim();
+            let (name_and_type, args_part) = val.split_once('(').unwrap_or((val, ""));
+            let args = if args_part.is_empty() {
+                Vec::new()
+            } else {
+                let args_str = args_part.trim_end_matches(')').trim();
+                args_str
+                    .split(',')
+                    .map(|a| trim(a).to_string())
+                    .filter(|a| !a.is_empty())
+                    .collect()
+            };
+            let (name, capability_type) = name_and_type.split_once(':').ok_or_else(|| {
+                format!(".in: component capability must be `name: Type(args)`, got `{val}`")
+            })?;
+            capabilities.push(ComponentCapability {
+                name: trim(name).to_string(),
+                capability_type: trim(capability_type).to_string(),
+                args,
+            });
+        } else {
+            return Err(format!(".in: unknown component field `{line}`"));
+        }
+    }
+
+    Ok(Decl::Component {
+        name,
+        target,
+        deterministic,
+        checkpoint,
+        imports,
+        exports,
+        capabilities,
     })
 }
 
@@ -1804,8 +1914,13 @@ fn parse_module_from_blocks(blocks: &[String]) -> Result<UnifiedModule, String> 
             decls.push(parse_class_block(block)?);
         } else if line.starts_with("interface ") {
             decls.push(parse_interface_block(block)?);
+        } else if line.starts_with("component ") {
+            decls.push(parse_component_block(block)?);
         } else {
-            return Err(".in: expected top-level `fn`, `struct`, `class`, or `interface`".into());
+            return Err(
+                ".in: expected top-level `fn`, `struct`, `class`, `interface`, or `component`"
+                    .into(),
+            );
         }
     }
     Ok(UnifiedModule::new(decls))
@@ -1957,6 +2072,7 @@ pub fn parse_in_surface_info(source: &str) -> Result<InSurfaceInfo, String> {
                 || line.starts_with("struct ")
                 || line.starts_with("class ")
                 || line.starts_with("interface ")
+                || line.starts_with("component ")
             {
                 depth += brace_delta(raw_line);
                 if depth < 0 {
@@ -1992,6 +2108,7 @@ fn duplicate_top_level_names(module: &UnifiedModule) -> Vec<String> {
             Decl::Struct { name, .. } | Decl::Class { name, .. } => names.push(name.clone()),
             Decl::Function { name, .. } => names.push(name.clone()),
             Decl::Interface { .. } => {}
+            Decl::Component { name, .. } => names.push(name.clone()),
         }
     }
     let mut seen = HashSet::new();
@@ -2475,7 +2592,9 @@ fn parse_in_module_without_validation(
 
 fn validate_module(module: &UnifiedModule, require_main: bool) -> Result<(), String> {
     if module.decls.is_empty() {
-        return Err(".in: no top-level struct, class, interface, or fn after filtering".into());
+        return Err(
+            ".in: no top-level struct, class, interface, component, or fn after filtering".into(),
+        );
     }
 
     if let Some(dup) = duplicate_top_level_names(module).first() {
@@ -2540,6 +2659,7 @@ fn validate_module(module: &UnifiedModule, require_main: bool) -> Result<(), Str
                 }
             }
             Decl::Interface { .. } => {}
+            Decl::Component { .. } => {}
         }
     }
 
@@ -4262,6 +4382,121 @@ fn main() -> void
         assert_eq!(
             MatchPattern::parse("my_var").unwrap(),
             MatchPattern::IdentPat("my_var".into())
+        );
+    }
+
+    #[test]
+    fn parse_component_declaration() {
+        let src = r#"
+component TestComp {
+  target "x86_64"
+  deterministic true
+  checkpoint full
+
+  import dep: DepInterface
+  export api: PubInterface
+  capability log: DebugConsole(write)
+}
+
+interface DepInterface {
+  fn helper(x: Int) -> String
+}
+
+interface PubInterface {
+  fn run() -> Int
+}
+
+fn main() -> void {}
+"#;
+        let module = parse_in_source(src).expect("component should parse");
+
+        let comp = module.decls.iter().find_map(|d| match d {
+            Decl::Component { name, .. } if name == "TestComp" => Some(d),
+            _ => None,
+        });
+        assert!(comp.is_some(), "expected TestComp component");
+
+        if let Decl::Component {
+            target,
+            deterministic,
+            checkpoint,
+            imports,
+            exports,
+            capabilities,
+            ..
+        } = comp.unwrap()
+        {
+            assert_eq!(target, "x86_64");
+            assert!(deterministic);
+            assert_eq!(checkpoint, "full");
+            assert_eq!(imports.len(), 1);
+            assert_eq!(imports[0].name, "dep");
+            assert_eq!(imports[0].interface, "DepInterface");
+            assert_eq!(exports.len(), 1);
+            assert_eq!(exports[0].name, "api");
+            assert_eq!(exports[0].interface, "PubInterface");
+            assert_eq!(capabilities.len(), 1);
+            assert_eq!(capabilities[0].name, "log");
+            assert_eq!(capabilities[0].capability_type, "DebugConsole");
+            assert_eq!(capabilities[0].args, vec!["write"]);
+        } else {
+            panic!("expected Component variant");
+        }
+    }
+
+    #[test]
+    fn parse_capability_declaration() {
+        // Test capability with multiple args
+        let src = r#"
+component MultiCap {
+  target "x86_64"
+  deterministic false
+  checkpoint none
+
+  capability mem: PhysicalMemory(discover, map, protect)
+  capability caps: CapabilityTable(create, mint)
+}
+
+fn main() -> void {}
+"#;
+        let module = parse_in_source(src).expect("multi-cap component should parse");
+
+        let comp = module.decls.iter().find_map(|d| match d {
+            Decl::Component { name, .. } if name == "MultiCap" => Some(d),
+            _ => None,
+        });
+        assert!(comp.is_some(), "expected MultiCap component");
+
+        if let Decl::Component { capabilities, .. } = comp.unwrap() {
+            assert_eq!(capabilities.len(), 2);
+
+            assert_eq!(capabilities[0].name, "mem");
+            assert_eq!(capabilities[0].capability_type, "PhysicalMemory");
+            assert_eq!(capabilities[0].args, vec!["discover", "map", "protect"]);
+
+            assert_eq!(capabilities[1].name, "caps");
+            assert_eq!(capabilities[1].capability_type, "CapabilityTable");
+            assert_eq!(capabilities[1].args, vec!["create", "mint"]);
+        } else {
+            panic!("expected Component variant");
+        }
+
+        // Test rejection of unknown component field
+        let bad_src = r#"
+component BadField {
+  target "x86_64"
+  deterministic true
+  checkpoint none
+
+  unknown_field foo
+}
+
+fn main() -> void {}
+"#;
+        let err = parse_in_source(bad_src).expect_err("unknown field should fail");
+        assert!(
+            err.contains("unknown component field"),
+            "unexpected error: {err}"
         );
     }
 }

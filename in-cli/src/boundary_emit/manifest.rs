@@ -1,4 +1,4 @@
-use crate::boundary_ir::BoundaryModule;
+use crate::boundary_ir::{BoundaryModule, ComponentMetadata};
 
 pub fn emit_abi_manifest(module: &BoundaryModule) -> String {
     emit_abi_manifest_with_package(module, None)
@@ -17,6 +17,11 @@ pub fn emit_abi_manifest_with_package(module: &BoundaryModule, package: Option<&
         );
     }
     serde_json::to_string_pretty(&value).unwrap_or_default()
+}
+
+/// Emit component metadata as a JSON sidecar.
+pub fn emit_component_metadata(metadata: &ComponentMetadata) -> String {
+    serde_json::to_string_pretty(metadata).unwrap_or_default()
 }
 
 #[cfg(test)]

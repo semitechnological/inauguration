@@ -318,6 +318,25 @@ impl UnifiedModule {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComponentImport {
+    pub name: String,
+    pub interface: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComponentExport {
+    pub name: String,
+    pub interface: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComponentCapability {
+    pub name: String,
+    pub capability_type: String,
+    pub args: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Decl {
     Struct {
         name: String,
@@ -345,5 +364,14 @@ pub enum Decl {
         methods: Vec<MethodSig>,
         visibility: Visibility,
         type_params: Vec<String>,
+    },
+    Component {
+        name: String,
+        target: String,
+        deterministic: bool,
+        checkpoint: String,
+        imports: Vec<ComponentImport>,
+        exports: Vec<ComponentExport>,
+        capabilities: Vec<ComponentCapability>,
     },
 }

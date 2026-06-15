@@ -392,7 +392,7 @@ fn validate_module(
     for d in &module.decls {
         match d {
             Decl::Struct { name, .. } | Decl::Function { name, .. } => names.push(name.clone()),
-            Decl::Class { .. } | Decl::Interface { .. } => {}
+            Decl::Class { .. } | Decl::Interface { .. } | Decl::Component { .. } => {}
         }
     }
     let mut seen = HashSet::new();
@@ -444,7 +444,7 @@ fn validate_module(
                     return Err(format!("icore: unknown return type in function `{name}`"));
                 }
             }
-            Decl::Class { .. } | Decl::Interface { .. } => {}
+            Decl::Class { .. } | Decl::Interface { .. } | Decl::Component { .. } => {}
         }
     }
     Ok(())

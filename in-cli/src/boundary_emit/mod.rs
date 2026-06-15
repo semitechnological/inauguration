@@ -4,7 +4,7 @@ pub mod probes;
 pub mod swift_wrapper;
 
 pub use c_header::emit_c_header;
-pub use manifest::{emit_abi_manifest, emit_abi_manifest_with_package};
+pub use manifest::{emit_abi_manifest, emit_abi_manifest_with_package, emit_component_metadata};
 pub use probes::{LayoutProbes, emit_layout_probes};
 pub use swift_wrapper::{
     SwiftBoundaryEmit, emit_swift_boundary, emit_swift_layout_probes, emit_swift_wrapper,

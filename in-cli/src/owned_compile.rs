@@ -2,6 +2,7 @@ use crate::bytecode_compiler;
 use crate::compile_cache;
 use crate::core_ir::{Decl, ModuleIdentityReport, UnifiedModule};
 use crate::core_ir_verifier;
+use crate::in_lang_parse;
 
 use crate::external_guard::{self, ExternalInvocationGuard};
 use crate::native_backend;
@@ -289,11 +290,34 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
             }
         }
         Err(err) => {
-            let reason = err.to_string();
-            report.reason_code = Some("frontend-parse-failed".to_string());
-            report.reason = Some(reason.clone());
-            report.error = Some(reason);
-            return finalize_report(&mut report, started, &cwd, &frontend_hash);
+            // For freestanding targets (e.g. x86_64-unknown-none), retry without requiring `fn main`.
+            // Component declarations don't have a `main` entry point.
+            let err_str = err.to_string();
+            if err_str.contains("missing required `fn main`")
+                && request.path.extension().is_some_and(|e| e == "in")
+                && (request.linkage == NativeLinkage::StaticLib
+                    || request
+                        .target_triple
+                        .as_deref()
+                        .is_some_and(|t| t.ends_with("-none")))
+            {
+                match in_lang_parse::parse_in_library_file(&request.path) {
+                    Ok(module) => module,
+                    Err(lib_err) => {
+                        let reason = lib_err;
+                        report.reason_code = Some("frontend-parse-failed".to_string());
+                        report.reason = Some(reason.clone());
+                        report.error = Some(reason);
+                        return finalize_report(&mut report, started, &cwd, &frontend_hash);
+                    }
+                }
+            } else {
+                let reason = err_str;
+                report.reason_code = Some("frontend-parse-failed".to_string());
+                report.reason = Some(reason.clone());
+                report.error = Some(reason);
+                return finalize_report(&mut report, started, &cwd, &frontend_hash);
+            }
         }
     };
 
@@ -483,7 +507,11 @@ fn compile_native(
         .as_ref()
         .ok_or_else(|| "native compile requires --out executable path".to_string())?;
     if let Some(target_triple) = request.target_triple.as_deref() {
-        let exit = const_eval_entry_exit_code(&native_module, module_id, entry)?;
+        let exit = match const_eval_entry_exit_code(&native_module, module_id, entry) {
+            Ok(code) => code,
+            Err(_) if request.linkage == NativeLinkage::StaticLib => 0,
+            Err(err) => return Err(err),
+        };
         if request.linkage == NativeLinkage::Executable
             && target_triple == "aarch64-apple-darwin"
             && path_extension_is(out_path, "app")
@@ -540,6 +568,8 @@ fn compile_native(
             } else {
                 None
             };
+            // Emit component metadata sidecar if the module has component declarations
+            let _meta_path = emit_component_metadata_sidecar(module, entry, out_path);
             return Ok(NativeCompileResult {
                 artifact_path: out_path.display().to_string(),
                 eval_exit_code: if request.linkage == NativeLinkage::Executable {
@@ -577,6 +607,176 @@ fn compile_native(
         reason_code: status.reason_code,
         reason: status.reason,
     })
+}
+
+/// Emit a JSON component metadata sidecar alongside the compiled artifact.
+/// Returns the path if emitted, or None if the module has no component declarations.
+fn emit_component_metadata_sidecar(
+    module: &UnifiedModule,
+    entry: &str,
+    out_path: &Path,
+) -> Option<String> {
+    use crate::boundary_emit::emit_component_metadata;
+    use crate::boundary_ir::{
+        CapabilityDecl, CodeSection, ComponentMetadata, MemoryRequirements, ObjectField,
+        ObjectSchema, Provenance, ServiceExport, ServiceImport,
+    };
+
+    // Find the first component declaration
+    let component = module.decls.iter().find_map(|d| match d {
+        Decl::Component {
+            name,
+            target,
+            deterministic,
+            checkpoint,
+            imports,
+            exports,
+            capabilities,
+        } => Some((
+            name.clone(),
+            target.clone(),
+            *deterministic,
+            checkpoint.clone(),
+            imports.clone(),
+            exports.clone(),
+            capabilities.clone(),
+        )),
+        _ => None,
+    })?;
+
+    let (name, target, deterministic, checkpoint, imports, exports, capabilities) = component;
+
+    // Collect object schemas from struct declarations
+    let object_schemas: Vec<ObjectSchema> = module
+        .decls
+        .iter()
+        .filter_map(|d| match d {
+            Decl::Struct {
+                name: sn, fields, ..
+            } => {
+                let mut offset = 0u64;
+                let obj_fields: Vec<ObjectField> = fields
+                    .iter()
+                    .map(|(fn_, typ)| {
+                        let size = schema_field_size(typ);
+                        let off = offset;
+                        offset += size;
+                        ObjectField {
+                            name: fn_.clone(),
+                            typ: schema_type_name(typ),
+                            offset: off,
+                            size,
+                        }
+                    })
+                    .collect();
+                let size = offset.next_multiple_of(8);
+                Some(ObjectSchema {
+                    name: sn.clone(),
+                    fields: obj_fields,
+                    size,
+                    align: 8,
+                })
+            }
+            _ => None,
+        })
+        .collect();
+
+    let component_name = format!("{}", name);
+    let comp = module
+        .identity
+        .package
+        .as_deref()
+        .map(|pkg| format!("{pkg}/{name}"))
+        .unwrap_or_else(|| component_name);
+
+    let metadata = ComponentMetadata {
+        component: comp,
+        target: target.clone(),
+        entry: Some(entry.to_string()),
+        code_sections: vec![CodeSection {
+            name: ".text".to_string(),
+            offset: 0,
+            size: 0, // filled in after lowering
+            flags: "rx".to_string(),
+        }],
+        data_sections: Vec::new(),
+        imports: imports
+            .into_iter()
+            .map(|i: crate::core_ir::ComponentImport| ServiceImport {
+                name: i.name,
+                interface: i.interface,
+            })
+            .collect(),
+        exports: exports
+            .into_iter()
+            .map(|e: crate::core_ir::ComponentExport| ServiceExport {
+                name: e.name,
+                interface: e.interface,
+            })
+            .collect(),
+        capabilities_required: capabilities
+            .iter()
+            .map(|c: &crate::core_ir::ComponentCapability| CapabilityDecl {
+                name: c.name.clone(),
+                capability_type: c.capability_type.clone(),
+                args: c.args.clone(),
+            })
+            .collect(),
+        capabilities_exported: capabilities
+            .iter()
+            .map(|c: &crate::core_ir::ComponentCapability| CapabilityDecl {
+                name: c.name.clone(),
+                capability_type: c.capability_type.clone(),
+                args: c.args.clone(),
+            })
+            .collect(),
+        object_schemas,
+        memory: Some(MemoryRequirements {
+            stack: 16384,
+            heap: 0,
+            static_data: 0,
+        }),
+        checkpoint: checkpoint.clone(),
+        deterministic,
+        provenance: Provenance {
+            compiler: "inauguration".to_string(),
+            compiler_version: env!("CARGO_PKG_VERSION").to_string(),
+            source_hash: String::new(),
+        },
+    };
+
+    let json = emit_component_metadata(&metadata);
+    let meta_path = out_path.with_extension("component-metadata.json");
+    match std::fs::write(&meta_path, &json) {
+        Ok(()) => Some(meta_path.display().to_string()),
+        Err(_) => None,
+    }
+}
+
+/// Get the size of a Core IR type for schema purposes.
+fn schema_field_size(typ: &crate::core_ir::Typ) -> u64 {
+    match typ {
+        crate::core_ir::Typ::Int | crate::core_ir::Typ::Float | crate::core_ir::Typ::Bool => 8,
+        crate::core_ir::Typ::String => 16,
+        crate::core_ir::Typ::Void => 0,
+        crate::core_ir::Typ::Array(_) => 16,
+        crate::core_ir::Typ::Named(_) => 8,
+        crate::core_ir::Typ::Generic(_) => 8,
+    }
+}
+
+/// Convert a Core IR type to a human-readable schema type name.
+fn schema_type_name(typ: &crate::core_ir::Typ) -> String {
+    match typ {
+        crate::core_ir::Typ::Int => "Int".to_string(),
+        crate::core_ir::Typ::Float => "Float".to_string(),
+        crate::core_ir::Typ::String => "String".to_string(),
+        crate::core_ir::Typ::Bool => "Bool".to_string(),
+        crate::core_ir::Typ::Void => "void".to_string(),
+        crate::core_ir::Typ::Named(name) => name.clone(),
+        crate::core_ir::Typ::Generic(name) => name.clone(),
+        crate::core_ir::Typ::Array(elem) => format!("[{}]", schema_type_name(elem)),
+    }
 }
 
 fn path_extension_is(path: &Path, extension: &str) -> bool {

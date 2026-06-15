@@ -58,7 +58,7 @@ fn format_decl(decl: &Decl, out: &mut String) {
             format_body(body, 1, out);
             out.push('}');
         }
-        Decl::Class { .. } | Decl::Interface { .. } => {}
+        Decl::Class { .. } | Decl::Interface { .. } | Decl::Component { .. } => {}
     }
 }
 

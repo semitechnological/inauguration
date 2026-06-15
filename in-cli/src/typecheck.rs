@@ -153,6 +153,7 @@ impl TypeChecker {
                     }
                 }
                 Decl::Interface { .. } => {}
+                Decl::Component { .. } => {}
             }
         }
 

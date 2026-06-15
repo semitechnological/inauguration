@@ -159,6 +159,7 @@ fn collect_module_facts(module: &UnifiedModule) -> Result<ModuleFacts<'_>, (Stri
                 functions.insert(name.as_str(), FunctionSig { params, ret });
             }
             Decl::Interface { .. } => {}
+            Decl::Component { .. } => {}
         }
     }
 

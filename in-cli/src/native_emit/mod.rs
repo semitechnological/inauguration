@@ -9,6 +9,8 @@ pub mod object;
 pub mod raw;
 pub mod target;
 pub mod wasm;
+pub mod x86_64;
+pub mod x86_64_lower;
 
 pub use coff::{COFF_WINDOWS_TRIPLE, CoffDll, CoffExe, write_dll, write_exe};
 pub use elf::{
