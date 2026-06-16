@@ -13,6 +13,7 @@ use crate::parser_registry::ParserId;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use tree_sitter::{Language, Node, Parser};
+use tree_sitter_swift;
 
 type ZigLayoutFields = Vec<(String, String)>;
 type ZigLayoutSpec = (BoundaryRepr, ZigLayoutFields);
@@ -102,6 +103,7 @@ fn dispatch(id: ParserId, path: &Path, src: &str) -> Result<UnifiedModule, Strin
         ParserId::Erlang => parse_lang(tree_sitter_erlang::LANGUAGE.into(), src, extract_erlang),
         ParserId::Haskell => parse_lang(tree_sitter_haskell::LANGUAGE.into(), src, extract_haskell),
         ParserId::Julia => parse_lang(tree_sitter_julia::LANGUAGE.into(), src, extract_julia),
+        ParserId::Swift => parse_lang(tree_sitter_swift::LANGUAGE.into(), src, extract_swift),
         ParserId::R => parse_lang(tree_sitter_r::LANGUAGE.into(), src, extract_r_lang),
         ParserId::In
         | ParserId::Icore

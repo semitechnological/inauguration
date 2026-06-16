@@ -54,6 +54,7 @@ pub enum ParserId {
     Go,
     V,
     Rust,
+    Swift,
     Zig,
     Dart,
     Lua,
@@ -98,6 +99,7 @@ impl ParserId {
             ParserId::Go => "go",
             ParserId::V => "v",
             ParserId::Rust => "rust",
+            ParserId::Swift => "swift",
             ParserId::Zig => "zig",
             ParserId::Dart => "dart",
             ParserId::Lua => "lua",
@@ -129,7 +131,7 @@ impl ParserId {
                 "dynamic OO / scripting"
             }
             ParserId::JavaScript | ParserId::TypeScript => "ECMAScript-shaped",
-            ParserId::Go | ParserId::V | ParserId::Rust | ParserId::Zig => "systems / curly-brace",
+            ParserId::Go | ParserId::V | ParserId::Rust | ParserId::Swift | ParserId::Zig => "systems / curly-brace",
             ParserId::Dart | ParserId::Lua => "OO / embeddable",
             ParserId::Clojure
             | ParserId::Elixir
@@ -144,11 +146,11 @@ impl ParserId {
     }
 }
 
-/// Map a **lowercase** extension (no leading dot) to a tracked front. `swift` is intentionally absent
-/// so the Swift toolchain path handles `.swift`.
+/// Map a **lowercase** extension (no leading dot) to a tracked front.
 #[must_use]
 pub fn parser_id_from_extension(ext: &str) -> Option<ParserId> {
     match ext {
+        "swift" => Some(ParserId::Swift),
         "in" => Some(ParserId::In),
         "icore" => Some(ParserId::Icore),
         "c" | "h" => Some(ParserId::C),
@@ -228,7 +230,7 @@ pub enum ParserCli {
 pub enum ResolvedBuildParser {
     /// Core IR path (implemented: [`ParserId::In`], [`ParserId::Icore`]; stubs: other [`ParserId`]).
     CoreIr(ParserId),
-    /// Swift gather + `sil_emit::emit_textual_sil` (subset-default, optional toolchain fallback).
+    /// Deprecated: Swift now routes through Tree-sitter Core IR like all other languages.
     SwiftSilEmit,
 }
 
@@ -508,7 +510,7 @@ mod tests {
     fn auto_swift_for_swift() {
         assert!(matches!(
             resolve_parser_id(Path::new("App.swift"), ParserCli::Auto),
-            ResolvedBuildParser::SwiftSilEmit
+            ResolvedBuildParser::CoreIr(ParserId::Swift)
         ));
     }
 
