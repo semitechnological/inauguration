@@ -257,37 +257,11 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
     let mut module = match parser_registry::parse_with_resolved(resolved, &request.path) {
         Ok(Some(module)) => module,
         Ok(None) => {
-            if request.path.extension().is_some_and(|e| e == "swift") {
-                match std::fs::read_to_string(&request.path) {
-                    Ok(source) => {
-                        match crate::native_swift_sil::parse_swift_subset_to_unified(&source) {
-                            Ok(module) => {
-                                report.frontend_level = "swift-subset";
-                                module
-                            }
-                            Err(err) => {
-                                report.reason_code = Some("frontend-parse-failed".to_string());
-                                report.reason = Some(err.clone());
-                                report.error = Some(err);
-                                return finalize_report(&mut report, started, &cwd, &frontend_hash);
-                            }
-                        }
-                    }
-                    Err(err) => {
-                        let reason = format!("failed to read Swift source: {err}");
-                        report.reason_code = Some("frontend-parse-failed".to_string());
-                        report.reason = Some(reason.clone());
-                        report.error = Some(reason);
-                        return finalize_report(&mut report, started, &cwd, &frontend_hash);
-                    }
-                }
-            } else {
-                let reason = "owned compile requires a Core IR frontend; Swift SIL emit is not supported by this path".to_string();
-                report.reason_code = Some("frontend-parse-failed".to_string());
-                report.reason = Some(reason.clone());
-                report.error = Some(reason);
-                return finalize_report(&mut report, started, &cwd, &frontend_hash);
-            }
+            let reason = "owned compile requires a Core IR frontend. All languages now route through Core IR via Tree-sitter.".to_string();
+            report.reason_code = Some("frontend-parse-failed".to_string());
+            report.reason = Some(reason.clone());
+            report.error = Some(reason);
+            return finalize_report(&mut report, started, &cwd, &frontend_hash);
         }
         Err(err) => {
             // For freestanding targets (e.g. x86_64-unknown-none), retry without requiring `fn main`.

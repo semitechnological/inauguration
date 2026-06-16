@@ -231,7 +231,7 @@ pub enum ResolvedBuildParser {
     /// Core IR path (implemented: [`ParserId::In`], [`ParserId::Icore`]; stubs: other [`ParserId`]).
     CoreIr(ParserId),
     /// Deprecated: Swift now routes through Tree-sitter Core IR like all other languages.
-    SwiftSilEmit,
+    Swift,
 }
 
 /// `IN_PARSER=in` or `IN_PARSER=icore` forces the matching Core IR front (any file path).
@@ -312,7 +312,7 @@ pub fn resolve_parser_id(path: &Path, cli: ParserCli) -> ResolvedBuildParser {
                     return ResolvedBuildParser::CoreIr(id);
                 }
             }
-            ResolvedBuildParser::SwiftSilEmit
+            ResolvedBuildParser::Swift
         }
     }
 }
@@ -353,7 +353,7 @@ pub fn parse_with_resolved(
     path: &Path,
 ) -> Result<Option<UnifiedModule>, ParserRegistryError> {
     match resolved {
-        ResolvedBuildParser::SwiftSilEmit => Ok(None),
+        ResolvedBuildParser::Swift => Ok(None),
         ResolvedBuildParser::CoreIr(ParserId::In) => InLangParser.parse_to_core(path).map(Some),
         ResolvedBuildParser::CoreIr(ParserId::Icore) => {
             crate::compiler::icore::parse_icore_file(path)
@@ -614,7 +614,7 @@ mod tests {
         std::fs::write(&path, "#!in parser=nope\n").expect("write temp");
         assert!(matches!(
             resolve_parser_id(&path, ParserCli::Auto),
-            ResolvedBuildParser::SwiftSilEmit
+            ResolvedBuildParser::Swift
         ));
         let _ = std::fs::remove_file(&path);
     }

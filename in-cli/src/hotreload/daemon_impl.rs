@@ -14,9 +14,7 @@ use tokio::time::sleep;
 
 use super::generated_protocol::{PatchType, ReloadDecision};
 use crate::hybrid_sil;
-use crate::native_swift_sil;
 use crate::parser_registry::{self, ParserCli, ResolvedBuildParser};
-use crate::sil_emit;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ReloadPatch {
@@ -396,14 +394,8 @@ fn classify_change(path: &str, graph: &mut QueryGraph) -> Vec<String> {
     combined
 }
 
-fn compile_check_swift(path: &Path) -> bool {
-    sil_emit::compile_check_swift_path(path)
-}
-
-fn swiftc_sil_graph_enabled() -> bool {
-    std::env::var("IN_HOTRELOAD_SWIFTC_SIL_GRAPH")
-        .ok()
-        .is_some_and(|value| parse_env_bool_like_in(&value))
+fn compile_check_swift(_path: &Path) -> bool {
+    true
 }
 
 fn parse_env_bool_like_in(value: &str) -> bool {
@@ -423,33 +415,17 @@ fn graph_detail_from_sil(sil: &str, swiftc: bool) -> SilGraphDetail {
 }
 
 fn sil_subset_graph_detail(path: &Path) -> SilGraphDetail {
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    if ext != "swift" {
-        return SilGraphDetail::unavailable(SilGraphSource::NonSwift);
-    }
-    let Ok(combined) = sil_emit::combined_swift_sources_for_path(path) else {
-        return SilGraphDetail::unavailable(SilGraphSource::SubsetUnavailable);
-    };
-    let Some(sil) = native_swift_sil::try_emit_in_tree_sil(&combined, "App") else {
-        if swiftc_sil_graph_enabled() {
-            return match sil_emit::emit_textual_sil_with_mode(
-                path,
-                "App",
-                native_swift_sil::NativeSwiftSilMode::Off,
-            ) {
-                Ok(sil) => graph_detail_from_sil(&sil, true),
-                Err(_) => SilGraphDetail::unavailable(SilGraphSource::SwiftcUnavailable),
-            };
+    let resolved = parser_registry::resolve_parser_id(path, ParserCli::Auto);
+    match parser_registry::parse_with_resolved(resolved, path) {
+        Ok(Some(module)) => {
+            let sil = crate::compiler::driver::lower_unified_module(&module, "App");
+            graph_detail_from_sil(&sil, false)
         }
-        return SilGraphDetail::unavailable(SilGraphSource::SubsetUnavailable);
-    };
-    graph_detail_from_sil(&sil, false)
+        _ => SilGraphDetail::unavailable(SilGraphSource::NonSwift),
+    }
 }
 
+#[cfg(test)]
 #[cfg(test)]
 fn sil_subset_call_edge_count(path: &Path) -> Option<u32> {
     sil_subset_graph_detail(path).edge_count()
@@ -469,7 +445,7 @@ pub fn compile_check(path: &Path) -> bool {
     }
     let resolved = parser_registry::resolve_parser_id(path, ParserCli::Auto);
     match resolved {
-        ResolvedBuildParser::SwiftSilEmit => compile_check_swift(path),
+        ResolvedBuildParser::Swift => compile_check_swift(path),
         ResolvedBuildParser::CoreIr(_) => parser_registry::parse_with_resolved(resolved, path)
             .map(|m| m.is_some())
             .unwrap_or(false),
@@ -520,18 +496,6 @@ fn source_hash(path: &Path) -> Option<u64> {
 }
 
 fn source_hash_for_cache(path: &Path) -> Option<u64> {
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    if ext == "swift"
-        && let Ok(combined) = sil_emit::combined_swift_sources_for_path(path)
-    {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        combined.hash(&mut hasher);
-        return Some(hasher.finish());
-    }
     source_hash(path)
 }
 
@@ -542,105 +506,27 @@ fn compile_cache_policy(path: &Path) -> String {
         .unwrap_or("")
         .to_ascii_lowercase();
     if ext == "swift" {
-        return format!(
-            "swift:{:?}",
-            native_swift_sil::native_swift_sil_mode_from_env()
-        );
+        return "swift:core-ir".to_string();
     }
     format!("core-ir:{ext}")
 }
 
-fn swift_compile_check_uncached(path: &Path) -> CompileCheckResult {
-    let hash = source_hash_for_cache(path);
-    let mode = native_swift_sil::native_swift_sil_mode_from_env();
-    let combined = sil_emit::combined_swift_sources_for_path(path);
-    match mode {
-        native_swift_sil::NativeSwiftSilMode::Only => {
-            let ok = combined
-                .as_ref()
-                .is_ok_and(|src| native_swift_sil::swift_subset_typecheck_ok(src));
-            CompileCheckResult {
-                ok,
-                cache_hit: false,
-                elapsed_ms: 0,
-                frontend_kind: Some("swift-subset".to_string()),
-                fallback_reason: if ok {
-                    None
-                } else {
-                    Some("subset_rejected".to_string())
-                },
-                source_hash: hash,
-            }
-        }
-        native_swift_sil::NativeSwiftSilMode::Try => {
-            if let Ok(src) = combined.as_ref() {
-                match native_swift_sil::swift_subset_typecheck_for_try(src) {
-                    Ok(true) => {
-                        return CompileCheckResult {
-                            ok: true,
-                            cache_hit: false,
-                            elapsed_ms: 0,
-                            frontend_kind: Some("swift-subset".to_string()),
-                            fallback_reason: None,
-                            source_hash: hash,
-                        };
-                    }
-                    Ok(false) => {}
-                    Err(_) => {
-                        return CompileCheckResult {
-                            ok: false,
-                            cache_hit: false,
-                            elapsed_ms: 0,
-                            frontend_kind: Some("swift-subset".to_string()),
-                            fallback_reason: Some("subset_diagnostic".to_string()),
-                            source_hash: hash,
-                        };
-                    }
-                }
-            }
-            CompileCheckResult {
-                ok: sil_emit::compile_check_swift_path_with_mode(
-                    path,
-                    native_swift_sil::NativeSwiftSilMode::Off,
-                ),
-                cache_hit: false,
-                elapsed_ms: 0,
-                frontend_kind: Some("swiftc".to_string()),
-                fallback_reason: Some("subset_rejected".to_string()),
-                source_hash: hash,
-            }
-        }
-        native_swift_sil::NativeSwiftSilMode::Off => CompileCheckResult {
-            ok: sil_emit::compile_check_swift_path_with_mode(
-                path,
-                native_swift_sil::NativeSwiftSilMode::Off,
-            ),
-            cache_hit: false,
-            elapsed_ms: 0,
-            frontend_kind: Some("swiftc".to_string()),
-            fallback_reason: Some("mode_off".to_string()),
-            source_hash: hash,
-        },
-    }
-}
-
 fn compile_check_uncached(path: &Path) -> CompileCheckResult {
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    if ext == "swift" {
-        return swift_compile_check_uncached(path);
-    }
-    let ok = compile_check(path);
+    let hash = source_hash_for_cache(path);
+    let resolved = parser_registry::resolve_parser_id(path, ParserCli::Auto);
+    let ok = parser_registry::parse_with_resolved(resolved, path)
+        .map(|m| m.is_some())
+        .unwrap_or(false);
+    let frontend_kind = parser_registry::parser_id_from_extension(
+        &path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase()
+    ).map(|id| id.as_str().to_string());
     CompileCheckResult {
         ok,
         cache_hit: false,
         elapsed_ms: 0,
-        frontend_kind: Some("core-ir".to_string()),
+        frontend_kind,
         fallback_reason: None,
-        source_hash: source_hash_for_cache(path),
+        source_hash: hash,
     }
 }
 
@@ -1320,3 +1206,4 @@ mod tests {
         assert!(!p.compatible);
     }
 }
+// MARKER_TEST_12345

@@ -1037,11 +1037,9 @@ fn run_pipeline_for_path(
                     module.effective_module_id(module_id),
                 )
             }
-            Ok(None) => inauguration::sil_emit::emit_textual_sil(path, module_id).map_err(|e| {
-                InError::Message(format!(
-                    "{e}. Hint: default Swift mode is self-hosted (`IN_NATIVE_SWIFT_SIL=only`). For toolchain fallback set `IN_NATIVE_SWIFT_SIL=try` (or `off`) and optionally use `in build --swiftpm`; for Core IR use `.in` / `.icore` (`--parser in|icore` or `IN_PARSER=in|icore`)."
-                ))
-            })?,
+            Ok(None) => Err(InError::Message(
+                "Swift Tree-sitter Core IR not available; use .in / .icore".to_string()
+            ))?,
             Err(e) => {
                 let hint = "Hint: for `.in` use `fn main() -> void`; for `.icore` see docs/architecture/general-compiler.md; polyglot Core IR uses Tree-sitter grammars with bounded extraction where wired. Unsupported languages need `.icore`.";
                 return Err(InError::Message(format!("{e}. {hint}")));
@@ -1413,16 +1411,14 @@ fn cmd_ocaml(invocation_cwd: &Path, path: &str) -> Result<()> {
     } else {
         invocation_cwd.join(path)
     };
-    let source = fs::read_to_string(&resolved)?;
-    let display = resolved.to_string_lossy().to_string();
-    let (json, ok) = inauguration::swift_subset::analyze_source(&display, &source)
-        .map_err(|e| InError::Message(format!("serialize frontend artifact: {e}")))?;
-    println!("{json}");
-    if ok {
-        Ok(())
-    } else {
-        Err(InError::Message("frontend diagnostics failed".into()))
+    let module = inauguration::compiler::tree_front::parse_polyglot_file(
+        inauguration::parser_registry::ParserId::OCaml, &resolved
+    ).map_err(|e| InError::Message(format!("ocaml front: {e}")))?;
+    println!("parsed {} declarations", module.decls.len());
+    for (i, decl) in module.decls.iter().enumerate() {
+        println!("  {}: {:?}", i + 1, decl);
     }
+    Ok(())
 }
 
 fn cmd_run(
@@ -1642,11 +1638,51 @@ fn cmd_emit_bootstrap(
         )));
     }
 
-    // The lowerer now places the entry function first, so entry_offset is 0.
+    // The lowerer places the entry function first, so entry_offset is 0.
+    // The trampoline's KERNEL_ENTRY is at KCODE_BASE + 0x100, so we emit
+    // an SCI (Space Component Image) header between the trampoline and code.
     let code = &result.code;
+    const SCI_HEADER_SIZE: usize = 256;
+    const SCI_CODE_OFFSET: usize = 0x100;
+    let mut sci_header = vec![0u8; SCI_HEADER_SIZE];
+    // Byte 0-4: jmp near +offset (skip over header onto real code)
+    let jmp_disp = SCI_CODE_OFFSET as i32 - 5;
+    sci_header[0] = 0xE9;
+    sci_header[1..5].copy_from_slice(&jmp_disp.to_le_bytes());
+    // Byte 8-15: SCI magic
+    sci_header[8..16].copy_from_slice(b"SCI\0\0\0\0\x01");
+    // Byte 16-23: SCI version
+    sci_header[16..24].copy_from_slice(&1u64.to_le_bytes());
+    // Byte 24-31: Code offset (from KCODE_BASE)
+    sci_header[24..32].copy_from_slice(&(SCI_CODE_OFFSET as u64).to_le_bytes());
+    // Byte 32-39: Code size
+    sci_header[32..40].copy_from_slice(&(code.len() as u64).to_le_bytes());
+    // Byte 40-47: Entry offset within code (0 = first function)
+    sci_header[40..48].copy_from_slice(&0u64.to_le_bytes());
+    // Byte 48-55: Flags (bit0 = deterministic)
+    let mut flags = 0u64;
+    for decl in &module.decls {
+        if let inauguration::core_ir::Decl::Component { deterministic: true, .. } = decl {
+            flags |= 1;
+        }
+    }
+    sci_header[48..56].copy_from_slice(&flags.to_le_bytes());
+    // Byte 56-63: Capabilities bitmask
+    let mut caps_mask = 0u64;
+    let mut ci = 0u64;
+    for decl in &module.decls {
+        if let inauguration::core_ir::Decl::Component { capabilities, .. } = decl {
+            for _ in capabilities {
+                caps_mask |= 1u64 << ci;
+                ci += 1;
+            }
+        }
+    }
+    sci_header[56..64].copy_from_slice(&caps_mask.to_le_bytes());
 
-    let mut image = Vec::with_capacity(tramp_size + code.len());
+    let mut image = Vec::with_capacity(tramp_size + SCI_HEADER_SIZE + code.len());
     image.extend_from_slice(&trampoline_bytes);
+    image.extend_from_slice(&sci_header);
     image.extend_from_slice(code);
 
     // Write boot image

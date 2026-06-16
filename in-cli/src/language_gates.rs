@@ -100,7 +100,7 @@ pub fn evaluate_path(path: &Path, _entry: &LanguageSupport) -> LanguageGateRepor
 
     let resolved = parser_registry::resolve_parser_id(path, parser_registry::ParserCli::Auto);
 
-    if matches!(resolved, ResolvedBuildParser::SwiftSilEmit) {
+    if matches!(resolved, ResolvedBuildParser::Swift) {
         passed.push(GATE_CORE_IR_DECLS);
         passed.push(GATE_CORE_IR_BODIES);
         passed.push(GATE_TEXTUAL_SIL);

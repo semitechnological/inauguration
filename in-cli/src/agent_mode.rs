@@ -730,7 +730,7 @@ fn parser_preference_from_cli(parser: ParserCli) -> AgentParserPreference {
 fn resolved_parser_id(resolved: ResolvedBuildParser) -> Option<ParserId> {
     match resolved {
         ResolvedBuildParser::CoreIr(id) => Some(id),
-        ResolvedBuildParser::SwiftSilEmit => None,
+        ResolvedBuildParser::Swift => None,
     }
 }
 
@@ -748,7 +748,7 @@ fn parser_decision(
             source_path: path.display().to_string(),
             reason: "parser_registry resolved source to a Core IR frontend".to_string(),
         },
-        ResolvedBuildParser::SwiftSilEmit => ParserDecision {
+        ResolvedBuildParser::Swift => ParserDecision {
             requested: parser_preference_label(preference).to_string(),
             route: "swift_sil_emit".to_string(),
             parser_id: None,
@@ -770,7 +770,7 @@ fn parser_preference_label(preference: &AgentParserPreference) -> &'static str {
 
 fn language_level(resolved: ResolvedBuildParser) -> LanguageLevel {
     match resolved {
-        ResolvedBuildParser::SwiftSilEmit => LanguageLevel {
+        ResolvedBuildParser::Swift => LanguageLevel {
             level: 2,
             label: "native Swift subset to SIL".to_string(),
         },
