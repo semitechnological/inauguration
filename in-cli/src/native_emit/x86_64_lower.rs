@@ -1281,7 +1281,9 @@ fn lower_expr_into(
                 _ => {}
             }
 
-            // Evaluate arguments into registers (System V AMD64 ABI)
+            // Evaluate arguments into registers (System V AMD64 ABI).
+            // Save previously-computed arg registers before evaluating each
+            // subsequent arg, because nested calls/intrinsics may clobber them.
             let arg_regs = [RDI, RSI, RDX, RCX, 8, 9];
             if args.len() > 6 {
                 return Err(format!(
@@ -1290,7 +1292,17 @@ fn lower_expr_into(
                 ));
             }
             for (i, arg) in args.iter().enumerate() {
+                if i > 0 {
+                    for j in 0..i {
+                        emitter.emit_insns(&x86_64::push_r(arg_regs[j]));
+                    }
+                }
                 lower_expr_into(emitter, ctx, arg, arg_regs[i], pending_calls)?;
+                if i > 0 {
+                    for j in (0..i).rev() {
+                        emitter.emit_insns(&x86_64::pop_r(arg_regs[j]));
+                    }
+                }
             }
 
             // Emit call (placeholder, patched later)

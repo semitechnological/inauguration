@@ -1657,11 +1657,69 @@ fn cmd_emit_bootstrap(
     std::fs::write(out_path, &image)
         .map_err(|e| InError::Message(format!("write boot image: {e}")))?;
 
-    if !_metadata.is_some_and(|_| true) {
-        // Emit component metadata alongside the boot image
-        let meta_path = out_path.with_extension("component-metadata.json");
-        let _ = std::fs::write(&meta_path, "{}");
+    // Emit component metadata as JSON sidecar (SCI profile, not Space-branded)
+    let meta_path = out_path.with_extension("component-metadata.json");
+    let mut schemas: Vec<serde_json::Value> = Vec::new();
+    let mut component = serde_json::json!(null);
+    let mut target = serde_json::json!(null);
+    let mut deterministic = serde_json::json!(null);
+    let mut checkpoint = serde_json::json!(null);
+    let mut imports = serde_json::json!([]);
+    let mut exports = serde_json::json!([]);
+    let mut caps = serde_json::json!([]);
+    for decl in &module.decls {
+        match decl {
+            inauguration::core_ir::Decl::Component {
+                name, target: t, deterministic: det, checkpoint: chk,
+                imports: imps, exports: exps, capabilities: capabs, ..
+            } => {
+                component = serde_json::json!(name);
+                target = serde_json::json!(t);
+                deterministic = serde_json::json!(det);
+                checkpoint = serde_json::json!(chk);
+                imports = serde_json::json!(imps.iter().map(|i| {
+                    serde_json::json!({"name": i.name, "interface": i.interface})
+                }).collect::<Vec<_>>());
+                exports = serde_json::json!(exps.iter().map(|e| {
+                    serde_json::json!({"name": e.name, "interface": e.interface})
+                }).collect::<Vec<_>>());
+                caps = serde_json::json!(capabs.iter().map(|c| {
+                    serde_json::json!({
+                        "name": c.name,
+                        "capability_type": c.capability_type,
+                        "args": c.args,
+                    })
+                }).collect::<Vec<_>>());
+            }
+            inauguration::core_ir::Decl::Struct { name, fields, .. } => {
+                let schema_fields: Vec<serde_json::Value> = fields.iter().map(|(fn_, typ)| {
+                    serde_json::json!({"name": fn_, "type": format!("{:?}", typ)})
+                }).collect();
+                schemas.push(serde_json::json!({
+                    "name": name,
+                    "fields": schema_fields,
+                }));
+            }
+            _ => {}
+        }
     }
+    let meta = serde_json::json!({
+        "component": component,
+        "target": target,
+        "entry": entry_name,
+        "imports": imports,
+        "exports": exports,
+        "capabilities_required": caps,
+        "object_schemas": schemas,
+        "deterministic": deterministic,
+        "checkpoint": checkpoint,
+        "code_size": result.code.len(),
+        "provenance": {
+            "compiler": "inauguration",
+            "compiler_version": env!("CARGO_PKG_VERSION"),
+        }
+    });
+    let _ = std::fs::write(&meta_path, serde_json::to_string_pretty(&meta).unwrap_or_else(|_| "{}".to_string()));
 
     eprintln!(
         "boot image: {} bytes (trampoline: {} + kernel: {})",
