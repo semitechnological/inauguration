@@ -3496,7 +3496,7 @@ fn rewrite_this_receiver_in_stmt(stmt: &mut Stmt) {
         | Stmt::Return(Some(expr))
         | Stmt::Expr(expr)
         | Stmt::Throw(expr) => rewrite_this_receiver_in_expr(expr),
-        Stmt::IndexAssign { base, index, value } => {
+        Stmt::IndexAssign { base, index, value, ..} => {
             rewrite_this_receiver_in_expr(base);
             rewrite_this_receiver_in_expr(index);
             rewrite_this_receiver_in_expr(value);
@@ -3529,7 +3529,7 @@ fn rewrite_this_receiver_in_stmt(stmt: &mut Stmt) {
             }
         }
         Stmt::Return(None) => {}
-        Stmt::Break(_) => {}
+        Stmt::Break => {}
     }
 }
 
@@ -3554,11 +3554,11 @@ fn rewrite_this_receiver_in_expr(expr: &mut Expr) {
                 rewrite_this_receiver_in_expr(item);
             }
         }
-        Expr::Index { base, index } => {
+        Expr::Index { base, index, ..} => {
             rewrite_this_receiver_in_expr(base);
             rewrite_this_receiver_in_expr(index);
         }
-        Expr::Call { callee, args } => {
+        Expr::Call { callee, args, ..} => {
             rewrite_this_receiver_in_expr(callee);
             for arg in args {
                 rewrite_this_receiver_in_expr(arg);
@@ -3620,8 +3620,8 @@ fn rewrite_constructor_calls_in_stmt(stmt: &mut Stmt, class_fields: &HashMap<Str
         | Stmt::Return(Some(expr))
         | Stmt::Expr(expr)
         | Stmt::Throw(expr) => rewrite_constructor_calls_in_expr(expr, class_fields),
-        Stmt::Break(_) => {}
-        Stmt::IndexAssign { base, index, value } => {
+        Stmt::Break => {}
+        Stmt::IndexAssign { base, index, value, ..} => {
             rewrite_constructor_calls_in_expr(base, class_fields);
             rewrite_constructor_calls_in_expr(index, class_fields);
             rewrite_constructor_calls_in_expr(value, class_fields);
@@ -3659,7 +3659,7 @@ fn rewrite_constructor_calls_in_stmt(stmt: &mut Stmt, class_fields: &HashMap<Str
 
 fn rewrite_constructor_calls_in_expr(expr: &mut Expr, class_fields: &HashMap<String, Vec<String>>) {
     match expr {
-        Expr::Call { callee, args } => {
+        Expr::Call { callee, args, ..} => {
             rewrite_constructor_calls_in_expr(callee, class_fields);
             for arg in args.iter_mut() {
                 rewrite_constructor_calls_in_expr(arg, class_fields);
@@ -3700,7 +3700,7 @@ fn rewrite_constructor_calls_in_expr(expr: &mut Expr, class_fields: &HashMap<Str
                 rewrite_constructor_calls_in_expr(item, class_fields);
             }
         }
-        Expr::Index { base, index } => {
+        Expr::Index { base, index, ..} => {
             rewrite_constructor_calls_in_expr(base, class_fields);
             rewrite_constructor_calls_in_expr(index, class_fields);
         }
@@ -6207,7 +6207,7 @@ class X {
                 ));
                 assert!(matches!(
                     &body[2],
-                    Stmt::Expr(Expr::Call { callee, args })
+                    Stmt::Expr(Expr::Call { callee, args, ..})
                         if matches!(callee.as_ref(), Expr::Ident(name) if name == "helper")
                             && args == &vec![Expr::Ident("value".into())]
                 ));
@@ -6277,7 +6277,7 @@ class X {
             Decl::Function { body, .. } => assert!(
                 matches!(
                     body.as_slice(),
-                    [Stmt::Expr(Expr::Call { callee, args })]
+                    [Stmt::Expr(Expr::Call { callee, args, ..})]
                         if matches!(callee.as_ref(), Expr::Ident(name) if name == "helper")
                             && matches!(args.as_slice(), [Expr::IntLit(1)])
                 ),
@@ -6305,7 +6305,7 @@ class X {
             Decl::Function { body, .. } => assert!(
                 matches!(
                     body.as_slice(),
-                    [Stmt::Expr(Expr::Call { callee, args })]
+                    [Stmt::Expr(Expr::Call { callee, args, ..})]
                         if matches!(callee.as_ref(), Expr::Ident(name) if name == "helper")
                             && matches!(args.as_slice(), [Expr::IntLit(1)])
                 ),
@@ -6351,7 +6351,7 @@ function main() {
                 ));
                 assert!(matches!(
                     &body[2],
-                    Stmt::Expr(Expr::Call { callee, args })
+                    Stmt::Expr(Expr::Call { callee, args, ..})
                         if matches!(callee.as_ref(), Expr::Ident(name) if name == "helper")
                             && args == &vec![Expr::Ident("value".into())]
                 ));
@@ -6403,7 +6403,7 @@ function main(): void {
                 body.as_slice(),
                 [
                     Stmt::Let(name, None, Expr::IntLit(1)),
-                    Stmt::Expr(Expr::Call { callee, args }),
+                    Stmt::Expr(Expr::Call { callee, args, ..}),
                     Stmt::Return(None),
                 ] if name == "value"
                     && matches!(callee.as_ref(), Expr::Ident(name) if name == "helper")
@@ -6546,7 +6546,7 @@ class X {
                 ));
                 assert!(matches!(
                     &body[2],
-                    Stmt::Expr(Expr::Call { callee, args })
+                    Stmt::Expr(Expr::Call { callee, args, ..})
                         if matches!(callee.as_ref(), Expr::Ident(name) if name == "Helper")
                             && args == &vec![Expr::Ident("value".into())]
                 ));
@@ -6671,7 +6671,7 @@ def main():
                 ));
                 assert!(matches!(
                     &body[2],
-                    Stmt::Expr(Expr::Call { callee, args })
+                    Stmt::Expr(Expr::Call { callee, args, ..})
                         if matches!(callee.as_ref(), Expr::Ident(name) if name == "helper")
                             && args == &vec![Expr::Ident("value".into())]
                 ));
@@ -6934,7 +6934,7 @@ pub fn main() void {
                 );
                 assert!(matches!(
                     &body[2],
-                    Stmt::Expr(Expr::Call { callee, args })
+                    Stmt::Expr(Expr::Call { callee, args, ..})
                         if matches!(callee.as_ref(), Expr::Ident(name) if name == "helper")
                             && args == &vec![Expr::Ident("value".into())]
                 ));
@@ -7047,7 +7047,7 @@ fun main() {
                 );
                 assert!(matches!(
                     &body[2],
-                    Stmt::Expr(Expr::Call { callee, args })
+                    Stmt::Expr(Expr::Call { callee, args, ..})
                         if matches!(callee.as_ref(), Expr::Ident(name) if name == "helper")
                             && args == &vec![Expr::Ident("value".into())]
                 ));
@@ -7125,7 +7125,7 @@ int main(void) {
                 ));
                 assert!(matches!(
                     &body[2],
-                    Stmt::Expr(Expr::Call { callee, args })
+                    Stmt::Expr(Expr::Call { callee, args, ..})
                         if matches!(callee.as_ref(), Expr::Ident(name) if name == "helper")
                             && args == &vec![Expr::Ident("value".into())]
                 ));
@@ -7225,7 +7225,7 @@ int main() {
                 ));
                 assert!(matches!(
                     &body[2],
-                    Stmt::Expr(Expr::Call { callee, args })
+                    Stmt::Expr(Expr::Call { callee, args, ..})
                         if matches!(callee.as_ref(), Expr::Ident(name) if name == "helper")
                             && args == &vec![Expr::Ident("value".into())]
                 ));
@@ -7780,7 +7780,7 @@ function main() {}
         assert!(matches!(
             &inc[0],
             Stmt::Return(Some(Expr::Binary { lhs, .. }))
-                if matches!(lhs.as_ref(), Expr::Field { base, name } if name == "value" && matches!(base.as_ref(), Expr::Ident(id) if id == "self"))
+                if matches!(lhs.as_ref(), Expr::Field { base, name, ..} if name == "value" && matches!(base.as_ref(), Expr::Ident(id) if id == "self"))
         ));
         let answer = m
             .decls
@@ -7792,13 +7792,13 @@ function main() {}
             .expect("answer");
         assert!(matches!(
             &answer[0],
-            Stmt::Let(_, _, Expr::StructInit { name, fields })
+            Stmt::Let(_, _, Expr::StructInit { name, fields, ..})
                 if name == "Counter" && fields.iter().any(|(field, expr)| field == "value" && matches!(expr, Expr::IntLit(41)))
         ));
         assert!(matches!(
             &answer[1],
-            Stmt::Return(Some(Expr::Call { callee, args }))
-                if matches!(callee.as_ref(), Expr::Field { base, name } if name == "inc" && matches!(base.as_ref(), Expr::Ident(id) if id == "c"))
+            Stmt::Return(Some(Expr::Call { callee, args, ..}))
+                if matches!(callee.as_ref(), Expr::Field { base, name, ..} if name == "inc" && matches!(base.as_ref(), Expr::Ident(id) if id == "c"))
                     && args.is_empty()
         ));
     }
@@ -7927,7 +7927,7 @@ function main(): void {}
             .expect("answer");
         assert!(matches!(
             &answer[0],
-            Stmt::Let(_, _, Expr::StructInit { name, fields })
+            Stmt::Let(_, _, Expr::StructInit { name, fields, ..})
                 if name == "Counter" && fields.iter().any(|(field, expr)| field == "value" && matches!(expr, Expr::IntLit(41)))
         ));
         assert!(matches!(

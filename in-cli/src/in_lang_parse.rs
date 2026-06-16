@@ -1450,7 +1450,7 @@ fn parse_assign_stmt(s: &str) -> Option<Stmt> {
     }
     let value = parse_expr(trim(&s[eq_pos + 1..]));
     match parse_expr(name) {
-        Expr::Index { base, index } => Some(Stmt::IndexAssign {
+        Expr::Index { base, index, ..} => Some(Stmt::IndexAssign {
             base: *base,
             index: *index,
             value,
@@ -1660,7 +1660,7 @@ fn parse_stmt_line(line: &str) -> Result<Stmt, String> {
                 .get(5)
                 .map_or(true, |&c| c == b' ' || c == b';' || c == b'}'))
     {
-        return Ok(Stmt::Break(_));
+        return Ok(Stmt::Break);
     }
     // `for` is handled by parse_function_body expansion
     if s.starts_with("for ") {
@@ -2368,11 +2368,11 @@ fn validate_expr_shapes(
             }
             Ok(())
         }
-        Expr::Index { base, index } => {
+        Expr::Index { base, index, ..} => {
             validate_expr_shapes(fn_name, structs, base)?;
             validate_expr_shapes(fn_name, structs, index)
         }
-        Expr::Call { callee, args } => {
+        Expr::Call { callee, args, ..} => {
             validate_expr_shapes(fn_name, structs, callee)?;
             for arg in args {
                 validate_expr_shapes(fn_name, structs, arg)?;
@@ -2380,7 +2380,7 @@ fn validate_expr_shapes(
             Ok(())
         }
         Expr::Field { base, .. } => validate_expr_shapes(fn_name, structs, base),
-        Expr::StructInit { name, fields } => {
+        Expr::StructInit { name, fields, ..} => {
             let schema = structs.get(name).ok_or(format!(
                 ".in: unknown struct initializer `{name}` in fn {fn_name}"
             ))?;
@@ -2432,13 +2432,13 @@ fn validate_stmt_types(
         | Stmt::Expr(expr) => {
             validate_expr_shapes(fn_name, struct_fields, expr)?;
         }
-        Stmt::IndexAssign { base, index, value } => {
+        Stmt::IndexAssign { base, index, value, ..} => {
             validate_expr_shapes(fn_name, struct_fields, base)?;
             validate_expr_shapes(fn_name, struct_fields, index)?;
             validate_expr_shapes(fn_name, struct_fields, value)?;
         }
         Stmt::Return(None) => {}
-        Stmt::Break(_) => {}
+        Stmt::Break => {}
         Stmt::If {
             cond,
             then_body,
@@ -2472,7 +2472,7 @@ fn validate_stmt_types(
         Stmt::Throw(expr) => {
             validate_expr_shapes(fn_name, struct_fields, expr)?;
         }
-        Stmt::Try { body, catches } => {
+        Stmt::Try { body, catches, ..} => {
             for stmt in body {
                 validate_stmt_types(fn_name, structs, struct_fields, stmt)?;
             }
@@ -2538,7 +2538,7 @@ fn desugar_method_calls_in_body(
             Stmt::Assign(_, expr) | Stmt::Return(Some(expr)) | Stmt::Expr(expr) => {
                 desugar_method_calls_in_expr(expr, env, structs, fn_rets);
             }
-            Stmt::IndexAssign { base, index, value } => {
+            Stmt::IndexAssign { base, index, value, ..} => {
                 desugar_method_calls_in_expr(base, env, structs, fn_rets);
                 desugar_method_calls_in_expr(index, env, structs, fn_rets);
                 desugar_method_calls_in_expr(value, env, structs, fn_rets);
@@ -2569,11 +2569,11 @@ fn desugar_method_calls_in_body(
                 }
             }
             Stmt::Return(None) => {}
-            Stmt::Break(_) => {}
+            Stmt::Break => {}
             Stmt::Throw(expr) => {
                 desugar_method_calls_in_expr(expr, env, structs, fn_rets);
             }
-            Stmt::Try { body, catches } => {
+            Stmt::Try { body, catches, ..} => {
                 let mut try_env = env.clone();
                 desugar_method_calls_in_body(body, &mut try_env, structs, fn_rets);
                 for catch in catches {
@@ -2608,11 +2608,11 @@ fn desugar_method_calls_in_expr(
                 desugar_method_calls_in_expr(item, env, structs, fn_rets);
             }
         }
-        Expr::Index { base, index } => {
+        Expr::Index { base, index, ..} => {
             desugar_method_calls_in_expr(base, env, structs, fn_rets);
             desugar_method_calls_in_expr(index, env, structs, fn_rets);
         }
-        Expr::Call { callee, args } => {
+        Expr::Call { callee, args, ..} => {
             for arg in args.iter_mut() {
                 desugar_method_calls_in_expr(arg, env, structs, fn_rets);
             }
@@ -2650,7 +2650,7 @@ fn infer_in_expr_type(
         Expr::BoolLit(_) => Some(Typ::Bool),
         Expr::Ident(name) => env.get(name).cloned(),
         Expr::StructInit { name, .. } => Some(Typ::Named(name.clone())),
-        Expr::Field { base, name } => {
+        Expr::Field { base, name, ..} => {
             if let Some(Typ::Named(struct_name)) = infer_in_expr_type(base, env, structs, fn_rets) {
                 structs
                     .get(&struct_name)
@@ -2673,7 +2673,7 @@ fn infer_in_expr_type(
                 None
             }
         }
-        Expr::Unary { op, expr } => match op.as_str() {
+        Expr::Unary { op, expr, ..} => match op.as_str() {
             "!" => Some(Typ::Bool),
             "-" => Some(Typ::Int),
             _ => infer_in_expr_type(expr, env, structs, fn_rets),
@@ -2777,7 +2777,7 @@ fn inline_const_values(module: &mut UnifiedModule) {
                 replace_idents(lhs, consts);
                 replace_idents(rhs, consts);
             }
-            Expr::Call { callee, args } => {
+            Expr::Call { callee, args, ..} => {
                 replace_idents(callee, consts);
                 for arg in args {
                     replace_idents(arg, consts);
@@ -2794,7 +2794,7 @@ fn inline_const_values(module: &mut UnifiedModule) {
                     replace_idents(item, consts);
                 }
             }
-            Expr::Index { base, index } => {
+            Expr::Index { base, index, ..} => {
                 replace_idents(base, consts);
                 replace_idents(index, consts);
             }
@@ -2814,7 +2814,7 @@ fn inline_const_values(module: &mut UnifiedModule) {
             | Stmt::Return(Some(expr))
             | Stmt::Expr(expr)
             | Stmt::Throw(expr) => replace_idents(expr, consts),
-            Stmt::IndexAssign { base, index, value } => {
+            Stmt::IndexAssign { base, index, value, ..} => {
                 replace_idents(base, consts);
                 replace_idents(index, consts);
                 replace_idents(value, consts);
@@ -2857,7 +2857,7 @@ fn inline_const_values(module: &mut UnifiedModule) {
                     }
                 }
             }
-            Stmt::Try { body, catches } => {
+            Stmt::Try { body, catches, ..} => {
                 for s in body {
                     replace_stmt_idents(s, consts);
                 }
@@ -2868,7 +2868,7 @@ fn inline_const_values(module: &mut UnifiedModule) {
                 }
             }
             Stmt::Return(None) => {}
-            Stmt::Break(_) => {}
+            Stmt::Break => {}
         }
     }
 
@@ -3114,7 +3114,7 @@ fn main() -> void
         ));
         assert!(matches!(
             &body[1],
-            Stmt::Return(Some(Expr::Field { base, name }))
+            Stmt::Return(Some(Expr::Field { base, name, ..}))
                 if name == "y" && matches!(base.as_ref(), Expr::Ident(ident) if ident == "p")
         ));
     }
@@ -3131,7 +3131,7 @@ fn main() -> void
         assert_eq!(body.len(), 1);
         assert!(matches!(
             &body[0],
-            Stmt::Return(Some(Expr::Field { base, name }))
+            Stmt::Return(Some(Expr::Field { base, name, ..}))
                 if name == "y"
                     && matches!(base.as_ref(), Expr::StructInit { name: init, .. } if init == "Point")
         ));
@@ -3775,7 +3775,7 @@ fn main() -> void {
         };
         assert!(matches!(
             &body[1],
-            Stmt::Assign(name, Expr::Call { callee, args })
+            Stmt::Assign(name, Expr::Call { callee, args, ..})
                 if name == "n"
                     && matches!(callee.as_ref(), Expr::Ident(c) if c == "add")
                     && args.len() == 2
@@ -3851,7 +3851,7 @@ fn main() -> void {
         };
         assert!(matches!(
             &body[0],
-            Stmt::Return(Some(Expr::Binary { op, lhs, rhs }))
+            Stmt::Return(Some(Expr::Binary { op, lhs, rhs, ..}))
                 if op == "%"
                     && matches!(lhs.as_ref(), Expr::IntLit(7))
                     && matches!(rhs.as_ref(), Expr::IntLit(4))
@@ -3887,7 +3887,7 @@ fn main() -> void
                 ..
             } if op == "=="
                 && matches!(lhs.as_ref(), Expr::Unary { op, .. } if op == "!")
-                && matches!(then_body.as_slice(), [Stmt::Return(Some(Expr::Unary { op, expr }))] if op == "-" && matches!(expr.as_ref(), Expr::Binary { op, .. } if op == "+"))
+                && matches!(then_body.as_slice(), [Stmt::Return(Some(Expr::Unary { op, expr, ..}))] if op == "-" && matches!(expr.as_ref(), Expr::Binary { op, .. } if op == "+"))
         ));
         assert!(matches!(
             &body[1],
@@ -3919,7 +3919,7 @@ fn main() -> void
         assert!(matches!(
             &body[0],
             Stmt::If {
-                cond: Expr::Binary { op, lhs, rhs },
+                cond: Expr::Binary { op, lhs, rhs, ..},
                 ..
             } if op == "||"
                 && matches!(lhs.as_ref(), Expr::Ident(name) if name == "a")

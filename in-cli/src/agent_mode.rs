@@ -1014,7 +1014,7 @@ fn collect_dependency_symbol_calls_from_stmt<'a>(
         | Stmt::Expr(expr) => {
             collect_dependency_symbol_calls_from_expr(expr, symbols, functions, bound_aliases, out);
         }
-        Stmt::IndexAssign { base, index, value } => {
+        Stmt::IndexAssign { base, index, value, ..} => {
             collect_dependency_symbol_calls_from_expr(base, symbols, functions, bound_aliases, out);
             collect_dependency_symbol_calls_from_expr(
                 index,
@@ -1076,7 +1076,7 @@ fn collect_dependency_symbol_calls_from_stmt<'a>(
                 );
             }
         }
-        Stmt::Match { scrutinee, arms } => {
+        Stmt::Match { scrutinee, arms, ..} => {
             collect_dependency_symbol_calls_from_expr(
                 scrutinee,
                 symbols,
@@ -1097,7 +1097,7 @@ fn collect_dependency_symbol_calls_from_stmt<'a>(
             }
         }
         Stmt::Return(None) => {}
-        Stmt::Break(_) => {}
+        Stmt::Break => {}
         Stmt::Throw(_) | Stmt::Try { .. } => {}
     }
 }
@@ -1142,7 +1142,7 @@ fn collect_dependency_symbol_calls_from_expr<'a>(
                 );
             }
         }
-        Expr::Index { base, index } => {
+        Expr::Index { base, index, ..} => {
             collect_dependency_symbol_calls_from_expr(base, symbols, functions, bound_aliases, out);
             collect_dependency_symbol_calls_from_expr(
                 index,
@@ -1152,7 +1152,7 @@ fn collect_dependency_symbol_calls_from_expr<'a>(
                 out,
             );
         }
-        Expr::Call { callee, args } => {
+        Expr::Call { callee, args, ..} => {
             if let Expr::Ident(name) = callee.as_ref()
                 && !functions.contains(name.as_str())
                 && !bound_aliases.contains(name.as_str())

@@ -352,11 +352,11 @@ fn collect_string_literals(module: &UnifiedModule) -> Vec<String> {
                     from_expr(e, out);
                 }
             }
-            Expr::Index { base, index } => {
+            Expr::Index { base, index, ..} => {
                 from_expr(base, out);
                 from_expr(index, out);
             }
-            Expr::Call { callee, args } => {
+            Expr::Call { callee, args, ..} => {
                 from_expr(callee, out);
                 for a in args {
                     from_expr(a, out);
@@ -374,7 +374,7 @@ fn collect_string_literals(module: &UnifiedModule) -> Vec<String> {
         match stmt {
             Stmt::Let(_, _, expr) => from_expr(expr, out),
             Stmt::Assign(_, expr) => from_expr(expr, out),
-            Stmt::IndexAssign { base, index, value } => {
+            Stmt::IndexAssign { base, index, value, ..} => {
                 from_expr(base, out);
                 from_expr(index, out);
                 from_expr(value, out);
@@ -399,7 +399,7 @@ fn collect_string_literals(module: &UnifiedModule) -> Vec<String> {
                     from_stmt(s, out);
                 }
             }
-            Stmt::Match { scrutinee, arms } => {
+            Stmt::Match { scrutinee, arms, ..} => {
                 from_expr(scrutinee, out);
                 for arm in arms {
                     for s in &arm.body {
@@ -408,7 +408,7 @@ fn collect_string_literals(module: &UnifiedModule) -> Vec<String> {
                 }
             }
             Stmt::Throw(expr) => from_expr(expr, out),
-            Stmt::Try { body, catches } => {
+            Stmt::Try { body, catches, ..} => {
                 for s in body {
                     from_stmt(s, out);
                 }
@@ -419,7 +419,7 @@ fn collect_string_literals(module: &UnifiedModule) -> Vec<String> {
                 }
             }
             Stmt::Expr(expr) => from_expr(expr, out),
-            Stmt::Break(_) => {}
+            Stmt::Break => {}
         }
     }
     let mut strings = Vec::new();
@@ -609,7 +609,7 @@ fn lower_stmt(
             lower_expr_into(emitter, ctx, expr, RAX, pending_calls)?;
             Ok(())
         }
-        Stmt::IndexAssign { base, index, value } => {
+        Stmt::IndexAssign { base, index, value, ..} => {
             // a[i] = value → compute addr = base + i*8, store value
             lower_expr_into(emitter, ctx, base, RDI, pending_calls)?;
             lower_expr_into(emitter, ctx, index, RAX, pending_calls)?;
@@ -623,7 +623,7 @@ fn lower_stmt(
             emitter.emit_bytes(&[0x48, 0x89, 0x37]);
             Ok(())
         }
-        Stmt::Break(_) => {
+        Stmt::Break => {
             // ponytail: break is a no-op for now
             Ok(())
         }
@@ -787,7 +787,7 @@ fn lower_expr_into(
             }
             Ok(())
         }
-        Expr::Binary { op, lhs, rhs } => {
+        Expr::Binary { op, lhs, rhs, ..} => {
             // Evaluate lhs into RAX
             lower_expr_into(emitter, ctx, lhs, RAX, pending_calls)?;
             // Push RAX to stack
@@ -950,7 +950,7 @@ fn lower_expr_into(
             }
             Ok(())
         }
-        Expr::Call { callee, args } => {
+        Expr::Call { callee, args, ..} => {
             let target_name = match callee.as_ref() {
                 Expr::Ident(name) => name.clone(),
                 _ => {
@@ -1327,7 +1327,7 @@ fn lower_expr_into(
             }
             Ok(())
         }
-        Expr::StructInit { name, fields } => {
+        Expr::StructInit { name, fields, ..} => {
             // Evaluate each field into its corresponding stack slot
             let field_offsets: Vec<(String, u32)> = match ctx.locals.get(name) {
                 Some(StackSlot::Struct { fields: field_map }) => fields
@@ -1344,7 +1344,7 @@ fn lower_expr_into(
             }
             Ok(())
         }
-        Expr::Field { base, name } => {
+        Expr::Field { base, name, ..} => {
             let Expr::Ident(base_name) = base.as_ref() else {
                 return Err(format!(
                     "x86_64-lower: unsupported field access in `{}`",
@@ -1372,7 +1372,7 @@ fn lower_expr_into(
                 )),
             }
         }
-        Expr::Unary { op, expr } => {
+        Expr::Unary { op, expr, ..} => {
             lower_expr_into(emitter, ctx, expr, RAX, pending_calls)?;
             match op.as_str() {
                 "-" => {
@@ -1399,7 +1399,7 @@ fn lower_expr_into(
             }
             Ok(())
         }
-        Expr::Index { base, index } => {
+        Expr::Index { base, index, ..} => {
             // a[i] → compute addr = base + i*8, load 8 bytes
             lower_expr_into(emitter, ctx, base, RDI, pending_calls)?;
             lower_expr_into(emitter, ctx, index, RAX, pending_calls)?;

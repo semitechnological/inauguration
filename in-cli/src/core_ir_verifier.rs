@@ -333,7 +333,7 @@ fn check_stmt(
             }
             Ok(())
         }
-        Stmt::IndexAssign { base, index, value } => {
+        Stmt::IndexAssign { base, index, value, ..} => {
             check_expr(fn_name, base, facts, env, call_edges)?;
             check_expr(fn_name, index, facts, env, call_edges)?;
             check_expr(fn_name, value, facts, env, call_edges)?;
@@ -367,7 +367,7 @@ fn check_stmt(
             }
         }
         Stmt::Expr(expr) => check_expr(fn_name, expr, facts, env, call_edges),
-        Stmt::Break(_) => Ok(()),
+        Stmt::Break => Ok(()),
         Stmt::Return(Some(expr)) => {
             check_expr(fn_name, expr, facts, env, call_edges)?;
             if *ret == Typ::Void {
@@ -416,7 +416,7 @@ fn check_stmt(
             }
             check_stmts(fn_name, body, facts, ret, &mut env.clone(), call_edges)
         }
-        Stmt::Match { scrutinee, arms } => {
+        Stmt::Match { scrutinee, arms, ..} => {
             check_expr(fn_name, scrutinee, facts, env, call_edges)?;
             for arm in arms {
                 check_stmts(fn_name, &arm.body, facts, ret, &mut env.clone(), call_edges)?;
@@ -451,7 +451,7 @@ fn check_expr(
             }
         }
         Expr::Unary { expr, .. } => check_expr(fn_name, expr, facts, env, call_edges),
-        Expr::Binary { op, lhs, rhs } => {
+        Expr::Binary { op, lhs, rhs, ..} => {
             check_expr(fn_name, lhs, facts, env, call_edges)?;
             check_expr(fn_name, rhs, facts, env, call_edges)?;
             match op.as_str() {
@@ -495,10 +495,10 @@ fn check_expr(
                 _ => Ok(()),
             }
         }
-        Expr::StructInit { name, fields } => {
+        Expr::StructInit { name, fields, ..} => {
             check_struct_init(fn_name, name, fields, facts, env, call_edges)
         }
-        Expr::Field { base, name } => {
+        Expr::Field { base, name, ..} => {
             check_expr(fn_name, base, facts, env, call_edges)?;
             if let Some(Typ::Named(struct_name)) = expr_type(base, facts, env)
                 && let Some(schema) = facts.structs.get(struct_name.as_str())
@@ -534,7 +534,7 @@ fn check_expr(
             }
             Ok(())
         }
-        Expr::Index { base, index } => {
+        Expr::Index { base, index, ..} => {
             check_expr(fn_name, base, facts, env, call_edges)?;
             check_expr(fn_name, index, facts, env, call_edges)?;
             require_type(fn_name, "array index", &Typ::Int, index, facts, env)?;
@@ -552,7 +552,7 @@ fn check_expr(
             }
             Ok(())
         }
-        Expr::Call { callee, args } => {
+        Expr::Call { callee, args, ..} => {
             if let Expr::Ident(name) = callee.as_ref() {
                 let Some(sig) = facts.functions.get(name.as_str()) else {
                     return Err((
@@ -690,7 +690,7 @@ fn expr_type(expr: &Expr, facts: &ModuleFacts<'_>, env: &HashMap<String, Typ>) -
                 }
             }),
         Expr::StructInit { name, .. } => Some(Typ::Named(name.clone())),
-        Expr::Field { base, name } => {
+        Expr::Field { base, name, ..} => {
             if let Some(Typ::Named(struct_name)) = expr_type(base, facts, env)
                 && let Some(schema) = facts.structs.get(struct_name.as_str())
                 && let Some((_, typ)) = schema.iter().find(|(field, _)| field == name)
@@ -716,7 +716,7 @@ fn expr_type(expr: &Expr, facts: &ModuleFacts<'_>, env: &HashMap<String, Typ>) -
                 None
             }
         }
-        Expr::Unary { op, expr } => match op.as_str() {
+        Expr::Unary { op, expr, ..} => match op.as_str() {
             "!" => Some(Typ::Bool),
             "-" => {
                 if expr_type(expr, facts, env) == Some(Typ::Float) {
@@ -727,7 +727,7 @@ fn expr_type(expr: &Expr, facts: &ModuleFacts<'_>, env: &HashMap<String, Typ>) -
             }
             _ => expr_type(expr, facts, env),
         },
-        Expr::Binary { op, lhs, rhs } => {
+        Expr::Binary { op, lhs, rhs, ..} => {
             let lhs_typ = expr_type(lhs, facts, env);
             let rhs_typ = expr_type(rhs, facts, env);
             match op.as_str() {

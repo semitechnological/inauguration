@@ -850,7 +850,7 @@ fn native_entry_module(module: &UnifiedModule, entry: &str) -> UnifiedModule {
 
     fn collect_expr_calls(expr: &Expr, out: &mut HashSet<String>) {
         match expr {
-            Expr::Call { callee, args } => {
+            Expr::Call { callee, args, ..} => {
                 if let Expr::Ident(name) = callee.as_ref() {
                     out.insert(name.clone());
                 } else {
@@ -876,7 +876,7 @@ fn native_entry_module(module: &UnifiedModule, entry: &str) -> UnifiedModule {
                     collect_expr_calls(item, out);
                 }
             }
-            Expr::Index { base, index } => {
+            Expr::Index { base, index, ..} => {
                 collect_expr_calls(base, out);
                 collect_expr_calls(index, out);
             }
@@ -898,7 +898,7 @@ fn native_entry_module(module: &UnifiedModule, entry: &str) -> UnifiedModule {
                 | Stmt::Return(Some(expr))
                 | Stmt::Expr(expr)
                 | Stmt::Throw(expr) => collect_expr_calls(expr, out),
-                Stmt::IndexAssign { base, index, value } => {
+                Stmt::IndexAssign { base, index, value, ..} => {
                     collect_expr_calls(base, out);
                     collect_expr_calls(index, out);
                     collect_expr_calls(value, out);
@@ -918,20 +918,20 @@ fn native_entry_module(module: &UnifiedModule, entry: &str) -> UnifiedModule {
                     }
                     collect_stmt_calls(body, out);
                 }
-                Stmt::Match { scrutinee, arms } => {
+                Stmt::Match { scrutinee, arms, ..} => {
                     collect_expr_calls(scrutinee, out);
                     for arm in arms {
                         collect_stmt_calls(&arm.body, out);
                     }
                 }
-                Stmt::Try { body, catches } => {
+                Stmt::Try { body, catches, ..} => {
                     collect_stmt_calls(body, out);
                     for catch in catches {
                         collect_stmt_calls(&catch.body, out);
                     }
                 }
                 Stmt::Return(None) => {}
-                Stmt::Break(_) => {}
+                Stmt::Break => {}
             }
         }
     }

@@ -447,7 +447,7 @@ fn collect_body_strings(body: &[Stmt], values: &mut Vec<String>) {
             | Stmt::Assign(_, expr)
             | Stmt::Return(Some(expr))
             | Stmt::Expr(expr) => collect_expr_strings(expr, values),
-            Stmt::IndexAssign { base, index, value } => {
+            Stmt::IndexAssign { base, index, value, ..} => {
                 collect_expr_strings(base, values);
                 collect_expr_strings(index, values);
                 collect_expr_strings(value, values);
@@ -467,7 +467,7 @@ fn collect_body_strings(body: &[Stmt], values: &mut Vec<String>) {
                 }
                 collect_body_strings(body, values);
             }
-            Stmt::Match { scrutinee, arms } => {
+            Stmt::Match { scrutinee, arms, ..} => {
                 collect_expr_strings(scrutinee, values);
                 for arm in arms {
                     collect_body_strings(&arm.body, values);
@@ -476,13 +476,13 @@ fn collect_body_strings(body: &[Stmt], values: &mut Vec<String>) {
             Stmt::Return(None) => {}
 
             Stmt::Throw(expr) => collect_expr_strings(expr, values),
-            Stmt::Try { body, catches } => {
+            Stmt::Try { body, catches, ..} => {
                 collect_body_strings(body, values);
                 for catch in catches {
                     collect_body_strings(&catch.body, values);
                 }
             }
-            Stmt::Break(_) => {}
+            Stmt::Break => {}
         }
     }
 }
@@ -506,11 +506,11 @@ fn collect_expr_strings(expr: &Expr, values: &mut Vec<String>) {
                 collect_expr_strings(item, values);
             }
         }
-        Expr::Index { base, index } => {
+        Expr::Index { base, index, ..} => {
             collect_expr_strings(base, values);
             collect_expr_strings(index, values);
         }
-        Expr::Call { callee, args } => {
+        Expr::Call { callee, args, ..} => {
             collect_expr_strings(callee, values);
             for arg in args {
                 collect_expr_strings(arg, values);
@@ -614,7 +614,7 @@ fn alloc_declared_locals(
     for stmt in body {
         match stmt {
             Stmt::Let(name, typ, expr) => ctx.alloc_let_local(name, typ.as_ref(), expr, fn_name)?,
-            Stmt::Break(_) => {}
+            Stmt::Break => {}
             Stmt::If {
                 then_body,
                 else_body,
@@ -631,7 +631,7 @@ fn alloc_declared_locals(
             }
             Stmt::Return(_) | Stmt::Assign(_, _) | Stmt::IndexAssign { .. } | Stmt::Expr(_) => {}
             Stmt::Throw(_) => {}
-            Stmt::Try { body, catches } => {
+            Stmt::Try { body, catches, ..} => {
                 alloc_declared_locals(ctx, body, fn_name)?;
                 for catch in catches {
                     ctx.alloc_local(&catch.pattern, Some(&Typ::Int), fn_name)?;
@@ -951,7 +951,7 @@ fn lower_stmt(
             }
             lower_store_local(emitter, ctx, name, expr, functions, pending_calls, fn_name)
         }
-        Stmt::IndexAssign { base, index, value } => lower_index_assign(
+        Stmt::IndexAssign { base, index, value, ..} => lower_index_assign(
             emitter,
             ctx,
             base,
@@ -975,7 +975,7 @@ fn lower_stmt(
             fn_name,
             ret_typ,
         ),
-        Stmt::Match { scrutinee, arms } => lower_match(
+        Stmt::Match { scrutinee, arms, ..} => lower_match(
             emitter,
             ctx,
             scrutinee,
@@ -992,7 +992,7 @@ fn lower_stmt(
             emitter.emit_u32(aarch64::strb(1, aarch64::REG_SP, ctx.error_flag_offset));
             Ok(())
         }
-        Stmt::Try { body, catches } => {
+        Stmt::Try { body, catches, ..} => {
             let saved_flag_offset = ctx.error_value_offset + 8;
 
             emitter.emit_u32(aarch64::ldrb(1, aarch64::REG_SP, ctx.error_flag_offset));
@@ -1056,7 +1056,7 @@ fn lower_stmt(
 
             Ok(())
         }
-        Stmt::Break(_) => Ok(()),
+        Stmt::Break => Ok(()),
     }
 }
 
@@ -1263,7 +1263,7 @@ fn lower_struct_expr_into_slots(
             }
             Ok(())
         }
-        Expr::Call { callee, args } => {
+        Expr::Call { callee, args, ..} => {
             let return_typ = call_return_type(callee, functions, fn_name)?;
             if return_typ != &Typ::Named(typ.to_string()) {
                 return Err(format!(
@@ -1357,7 +1357,7 @@ fn lower_struct_expr_into_regs(
             }
             Ok(())
         }
-        Expr::Call { callee, args } => {
+        Expr::Call { callee, args, ..} => {
             let return_typ = call_return_type(callee, functions, fn_name)?;
             if return_typ != &Typ::Named(typ.to_string()) {
                 return Err(format!(
@@ -1422,7 +1422,7 @@ fn lower_array_expr_into_regs(
                 )),
             }
         }
-        Expr::Call { callee, args } => {
+        Expr::Call { callee, args, ..} => {
             let return_typ = call_return_type(callee, functions, fn_name)?;
             if return_typ != &Typ::Array(Box::new(elem.clone())) {
                 return Err(format!(
@@ -1706,7 +1706,7 @@ fn lower_expr_into(
             }
             Ok(())
         }
-        Expr::Binary { op, lhs, rhs } => lower_binary(
+        Expr::Binary { op, lhs, rhs, ..} => lower_binary(
             emitter,
             ctx,
             op,
@@ -1717,7 +1717,7 @@ fn lower_expr_into(
             pending_calls,
             fn_name,
         ),
-        Expr::Unary { op, expr } => lower_unary(
+        Expr::Unary { op, expr, ..} => lower_unary(
             emitter,
             ctx,
             op,
@@ -1727,7 +1727,7 @@ fn lower_expr_into(
             pending_calls,
             fn_name,
         ),
-        Expr::Call { callee, args } => lower_call(
+        Expr::Call { callee, args, ..} => lower_call(
             emitter,
             ctx,
             callee,
@@ -1737,7 +1737,7 @@ fn lower_expr_into(
             pending_calls,
             fn_name,
         ),
-        Expr::Field { base, name } => lower_field(
+        Expr::Field { base, name, ..} => lower_field(
             emitter,
             ctx,
             base,
@@ -1747,7 +1747,7 @@ fn lower_expr_into(
             pending_calls,
             fn_name,
         ),
-        Expr::Index { base, index } => lower_index(
+        Expr::Index { base, index, ..} => lower_index(
             emitter,
             ctx,
             base,
@@ -2565,7 +2565,7 @@ fn expr_contains_call(expr: &Expr) -> bool {
         Expr::StructInit { fields, .. } => fields.iter().any(|(_, expr)| expr_contains_call(expr)),
         Expr::Field { base, .. } => expr_contains_call(base),
         Expr::ArrayLit(items) => items.iter().any(expr_contains_call),
-        Expr::Index { base, index } => expr_contains_call(base) || expr_contains_call(index),
+        Expr::Index { base, index, ..} => expr_contains_call(base) || expr_contains_call(index),
         Expr::IntLit(_)
         | Expr::FloatLit(_)
         | Expr::StringLit(_)

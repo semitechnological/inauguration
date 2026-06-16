@@ -28,11 +28,11 @@ fn fn_bodies_mut(decls: &mut Vec<Decl>) -> impl Iterator<Item = &mut Vec<Stmt>> 
 fn walk_expr<F: FnMut(&Expr)>(e: &Expr, f: &mut F) {
     f(e);
     match e {
-        Expr::Call { callee, args } => { walk_expr(callee, f); for a in args { walk_expr(a, f); } }
+        Expr::Call { callee, args, ..} => { walk_expr(callee, f); for a in args { walk_expr(a, f); } }
         Expr::Binary { lhs, rhs, .. } => { walk_expr(lhs, f); walk_expr(rhs, f); }
         Expr::Unary { expr, .. } => walk_expr(expr, f),
         Expr::Field { base, .. } => walk_expr(base, f),
-        Expr::Index { base, index } => { walk_expr(base, f); walk_expr(index, f); }
+        Expr::Index { base, index, ..} => { walk_expr(base, f); walk_expr(index, f); }
         Expr::StructInit { fields, .. } => { for (_, e) in fields { walk_expr(e, f); } }
         _ => {}
     }
@@ -40,19 +40,19 @@ fn walk_expr<F: FnMut(&Expr)>(e: &Expr, f: &mut F) {
 
 fn map_expr<F: FnMut(Expr) -> Expr + Copy>(e: Expr, f: &mut F) -> Expr {
     match e {
-        Expr::Call { callee, args } => Expr::Call {
+        Expr::Call { callee, args, ..} => Expr::Call {
             callee: Box::new(map_expr(*callee, f)),
             args: args.into_iter().map(|a| map_expr(a, f)).collect(),
         },
-        Expr::Binary { op, lhs, rhs } => Expr::Binary {
+        Expr::Binary { op, lhs, rhs, ..} => Expr::Binary {
             op, lhs: Box::new(map_expr(*lhs, f)), rhs: Box::new(map_expr(*rhs, f)),
         },
-        Expr::Unary { op, expr } => Expr::Unary { op, expr: Box::new(map_expr(*expr, f)) },
-        Expr::Field { base, name } => Expr::Field { base: Box::new(map_expr(*base, f)), name },
-        Expr::Index { base, index } => Expr::Index {
+        Expr::Unary { op, expr, ..} => Expr::Unary { op, expr: Box::new(map_expr(*expr, f)) },
+        Expr::Field { base, name, ..} => Expr::Field { base: Box::new(map_expr(*base, f)), name },
+        Expr::Index { base, index, ..} => Expr::Index {
             base: Box::new(map_expr(*base, f)), index: Box::new(map_expr(*index, f)),
         },
-        Expr::StructInit { name, fields } => Expr::StructInit {
+        Expr::StructInit { name, fields, ..} => Expr::StructInit {
             name, fields: fields.into_iter().map(|(n, e)| (n, map_expr(e, f))).collect(),
         },
         other => f(other),
@@ -63,16 +63,16 @@ fn map_stmt<F: FnMut(Expr) -> Expr + Copy>(s: Stmt, f: &mut F) -> Stmt {
     match s {
         Stmt::Let(n, t, e) => Stmt::Let(n, t, map_expr(e, f)),
         Stmt::Assign(n, e) => Stmt::Assign(n, map_expr(e, f)),
-        Stmt::IndexAssign { base, index, value } => Stmt::IndexAssign {
+        Stmt::IndexAssign { base, index, value, ..} => Stmt::IndexAssign {
             base: map_expr(base, f), index: map_expr(index, f), value: map_expr(value, f),
         },
         Stmt::Return(e) => Stmt::Return(e.map(|e| map_expr(e, f))),
-        Stmt::If { cond, then_body, else_body } => Stmt::If {
+        Stmt::If { cond, then_body, else_body, ..} => Stmt::If {
             cond: map_expr(cond, f),
             then_body: then_body.into_iter().map(|s| map_stmt(s, f)).collect(),
             else_body: else_body.into_iter().map(|s| map_stmt(s, f)).collect(),
         },
-        Stmt::Loop { kind, cond, body } => Stmt::Loop {
+        Stmt::Loop { kind, cond, body, ..} => Stmt::Loop {
             kind, cond: cond.map(|c| map_expr(c, f)),
             body: body.into_iter().map(|s| map_stmt(s, f)).collect(),
         },
@@ -127,7 +127,7 @@ fn inline_body(stmts: Vec<Stmt>, cand: &[String], fns: &HashMap<String, Decl>, d
 
 fn inline_in_expr(e: Expr, cand: &[String], fns: &HashMap<String, Decl>, depth: u32) -> Expr {
     map_expr(e, &mut |e| match e {
-        Expr::Call { callee, args } if depth < 10 => {
+        Expr::Call { callee, args, ..} if depth < 10 => {
             let name = match *callee {
                 Expr::Ident(ref n) => n.clone(),
                 other => return Expr::Call { callee: Box::new(other), args },
@@ -151,7 +151,7 @@ fn inline_in_expr(e: Expr, cand: &[String], fns: &HashMap<String, Decl>, depth: 
 
 /// Replace a call-to-small-fn with its return value (for let-bindings).
 fn fold_call_ret(e: Expr, cand: &[String], fns: &HashMap<String, Decl>) -> Expr {
-    if let Expr::Call { callee, args } = &e {
+    if let Expr::Call { callee, args, ..} = &e {
         if let Expr::Ident(name) = callee.as_ref() {
             if cand.contains(name) {
                 if let Some(Decl::Function { body, params, .. }) = fns.get(name) {
@@ -170,7 +170,7 @@ fn fold_call_ret(e: Expr, cand: &[String], fns: &HashMap<String, Decl>) -> Expr 
 }
 
 fn try_inline_void(e: &Expr, cand: &[String], fns: &HashMap<String, Decl>) -> Option<Vec<Stmt>> {
-    if let Expr::Call { callee, args } = e {
+    if let Expr::Call { callee, args, ..} = e {
         if let Expr::Ident(name) = callee.as_ref() {
             if cand.contains(name) {
                 if let Some(Decl::Function { body, params, ret, .. }) = fns.get(name) {
@@ -196,12 +196,12 @@ fn subst_stmt(s: &Stmt, sub: &HashMap<String, Expr>) -> Stmt {
     match s {
         Stmt::Let(n, t, e) => Stmt::Let(n.clone(), t.clone(), substitute_expr(e, sub)),
         Stmt::Assign(n, e) => Stmt::Assign(n.clone(), substitute_expr(e, sub)),
-        Stmt::IndexAssign { base, index, value } => Stmt::IndexAssign { base: substitute_expr(base, sub), index: substitute_expr(index, sub), value: substitute_expr(value, sub) },
+        Stmt::IndexAssign { base, index, value, ..} => Stmt::IndexAssign { base: substitute_expr(base, sub), index: substitute_expr(index, sub), value: substitute_expr(value, sub) },
         Stmt::Return(e) => Stmt::Return(e.as_ref().map(|e| substitute_expr(e, sub))),
-        Stmt::If { cond, then_body, else_body } => Stmt::If { cond: substitute_expr(cond, sub), then_body: substitute_params(then_body, sub), else_body: substitute_params(else_body, sub) },
-        Stmt::Loop { kind, cond, body } => Stmt::Loop { kind: kind.clone(), cond: cond.as_ref().map(|c| substitute_expr(c, sub)), body: substitute_params(body, sub) },
+        Stmt::If { cond, then_body, else_body, ..} => Stmt::If { cond: substitute_expr(cond, sub), then_body: substitute_params(then_body, sub), else_body: substitute_params(else_body, sub) },
+        Stmt::Loop { kind, cond, body, ..} => Stmt::Loop { kind: kind.clone(), cond: cond.as_ref().map(|c| substitute_expr(c, sub)), body: substitute_params(body, sub) },
         Stmt::Expr(e) => Stmt::Expr(substitute_expr(e, sub)),
-        Stmt::Break(_) => Stmt::Break(_),
+        Stmt::Break => Stmt::Break,
         o => o.clone(),
     }
 }
@@ -220,7 +220,7 @@ fn ptr_in_stmts(stmts: &[Stmt], out: &mut Vec<String>) {
     for s in stmts {
         match s {
             Stmt::Let(_, _, e) | Stmt::Assign(_, e) | Stmt::Return(Some(e)) | Stmt::Expr(e) => ptr_in_expr(e, out),
-            Stmt::IndexAssign { base, index, value } => { ptr_in_expr(base, out); ptr_in_expr(index, out); ptr_in_expr(value, out); }
+            Stmt::IndexAssign { base, index, value, ..} => { ptr_in_expr(base, out); ptr_in_expr(index, out); ptr_in_expr(value, out); }
             Stmt::If { then_body, else_body, .. } => { ptr_in_stmts(then_body, out); ptr_in_stmts(else_body, out); }
             Stmt::Loop { body, .. } => ptr_in_stmts(body, out),
             _ => {}
@@ -229,7 +229,7 @@ fn ptr_in_stmts(stmts: &[Stmt], out: &mut Vec<String>) {
 }
 fn ptr_in_expr(e: &Expr, out: &mut Vec<String>) {
     match e {
-        Expr::Call { callee, args } => {
+        Expr::Call { callee, args, ..} => {
             if let Expr::Ident(name) = callee.as_ref() {
                 if matches!(name.as_str(), "invoke" | "invoke1" | "invoke2") {
                     if let Some(first) = args.first() { if let Expr::Ident(fn_name) = first { if !out.contains(fn_name) { out.push(fn_name.clone()); } } }
@@ -241,7 +241,7 @@ fn ptr_in_expr(e: &Expr, out: &mut Vec<String>) {
         Expr::Binary { lhs, rhs, .. } => { ptr_in_expr(lhs, out); ptr_in_expr(rhs, out); }
         Expr::Unary { expr, .. } => ptr_in_expr(expr, out),
         Expr::Field { base, .. } => ptr_in_expr(base, out),
-        Expr::Index { base, index } => { ptr_in_expr(base, out); ptr_in_expr(index, out); }
+        Expr::Index { base, index, ..} => { ptr_in_expr(base, out); ptr_in_expr(index, out); }
         Expr::StructInit { fields, .. } => { for (_, e) in fields { ptr_in_expr(e, out); } }
         _ => {}
     }
@@ -259,7 +259,7 @@ fn algebraic_simplify(decls: &mut Vec<Decl>) {
 fn simplify_expr(e: Expr) -> Expr {
     // Clone-and-match on owned value to avoid borrow gymnastics
     match e.clone() {
-        Expr::Binary { op, lhs, rhs } => {
+        Expr::Binary { op, lhs, rhs, ..} => {
             let is_zero = |e: &Expr| matches!(e, Expr::IntLit(0));
             let is_one  = |e: &Expr| matches!(e, Expr::IntLit(1));
             let is_neg1 = |e: &Expr| matches!(e, Expr::IntLit(-1));
@@ -295,7 +295,7 @@ fn simplify_expr(e: Expr) -> Expr {
             }
             e
         }
-        Expr::Unary { op, expr } => {
+        Expr::Unary { op, expr, ..} => {
             match op.as_str() {
                 "neg" => {
                     if let Expr::Unary { op: inner_op, expr: inner_expr } = *expr {
@@ -343,8 +343,8 @@ fn remove_dead_functions(decls: &mut Vec<Decl>) {
 fn collect_calls_in_stmt(s: &Stmt, out: &mut HashSet<String>) {
     match s {
         Stmt::Let(_, _, e) | Stmt::Assign(_, e) | Stmt::Return(Some(e)) | Stmt::Expr(e) => collect_calls_in_expr(e, out),
-        Stmt::IndexAssign { base, index, value } => { collect_calls_in_expr(base, out); collect_calls_in_expr(index, out); collect_calls_in_expr(value, out); }
-        Stmt::If { cond, then_body, else_body } => { collect_calls_in_expr(cond, out); for s in then_body { collect_calls_in_stmt(s, out); } for s in else_body { collect_calls_in_stmt(s, out); } }
+        Stmt::IndexAssign { base, index, value, ..} => { collect_calls_in_expr(base, out); collect_calls_in_expr(index, out); collect_calls_in_expr(value, out); }
+        Stmt::If { cond, then_body, else_body, ..} => { collect_calls_in_expr(cond, out); for s in then_body { collect_calls_in_stmt(s, out); } for s in else_body { collect_calls_in_stmt(s, out); } }
         Stmt::Loop { cond, body, .. } => { if let Some(c) = cond { collect_calls_in_expr(c, out); } for s in body { collect_calls_in_stmt(s, out); } }
         _ => {}
     }
@@ -371,7 +371,7 @@ fn fold_constants_in_decls(decls: &mut Vec<Decl>) {
 
 fn fold_expr(e: Expr) -> Expr {
     match &e {
-        Expr::Binary { op, lhs, rhs } => {
+        Expr::Binary { op, lhs, rhs, ..} => {
             if let (Expr::IntLit(a), Expr::IntLit(b)) = (lhs.as_ref(), rhs.as_ref()) {
                 // ponytail: skip div-by-zero (would change runtime behavior)
                 let result = match op.as_str() {
@@ -401,7 +401,7 @@ fn fold_expr(e: Expr) -> Expr {
             }
             e
         }
-        Expr::Unary { op, expr } => {
+        Expr::Unary { op, expr, ..} => {
             if let Expr::IntLit(n) = expr.as_ref() {
                 let result = match op.as_str() {
                     "neg" => Some(-n),
@@ -460,9 +460,9 @@ fn count_uses_in_stmt(s: &Stmt, consts: &mut HashMap<String, (i64, usize)>) {
     match s {
         Stmt::Let(_, _, e) => count_uses_in_expr(e, consts),
         Stmt::Assign(_, e) => count_uses_in_expr(e, consts),
-        Stmt::IndexAssign { base, index, value } => { count_uses_in_expr(base, consts); count_uses_in_expr(index, consts); count_uses_in_expr(value, consts); }
+        Stmt::IndexAssign { base, index, value, ..} => { count_uses_in_expr(base, consts); count_uses_in_expr(index, consts); count_uses_in_expr(value, consts); }
         Stmt::Return(Some(e)) => count_uses_in_expr(e, consts),
-        Stmt::If { cond, then_body, else_body } => { count_uses_in_expr(cond, consts); for s in then_body { count_uses_in_stmt(s, consts); } for s in else_body { count_uses_in_stmt(s, consts); } }
+        Stmt::If { cond, then_body, else_body, ..} => { count_uses_in_expr(cond, consts); for s in then_body { count_uses_in_stmt(s, consts); } for s in else_body { count_uses_in_stmt(s, consts); } }
         Stmt::Loop { cond, body, .. } => { if let Some(c) = cond { count_uses_in_expr(c, consts); } for s in body { count_uses_in_stmt(s, consts); } }
         Stmt::Expr(e) => count_uses_in_expr(e, consts),
         _ => {}
@@ -533,9 +533,9 @@ fn collect_used(stmts: &[Stmt], out: &mut HashSet<String>) {
     for s in stmts {
         match s {
             Stmt::Assign(n, e) => { out.insert(n.clone()); collect_used_in_expr(e, out); }
-            Stmt::IndexAssign { base, index, value } => { collect_used_in_expr(base, out); collect_used_in_expr(index, out); collect_used_in_expr(value, out); }
+            Stmt::IndexAssign { base, index, value, ..} => { collect_used_in_expr(base, out); collect_used_in_expr(index, out); collect_used_in_expr(value, out); }
             Stmt::Let(_, _, e) | Stmt::Return(Some(e)) | Stmt::Expr(e) => collect_used_in_expr(e, out),
-            Stmt::If { cond, then_body, else_body } => { collect_used_in_expr(cond, out); collect_used(then_body, out); collect_used(else_body, out); }
+            Stmt::If { cond, then_body, else_body, ..} => { collect_used_in_expr(cond, out); collect_used(then_body, out); collect_used(else_body, out); }
             Stmt::Loop { cond, body, .. } => { if let Some(c) = cond { collect_used_in_expr(c, out); } collect_used(body, out); }
             _ => {}
         }

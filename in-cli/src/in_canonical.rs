@@ -104,7 +104,7 @@ fn format_stmt(stmt: &Stmt, depth: usize, out: &mut String) {
             out.push_str(&format_expr(expr));
             out.push('\n');
         }
-        Stmt::IndexAssign { base, index, value } => {
+        Stmt::IndexAssign { base, index, value, ..} => {
             out.push_str(&indent);
             out.push_str(&format_expr(base));
             out.push('[');
@@ -117,7 +117,7 @@ fn format_stmt(stmt: &Stmt, depth: usize, out: &mut String) {
             out.push_str(&indent);
             out.push_str("return\n");
         }
-        Stmt::Break(_) => {}
+        Stmt::Break => {}
         Stmt::Return(Some(expr)) => {
             out.push_str(&indent);
             out.push_str("return ");
@@ -170,7 +170,7 @@ fn format_stmt(stmt: &Stmt, depth: usize, out: &mut String) {
             out.push_str(&indent);
             out.push_str("}\n");
         }
-        Stmt::Match { scrutinee, arms } => {
+        Stmt::Match { scrutinee, arms, ..} => {
             out.push_str(&indent);
             out.push_str("match ");
             out.push_str(&format_expr(scrutinee));
@@ -198,15 +198,15 @@ fn format_expr(expr: &Expr) -> String {
         Expr::StringLit(value) => format!("{value:?}"),
         Expr::BoolLit(value) => value.to_string(),
         Expr::Ident(name) => name.clone(),
-        Expr::Unary { op, expr } => {
+        Expr::Unary { op, expr, ..} => {
             let mut out = op.clone();
             out.push_str(&format_expr(expr));
             out
         }
-        Expr::Binary { op, lhs, rhs } => {
+        Expr::Binary { op, lhs, rhs, ..} => {
             format!("{} {} {}", format_expr(lhs), op, format_expr(rhs))
         }
-        Expr::StructInit { name, fields } => {
+        Expr::StructInit { name, fields, ..} => {
             let rendered = fields
                 .iter()
                 .map(|(field, expr)| format!("{field}: {}", format_expr(expr)))
@@ -214,17 +214,17 @@ fn format_expr(expr: &Expr) -> String {
                 .join(", ");
             format!("{name} {{ {rendered} }}")
         }
-        Expr::Field { base, name } => {
+        Expr::Field { base, name, ..} => {
             format!("{}.{}", format_expr(base), name)
         }
         Expr::ArrayLit(items) => {
             let rendered = items.iter().map(format_expr).collect::<Vec<_>>().join(", ");
             format!("[{rendered}]")
         }
-        Expr::Index { base, index } => {
+        Expr::Index { base, index, ..} => {
             format!("{}[{}]", format_expr(base), format_expr(index))
         }
-        Expr::Call { callee, args } => {
+        Expr::Call { callee, args, ..} => {
             if let Expr::Ident(name) = callee.as_ref()
                 && let Some(method) = name.strip_prefix("__method__")
                 && let Some((base, rest)) = args.split_first()

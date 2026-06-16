@@ -59,90 +59,78 @@ pub enum Typ {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expr {
-    IntLit(i64, NodeSpan),
-    FloatLit(FloatVal, NodeSpan),
-    StringLit(String, NodeSpan),
-    BoolLit(bool, NodeSpan),
-    Ident(String, NodeSpan),
+    IntLit(i64),
+    FloatLit(FloatVal),
+    StringLit(String),
+    BoolLit(bool),
+    Ident(String),
     Unary {
         op: String,
         expr: Box<Expr>,
-        span: NodeSpan,
     },
     Binary {
         op: String,
         lhs: Box<Expr>,
         rhs: Box<Expr>,
-        span: NodeSpan,
     },
     StructInit {
         name: String,
         fields: Vec<(String, Expr)>,
-        span: NodeSpan,
     },
     Field {
         base: Box<Expr>,
         name: String,
-        span: NodeSpan,
     },
-    ArrayLit(Vec<Expr>, NodeSpan),
+    ArrayLit(Vec<Expr>),
     Index {
         base: Box<Expr>,
         index: Box<Expr>,
-        span: NodeSpan,
     },
     Call {
         callee: Box<Expr>,
         args: Vec<Expr>,
-        span: NodeSpan,
     },
     Closure {
         params: Vec<(String, Typ)>,
         ret: Typ,
         body: Vec<Stmt>,
         captures: Vec<String>,
-        span: NodeSpan,
     },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Stmt {
-    Let(String, Option<Typ>, Expr, NodeSpan),
-    Assign(String, Expr, NodeSpan),
+    Let(String, Option<Typ>, Expr),
+    Assign(String, Expr),
     IndexAssign {
         base: Expr,
         index: Expr,
         value: Expr,
-        span: NodeSpan,
     },
-    Return(Option<Expr>, NodeSpan),
+    Return(Option<Expr>),
     If {
         cond: Expr,
         then_body: Vec<Stmt>,
         else_body: Vec<Stmt>,
-        span: NodeSpan,
     },
     Loop {
         kind: LoopKind,
         cond: Option<Expr>,
         body: Vec<Stmt>,
-        span: NodeSpan,
     },
     Match {
         scrutinee: Expr,
         arms: Vec<MatchArm>,
-        span: NodeSpan,
     },
-    Throw(Expr, NodeSpan),
+    Throw(Expr),
     Try {
         body: Vec<Stmt>,
         catches: Vec<CatchArm>,
-        span: NodeSpan,
     },
     /// Evaluated for side effects (e.g. `.in` expression statements).
-    Expr(Expr, NodeSpan),
+    Expr(Expr),
     /// Break out of the current loop.
-    Break(NodeSpan),
+    Break,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -278,14 +266,12 @@ impl MatchPattern {
 pub struct MatchArm {
     pub pattern: String,
     pub body: Vec<Stmt>,
-    pub span: NodeSpan,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CatchArm {
     pub pattern: String,
     pub body: Vec<Stmt>,
-    pub span: NodeSpan,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -391,7 +377,6 @@ pub enum Decl {
         name: String,
         fields: Vec<(String, Typ)>,
         type_params: Vec<String>,
-        span: NodeSpan,
     },
     Function {
         name: String,
@@ -399,7 +384,6 @@ pub enum Decl {
         ret: Typ,
         body: Vec<Stmt>,
         type_params: Vec<String>,
-        span: NodeSpan,
     },
     Class {
         name: String,
@@ -409,14 +393,12 @@ pub enum Decl {
         extends: Option<String>,
         implements: Vec<String>,
         type_params: Vec<String>,
-        span: NodeSpan,
     },
     Interface {
         name: String,
         methods: Vec<MethodSig>,
         visibility: Visibility,
         type_params: Vec<String>,
-        span: NodeSpan,
     },
     Component {
         name: String,
@@ -426,7 +408,6 @@ pub enum Decl {
         imports: Vec<ComponentImport>,
         exports: Vec<ComponentExport>,
         capabilities: Vec<ComponentCapability>,
-        span: NodeSpan,
     },
     /// A global variable or constant declaration.
     /// `mutable` is true for `var`, false for `const`.
@@ -435,6 +416,5 @@ pub enum Decl {
         typ: Typ,
         init: Option<Box<Expr>>,
         mutable: bool,
-        span: NodeSpan,
     },
 }

@@ -339,11 +339,11 @@ impl TypeChecker {
                 }
             }
             Stmt::Return(None) => {}
-            Stmt::Break(_) => {}
+            Stmt::Break => {}
             Stmt::Expr(expr) => {
                 self.check_expr(fn_name, expr, facts, env, errors);
             }
-            Stmt::IndexAssign { base, index, value } => {
+            Stmt::IndexAssign { base, index, value, ..} => {
                 self.check_expr(fn_name, base, facts, env, errors);
                 self.check_expr(fn_name, index, facts, env, errors);
                 self.check_expr(fn_name, value, facts, env, errors);
@@ -402,7 +402,7 @@ impl TypeChecker {
                 let mut env_body = env.clone();
                 self.check_stmts(fn_name, fn_ret, body, facts, &mut env_body, errors);
             }
-            Stmt::Match { scrutinee, arms } => {
+            Stmt::Match { scrutinee, arms, ..} => {
                 self.check_expr(fn_name, scrutinee, facts, env, errors);
                 if arms.is_empty() {
                     errors.push(TypeError::TypeMismatch {
@@ -445,7 +445,7 @@ impl TypeChecker {
             Expr::Unary { expr: inner, .. } => {
                 self.check_expr(fn_name, inner, facts, env, errors);
             }
-            Expr::Binary { op, lhs, rhs } => {
+            Expr::Binary { op, lhs, rhs, ..} => {
                 self.check_expr(fn_name, lhs, facts, env, errors);
                 self.check_expr(fn_name, rhs, facts, env, errors);
                 if let (Some(l), Some(r)) = (
@@ -512,7 +512,7 @@ impl TypeChecker {
                     }
                 }
             }
-            Expr::StructInit { name, fields } => match facts.structs.get(name) {
+            Expr::StructInit { name, fields, ..} => match facts.structs.get(name) {
                 Some(schema) => {
                     for (field_name, field_expr) in fields {
                         self.check_expr(fn_name, field_expr, facts, env, errors);
@@ -543,7 +543,7 @@ impl TypeChecker {
                     errors.push(TypeError::StructNotFound { name: name.clone() });
                 }
             },
-            Expr::Field { base, name } => {
+            Expr::Field { base, name, ..} => {
                 self.check_expr(fn_name, base, facts, env, errors);
                 if let Some(base_typ) = self.expr_type(base, facts, env)
                     && let Typ::Named(struct_name) = &base_typ
@@ -576,7 +576,7 @@ impl TypeChecker {
                     }
                 }
             }
-            Expr::Index { base, index } => {
+            Expr::Index { base, index, ..} => {
                 self.check_expr(fn_name, base, facts, env, errors);
                 self.check_expr(fn_name, index, facts, env, errors);
                 if let Some(index_typ) = self.expr_type(index, facts, env)
@@ -596,7 +596,7 @@ impl TypeChecker {
                     });
                 }
             }
-            Expr::Call { callee, args } => {
+            Expr::Call { callee, args, ..} => {
                 if let Expr::Ident(callee_name) = callee.as_ref() {
                     if let Some((params, _ret)) = facts.functions.get(callee_name) {
                         if params.len() != args.len() {
@@ -641,7 +641,7 @@ impl TypeChecker {
             Expr::BoolLit(_) => Some(Typ::Bool),
             Expr::Ident(name) => env.get(name).cloned(),
             Expr::StructInit { name, .. } => Some(Typ::Named(name.clone())),
-            Expr::Field { base, name } => {
+            Expr::Field { base, name, ..} => {
                 if let Some(base_typ) = self.expr_type(base, facts, env)
                     && let Typ::Named(struct_name) = &base_typ
                     && let Some(schema) = facts.structs.get(struct_name)
@@ -666,12 +666,12 @@ impl TypeChecker {
                     None
                 }
             }
-            Expr::Unary { op, expr } => match op.as_str() {
+            Expr::Unary { op, expr, ..} => match op.as_str() {
                 "!" => Some(Typ::Bool),
                 "-" => self.expr_type(expr, facts, env),
                 _ => self.expr_type(expr, facts, env),
             },
-            Expr::Binary { op, lhs, rhs } => match op.as_str() {
+            Expr::Binary { op, lhs, rhs, ..} => match op.as_str() {
                 "+" => {
                     let l = self.expr_type(lhs, facts, env);
                     let r = self.expr_type(rhs, facts, env);
