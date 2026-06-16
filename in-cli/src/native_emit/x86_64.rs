@@ -151,9 +151,15 @@ pub fn mov_mr(dst: u8, src: u8) -> Vec<u8> {
 fn sib_for_base(base: u8) -> Option<u8> {
     // RSP (4) and RBP (5) with Mod=01 or Mod=10 require a SIB byte.
     // For RSP: SIB = 0x24 (scale=0, index=4=no-index, base=4=RSP)
-    if base == RSP { Some(0x24) }
-    else if base == RBP { Some(0x25) }  // [RBP + disp] uses SIB with index=4, base=5
-    else { None }
+    if base == RSP {
+        Some(0x24)
+    } else if base == RBP {
+        Some(0x25)
+    }
+    // [RBP + disp] uses SIB with index=4, base=5
+    else {
+        None
+    }
 }
 
 /// mov [r/m64 + disp8], r64  (REX.W + 89 /r with ModRM)
@@ -161,8 +167,9 @@ fn sib_for_base(base: u8) -> Option<u8> {
 pub fn mov_m_r(base: u8, disp: i32, reg: u8) -> Vec<u8> {
     let mut code = vec![rex_wr(reg, base)];
     code.push(0x89);
-    let needs_sib = base == RSP || base == RBP;
-    if disp == 0 && !needs_sib {
+    // SIB needed only for RSP (rm=4 always requires SIB). RBP with Mod=01 works without SIB.
+    let needs_sib = base == RSP;
+    if disp == 0 && !needs_sib && base != RBP {
         code.push(modrm(0, reg & 7, base & 7));
     } else if disp as i8 as i32 == disp {
         code.push(modrm(1, reg & 7, base & 7));
@@ -185,8 +192,8 @@ pub fn mov_m_r(base: u8, disp: i32, reg: u8) -> Vec<u8> {
 pub fn mov_r_m(reg: u8, base: u8, disp: i32) -> Vec<u8> {
     let mut code = vec![rex_wr(reg, base)];
     code.push(0x8B);
-    let needs_sib = base == RSP || base == RBP;
-    if disp == 0 && !needs_sib {
+    let needs_sib = base == RSP;
+    if disp == 0 && !needs_sib && base != RBP {
         code.push(modrm(0, reg & 7, base & 7));
     } else if disp as i8 as i32 == disp {
         code.push(modrm(1, reg & 7, base & 7));
@@ -204,26 +211,26 @@ pub fn mov_r_m(reg: u8, base: u8, disp: i32) -> Vec<u8> {
     code
 }
 
-/// mov [rsp + disp8], r64  — stack spill
+/// mov [rbp - (8 + disp)], r64  — RBP-relative spill (push/pop-safe)
 pub fn str64(reg: u8, disp: u16) -> Vec<u8> {
-    mov_m_r(RSP, disp as i32, reg)
+    mov_m_r(RBP, -(disp as i32 + 8), reg)
 }
 
-/// mov r64, [rsp + disp8]  — stack load
+/// mov r64, [rbp - (8 + disp)]  — RBP-relative load (push/pop-safe)
 pub fn ldr64(reg: u8, disp: u16) -> Vec<u8> {
-    mov_r_m(reg, RSP, disp as i32)
+    mov_r_m(reg, RBP, -(disp as i32 + 8))
 }
 
 /// mov rax, [abs64] — load from absolute 64-bit address (uses moffs form, rax only)
 pub fn mov_rax_from_abs(addr: u64) -> Vec<u8> {
-    let mut code = vec![0x48, 0xA1];  // REX.W + MOV RAX, moffs64
+    let mut code = vec![0x48, 0xA1]; // REX.W + MOV RAX, moffs64
     code.extend_from_slice(&addr.to_le_bytes());
     code
 }
 
 /// mov [abs64], rax — store to absolute 64-bit address (uses moffs form, rax only)
 pub fn mov_abs_from_rax(addr: u64) -> Vec<u8> {
-    let mut code = vec![0x48, 0xA3];  // REX.W + MOV moffs64, RAX
+    let mut code = vec![0x48, 0xA3]; // REX.W + MOV moffs64, RAX
     code.extend_from_slice(&addr.to_le_bytes());
     code
 }

@@ -59,7 +59,7 @@ fn format_decl(decl: &Decl, out: &mut String) {
             out.push('}');
         }
         Decl::Class { .. } | Decl::Interface { .. } | Decl::Component { .. } => {}
-            Decl::Global { .. } => {}
+        Decl::Global { .. } => {}
     }
 }
 
@@ -116,6 +116,8 @@ fn format_stmt(stmt: &Stmt, depth: usize, out: &mut String) {
         Stmt::Return(None) => {
             out.push_str(&indent);
             out.push_str("return\n");
+        }
+        Stmt::Break => {
         }
         Stmt::Return(Some(expr)) => {
             out.push_str(&indent);

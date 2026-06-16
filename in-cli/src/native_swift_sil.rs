@@ -139,6 +139,7 @@ fn rewrite_stmt_field_refs(
                 .collect(),
             catches,
         },
+        Stmt::Break => Stmt::Break,
         Stmt::Expr(expr) => Stmt::Expr(rewrite_expr_field_refs(expr, fields, locals)),
         other => other,
     }

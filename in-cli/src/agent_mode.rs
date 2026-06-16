@@ -1097,6 +1097,7 @@ fn collect_dependency_symbol_calls_from_stmt<'a>(
             }
         }
         Stmt::Return(None) => {}
+            Stmt::Break => {}
         Stmt::Throw(_) | Stmt::Try { .. } => {}
     }
 }

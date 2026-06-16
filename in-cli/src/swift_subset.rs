@@ -1081,6 +1081,7 @@ fn check_stmt_calls(
             }
         }
         Stmt::Return(None) => {}
+            Stmt::Break => {}
         Stmt::Throw(_) | Stmt::Try { .. } => {}
     }
 }
@@ -1372,6 +1373,7 @@ fn check_stmt_names(
                 .unwrap_or(Typ::Void);
             env.insert(name.clone(), typ);
         }
+        Stmt::Break => {}
         Stmt::Assign(name, expr) => {
             if !env.contains_key(name) {
                 diagnostics.push(Diagnostic {

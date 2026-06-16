@@ -1509,7 +1509,6 @@ fn parse_while_stmt(s: &str) -> Result<Stmt, String> {
     })
 }
 
-
 fn parse_match_stmt(s: &str) -> Result<Stmt, String> {
     let rest = trim(s)
         .strip_prefix("match ")
@@ -1655,9 +1654,14 @@ fn parse_stmt_line(line: &str) -> Result<Stmt, String> {
     if s.starts_with("while ") {
         return parse_while_stmt(s);
     }
+    if s.starts_with("break") && (s.len() == 5 || s.as_bytes().get(5).map_or(true, |&c| c == b' ' || c == b';' || c == b'}')) {
+        return Ok(Stmt::Break);
+    }
     // `for` is handled by parse_function_body expansion
     if s.starts_with("for ") {
-        return Err(".in: unexpected `for` statement (should be expanded by parse_function_body)".into());
+        return Err(
+            ".in: unexpected `for` statement (should be expanded by parse_function_body)".into(),
+        );
     }
     if s.starts_with("match ") {
         return parse_match_stmt(s);
@@ -1710,7 +1714,7 @@ fn parse_for_expanded(s: &str) -> Result<Vec<Stmt>, String> {
     if parts.len() != 2 {
         return Err(".in: `for` needs `<var> in <range>`".into());
     }
-    let var_name = trim(parts[0]);
+    let var_name = trim(parts[0]).to_string();
     if var_name.is_empty() {
         return Err(".in: `for` loop variable name missing".into());
     }
@@ -1737,13 +1741,13 @@ fn parse_for_expanded(s: &str) -> Result<Vec<Stmt>, String> {
         kind: LoopKind::While,
         cond: Some(Expr::Binary {
             op: "<".to_string(),
-            lhs: Box::new(Expr::Ident(var_name.to_string())),
+            lhs: Box::new(Expr::Ident(var_name.clone())),
             rhs: Box::new(end_expr),
         }),
         body,
     };
     Ok(vec![
-        Stmt::Let(var_name.to_string(), Some(Typ::Int), start_expr),
+        Stmt::Let(var_name, Some(Typ::Int), start_expr),
         while_loop,
     ])
 }
@@ -2009,9 +2013,12 @@ fn parse_module_from_blocks(blocks: &[String]) -> Result<UnifiedModule, String> 
             let rest = trim(&line[4..]);
             if let Some(eq) = rest.find('=') {
                 let lhs = trim(&rest[..eq]);
-                let rhs = trim(&rest[eq+1..]);
+                let rhs = trim(&rest[eq + 1..]);
                 let (name, typ) = if let Some(colon) = lhs.rfind(':') {
-                    (trim(&lhs[..colon]).to_string(), Some(parse_in_type(trim(&lhs[colon+1..]))))
+                    (
+                        trim(&lhs[..colon]).to_string(),
+                        Some(parse_in_type(trim(&lhs[colon + 1..]))),
+                    )
                 } else {
                     (lhs.to_string(), None)
                 };
@@ -2030,9 +2037,12 @@ fn parse_module_from_blocks(blocks: &[String]) -> Result<UnifiedModule, String> 
             let rest = trim(&line[6..]);
             if let Some(eq) = rest.find('=') {
                 let lhs = trim(&rest[..eq]);
-                let rhs = trim(&rest[eq+1..]);
+                let rhs = trim(&rest[eq + 1..]);
                 let (name, typ) = if let Some(colon) = lhs.rfind(':') {
-                    (trim(&lhs[..colon]).to_string(), Some(parse_in_type(trim(&lhs[colon+1..]))))
+                    (
+                        trim(&lhs[..colon]).to_string(),
+                        Some(parse_in_type(trim(&lhs[colon + 1..]))),
+                    )
                 } else {
                     (lhs.to_string(), None)
                 };
@@ -2423,6 +2433,7 @@ fn validate_stmt_types(
             validate_expr_shapes(fn_name, struct_fields, value)?;
         }
         Stmt::Return(None) => {}
+        Stmt::Break => {}
         Stmt::If {
             cond,
             then_body,
@@ -2553,6 +2564,7 @@ fn desugar_method_calls_in_body(
                 }
             }
             Stmt::Return(None) => {}
+            Stmt::Break => {}
             Stmt::Throw(expr) => {
                 desugar_method_calls_in_expr(expr, env, structs, fn_rets);
             }
@@ -2734,9 +2746,12 @@ fn inline_const_values(module: &mut UnifiedModule) {
         .decls
         .iter()
         .filter_map(|d| match d {
-            Decl::Global { name, init, mutable: false, .. } => {
-                init.as_ref().map(|expr| (name.clone(), *expr.clone()))
-            }
+            Decl::Global {
+                name,
+                init,
+                mutable: false,
+                ..
+            } => init.as_ref().map(|expr| (name.clone(), *expr.clone())),
             _ => None,
         })
         .collect();
@@ -2799,17 +2814,35 @@ fn inline_const_values(module: &mut UnifiedModule) {
                 replace_idents(index, consts);
                 replace_idents(value, consts);
             }
-            Stmt::If { cond, then_body, else_body } => {
+            Stmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
                 replace_idents(cond, consts);
-                for s in then_body { replace_stmt_idents(s, consts); }
-                for s in else_body { replace_stmt_idents(s, consts); }
+                for s in then_body {
+                    replace_stmt_idents(s, consts);
+                }
+                for s in else_body {
+                    replace_stmt_idents(s, consts);
+                }
             }
-            Stmt::Loop { cond: Some(cond), body, .. } => {
+            Stmt::Loop {
+                cond: Some(cond),
+                body,
+                ..
+            } => {
                 replace_idents(cond, consts);
-                for s in body { replace_stmt_idents(s, consts); }
+                for s in body {
+                    replace_stmt_idents(s, consts);
+                }
             }
-            Stmt::Loop { cond: None, body, .. } => {
-                for s in body { replace_stmt_idents(s, consts); }
+            Stmt::Loop {
+                cond: None, body, ..
+            } => {
+                for s in body {
+                    replace_stmt_idents(s, consts);
+                }
             }
             Stmt::Match { scrutinee, arms } => {
                 replace_idents(scrutinee, consts);
@@ -2820,7 +2853,9 @@ fn inline_const_values(module: &mut UnifiedModule) {
                 }
             }
             Stmt::Try { body, catches } => {
-                for s in body { replace_stmt_idents(s, consts); }
+                for s in body {
+                    replace_stmt_idents(s, consts);
+                }
                 for catch in catches {
                     for s in &mut catch.body {
                         replace_stmt_idents(s, consts);
@@ -2828,6 +2863,7 @@ fn inline_const_values(module: &mut UnifiedModule) {
                 }
             }
             Stmt::Return(None) => {}
+            Stmt::Break => {}
         }
     }
 

@@ -89,9 +89,8 @@ fn is_builtin_fn(name: &str) -> bool {
 fn builtin_return_type(name: &str) -> Typ {
     match name {
         "len" | "array_len" | "bool_to_int" | "to_int" | "str_to_int" | "str_index_of"
-        | "str_table_get_int"
-        | "inb" | "inl" | "load8" | "load16" | "load32" | "load64" | "read_cr2"
-        | "invoke" | "invoke1" | "invoke2" => Typ::Int,
+        | "str_table_get_int" | "inb" | "inl" | "load8" | "load16" | "load32" | "load64"
+        | "read_cr2" | "invoke" | "invoke1" | "invoke2" => Typ::Int,
         "str_eq" | "str_contains" | "str_starts_with" | "str_is_int" | "str_table_has"
         | "int_to_bool" => Typ::Bool,
         "str_concat" | "str_trim" | "str_slice" | "to_string" => Typ::String,
@@ -280,6 +279,7 @@ fn check_stmt(
             }
             Ok(())
         }
+        Stmt::Break => Ok(()),
         Stmt::If {
             cond,
             then_body,

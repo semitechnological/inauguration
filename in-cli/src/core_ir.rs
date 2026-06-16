@@ -96,6 +96,8 @@ pub enum Stmt {
     },
     /// Evaluated for side effects (e.g. `.in` expression statements).
     Expr(Expr),
+    /// Break out of the current loop.
+    Break,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

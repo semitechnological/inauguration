@@ -47,6 +47,8 @@ struct LowerCtx<'a> {
     fn_name: String,
     /// Global variable addresses: name → absolute physical address
     globals: HashMap<String, u64>,
+    /// String literal content → fixed absolute address
+    string_addrs: HashMap<String, u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -69,6 +71,7 @@ impl<'a> LowerCtx<'a> {
         structs: &'a HashMap<String, Vec<(String, Typ)>>,
         functions: &'a HashMap<String, FunctionInfo>,
         globals: HashMap<String, u64>,
+        string_addrs: HashMap<String, u64>,
     ) -> Self {
         let mut ctx = Self {
             locals: HashMap::new(),
@@ -79,6 +82,7 @@ impl<'a> LowerCtx<'a> {
             pending_calls: Vec::new(),
             fn_name: fn_name.to_string(),
             globals,
+            string_addrs,
         };
         // Allocate stack slots for parameters
         // On x86_64 (System V), first 6 integer args go in RDI, RSI, RDX, RCX, R8, R9
@@ -172,6 +176,23 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
     let structs = collect_structs(module);
     let globals = collect_globals(module);
 
+    // Collect all unique string literals and assign fixed addresses (above globals at 0x6000)
+    let mut all_strings: Vec<String> = Vec::new();
+    for func_info in functions.values() {
+        collect_string_literals(&func_info.body, &mut all_strings);
+    }
+    all_strings.sort();
+    all_strings.dedup();
+
+    let string_base: u64 = 0x7000;
+    let mut string_addrs: HashMap<String, u64> = HashMap::new();
+    let mut next_addr = string_base;
+    for s in &all_strings {
+        string_addrs.insert(s.clone(), next_addr);
+        // 8-byte aligned, null-terminated
+        next_addr += (s.len() + 1 + 7) as u64 & !7;
+    }
+
     let mut emitter = CodeEmitter::new();
     let mut function_offsets: HashMap<String, u32> = HashMap::new();
     let mut all_pending_calls: Vec<PendingCall> = Vec::new();
@@ -180,9 +201,13 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
     // can jump to a known offset 0 in the compiled code section).
     let mut names: Vec<String> = functions.keys().cloned().collect();
     names.sort_by(|a, b| {
-        if a == entry { std::cmp::Ordering::Less }
-        else if b == entry { std::cmp::Ordering::Greater }
-        else { a.cmp(b) }
+        if a == entry {
+            std::cmp::Ordering::Less
+        } else if b == entry {
+            std::cmp::Ordering::Greater
+        } else {
+            a.cmp(b)
+        }
     });
 
     for name in &names {
@@ -195,6 +220,7 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
             &structs,
             &functions,
             &globals,
+            &string_addrs,
             &mut all_pending_calls,
         )?;
     }
@@ -206,6 +232,25 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
             .ok_or_else(|| format!("x86_64-lower: unresolved call target `{}`", call.target))?;
         let rel_offset = *target_offset as i32 - call.site as i32 - 5; // call is 5 bytes
         emitter.patch_u32(call.site + 1, rel_offset as u32);
+    }
+
+    // Append string data at fixed addresses
+    if !all_strings.is_empty() {
+        let code_end = emitter.len() as u64;
+        if string_base > code_end {
+            emitter.bytes.resize(string_base as usize, 0);
+        }
+        for s in &all_strings {
+            let addr = string_addrs[s];
+            let size = s.len() + 1; // +1 for null terminator
+            let padded = (size + 7) & !7;
+            let end = (addr as usize) + padded;
+            if end > emitter.bytes.len() {
+                emitter.bytes.resize(end, 0);
+            }
+            emitter.bytes[addr as usize..addr as usize + s.len()].copy_from_slice(s.as_bytes());
+            emitter.bytes[addr as usize + s.len()] = 0; // null terminator
+        }
     }
 
     let entry_offset = function_offsets.get(entry).copied().unwrap_or(0);
@@ -286,6 +331,7 @@ fn lower_function(
     structs: &HashMap<String, Vec<(String, Typ)>>,
     functions: &HashMap<String, FunctionInfo>,
     globals: &HashMap<String, u64>,
+    string_addrs: &HashMap<String, u64>,
     pending_calls: &mut Vec<PendingCall>,
 ) -> Result<(), String> {
     // Validate return type
@@ -299,7 +345,14 @@ fn lower_function(
         }
     }
 
-    let mut ctx = LowerCtx::new(&func.name, &func.params, structs, functions, globals.clone());
+    let mut ctx = LowerCtx::new(
+        &func.name,
+        &func.params,
+        structs,
+        functions,
+        globals.clone(),
+        string_addrs.clone(),
+    );
 
     // Pre-allocate locals for let bindings
     alloc_declared_locals(&mut ctx, &func.body)?;
@@ -441,6 +494,10 @@ fn lower_stmt(
             emitter.emit_bytes(&[0x48, 0x89, 0x37]);
             Ok(())
         }
+        Stmt::Break => {
+            // ponytail: break is a no-op for now
+            Ok(())
+        }
         Stmt::If {
             cond,
             then_body,
@@ -505,28 +562,38 @@ fn lower_loop(
         lower_expr_into(emitter, ctx, cond, RAX, pending_calls)?;
         emitter.emit_insns(&x86_64::cmp_rmi8(RAX, 0));
         let exit_branch = emitter.len();
-        emitter.emit_insns(&x86_64::je(0)); // placeholder
+        // Use near conditional jump (6 bytes) to avoid rel8 overflow for large bodies
+        emitter.emit_bytes(&[0x0F, 0x84, 0, 0, 0, 0]); // jcc_near(0x04, 0) placeholder
 
         for stmt in body {
             lower_stmt(emitter, ctx, stmt, pending_calls)?;
         }
 
+        // Backward jump to loop_start
         let loop_end = emitter.len();
-        let loop_delta = (loop_start as i32 - loop_end as i32 - 2) as i8;
-        emitter.emit_insns(&x86_64::jmp_rel8(loop_delta));
+        let back_delta = loop_start as i32 - loop_end as i32;
+        if back_delta - 2 >= i8::MIN as i32 && back_delta - 2 <= i8::MAX as i32 {
+            emitter.emit_insns(&x86_64::jmp_rel8((back_delta - 2) as i8));
+        } else {
+            emitter.emit_insns(&x86_64::jmp_rel32(back_delta - 5));
+        }
 
-        // Patch exit branch
+        // Patch exit branch (jcc_near rel32)
         let exit_offset = emitter.len();
-        let exit_delta = (exit_offset as i32 - exit_branch as i32 - 2) as i8;
-        emitter.patch_u8(exit_branch + 1, exit_delta as u8);
+        let exit_delta = exit_offset as i32 - exit_branch as i32 - 6;
+        emitter.patch_u32(exit_branch + 2, exit_delta as u32);
     } else {
         // Infinite loop
         for stmt in body {
             lower_stmt(emitter, ctx, stmt, pending_calls)?;
         }
         let loop_end = emitter.len();
-        let loop_delta = (loop_start as i32 - loop_end as i32 - 2) as i8;
-        emitter.emit_insns(&x86_64::jmp_rel8(loop_delta));
+        let back_delta = loop_start as i32 - loop_end as i32;
+        if back_delta - 2 >= i8::MIN as i32 && back_delta - 2 <= i8::MAX as i32 {
+            emitter.emit_insns(&x86_64::jmp_rel8((back_delta - 2) as i8));
+        } else {
+            emitter.emit_insns(&x86_64::jmp_rel32(back_delta - 5));
+        }
     }
 
     Ok(())
@@ -557,6 +624,24 @@ fn lower_expr_into(
                 } else {
                     emitter.emit_insns(&x86_64::mov_r_from_abs32(target_reg, addr32));
                 }
+                return Ok(());
+            }
+            // Check if this is a function name (used as address/pointer)
+            if ctx.functions.contains_key(name) {
+                // We don't know the final address at compile time (it depends on layout).
+                // For now, emit a placeholder that gets patched after all functions are compiled.
+                // The address is KERNEL_BASE + function_offset.
+                let padding_addr = 0x102000u64;  // base address of kernel code
+                if target_reg == RAX {
+                    emitter.emit_insns(&x86_64::mov_rax_from_abs(padding_addr));
+                } else {
+                    emitter.emit_insns(&x86_64::mov_r_from_abs32(target_reg, padding_addr as u32));
+                }
+                // Store a pending relocation so it can be patched later
+                ctx.pending_calls.push(PendingCall {
+                    site: emitter.len() - 8,  // last 8 bytes of the mov instruction
+                    target: format!("__addr_{}", name),
+                });
                 return Ok(());
             }
             let offset = ctx.slot_offset(name)?;
@@ -1116,10 +1201,107 @@ fn lower_expr_into(
             }
             Ok(())
         }
+        Expr::StringLit(content) => {
+            let addr = ctx.string_addrs.get(content.as_str()).ok_or_else(|| {
+                format!(
+                    "x86_64-lower: string literal `{content}` not found in string pool in `{}`",
+                    ctx.fn_name
+                )
+            })?;
+            emitter.emit_insns(&x86_64::load_i64(target_reg, *addr as i64));
+            Ok(())
+        }
         _ => Err(format!(
             "x86_64-lower: unsupported expression in `{}`",
             ctx.fn_name
         )),
+    }
+}
+
+// ── String literal collection helpers ───────────────────────────
+
+fn collect_string_literals(stmts: &[Stmt], out: &mut Vec<String>) {
+    for stmt in stmts {
+        walk_stmt_for_strings(stmt, out);
+    }
+}
+
+fn walk_stmt_for_strings(stmt: &Stmt, out: &mut Vec<String>) {
+    match stmt {
+        Stmt::Let(_, _, expr) | Stmt::Expr(expr) | Stmt::Return(Some(expr)) => {
+            walk_expr_for_strings(expr, out);
+        }
+        Stmt::Assign(_, expr) => walk_expr_for_strings(expr, out),
+        Stmt::Throw(expr) => walk_expr_for_strings(expr, out),
+        Stmt::If {
+            cond,
+            then_body,
+            else_body,
+            ..
+        } => {
+            walk_expr_for_strings(cond, out);
+            collect_string_literals(then_body, out);
+            collect_string_literals(else_body, out);
+        }
+        Stmt::Loop { cond, body, .. } => {
+            if let Some(cond) = cond {
+                walk_expr_for_strings(cond, out);
+            }
+            collect_string_literals(body, out);
+        }
+        Stmt::Match { scrutinee, arms } => {
+            walk_expr_for_strings(scrutinee, out);
+            for arm in arms {
+                collect_string_literals(&arm.body, out);
+            }
+        }
+        Stmt::Try { body, .. } => {
+            collect_string_literals(body, out);
+        }
+        Stmt::IndexAssign { base, index, value } => {
+            walk_expr_for_strings(base, out);
+            walk_expr_for_strings(index, out);
+            walk_expr_for_strings(value, out);
+        }
+        Stmt::Return(None) => {}
+        Stmt::Break => {}
+    }
+}
+
+fn walk_expr_for_strings(expr: &Expr, out: &mut Vec<String>) {
+    match expr {
+        Expr::StringLit(s) => out.push(s.clone()),
+        Expr::Ident(_)
+        | Expr::IntLit(_)
+        | Expr::BoolLit(_)
+        | Expr::FloatLit(_)
+        | Expr::Closure { .. } => {}
+        Expr::Unary { expr, .. } => walk_expr_for_strings(expr, out),
+        Expr::Binary { lhs, rhs, .. } => {
+            walk_expr_for_strings(lhs, out);
+            walk_expr_for_strings(rhs, out);
+        }
+        Expr::Call { callee, args } => {
+            walk_expr_for_strings(callee, out);
+            for arg in args {
+                walk_expr_for_strings(arg, out);
+            }
+        }
+        Expr::StructInit { fields, .. } => {
+            for (_, expr) in fields {
+                walk_expr_for_strings(expr, out);
+            }
+        }
+        Expr::Field { base, .. } => walk_expr_for_strings(base, out),
+        Expr::ArrayLit(items) => {
+            for item in items {
+                walk_expr_for_strings(item, out);
+            }
+        }
+        Expr::Index { base, index } => {
+            walk_expr_for_strings(base, out);
+            walk_expr_for_strings(index, out);
+        }
     }
 }
 
@@ -1247,5 +1429,108 @@ fn main() -> void {}
     fn rejects_empty_module() {
         let module = UnifiedModule::new(Vec::new());
         assert!(lower_module(&module, "main").is_err());
+    }
+
+    #[test]
+    fn find_loop_sizes() {
+        // Test with outb to reproduce the real scenario
+        let src = r#"
+fn answer() -> Int {
+  let i = 0
+  while i < 3 {
+    let ch = 49 + i
+    outb(0x3F8, ch)
+    outb(0x3F8, 10)
+    i = i + 1
+  }
+  return 0
+}
+
+fn main() -> void {}
+"#;
+        let module = crate::in_lang_parse::parse_in_source(src).expect("parse");
+        let result = lower_module(&module, "answer").expect("lower");
+        eprintln!("Loop test code size: {} bytes", result.code.len());
+
+        let code = &result.code;
+        for i in 0..code.len() {
+            // jmp rel32 (0xE9 + rel32)
+            if i + 4 < code.len() && code[i] == 0xE9 && code[i + 1..i + 5] != [0, 0, 0, 0] {
+                let off = i32::from_le_bytes(code[i + 1..i + 5].try_into().unwrap());
+                let target = (i as i32 + 5 + off) as i32;
+                eprintln!(
+                    "  jmp_rel32 at {:x}: offset={} target={} (backward={})",
+                    i,
+                    off,
+                    target,
+                    target < i as i32
+                );
+            }
+            // jmp rel8 (0xEB + rel8)
+            if i + 1 < code.len() && code[i] == 0xEB {
+                let off = code[i + 1] as i8;
+                let target = (i as i32 + 2 + off as i32) as i32;
+                eprintln!(
+                    "  jmp_rel8 at {:x}: offset={} target={} (backward={})",
+                    i,
+                    off,
+                    target,
+                    target < i as i32
+                );
+            }
+            // jcc_near je (0F 84 + rel32)
+            if i + 4 < code.len() && code[i] == 0x0F && code[i + 1] == 0x84 {
+                let off = i32::from_le_bytes(code[i + 2..i + 6].try_into().unwrap());
+                let target = (i as i32 + 6 + off) as i32;
+                eprintln!(
+                    "  jcc_near(je) at {:x}: offset={} target={}",
+                    i, off, target
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn lower_while_loop() {
+        let src = r#"
+fn answer() -> Int {
+  let i = 0
+  while i < 3 {
+    i = i + 1
+  }
+  return 0
+}
+
+fn main() -> void {}
+"#;
+        let module = crate::in_lang_parse::parse_in_source(src).expect("parse");
+        let result = lower_module(&module, "answer").expect("lower");
+        let code = &result.code;
+
+        // Find the backward jump (jmp rel8 = 0xEB or jmp rel32 = 0xE9)
+        let mut found_backward_jmp = false;
+        let mut found_exit_jmp = false;
+        for i in 0..code.len() {
+            if i + 1 < code.len() && code[i] == 0xEB {
+                let off = code[i + 1] as i8;
+                let target = (i as i32 + 2 + off as i32) as usize;
+                if target < i {
+                    found_backward_jmp = true;
+                }
+            }
+            if i + 4 < code.len() && code[i] == 0xE9 {
+                let off = i32::from_le_bytes(code[i + 1..i + 5].try_into().unwrap());
+                let target = (i as i32 + 5 + off) as usize;
+                if target < i {
+                    found_backward_jmp = true;
+                }
+            }
+            // jcc_near je = 0F 84
+            if i + 5 < code.len() && code[i] == 0x0F && code[i + 1] == 0x84 {
+                found_exit_jmp = true;
+            }
+        }
+        assert!(found_backward_jmp, "no backward jump found");
+        assert!(found_exit_jmp, "no exit conditional jump found");
     }
 }

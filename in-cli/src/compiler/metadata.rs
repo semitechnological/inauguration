@@ -8,7 +8,6 @@
 
 use serde::{Deserialize, Serialize};
 
-
 use super::backend::BackendOutput;
 use super::core::{IrModule, IrType};
 
@@ -285,7 +284,10 @@ impl ComponentMetadata {
                             IrType::I8 | IrType::U8 => 1,
                             IrType::I16 | IrType::U16 => 2,
                             IrType::I32 | IrType::U32 | IrType::F32 => 4,
-                            IrType::I64 | IrType::U64 | IrType::F64 | IrType::Bool
+                            IrType::I64
+                            | IrType::U64
+                            | IrType::F64
+                            | IrType::Bool
                             | IrType::Ptr(_) => 8,
                             IrType::Int(bits) => (bits / 8) as u64,
                             IrType::Float(bits) => (bits / 8) as u64,
@@ -368,12 +370,17 @@ impl ComponentMetadata {
 
     #[deprecated(note = "use build() which accepts backend output and source")]
     pub fn from_spec(spec: &ComponentSpec, module: &IrModule) -> Self {
-        Self::build(spec, module, &BackendOutput {
-            data: Vec::new(),
-            extension: "",
-            entry_offset: None,
-            symbol_table: vec![],
-        }, "")
+        Self::build(
+            spec,
+            module,
+            &BackendOutput {
+                data: Vec::new(),
+                extension: "",
+                entry_offset: None,
+                symbol_table: vec![],
+            },
+            "",
+        )
     }
 
     pub fn to_json_pretty(&self) -> Result<String, serde_json::Error> {
@@ -387,8 +394,8 @@ impl ComponentMetadata {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::core::{IrFunction, IrModule, IrType};
+    use super::*;
 
     #[test]
     fn spec_host_executable_creates_valid_spec() {

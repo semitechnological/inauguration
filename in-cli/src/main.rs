@@ -1615,7 +1615,9 @@ fn cmd_emit_bootstrap(
 ) -> Result<()> {
     let trampoline_path = trampoline
         .map(|t| resolve_invocation_path(cwd, t))
-        .ok_or_else(|| InError::Message("--trampoline is required for --emit bootstrap".to_string()))?;
+        .ok_or_else(|| {
+            InError::Message("--trampoline is required for --emit bootstrap".to_string())
+        })?;
     let entry_name = entry
         .ok_or_else(|| InError::Message("--entry is required for --emit bootstrap".to_string()))?;
 

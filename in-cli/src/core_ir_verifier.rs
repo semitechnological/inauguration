@@ -126,12 +126,27 @@ struct FunctionSig<'a> {
 pub fn is_intrinsic(name: &str) -> bool {
     matches!(
         name,
-        "outb" | "inb" | "outl" | "inl"
-            | "load8" | "load16" | "load32" | "load64"
-            | "store8" | "store16" | "store32" | "store64"
-            | "hlt" | "cli" | "sti"
-            | "lidt" | "invlpg" | "read_cr2"
-            | "invoke" | "invoke1" | "invoke2"
+        "outb"
+            | "inb"
+            | "outl"
+            | "inl"
+            | "load8"
+            | "load16"
+            | "load32"
+            | "load64"
+            | "store8"
+            | "store16"
+            | "store32"
+            | "store64"
+            | "hlt"
+            | "cli"
+            | "sti"
+            | "lidt"
+            | "invlpg"
+            | "read_cr2"
+            | "invoke"
+            | "invoke1"
+            | "invoke2"
     )
 }
 
@@ -220,7 +235,11 @@ fn collect_module_facts(module: &UnifiedModule) -> Result<ModuleFacts<'_>, (Stri
         }
     }
 
-    Ok(ModuleFacts { functions, structs, globals })
+    Ok(ModuleFacts {
+        functions,
+        structs,
+        globals,
+    })
 }
 
 fn check_duplicate_param_names(
@@ -263,12 +282,9 @@ fn check_stmt(
 ) -> Result<(), (String, String)> {
     match stmt {
         Stmt::Let(name, typ, expr) => {
-            if env.contains_key(name) {
-                return Err((
-                    "duplicate-local-name".to_string(),
-                    format!("duplicate local name `{name}` in `{fn_name}`"),
-                ));
-            }
+            // Allow re-declaration of locals (desugared for-loop variables may reuse names)
+            // The last declaration wins.
+            let _ = env.remove(name);
             check_expr(fn_name, expr, facts, env, call_edges)?;
             let expr_typ = expr_type(expr, facts, env);
             if let (Some(expected), Some(actual)) = (typ, expr_typ.as_ref())
@@ -349,6 +365,7 @@ fn check_stmt(
             }
         }
         Stmt::Expr(expr) => check_expr(fn_name, expr, facts, env, call_edges),
+        Stmt::Break => Ok(()),
         Stmt::Return(Some(expr)) => {
             check_expr(fn_name, expr, facts, env, call_edges)?;
             if *ret == Typ::Void {
@@ -419,12 +436,16 @@ fn check_expr(
         Expr::IntLit(_) | Expr::FloatLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => Ok(()),
         Expr::Closure { .. } => Ok(()),
         Expr::Ident(name) => {
-            if env.contains_key(name) || facts.functions.contains_key(name.as_str()) || facts.globals.contains(name.as_str()) {
+            if env.contains_key(name)
+                || facts.functions.contains_key(name.as_str())
+                || facts.globals.contains(name.as_str())
+            {
                 Ok(())
             } else {
-                // For freestanding targets, treat unknown identifiers as potential globals
-                // (the lowerer handles them by name if they turn out to be globals).
-                Ok(())
+                Err((
+                    "unresolved-symbol".to_string(),
+                    format!("unresolved identifier `{name}` in `{fn_name}`"),
+                ))
             }
         }
         Expr::Unary { expr, .. } => check_expr(fn_name, expr, facts, env, call_edges),
@@ -554,14 +575,20 @@ fn check_expr(
                         if let Some(arg_typ) = expr_type(arg, facts, env)
                             && param_typ != &arg_typ
                         {
-                            return Err((
-                                "type-mismatch".to_string(),
-                                format!(
-                                    "argument `{param_name}` for `{name}` in `{fn_name}` expected {}, got {}",
-                                    type_name(param_typ),
-                                    type_name(&arg_typ)
-                                ),
-                            ));
+                            // Allow String→Int coercion for string literals (e.g. serial_write_cstr(port, "hello"))
+                            if !(*param_typ == Typ::Int
+                                && arg_typ == Typ::String
+                                && matches!(arg, Expr::StringLit(_)))
+                            {
+                                return Err((
+                                    "type-mismatch".to_string(),
+                                    format!(
+                                        "argument `{param_name}` for `{name}` in `{fn_name}` expected {}, got {}",
+                                        type_name(param_typ),
+                                        type_name(&arg_typ)
+                                    ),
+                                ));
+                            }
                         }
                     }
                 } else {
@@ -643,18 +670,22 @@ fn expr_type(expr: &Expr, facts: &ModuleFacts<'_>, env: &HashMap<String, Typ>) -
         Expr::FloatLit(_) => Some(Typ::Float),
         Expr::StringLit(_) => Some(Typ::String),
         Expr::BoolLit(_) => Some(Typ::Bool),
-        Expr::Ident(name) => env.get(name).cloned().or_else(|| {
-            facts
-                .functions
-                .get(name.as_str())
-                .map(|sig| sig.ret.clone())
-        }).or_else(|| {
-            if facts.globals.contains(name.as_str()) {
-                Some(Typ::Int)  // most globals are Int
-            } else {
-                None
-            }
-        }),
+        Expr::Ident(name) => env
+            .get(name)
+            .cloned()
+            .or_else(|| {
+                facts
+                    .functions
+                    .get(name.as_str())
+                    .map(|sig| sig.ret.clone())
+            })
+            .or_else(|| {
+                if facts.globals.contains(name.as_str()) {
+                    Some(Typ::Int) // most globals are Int
+                } else {
+                    None
+                }
+            }),
         Expr::StructInit { name, .. } => Some(Typ::Named(name.clone())),
         Expr::Field { base, name } => {
             if let Some(Typ::Named(struct_name)) = expr_type(base, facts, env)
@@ -899,7 +930,8 @@ mod tests {
     }
 
     #[test]
-    fn rejects_duplicate_local_names() {
+    fn allows_duplicate_local_names() {
+        // Duplicate locals are allowed (desugared for-loop variables may reuse names).
         let report = verify_module(
             &module(vec![function(
                 "main",
@@ -911,8 +943,7 @@ mod tests {
             &default_options(),
         );
 
-        assert!(!report.ok);
-        assert_eq!(report.reason_code.as_deref(), Some("duplicate-local-name"));
+        assert!(report.ok, "duplicate locals should be allowed: {:?}", report);
     }
 
     #[test]
@@ -954,7 +985,7 @@ mod tests {
                     "main",
                     vec![Stmt::Expr(Expr::Call {
                         callee: Box::new(Expr::Ident("helper".to_string())),
-                        args: vec![Expr::StringLit("bad".to_string())],
+                        args: vec![Expr::BoolLit(true)], // Bool→Int still rejected
                     })],
                 ),
             ]),

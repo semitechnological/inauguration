@@ -154,7 +154,7 @@ impl TypeChecker {
                 }
                 Decl::Interface { .. } => {}
                 Decl::Component { .. } => {}
-            Decl::Global { .. } => {}
+                Decl::Global { .. } => {}
             }
         }
 
@@ -339,6 +339,7 @@ impl TypeChecker {
                 }
             }
             Stmt::Return(None) => {}
+            Stmt::Break => {}
             Stmt::Expr(expr) => {
                 self.check_expr(fn_name, expr, facts, env, errors);
             }
