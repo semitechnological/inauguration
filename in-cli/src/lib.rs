@@ -441,3 +441,4 @@ fn main() -> void {
         assert_eq!(result.to_int(), 7);
     }
 }
+pub mod core_opt;

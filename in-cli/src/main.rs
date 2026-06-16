@@ -1510,10 +1510,6 @@ fn cmd_compile(
     if matches!(emit, Some(EmitKindCli::Boot)) {
         return cmd_emit_bootstrap(cwd, &source_path, &out_path, entry, trampoline, metadata);
     }
-    if matches!(emit, Some(EmitKindCli::C)) {
-        return cmd_emit_c(cwd, &source_path, &out_path);
-    }
-
     let request = OwnedCompileRequest {
         path: source_path,
         module_id: module_id.to_string(),
@@ -1606,21 +1602,6 @@ fn cmd_compile(
     Ok(())
 }
 
-fn cmd_emit_c(
-    _cwd: &Path,
-    source_path: &Path,
-    out_path: &Path,
-) -> Result<()> {
-    let module = inauguration::in_lang_parse::parse_in_library_file(source_path)
-        .map_err(|e| InError::Message(format!("parse {}: {e}", source_path.display())))?;
-    let c_source = inauguration::native_emit::c_backend::emit_c_module(&module)
-        .map_err(|e| InError::Message(e))?;
-    std::fs::write(out_path, &c_source)
-        .map_err(|e| InError::Message(format!("write {}: {e}", out_path.display())))?;
-    println!("c source: {} bytes", c_source.len());
-    Ok(())
-}
-
 fn cmd_emit_bootstrap(
     cwd: &Path,
     source_path: &Path,
@@ -1641,8 +1622,11 @@ fn cmd_emit_bootstrap(
         .map_err(|e| InError::Message(format!("read trampoline: {e}")))?;
 
     // Parse the .in source (library mode — doesn't require `fn main`)
-    let module = inauguration::in_lang_parse::parse_in_library_file(source_path)
+    let mut module = inauguration::in_lang_parse::parse_in_library_file(source_path)
         .map_err(|e| InError::Message(format!("parse {}: {e}", source_path.display())))?;
+
+    // Optimize Core IR (inlining, constant folding)
+    inauguration::core_opt::optimize(&mut module.decls);
 
     // Lower to x86_64 machine code
     let result = inauguration::native_emit::x86_64_lower::lower_module(&module, entry_name)
