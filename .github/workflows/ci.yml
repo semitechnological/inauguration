@@ -51,8 +51,8 @@ jobs:
       - name: Check generated protocol models
         run: ./scripts/check-protocol-models.sh
 
-  native-subset-sample:
-    name: Native subset sample (no swiftc)
+  polyglot-swift-sample:
+    name: Swift Tree-sitter sample
     strategy:
       fail-fast: false
       matrix:
@@ -61,7 +61,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: IN_NATIVE_SWIFT_SIL=only in build
+      - name: in build (.swift Tree-sitter sample)
         run: ./scripts/check-native-subset-sample.sh
 
   in-lang-sample:
