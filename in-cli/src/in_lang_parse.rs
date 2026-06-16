@@ -814,7 +814,10 @@ fn parse_expr(s: &str) -> Expr {
     for ops in [
         &["||"][..],
         &["&&"][..],
-        &["==", "!=", ">=", "<=", ">", "<"][..],
+        &["|"][..],
+        &["^"][..],
+        &["&"][..],
+        &["<<", ">>", "==", "!=", ">=", "<=", ">", "<"][..],
         &["+", "-"][..],
         &["*", "/", "%"][..],
     ] {
@@ -855,6 +858,11 @@ fn parse_expr(s: &str) -> Expr {
     }
     if let Ok(n) = s.parse::<i64>() {
         return Expr::IntLit(n);
+    }
+    if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        if let Ok(n) = i64::from_str_radix(hex, 16) {
+            return Expr::IntLit(n);
+        }
     }
     if s.contains('.')
         && let Ok(f) = s.parse::<f64>()
@@ -1064,7 +1072,16 @@ fn find_top_level_binary_op<'a>(s: &str, ops: &[&'a str]) -> Option<(&'a str, us
     let mut in_string = false;
     let mut escape = false;
     let mut matches = Vec::new();
+    // Track the end index of the last matched operator so we don't match
+    // characters that are part of a longer operator (e.g. matching `<` inside `<<`).
+    let mut skip_until: Option<usize> = None;
     for (i, c) in s.char_indices() {
+        if let Some(end) = skip_until {
+            if i < end {
+                continue;
+            }
+            skip_until = None;
+        }
         if escape {
             escape = false;
             continue;
@@ -1098,8 +1115,13 @@ fn find_top_level_binary_op<'a>(s: &str, ops: &[&'a str]) -> Option<(&'a str, us
                         }
                     }
                 }
-                if let Some(m) = best {
-                    matches.push(m);
+                if let Some((op, pos)) = best {
+                    matches.push((op, pos));
+                    // Skip characters consumed by this operator so sub-sequences
+                    // (e.g. '<' inside '<<') don't produce a second match.
+                    if op.len() > 1 {
+                        skip_until = Some(pos + op.len());
+                    }
                 }
             }
             _ => {}
@@ -2529,7 +2551,7 @@ fn infer_in_expr_type(
             _ => infer_in_expr_type(expr, env, structs, fn_rets),
         },
         Expr::Binary { op, .. } => match op.as_str() {
-            "+" | "-" | "*" | "/" | "%" => Some(Typ::Int),
+            "+" | "-" | "*" | "/" | "%" | "^" | "<<" | ">>" | "&" | "|" => Some(Typ::Int),
             "==" | "!=" | "<" | ">" | "<=" | ">=" | "&&" | "||" => Some(Typ::Bool),
             _ => None,
         },

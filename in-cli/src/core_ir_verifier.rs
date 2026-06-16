@@ -121,10 +121,56 @@ struct FunctionSig<'a> {
     ret: &'a Typ,
 }
 
+/// Return true if `name` is a known intrinsic that doesn't need a module-level declaration.
+pub fn is_intrinsic(name: &str) -> bool {
+    matches!(
+        name,
+        "outb" | "inb" | "outl" | "inl"
+            | "load8" | "load16" | "load32" | "load64"
+            | "store8" | "store16" | "store32" | "store64"
+            | "hlt" | "cli" | "sti"
+            | "lidt" | "invlpg" | "read_cr2"
+            | "invoke" | "invoke1" | "invoke2"
+    )
+}
+
 fn collect_module_facts(module: &UnifiedModule) -> Result<ModuleFacts<'_>, (String, String)> {
     let mut top_level = HashSet::new();
     let mut functions = HashMap::new();
     let mut structs = HashMap::new();
+
+    // Leak owned Typ values so we have 'static references for intrinsics.
+    // (Small fixed set, leaked once per compilation — acceptable for a compiler.)
+    let void_ret: &'static Typ = Box::leak(Box::new(Typ::Void));
+    let int_ret: &'static Typ = Box::leak(Box::new(Typ::Int));
+
+    // Seed builtin intrinsics so calls to them don't fail verification.
+    let intrinsics: [(&str, &'static Typ); 21] = [
+        ("outb", void_ret),
+        ("inb", int_ret),
+        ("outl", void_ret),
+        ("inl", int_ret),
+        ("load8", int_ret),
+        ("load16", int_ret),
+        ("load32", int_ret),
+        ("load64", int_ret),
+        ("store8", void_ret),
+        ("store16", void_ret),
+        ("store32", void_ret),
+        ("store64", void_ret),
+        ("hlt", void_ret),
+        ("cli", void_ret),
+        ("sti", void_ret),
+        ("lidt", void_ret),
+        ("invlpg", void_ret),
+        ("read_cr2", int_ret),
+        ("invoke", int_ret),
+        ("invoke1", int_ret),
+        ("invoke2", int_ret),
+    ];
+    for (name, ret) in intrinsics {
+        functions.insert(name, FunctionSig { params: &[], ret });
+    }
 
     for decl in &module.decls {
         match decl {
@@ -478,29 +524,37 @@ fn check_expr(
                     ));
                 };
                 call_edges.push((fn_name.to_string(), name.clone()));
-                if args.len() != sig.params.len() {
-                    return Err((
-                        "call-arity-mismatch".to_string(),
-                        format!(
-                            "call to `{name}` in `{fn_name}` expects {} args, got {}",
-                            sig.params.len(),
-                            args.len()
-                        ),
-                    ));
-                }
-                for ((param_name, param_typ), arg) in sig.params.iter().zip(args) {
-                    check_expr(fn_name, arg, facts, env, call_edges)?;
-                    if let Some(arg_typ) = expr_type(arg, facts, env)
-                        && param_typ != &arg_typ
-                    {
+                // Relax arity and type checking for intrinsics — the codegen handles validation.
+                if !is_intrinsic(name) {
+                    if args.len() != sig.params.len() {
                         return Err((
-                            "type-mismatch".to_string(),
+                            "call-arity-mismatch".to_string(),
                             format!(
-                                "argument `{param_name}` for `{name}` in `{fn_name}` expected {}, got {}",
-                                type_name(param_typ),
-                                type_name(&arg_typ)
+                                "call to `{name}` in `{fn_name}` expects {} args, got {}",
+                                sig.params.len(),
+                                args.len()
                             ),
                         ));
+                    }
+                    for ((param_name, param_typ), arg) in sig.params.iter().zip(args) {
+                        check_expr(fn_name, arg, facts, env, call_edges)?;
+                        if let Some(arg_typ) = expr_type(arg, facts, env)
+                            && param_typ != &arg_typ
+                        {
+                            return Err((
+                                "type-mismatch".to_string(),
+                                format!(
+                                    "argument `{param_name}` for `{name}` in `{fn_name}` expected {}, got {}",
+                                    type_name(param_typ),
+                                    type_name(&arg_typ)
+                                ),
+                            ));
+                        }
+                    }
+                } else {
+                    // Still check argument expressions (for side-effect / error detection)
+                    for arg in args {
+                        check_expr(fn_name, arg, facts, env, call_edges)?;
                     }
                 }
                 return Ok(());
@@ -629,7 +683,7 @@ fn expr_type(expr: &Expr, facts: &ModuleFacts<'_>, env: &HashMap<String, Typ>) -
                 {
                     Some(Typ::Float)
                 }
-                "+" | "-" | "*" | "/" | "%" => Some(Typ::Int),
+                "+" | "-" | "*" | "/" | "%" | "^" | "<<" | ">>" | "&" | "|" => Some(Typ::Int),
                 "==" | "!=" | "<" | ">" | "<=" | ">=" | "&&" | "||" => Some(Typ::Bool),
                 _ => None,
             }

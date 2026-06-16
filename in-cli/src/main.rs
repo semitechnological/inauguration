@@ -85,6 +85,11 @@ enum CompileTargetCli {
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
+enum EmitKindCli {
+    Boot,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
 enum NativeLinkageCli {
     Executable,
     Dylib,
@@ -317,6 +322,14 @@ enum Commands {
         jobs: usize,
         #[arg(long, default_value_t = false)]
         json: bool,
+        #[arg(long, value_enum)]
+        emit: Option<EmitKindCli>,
+        #[arg(long)]
+        trampoline: Option<String>,
+        #[arg(long)]
+        base: Option<String>,
+        #[arg(long)]
+        metadata: Option<String>,
     },
     #[command(about = "Run bytecode assembly")]
     RunBytecode {
@@ -522,6 +535,10 @@ fn run() -> Result<()> {
             linkage,
             jobs,
             json,
+            emit,
+            trampoline,
+            base,
+            metadata,
         } => cmd_compile(
             &invocation_cwd,
             &path,
@@ -534,6 +551,10 @@ fn run() -> Result<()> {
             linkage,
             jobs,
             json,
+            emit,
+            trampoline.as_deref(),
+            base.as_deref(),
+            metadata.as_deref(),
         ),
         Commands::RunBytecode { path, verbose } => {
             cmd_run_bytecode(&invocation_cwd, &path, verbose)
@@ -1473,6 +1494,10 @@ fn cmd_compile(
     linkage: NativeLinkageCli,
     jobs: usize,
     json: bool,
+    emit: Option<EmitKindCli>,
+    trampoline: Option<&str>,
+    base: Option<&str>,
+    metadata: Option<&str>,
 ) -> Result<()> {
     let source_path = resolve_invocation_path(cwd, path);
     let out_path = resolve_invocation_path(cwd, out);
@@ -1481,6 +1506,11 @@ fn cmd_compile(
             "file not found: {}",
             source_path.display()
         )));
+    }
+
+    // Handle boot image emission separately
+    if matches!(emit, Some(EmitKindCli::Boot)) {
+        return cmd_emit_bootstrap(cwd, &source_path, &out_path, entry, trampoline, metadata);
     }
 
     let request = OwnedCompileRequest {
@@ -1572,6 +1602,68 @@ fn cmd_compile(
                 .unwrap_or_else(|| "owned compile failed".to_string()),
         ));
     }
+    Ok(())
+}
+
+fn cmd_emit_bootstrap(
+    cwd: &Path,
+    source_path: &Path,
+    out_path: &Path,
+    entry: Option<&str>,
+    trampoline: Option<&str>,
+    _metadata: Option<&str>,
+) -> Result<()> {
+    let trampoline_path = trampoline
+        .map(|t| resolve_invocation_path(cwd, t))
+        .ok_or_else(|| InError::Message("--trampoline is required for --emit bootstrap".to_string()))?;
+    let entry_name = entry
+        .ok_or_else(|| InError::Message("--entry is required for --emit bootstrap".to_string()))?;
+
+    let trampoline_bytes = std::fs::read(&trampoline_path)
+        .map_err(|e| InError::Message(format!("read trampoline: {e}")))?;
+
+    // Parse the .in source (library mode — doesn't require `fn main`)
+    let module = inauguration::in_lang_parse::parse_in_library_file(source_path)
+        .map_err(|e| InError::Message(format!("parse {}: {e}", source_path.display())))?;
+
+    // Lower to x86_64 machine code
+    let result = inauguration::native_emit::x86_64_lower::lower_module(&module, entry_name)
+        .map_err(|e| InError::Message(format!("lower: {e}")))?;
+
+    // Build the flat boot image: trampoline + kernel code
+    // The trampoline must be exactly 0x2000 bytes for the Multiboot1 layout
+    // (padded by `times 0x2000 - ($ - $$) db 0` in the asm source)
+    let tramp_size = trampoline_bytes.len();
+    if tramp_size != 0x2000 {
+        return Err(InError::Message(format!(
+            "trampoline size {tramp_size} != expected 8192 (0x2000)"
+        )));
+    }
+
+    let mut image = Vec::with_capacity(tramp_size + result.code.len());
+    image.extend_from_slice(&trampoline_bytes);
+    image.extend_from_slice(&result.code);
+
+    // Write boot image
+    if let Some(parent) = out_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| InError::Message(format!("create output dir: {e}")))?;
+    }
+    std::fs::write(out_path, &image)
+        .map_err(|e| InError::Message(format!("write boot image: {e}")))?;
+
+    if !_metadata.is_some_and(|_| true) {
+        // Emit component metadata alongside the boot image
+        let meta_path = out_path.with_extension("component-metadata.json");
+        let _ = std::fs::write(&meta_path, "{}");
+    }
+
+    eprintln!(
+        "boot image: {} bytes (trampoline: {} + kernel: {})",
+        image.len(),
+        tramp_size,
+        result.code.len()
+    );
     Ok(())
 }
 
@@ -2883,6 +2975,7 @@ mod tests {
                 linkage,
                 jobs,
                 json,
+                ..
             } => {
                 assert_eq!(path, "apps/in-sample/hello.in");
                 assert!(matches!(target, CompileTargetCli::Bytecode));

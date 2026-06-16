@@ -76,13 +76,22 @@ fn is_builtin_fn(name: &str) -> bool {
             | "array_len"
             | "bool_to_int"
             | "int_to_bool"
+            // x86 bare-metal intrinsics
+            | "outb" | "inb" | "outl" | "inl"
+            | "load8" | "load16" | "load32" | "load64"
+            | "store8" | "store16" | "store32" | "store64"
+            | "hlt" | "cli" | "sti"
+            | "lidt" | "invlpg" | "read_cr2"
+            | "invoke" | "invoke1" | "invoke2"
     )
 }
 
 fn builtin_return_type(name: &str) -> Typ {
     match name {
         "len" | "array_len" | "bool_to_int" | "to_int" | "str_to_int" | "str_index_of"
-        | "str_table_get_int" => Typ::Int,
+        | "str_table_get_int"
+        | "inb" | "inl" | "load8" | "load16" | "load32" | "load64" | "read_cr2"
+        | "invoke" | "invoke1" | "invoke2" => Typ::Int,
         "str_eq" | "str_contains" | "str_starts_with" | "str_is_int" | "str_table_has"
         | "int_to_bool" => Typ::Bool,
         "str_concat" | "str_trim" | "str_slice" | "to_string" => Typ::String,
@@ -329,7 +338,7 @@ fn check_expr(
                         check_numeric_binop_operands(fn_name, lhs, rhs, facts, env)
                     }
                 }
-                "-" | "*" | "/" | "<" | ">" | "<=" | ">=" => {
+                "-" | "*" | "/" | "<" | ">" | "<=" | ">=" | "^" | "<<" | ">>" | "&" | "|" => {
                     check_numeric_binop_operands(fn_name, lhs, rhs, facts, env)
                 }
                 "%" => {
@@ -537,7 +546,7 @@ fn expr_type(
                 {
                     Ok(Some(Typ::Float))
                 }
-                "+" | "-" | "*" | "/" | "%" => Ok(Some(Typ::Int)),
+                "+" | "-" | "*" | "/" | "%" | "^" | "<<" | ">>" | "&" | "|" => Ok(Some(Typ::Int)),
                 "==" | "!=" | "<" | ">" | "<=" | ">=" | "&&" | "||" => Ok(Some(Typ::Bool)),
                 _ => Ok(None),
             }
