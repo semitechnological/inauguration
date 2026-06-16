@@ -227,11 +227,11 @@ fn trim(s: &str) -> &str {
 }
 
 /// Split source into complete top-level `struct` / `fn` declaration blocks (brace-balanced at depth 0).
-pub fn split_top_level_decl_blocks(source: &str) -> Vec<String> {
+pub fn split_top_level_decl_blocks(source: &str) -> Vec<(usize, String)> {
     let mut depth = 0i32;
-    let mut current: Option<Vec<String>> = None;
+    let mut current: Option<Vec<(usize, String)>> = None;
     let mut out = Vec::new();
-    for raw_line in source.lines() {
+    for (line_no, raw_line) in source.lines().enumerate() {
         let t = raw_line.trim();
         let delta = brace_delta(raw_line);
 
@@ -249,11 +249,12 @@ pub fn split_top_level_decl_blocks(source: &str) -> Vec<String> {
                     || t.starts_with("var ")
                     || t.starts_with("const "))
             {
-                current = Some(vec![t.to_string()]);
+                current = Some(vec![(line_no + 1, t.to_string())]);
                 depth += delta;
                 if depth == 0 {
                     let buf = current.take().expect("just set");
-                    out.push(buf.join("\n"));
+                    let text = buf.into_iter().map(|(_, s)| s).collect::<Vec<_>>().join("\n");
+                    out.push((line_no + 1, text));
                 }
                 continue;
             }
@@ -261,7 +262,7 @@ pub fn split_top_level_decl_blocks(source: &str) -> Vec<String> {
         }
 
         if !(t.is_empty() || t.starts_with("//")) {
-            current.as_mut().expect("inside decl").push(t.to_string());
+            current.as_mut().expect("inside decl").push((line_no + 1, t.to_string()));
         }
         depth += delta;
         if depth < 0 {
@@ -269,7 +270,9 @@ pub fn split_top_level_decl_blocks(source: &str) -> Vec<String> {
         }
         if depth == 0 {
             let buf = current.take().expect("inside decl");
-            out.push(buf.join("\n"));
+            let start_line = buf.first().map(|(l, _)| *l).unwrap_or(1);
+            let text = buf.into_iter().map(|(_, s)| s).collect::<Vec<_>>().join("\n");
+            out.push((start_line, text));
         }
     }
     out
@@ -277,7 +280,7 @@ pub fn split_top_level_decl_blocks(source: &str) -> Vec<String> {
 
 /// Legacy: line-oriented filter (single-line decls only). Prefer [`split_top_level_decl_blocks`].
 pub fn filter_top_level_in_decl_lines(source: &str) -> String {
-    split_top_level_decl_blocks(source).join("\n")
+    split_top_level_decl_blocks(source).into_iter().map(|(_, text)| text).collect::<Vec<_>>().join("\n")
 }
 
 fn split_and_trim(sep: char, s: &str) -> Vec<String> {
@@ -1958,9 +1961,9 @@ fn parallel_tasks_from_content(content: &str, region: usize) -> Vec<InParallelTa
         .collect()
 }
 
-fn parse_module_from_blocks(blocks: &[String]) -> Result<UnifiedModule, String> {
+fn parse_module_from_blocks(blocks: &[(usize, String)]) -> Result<UnifiedModule, String> {
     let mut decls = Vec::new();
-    for block in blocks {
+    for (start_line, block) in blocks {
         let line = trim(block);
         if line.is_empty() {
             continue;
@@ -1980,17 +1983,17 @@ fn parse_module_from_blocks(blocks: &[String]) -> Result<UnifiedModule, String> 
                 .trim_end_matches(';')
                 .trim()
                 .strip_prefix("extern ")
-                .ok_or_else(|| ".in: expected `extern`".to_string())?;
+                .ok_or_else(|| format!(".in at line {start_line}: expected `extern`"))?;
             let (_, header) = rest
                 .split_once(" fn ")
-                .ok_or_else(|| ".in: expected `extern <language> fn name(...)`".to_string())?;
+                .ok_or_else(|| format!(".in at line {start_line}: expected `extern <language> fn name(...)`"))?;
             let header = header
                 .split_once(" requires ")
                 .map(|(left, _)| left)
                 .unwrap_or(header);
             let (name, params, ret) = parse_fn_header(header);
             if name != binding.name {
-                return Err(".in: extern binding name mismatch".into());
+                return Err(format!(".in at line {start_line}: extern binding name mismatch"));
             }
             decls.push(Decl::Function {
                 name,
@@ -2014,7 +2017,6 @@ fn parse_module_from_blocks(blocks: &[String]) -> Result<UnifiedModule, String> 
         } else if line.starts_with("component ") {
             decls.push(parse_component_block(block)?);
         } else if line.starts_with("var ") {
-            // var name: Type = expr  (global mutable variable)
             let rest = trim(&line[4..]);
             if let Some(eq) = rest.find('=') {
                 let lhs = trim(&rest[..eq]);
@@ -2035,10 +2037,9 @@ fn parse_module_from_blocks(blocks: &[String]) -> Result<UnifiedModule, String> 
                     mutable: true,
                 });
             } else {
-                return Err(".in: `var` needs `=` initializer".into());
+                return Err(format!(".in at line {start_line}: `var` needs `=` initializer"));
             }
         } else if line.starts_with("const ") {
-            // const name = expr  or  const name: Type = expr
             let rest = trim(&line[6..]);
             if let Some(eq) = rest.find('=') {
                 let lhs = trim(&rest[..eq]);
@@ -3039,7 +3040,7 @@ fn main() -> void
 "#;
         let blocks = split_top_level_decl_blocks(src);
         assert_eq!(blocks.len(), 2);
-        assert!(blocks[1].contains("main"));
+        assert!(blocks[1].1.contains("main"));
         let err = parse_in_source(src).expect_err("struct with fn inside");
         assert!(err.contains("fn") || err.contains("struct"));
     }

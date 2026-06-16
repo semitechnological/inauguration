@@ -80,7 +80,7 @@ fn is_builtin_fn(name: &str) -> bool {
             | "outb" | "inb" | "outl" | "inl"
             | "load8" | "load16" | "load32" | "load64"
             | "store8" | "store16" | "store32" | "store64"
-            | "hlt" | "cli" | "sti"
+            | "hlt" | "cli" | "sti" | "pause"
             | "lidt" | "invlpg" | "read_cr2"
             | "invoke" | "invoke1" | "invoke2"
     )

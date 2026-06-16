@@ -37,6 +37,7 @@ pub mod boundary_verify;
 pub mod bytecode;
 pub mod bytecode_compiler;
 pub mod compile_cache;
+pub mod compile_error;
 pub mod compiler;
 pub mod core_ir;
 pub mod core_ir_verifier;

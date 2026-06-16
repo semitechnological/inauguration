@@ -141,6 +141,7 @@ pub fn is_intrinsic(name: &str) -> bool {
             | "hlt"
             | "cli"
             | "sti"
+            | "pause"
             | "lidt"
             | "invlpg"
             | "read_cr2"
@@ -162,7 +163,7 @@ fn collect_module_facts(module: &UnifiedModule) -> Result<ModuleFacts<'_>, (Stri
     let int_ret: &'static Typ = Box::leak(Box::new(Typ::Int));
 
     // Seed builtin intrinsics so calls to them don't fail verification.
-    let intrinsics: [(&str, &'static Typ); 21] = [
+    let intrinsics: [(&str, &'static Typ); 22] = [
         ("outb", void_ret),
         ("inb", int_ret),
         ("outl", void_ret),
@@ -178,6 +179,7 @@ fn collect_module_facts(module: &UnifiedModule) -> Result<ModuleFacts<'_>, (Stri
         ("hlt", void_ret),
         ("cli", void_ret),
         ("sti", void_ret),
+        ("pause", void_ret),
         ("lidt", void_ret),
         ("invlpg", void_ret),
         ("read_cr2", int_ret),
