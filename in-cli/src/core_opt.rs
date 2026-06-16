@@ -546,10 +546,197 @@ fn collect_used_in_expr(e: &Expr, out: &mut HashSet<String>) {
     walk_expr(e, &mut |e| { if let Expr::Ident(n) = e { out.insert(n.clone()); } });
 }
 
-// ─── x86_64 Peephole (disabled, needs offset tracking) ────────────────────
+// ─── x86_64 Peephole ──────────────────────────────────────────────────────
 
-pub fn peephole_x86_64(_code: &mut Vec<u8>) {
-    // Remove-redundant-mov-same-reg is safe in isolation but interacts with
-    // pre-computed relative jump offsets. Re-enable when we add offset
-    // re-patching.
+/// A relative jump/call instruction to re-patch after byte removal.
+#[derive(Debug)]
+struct RelJump {
+    pos: usize,       // start position in code buffer
+    len: usize,       // instruction length (2, 5, or 6 bytes)
+    offset_byte: usize, // position of the offset bytes (pos+1 for most, pos+2 for 0F 8x)
+    offset_value: i32,  // original signed offset
+    target: usize,       // absolute target position after instruction
+    is_call: bool,       // true for call (E8)
+}
+
+/// Scan the code buffer and remove redundant `mov r, r` instructions where
+/// source and destination registers are the same. Also removes trailing NOPs.
+///
+/// Handles offset re-patching for all relative jump/call instructions so that
+/// conditional branches, loop jumps, and function calls remain correct after
+/// byte removal.
+pub fn peephole_x86_64(code: &mut Vec<u8>) {
+    if code.is_empty() {
+        return;
+    }
+
+    // ── Pass 1: locate all relative jump/call instructions ──
+    let mut jumps: Vec<RelJump> = Vec::new();
+    let mut i = 0;
+    while i < code.len() {
+        let b = code[i];
+        let (len, is_rel, is_call, offset_idx, offset_size) = match b {
+            0xE8 => (5, true, true, 1, 4),  // call rel32
+            0xE9 => (5, true, false, 1, 4), // jmp rel32
+            0xEB => (2, true, false, 1, 1), // jmp rel8
+            0x74 | 0x75 | 0x7C | 0x7D | 0x7E | 0x7F
+            | 0x70 | 0x71 | 0x72 | 0x73 | 0x76 | 0x77
+            | 0x78 | 0x79 | 0x7A | 0x7B => (2, true, false, 1, 1), // jcc rel8
+            0x0F if i + 1 < code.len() && (0x80..=0x8F).contains(&code[i+1]) => {
+                (6, true, false, 2, 4) // jcc rel32 (0F 8x ...)
+            }
+            _ => (1, false, false, 0, 0),
+        };
+        if is_rel {
+            let offset_value: i32 = if offset_size == 4 {
+                i32::from_le_bytes([
+                    code[i + offset_idx],
+                    code[i + offset_idx + 1],
+                    code[i + offset_idx + 2],
+                    code[i + offset_idx + 3],
+                ])
+            } else {
+                // offset_size == 1 (rel8) → sign-extend
+                (code[i + offset_idx] as i8) as i32
+            };
+            let target = (i + len).wrapping_add(offset_value as usize);
+            jumps.push(RelJump {
+                pos: i,
+                len,
+                offset_byte: i + offset_idx,
+                offset_value,
+                target,
+                is_call: is_call,
+            });
+        }
+        i += len;
+    }
+
+    // ── Pass 2: locate redundant mov-same-reg patterns ──
+    // Patterns (modrm where mod=3 and reg==r/m):
+    //   48 89 XX   mov r64, r64 (REX.W + MOV r/m64, r64)
+    //   89 XX      mov r32, r32 (MOV r/m32, r32)
+    //   48 8B XX   mov r64, r64 (REX.W + MOV r64, r/m64)
+    //   8B XX      mov r32, r32 (MOV r32, r/m32)
+    #[derive(Debug)]
+    struct RemoveRange {
+        start: usize,
+        len: usize,
+    }
+    let mut remove: Vec<RemoveRange> = Vec::new();
+
+    let mut i = 0;
+    while i < code.len() {
+        let is_redundant_mov = if i + 1 < code.len() {
+            let (opcode, modrm) = if code[i] == 0x48 && i + 2 < code.len() {
+                (code[i+1], code[i+2])
+            } else {
+                (code[i], code[i+1])
+            };
+            let mod_field = modrm >> 6;      // bits 7:6
+            let reg_field = (modrm >> 3) & 7; // bits 5:3
+            let rm_field = modrm & 7;         // bits 2:0
+            if mod_field == 3 && reg_field == rm_field {
+                matches!(opcode, 0x89 | 0x8B)
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        if is_redundant_mov {
+            let mov_len = if i + 2 < code.len() && code[i] == 0x48 { 3 } else { 2 };
+            remove.push(RemoveRange { start: i, len: mov_len });
+            i += mov_len;
+        } else {
+            i += 1;
+        }
+    }
+
+    // ── Pass 3: locate trailing NOPs ──
+    // Remove trailing `66 90` (2-byte NOP) and `90` (single NOP)
+    let mut trailing = 0;
+    let mut j = code.len();
+    while j >= 2 && code[j-2] == 0x66 && code[j-1] == 0x90 {
+        trailing += 2;
+        j -= 2;
+    }
+    if j >= 1 && code[j-1] == 0x90 {
+        trailing += 1;
+    }
+    if trailing > 0 {
+        remove.push(RemoveRange { start: code.len() - trailing, len: trailing });
+    }
+
+    // Nothing to do?
+    if remove.is_empty() {
+        return;
+    }
+
+    // Sort remove ranges by position (ascending) and merge overlaps
+    remove.sort_by(|a, b| a.start.cmp(&b.start));
+    let mut merged: Vec<RemoveRange> = Vec::new();
+    for r in remove {
+        if let Some(last) = merged.last_mut() {
+            if r.start <= last.start + last.len {
+                // Overlap or adjacent → extend
+                let end = std::cmp::max(last.start + last.len, r.start + r.len);
+                last.len = end - last.start;
+                continue;
+            }
+        }
+        merged.push(r);
+    }
+    let mut remove = merged;
+
+    // ── Pass 4: adjust jump offsets for byte removal ──
+    // For each jump, compute how many removed bytes fall between pos and target.
+    // Then update the offset in the buffer.
+    for jmp in &jumps {
+        let old_target = jmp.target;
+        let old_offset = jmp.offset_value;
+
+        // Calculate how many bytes are removed before old_target
+        let mut removed_before_target: usize = 0;
+        for r in &remove {
+            if r.start + r.len <= old_target {
+                removed_before_target += r.len;
+            } else if r.start < old_target && r.start + r.len > old_target {
+                // Partial removal of a range overlapping target — shouldn't
+                // happen for MOV instructions (not jump targets), but handle
+                // safely by only counting bytes up to the target.
+                removed_before_target += old_target - r.start;
+            }
+        }
+
+        // Calculate how many bytes are removed at or before jmp.pos (the jump instruction itself)
+        let mut removed_at_jump: usize = 0;
+        for r in &remove {
+            if r.start + r.len <= jmp.pos {
+                removed_at_jump += r.len;
+            } else if r.start < jmp.pos && r.start + r.len > jmp.pos {
+                removed_at_jump += jmp.pos - r.start;
+            }
+        }
+
+        let new_offset = old_offset as isize - removed_before_target as isize + removed_at_jump as isize;
+
+        // Write the adjusted offset into the buffer
+        let offset_byte = jmp.offset_byte - removed_at_jump;
+
+        if jmp.len == 2 {
+            // rel8: 1 byte offset
+            code[offset_byte] = (new_offset as i8) as u8;
+        } else {
+            // rel32: 4 byte offset
+            let new_offset_i32 = new_offset as i32;
+            code[offset_byte..offset_byte+4].copy_from_slice(&new_offset_i32.to_le_bytes());
+        }
+    }
+
+    // ── Pass 5: remove bytes (highest first to avoid shifting) ──
+    remove.sort_by(|a, b| b.start.cmp(&a.start));
+    for r in remove {
+        code.drain(r.start..r.start + r.len);
+    }
 }

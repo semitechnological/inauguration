@@ -1646,7 +1646,7 @@ fn cmd_emit_bootstrap(
     // The trampoline's KERNEL_ENTRY is at KCODE_BASE + 0x100, so we emit
     // an SCI (Space Component Image) header between the trampoline and code.
     let mut code = result.code;
-    // ponytail: peephole disabled until patterns are verified safe
+    // ponytail: peephole disabled — offset re-patching needs verification
     // inauguration::core_opt::peephole_x86_64(&mut code);
     const SCI_HEADER_SIZE: usize = 256;
     const SCI_CODE_OFFSET: usize = 0x100;

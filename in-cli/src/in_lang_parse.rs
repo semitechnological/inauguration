@@ -1969,7 +1969,8 @@ fn parse_module_from_blocks(blocks: &[(usize, String)]) -> Result<UnifiedModule,
             continue;
         }
         if line.starts_with("fn ") {
-            let (name, params, ret, body) = parse_fn_block(block)?;
+            let (name, params, ret, body) = parse_fn_block(block)
+                .map_err(|e| format!(".in at line {start_line}: fn parse: {e}"))?;
             decls.push(Decl::Function {
                 name,
                 params,
@@ -1978,7 +1979,8 @@ fn parse_module_from_blocks(blocks: &[(usize, String)]) -> Result<UnifiedModule,
                 type_params: vec![],
             });
         } else if line.starts_with("extern ") {
-            let binding = parse_extern_fn_block(block)?;
+            let binding = parse_extern_fn_block(block)
+                .map_err(|e| format!(".in at line {start_line}: extern parse: {e}"))?;
             let rest = trim(block)
                 .trim_end_matches(';')
                 .trim()
@@ -2003,7 +2005,8 @@ fn parse_module_from_blocks(blocks: &[(usize, String)]) -> Result<UnifiedModule,
                 type_params: vec![],
             });
         } else if line.starts_with("struct ") {
-            let (name, fields, methods) = parse_struct_block(block)?;
+            let (name, fields, methods) = parse_struct_block(block)
+                .map_err(|e| format!(".in at line {start_line}: struct parse: {e}"))?;
             decls.push(Decl::Struct {
                 name,
                 fields,
@@ -2011,11 +2014,14 @@ fn parse_module_from_blocks(blocks: &[(usize, String)]) -> Result<UnifiedModule,
             });
             decls.extend(methods);
         } else if line.starts_with("class ") {
-            decls.push(parse_class_block(block)?);
+            decls.push(parse_class_block(block)
+                .map_err(|e| format!(".in at line {start_line}: {e}"))?);
         } else if line.starts_with("interface ") {
-            decls.push(parse_interface_block(block)?);
+            decls.push(parse_interface_block(block)
+                .map_err(|e| format!(".in at line {start_line}: {e}"))?);
         } else if line.starts_with("component ") {
-            decls.push(parse_component_block(block)?);
+            decls.push(parse_component_block(block)
+                .map_err(|e| format!(".in at line {start_line}: {e}"))?);
         } else if line.starts_with("var ") {
             let rest = trim(&line[4..]);
             if let Some(eq) = rest.find('=') {
@@ -2064,8 +2070,7 @@ fn parse_module_from_blocks(blocks: &[(usize, String)]) -> Result<UnifiedModule,
             }
         } else {
             return Err(
-                ".in: expected top-level `fn`, `struct`, `class`, `interface`, `component`, `var`, or `const`"
-                    .into(),
+                format!(".in at line {start_line}: expected top-level `fn`, `struct`, `class`, `interface`, `component`, `var`, or `const`")
             );
         }
     }
