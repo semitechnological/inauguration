@@ -1,4 +1,4 @@
-//! Lower [`crate::core_ir::UnifiedModule`] to textual SIL matching `native_swift_sil` stubs.
+//! Lower [`crate::core_ir::UnifiedModule`] to textual SIL.
 
 use crate::core_ir::{Decl, MatchPattern, Typ, UnifiedModule};
 use crate::core_ir::{Expr, Stmt};
@@ -1225,7 +1225,7 @@ fn find_fn<'a>(module: &'a UnifiedModule, name: &str) -> Option<&'a Decl> {
 }
 
 /// Emit textual SIL: helper functions first (sorted), then `@main` with `function_ref` callees and a
-/// unique SSA id space (same contract as [`crate::native_swift_sil`]).
+/// unique SSA id space.
 pub fn lower_to_textual_sil(module: &UnifiedModule, _module_id: &str) -> String {
     lower_to_textual_sil_inner(module, false)
 }

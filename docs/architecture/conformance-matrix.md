@@ -22,7 +22,7 @@ Run: `scripts/check-self-hosted-language-matrix.sh`
 | kotlin   | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: tree-sitter scalar body lowering; bounded sample bytecode executes |
 | cs       | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: tree-sitter scalar body lowering; bounded sample bytecode executes |
 | fsharp   | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 1 declaration support; this matrix fixture lowers and executes through the bounded bytecode path |
-| swift    | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 2: subset or swiftc textual SIL path |
+| swift    | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 4: Tree-sitter Core IR front |
 | rust     | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 3: dedicated bounded class/impl and body lowering |
 | js       | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 5: bounded entrypoint + Boundary IR + bytecode VM |
 | ts       | ✅    | ✅          | ✅    | ✅                 | 0                    | Level 5: bounded entrypoint + Boundary IR + bytecode VM |
@@ -47,7 +47,7 @@ Run: `scripts/check-self-hosted-language-matrix.sh`
 
 Feature support at the Core IR level (data structures exist), but frontends vary in emission:
 
-| Feature | `.in` parser | Rust front | Go front | V front | tree_front | Swift subset |
+| Feature | `.in` parser | Rust front | V front | tree_front | |
 |---------|-------------|------------|-----------|----------|------------|-------------|
 | `Decl::Struct` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `Decl::Function` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |

@@ -6,7 +6,7 @@
 2. **Native exit-stub subset** (`aarch64-apple-darwin` only): scalar-return entry functions in the Core IR subset are const-evaluated through the bytecode pipeline and emitted as a tiny owned Mach-O executable that exits with the evaluated code. No `swiftc`, `clang`, or linker invocation occurs on this path.
 3. **Target-triple object/module subsets**: selected non-host triples emit inspectable object, archive, module, or minimal executable artifacts for const-evaluable scalar entry functions without invoking an external linker or language compiler.
 
-Swift sources can still use `swiftc` for textual SIL or SwiftPM staging via `in build`, but that is a toolchain escape hatch, not the owned native backend. Use `in compile --target native` for owned native output; pass `--allow-external-toolchain` on `in build` only when external Swift/swiftc fallback is intentional.
+All languages including Swift go through the unified Core IR pipeline. The old `swiftc`/SwiftPM fallback has been removed — Swift is now a Tree-sitter Core IR front like all other languages.
 
 ## Stable status
 

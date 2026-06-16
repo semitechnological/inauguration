@@ -23,7 +23,7 @@ Rust type: `in_cli::core_ir::UnifiedModule`.
 | `Struct` | `name`, `fields: Vec<(String, Typ)>` | **`.in` v0.2** supports multiline field blocks; Tree-sitter and dedicated fronts fill fields where their current extractor supports them. |
 | `Function` | `name`, `params`, `ret`, `body` | **`.in`**, `icoreVersion: 2`, dedicated Rust/Go/V fronts, and selected Tree-sitter fronts fill bounded statement lists; lowering follows `lower_core`. |
 
-**`Typ`**: `Int`, `String`, `Bool`, `Void`, `Named(String)` — shared with `swift_subset` today for consistency.
+**`Typ`**: `Int`, `String`, `Bool`, `Void`, `Named(String)`.
 
 ## Boundary IR (`icoreVersion: 3`)
 
@@ -46,7 +46,7 @@ Rust types: `in_cli::boundary_ir::BoundaryModule`, `CompileArtifact`.
 |----|--------|--------|
 | `In` | `.in` files (and `#!in parser=in`) | `in_lang_parse` → `UnifiedModule` → `compiler::driver` / `lower_core`; parser-side surface facts feed agent `effects` / `capabilities` |
 | `Icore` | `.icore` files (and `#!in parser=icore`) | `compiler::icore` v1 declarations, v2 bounded body JSON, or **v3 Boundary IR** (`boundary` section + optional semantic decls) → `CompileArtifact` → same lowering |
-| `c`, `cpp`, `java`, `python`, … | Known extensions or `#!in parser=<slug>` | **Tree-sitter polyglot** — [`compiler::tree_front`](../../in-cli/src/compiler/tree_front/mod.rs) grammar-backed AST → `UnifiedModule`; selected fronts share bounded scalar body lowering through generic AST conventions, other routed fronts remain declaration-level; icore-only ids documented in [parser-surface.md](parser-surface.md). |
+| `swift`, `go`, `ocaml`, `haskell`, `c`, `cpp`, `java`, `python`, … | Known extensions or `#!in parser=<slug>` | **Tree-sitter polyglot** — [`compiler::tree_front`](../../in-cli/src/compiler/tree_front/mod.rs) grammar-backed AST → `UnifiedModule`. All 36 languages share the same pipeline. |
 
 ## Resolution order for `in build`
 
@@ -56,12 +56,14 @@ See **`in-cli/src/parser_registry.rs`** (`resolve_parser_id`) and [parser-surfac
 2. **Magic first line** — `#!in parser=in` | `auto` | `<slug>`.  
 3. **`IN_PARSER=in` / `IN_PARSER=icore`**.
 4. **Extension map** — `.in`, `.icore`, `.java`, `.cpp`, … → Core IR path (full parsers for `.in`/`.icore`; Tree-sitter for other wired extensions).  
-5. Otherwise **Swift** path: `sil_emit::emit_textual_sil` (`swiftc` and/or `IN_NATIVE_SWIFT_SIL` subset).
+5. Unknown extensions: fail closed with an `.icore` hint.
+
+All 36 languages now route through Core IR. Swift was unified into the Tree-sitter pipeline (the old `swift_subset`/`native_swift_sil`/`sil_emit` modules have been deleted).
 
 ## Related
 
 - [general-compiler.md](general-compiler.md) — multi-language driver, **icore**, roadmap.  
 - [parser-surface.md](parser-surface.md) — extension + magic-line routing, Tree-sitter vs full fronts.  
 - [in-language.md](in-language.md) — `.in` v0.2 grammar and `hybrid_sil` note.
-- [native-swift-master-plan.md](native-swift-master-plan.md) — Rust-first Swift / subset roadmap.
+
 - [README · Core Commands](../../README.md#core-commands) — CLI flags and sample commands (no duplicate install steps here).

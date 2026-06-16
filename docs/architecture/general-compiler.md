@@ -11,12 +11,12 @@ This is **not** “30 production compilers in one repo overnight.” It is an **
 | Layer | Role today | Direction |
 |-------|------------|------------|
 | **Resolution** | `parser_registry`: CLI, `IN_PARSER`, magic line, extension → [`ParserId`](../../in-cli/src/parser_registry.rs) | Add `--parser` / env aliases as new fronts stabilize |
-| **Parse** | Per-language modules → `UnifiedModule` | Full parsers: [`.in`](../../in-cli/src/in_lang_parse.rs) with agent-facing imports/capabilities/extern bindings, [**icore** JSON](../../in-cli/src/compiler/icore.rs). Dedicated fronts: [`rust_front`](../../in-cli/src/compiler/rust_front.rs), [`go_front`](../../in-cli/src/compiler/go_front.rs), [`v_front`](../../in-cli/src/compiler/v_front.rs), [`ocaml_front`](../../in-cli/src/compiler/ocaml_front.rs) (real declarations + bounded body-subset lowering; not full language semantics yet). Tree-sitter fronts: [`compiler::tree_front`](../../in-cli/src/compiler/tree_front/mod.rs) (bounded scalar body subsets for Java/Groovy, JavaScript/TypeScript, Kotlin, C#, Python, Ruby, Zig, and C-family functions where wired; declaration extraction for other routed fronts). Unsupported ids still route to `.icore`. |
+| **Parse** | Per-language modules → `UnifiedModule` | Full parsers: [`.in`](../../in-cli/src/in_lang_parse.rs) with agent-facing imports/capabilities/extern bindings, [**icore** JSON](../../in-cli/src/compiler/icore.rs). Dedicated fronts: [`rust_front`](../../in-cli/src/compiler/rust_front.rs), [`v_front`](../../in-cli/src/compiler/v_front.rs) (real declarations + bounded body-subset lowering). Tree-sitter fronts: [`compiler::tree_front`](../../in-cli/src/compiler/tree_front/mod.rs) covers all other 33 languages with bounded body extraction where wired. |
 | **Driver** | [`compiler::driver`](../../in-cli/src/compiler/driver.rs) — Core IR → textual SIL | Shared by every front that emits `UnifiedModule` |
-| **Emit (Swift)** | `sil_emit` when no Core IR front applies | Stays the `swiftc` / subset escape hatch |
+| **Emit (unified)** | Core IR → textual SIL via `compiler::driver::lower_unified_module` | Shared by every front — Swift is now a Tree-sitter Core IR front |
 | **Pipeline** | `hybrid_pipeline` / `hybrid_sil` | Merged textual SIL with explicit per-function records while retaining the legacy last-`sil @` single-function view (see [in-language.md](in-language.md)) |
 | **rust-driver** | Mirror of in-cli crates | Same IR/SIL contracts as fronts mature |
-| **Hot reload** | Swift: `swiftc -typecheck`; Core IR paths: `resolve_parser_id` + `parse_with_resolved` | Tighten semantics as polyglot lowering fills bodies and diagnostics |
+| **Hot reload** | `resolve_parser_id` + `parse_with_resolved` for all languages | Unified compile check through Tree-sitter pipeline |
 
 ## v0.4 orchestration/status surfaces
 

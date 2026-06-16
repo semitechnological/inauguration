@@ -9,7 +9,7 @@ Workflow entry points (flags, sample path, CI script) stay in the repo [README](
 ## Ideology
 
 - **Ultraminimal**: top-level declarations first; **v0.2** supports a bounded statement/expression body subset in Core IR plus explicit agent-facing imports, capabilities, and external function bindings.
-- **Indent-first on the roadmap**: crepuscularity’s **`.crepus`** files lean indent-first; `.in` v0.2 intentionally accepts familiar **braces + line breaks** so we can reuse the same brace-depth filtering pattern as `native_swift_sil` before tightening the grammar.
+- **Indent-first on the roadmap**: crepuscularity's **`.crepus`** files lean indent-first; `.in` v0.2 intentionally accepts familiar **braces + line breaks** before tightening the grammar.
 - **TS-flavored**: future expression forms can track a small JS/TS-like subset (see crepuscularity README under the repo-root symlink `../crepuscularity`).
 
 ## Current behavior (v0.2)
