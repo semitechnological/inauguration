@@ -7,11 +7,13 @@ use crate::core_ir::{Decl, Expr, Stmt, Typ};
 use std::collections::{HashMap, HashSet};
 
 pub fn optimize(decls: &mut Vec<Decl>) {
-    // Order: inline first so folding + DCE see larger bodies
+    // Order: inline → simplify → fold → propagate → DCE → dead-func
     inline_small_functions(decls);
+    algebraic_simplify(decls);
     fold_constants_in_decls(decls);
     propagate_constants(decls);
     dead_code_eliminate(decls);
+    remove_dead_functions(decls);
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -243,6 +245,119 @@ fn ptr_in_expr(e: &Expr, out: &mut Vec<String>) {
         Expr::StructInit { fields, .. } => { for (_, e) in fields { ptr_in_expr(e, out); } }
         _ => {}
     }
+}
+
+// ─── Algebraic Simplification ──────────────────────────────────────────────
+
+/// x+0→x, x*1→x, x&-1→x, x|0→x, x^0→x, x<<0→x, etc.
+fn algebraic_simplify(decls: &mut Vec<Decl>) {
+    for body in fn_bodies_mut(decls) {
+        *body = body.iter().map(|s| map_stmt(s.clone(), &mut |e| simplify_expr(e))).collect();
+    }
+}
+
+fn simplify_expr(e: Expr) -> Expr {
+    // Clone-and-match on owned value to avoid borrow gymnastics
+    match e.clone() {
+        Expr::Binary { op, lhs, rhs } => {
+            let is_zero = |e: &Expr| matches!(e, Expr::IntLit(0));
+            let is_one  = |e: &Expr| matches!(e, Expr::IntLit(1));
+            let is_neg1 = |e: &Expr| matches!(e, Expr::IntLit(-1));
+            match op.as_str() {
+                "add" | "bor" | "xor" => {
+                    if is_zero(&lhs) { return *rhs; }
+                    if is_zero(&rhs) { return *lhs; }
+                }
+                "land" => {
+                    if is_zero(&lhs) || is_zero(&rhs) { return Expr::IntLit(0); }
+                    if is_one(&lhs)  { return *rhs; }
+                    if is_one(&rhs)  { return *lhs; }
+                }
+                "lor" => {
+                    if is_one(&lhs) || is_one(&rhs) { return Expr::IntLit(1); }
+                    if is_zero(&lhs) { return *rhs; }
+                    if is_zero(&rhs) { return *lhs; }
+                }
+                "sub" => { if is_zero(&rhs) { return *lhs; } }
+                "mul" => {
+                    if is_zero(&lhs) || is_zero(&rhs) { return Expr::IntLit(0); }
+                    if is_one(&lhs)  { return *rhs; }
+                    if is_one(&rhs)  { return *lhs; }
+                }
+                "div" => { if is_one(&rhs) { return *lhs; } }
+                "band" => {
+                    if is_zero(&lhs) || is_zero(&rhs) { return Expr::IntLit(0); }
+                    if is_neg1(&lhs) { return *rhs; }
+                    if is_neg1(&rhs) { return *lhs; }
+                }
+                "shl" | "shr" => { if is_zero(&rhs) { return *lhs; } }
+                _ => {}
+            }
+            e
+        }
+        Expr::Unary { op, expr } => {
+            match op.as_str() {
+                "neg" => {
+                    if let Expr::Unary { op: inner_op, expr: inner_expr } = *expr {
+                        if inner_op == "neg" { return *inner_expr; }
+                    }
+                }
+                "not" => {
+                    if let Expr::Unary { op: inner_op, expr: inner_expr2 } = *expr {
+                        if inner_op == "not" { return *inner_expr2; }
+                    }
+                }
+                _ => {}
+            }
+            e
+        }
+        _ => e,
+    }
+}
+
+// ─── Dead Function Elimination ─────────────────────────────────────────────
+
+/// Remove functions that are never called and not referenced as pointers.
+fn remove_dead_functions(decls: &mut Vec<Decl>) {
+    // Collect all called function names
+    let mut called: HashSet<String> = HashSet::new();
+    for d in decls.iter() {
+        if let Decl::Function { body, .. } = d {
+            for s in body { collect_calls_in_stmt(s, &mut called); }
+        }
+    }
+    // Entry function and ptr-refs are always kept
+    let mut ptr_refs: Vec<String> = Vec::new();
+    detect_ptr_refs(decls, &mut ptr_refs);
+    for n in &ptr_refs { called.insert(n.clone()); }
+
+    // Keep entry, remove the rest
+    let entry = "kernel_entry";
+    called.insert(entry.to_string());
+    decls.retain(|d| match d {
+        Decl::Function { name, .. } => called.contains(name),
+        _ => true,
+    });
+}
+
+fn collect_calls_in_stmt(s: &Stmt, out: &mut HashSet<String>) {
+    match s {
+        Stmt::Let(_, _, e) | Stmt::Assign(_, e) | Stmt::Return(Some(e)) | Stmt::Expr(e) => collect_calls_in_expr(e, out),
+        Stmt::IndexAssign { base, index, value } => { collect_calls_in_expr(base, out); collect_calls_in_expr(index, out); collect_calls_in_expr(value, out); }
+        Stmt::If { cond, then_body, else_body } => { collect_calls_in_expr(cond, out); for s in then_body { collect_calls_in_stmt(s, out); } for s in else_body { collect_calls_in_stmt(s, out); } }
+        Stmt::Loop { cond, body, .. } => { if let Some(c) = cond { collect_calls_in_expr(c, out); } for s in body { collect_calls_in_stmt(s, out); } }
+        _ => {}
+    }
+}
+
+fn collect_calls_in_expr(e: &Expr, out: &mut HashSet<String>) {
+    walk_expr(e, &mut |e| {
+        if let Expr::Call { callee, .. } = e {
+            if let Expr::Ident(name) = callee.as_ref() {
+                out.insert(name.clone());
+            }
+        }
+    });
 }
 
 // ─── Constant Folding ──────────────────────────────────────────────────────
