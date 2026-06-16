@@ -18,8 +18,6 @@ type ZigLayoutFields = Vec<(String, String)>;
 type ZigLayoutSpec = (BoundaryRepr, ZigLayoutFields);
 type ZigLayoutSpecs = HashMap<String, ZigLayoutSpec>;
 
-const ICORE_HINT: &str = "emit `.icore` JSON or use `.in`; crates.io has no compatible Tree-sitter grammar wired for this ParserId yet";
-
 pub fn parse_polyglot_file(id: ParserId, path: &Path) -> Result<UnifiedModule, String> {
     match id {
         ParserId::In | ParserId::Icore => Err(format!(

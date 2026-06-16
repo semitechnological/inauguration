@@ -1492,7 +1492,7 @@ fn cmd_compile(
     json: bool,
     emit: Option<EmitKindCli>,
     trampoline: Option<&str>,
-    base: Option<&str>,
+    _base: Option<&str>,
     metadata: Option<&str>,
 ) -> Result<()> {
     let source_path = resolve_invocation_path(cwd, path);

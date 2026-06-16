@@ -394,7 +394,7 @@ impl ComponentMetadata {
 
 #[cfg(test)]
 mod tests {
-    use super::super::core::{IrFunction, IrModule, IrType};
+    use super::super::core::{IrModule, IrType};
     use super::*;
 
     #[test]

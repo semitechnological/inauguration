@@ -27,7 +27,7 @@ use std::time::Instant;
 use super::backend::{BackendOutput, CodegenBackend, NullBackend, select_backend};
 use super::core::{IrBasicBlock, IrFunction, IrInstruction, IrModule, IrOpcode, IrType};
 use super::metadata::{ComponentMetadata, ComponentSpec, OptimizationLevel};
-use super::passes::{PassManager, PassResult};
+use super::passes::PassManager;
 
 /// Error from the compilation pipeline.
 #[derive(Debug, Clone)]

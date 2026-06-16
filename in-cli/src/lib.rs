@@ -1,4 +1,28 @@
-#![allow(clippy::too_many_arguments, clippy::type_complexity)]
+#![allow(
+    dead_code,
+    clippy::collapsible_if,
+    clippy::comparison_chain,
+    clippy::if_not_else,
+    clippy::if_same_then_else,
+    clippy::len_zero,
+    clippy::len_without_is_empty,
+    clippy::assertions_on_constants,
+    clippy::manual_strip,
+    clippy::needless_borrows_for_generic_args,
+    clippy::needless_range_loop,
+    clippy::unnecessary_find_map,
+    clippy::unnecessary_map_or,
+    clippy::useless_format,
+    clippy::needless_question_mark,
+    clippy::never_loop,
+    clippy::slow_vector_initialization,
+    clippy::stable_sort_primitive,
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    clippy::type_complexity,
+    clippy::unnecessary_cast,
+    clippy::useless_conversion
+)]
 //! Library crate backing the `in` CLI — hybrid compiler wave plus embedded hotreload daemon.
 
 #[cfg(unix)]

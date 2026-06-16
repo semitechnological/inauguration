@@ -3,7 +3,7 @@
 //! The [`PassManager`] runs passes in pipeline order over an [`IrModule`].
 //! Each pass implements the [`Pass`] trait.
 
-use super::core::{IrBasicBlock, IrModule, IrOpcode};
+use super::core::{IrModule, IrOpcode};
 
 /// Error returned by a pass.
 #[derive(Debug, Clone)]

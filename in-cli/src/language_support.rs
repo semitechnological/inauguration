@@ -522,7 +522,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn all_languages_are_level_four_or_five() {
         for entry in LANGUAGE_SUPPORT.iter() {
             assert!(entry.level >= 4, "{} should be level >= 4", entry.language);
