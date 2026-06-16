@@ -553,7 +553,7 @@ fn parse_struct_block(block: &str) -> Result<StructBlock, String> {
     let fields = parse_struct_fields_inner(&field_inner)?;
     let mut methods = Vec::new();
     for method in method_blocks {
-        let (method_name, params, ret, body) = parse_fn_block(&method)?;
+        let (method_name, params, ret, body) = parse_fn_block(&method, 0)?;
         let mut lowered_params = vec![("self".to_string(), Typ::Named(name.clone()))];
         lowered_params.extend(params);
         methods.push(Decl::Function {
@@ -636,7 +636,7 @@ fn parse_class_block(block: &str) -> Result<Decl, String> {
     let fields = parse_class_fields_inner(&field_inner)?;
     let mut methods = Vec::new();
     for method in method_blocks {
-        let (method_name, params, ret, body) = parse_fn_block(&method)?;
+        let (method_name, params, ret, body) = parse_fn_block(&method, 0)?;
         methods.push(Decl::Function {
             name: method_name,
             params,
@@ -1761,17 +1761,18 @@ fn parse_for_expanded(s: &str) -> Result<Vec<Stmt>, String> {
 }
 
 #[allow(clippy::type_complexity)]
-fn parse_fn_block(block: &str) -> Result<(String, Vec<(String, Typ)>, Typ, Vec<Stmt>), String> {
+fn parse_fn_block(block: &str, fn_line: u32) -> Result<(String, Vec<(String, Typ)>, Typ, Vec<Stmt>), String> {
     let t = trim(block);
     let rest = t
         .strip_prefix("fn ")
-        .ok_or_else(|| ".in: expected `fn`".to_string())?;
+        .ok_or_else(|| format!(".in at line {fn_line}: expected `fn`"))?;
     if let Some(brace_idx) = find_fn_body_open_brace(rest) {
         let header = trim(&rest[..brace_idx]);
         let (name, params, ret) = parse_fn_header(header);
         let body_inner = brace_content_after_open(rest, brace_idx)
-            .ok_or_else(|| ".in: unclosed `{` in function body".to_string())?;
-        let body = parse_function_body(body_inner)?;
+            .ok_or_else(|| format!(".in at line {fn_line}: unclosed `{{` in function body"))?;
+        let body = parse_function_body(body_inner)
+            .map_err(|e| format!(".in at line {fn_line}: {e}"))?;
         Ok((name, params, ret, body))
     } else {
         let (name, params, ret) = parse_fn_header(rest);
@@ -1969,8 +1970,7 @@ fn parse_module_from_blocks(blocks: &[(usize, String)]) -> Result<UnifiedModule,
             continue;
         }
         if line.starts_with("fn ") {
-            let (name, params, ret, body) = parse_fn_block(block)
-                .map_err(|e| format!(".in at line {start_line}: fn parse: {e}"))?;
+            let (name, params, ret, body) = parse_fn_block(block, *start_line as u32)?;
             decls.push(Decl::Function {
                 name,
                 params,

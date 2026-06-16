@@ -570,6 +570,8 @@ pub fn peephole_x86_64(code: &mut Vec<u8>) {
         return;
     }
 
+    let orig_len = code.len();
+
     // ── Pass 1: locate all relative jump/call instructions ──
     let mut jumps: Vec<RelJump> = Vec::new();
     let mut i = 0;
@@ -618,12 +620,49 @@ pub fn peephole_x86_64(code: &mut Vec<u8>) {
     //   89 XX      mov r32, r32 (MOV r/m32, r32)
     //   48 8B XX   mov r64, r64 (REX.W + MOV r64, r/m64)
     //   8B XX      mov r32, r32 (MOV r32, r/m32)
+    //
+    // NOTE: only remove instructions that are NOT a jump target.
+    // Removing a jump target breaks control flow.
     #[derive(Debug)]
     struct RemoveRange {
         start: usize,
         len: usize,
     }
+    // Build set of jump targets for safety check
+    let target_set: std::collections::HashSet<usize> = jumps.iter().map(|j| j.target).collect();
     let mut remove: Vec<RemoveRange> = Vec::new();
+
+    let mut i = 0;
+    while i < code.len() {
+        let is_redundant_mov = if i + 1 < code.len() {
+            let (opcode, modrm) = if code[i] == 0x48 && i + 2 < code.len() {
+                (code[i+1], code[i+2])
+            } else {
+                (code[i], code[i+1])
+            };
+            let mod_field = modrm >> 6;      // bits 7:6
+            let reg_field = (modrm >> 3) & 7; // bits 5:3
+            let rm_field = modrm & 7;         // bits 2:0
+            if mod_field == 3 && reg_field == rm_field {
+                matches!(opcode, 0x89 | 0x8B)
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        if is_redundant_mov {
+            let mov_len = if i + 2 < code.len() && code[i] == 0x48 { 3 } else { 2 };
+            // Safety: only remove if no jump targets this instruction
+            let is_jump_target = (0..mov_len).any(|delta| target_set.contains(&(i + delta)));
+            if !is_jump_target {
+                remove.push(RemoveRange { start: i, len: mov_len });
+            }
+            i += mov_len;
+        } else {
+            i += 1;
+        }
+    }
 
     let mut i = 0;
     while i < code.len() {
@@ -696,33 +735,36 @@ pub fn peephole_x86_64(code: &mut Vec<u8>) {
         let old_target = jmp.target;
         let old_offset = jmp.offset_value;
 
-        // Calculate how many bytes are removed before old_target
-        let mut removed_before_target: usize = 0;
+        // Calculate how many bytes are removed BETWEEN the jump instruction
+        // and its target (after jump end, before target start)
+        let jump_end = jmp.pos + jmp.len;
+        let mut removed_between: usize = 0;
         for r in &remove {
-            if r.start + r.len <= old_target {
-                removed_before_target += r.len;
-            } else if r.start < old_target && r.start + r.len > old_target {
-                // Partial removal of a range overlapping target — shouldn't
-                // happen for MOV instructions (not jump targets), but handle
-                // safely by only counting bytes up to the target.
-                removed_before_target += old_target - r.start;
+            let r_end = r.start + r.len;
+            // Removal is after jump end and before target
+            if r.start >= jump_end && r_end <= old_target {
+                removed_between += r.len;
+            } else if r.start < old_target && r_end > old_target && r.start >= jump_end {
+                // Partial overlap: only bytes before target count
+                removed_between += old_target - r.start;
             }
         }
 
-        // Calculate how many bytes are removed at or before jmp.pos (the jump instruction itself)
-        let mut removed_at_jump: usize = 0;
-        for r in &remove {
-            if r.start + r.len <= jmp.pos {
-                removed_at_jump += r.len;
-            } else if r.start < jmp.pos && r.start + r.len > jmp.pos {
-                removed_at_jump += jmp.pos - r.start;
-            }
-        }
-
-        let new_offset = old_offset as isize - removed_before_target as isize + removed_at_jump as isize;
+        // New offset: original offset minus bytes removed between jump and target.
+        // Bytes removed before the jump shift both instruction and target equally
+        // so the relative offset stays the same.
+        let new_offset = old_offset as isize - removed_between as isize;
 
         // Write the adjusted offset into the buffer
-        let offset_byte = jmp.offset_byte - removed_at_jump;
+        // Bytes removed before the jump shift the offset byte position
+        let mut removed_before_jump: usize = 0;
+        for r in &remove {
+            let r_end = r.start + r.len;
+            if r_end <= jmp.pos {
+                removed_before_jump += r.len;
+            }
+        }
+        let offset_byte = jmp.offset_byte - removed_before_jump;
 
         if jmp.len == 2 {
             // rel8: 1 byte offset
@@ -738,5 +780,10 @@ pub fn peephole_x86_64(code: &mut Vec<u8>) {
     remove.sort_by(|a, b| b.start.cmp(&a.start));
     for r in remove {
         code.drain(r.start..r.start + r.len);
+    }
+
+    let removed = orig_len - code.len();
+    if removed > 0 {
+        eprintln!("peephole: removed {removed} bytes from {orig_len}");
     }
 }
