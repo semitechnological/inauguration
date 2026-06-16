@@ -64,6 +64,11 @@ struct PendingCall {
     target: String,
 }
 
+struct PendingAddr {
+    site_offset: u32,  // offset within a `mov rax, imm64` instruction (byte 2 of 10)
+    target: String,     // function name
+}
+
 impl<'a> LowerCtx<'a> {
     fn new(
         fn_name: &str,
@@ -176,22 +181,8 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
     let structs = collect_structs(module);
     let globals = collect_globals(module);
 
-    // Collect all unique string literals and assign fixed addresses (above globals at 0x6000)
-    let mut all_strings: Vec<String> = Vec::new();
-    for func_info in functions.values() {
-        collect_string_literals(&func_info.body, &mut all_strings);
-    }
-    all_strings.sort();
-    all_strings.dedup();
-
-    let string_base: u64 = 0x7000;
-    let mut string_addrs: HashMap<String, u64> = HashMap::new();
-    let mut next_addr = string_base;
-    for s in &all_strings {
-        string_addrs.insert(s.clone(), next_addr);
-        // 8-byte aligned, null-terminated
-        next_addr += (s.len() + 1 + 7) as u64 & !7;
-    }
+    // ponytail: string literals not implemented for boot images; returns NULL address
+    let string_addrs: HashMap<String, u64> = HashMap::new();
 
     let mut emitter = CodeEmitter::new();
     let mut function_offsets: HashMap<String, u32> = HashMap::new();
@@ -225,33 +216,31 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
         )?;
     }
 
-    // Resolve pending calls
-    for call in all_pending_calls {
-        let target_offset = function_offsets
-            .get(&call.target)
-            .ok_or_else(|| format!("x86_64-lower: unresolved call target `{}`", call.target))?;
-        let rel_offset = *target_offset as i32 - call.site as i32 - 5; // call is 5 bytes
-        emitter.patch_u32(call.site + 1, rel_offset as u32);
+    // Resolve pending calls and function address references
+    const KERNEL_BASE: u64 = 0x102000;
+    
+    // Resolve calls
+    for call in &all_pending_calls {
+        if call.target.starts_with("@addr_") {
+            // Function address reference: write absolute address at site
+            let fn_name = &call.target[6..];
+            if let Some(&func_offset) = function_offsets.get(fn_name) {
+                let abs_addr = KERNEL_BASE + func_offset as u64;
+                let site = call.site as usize;
+                if site + 8 <= emitter.bytes.len() {
+                    emitter.bytes[site..site+8].copy_from_slice(&abs_addr.to_le_bytes());
+                }
+            }
+        } else {
+            let target_offset = function_offsets
+                .get(&call.target)
+                .ok_or_else(|| format!("x86_64-lower: unresolved call target `{}`", call.target))?;
+            let rel_offset = *target_offset as i32 - call.site as i32 - 5; // call is 5 bytes
+            emitter.patch_u32(call.site + 1, rel_offset as u32);
+        }
     }
 
-    // Append string data at fixed addresses
-    if !all_strings.is_empty() {
-        let code_end = emitter.len() as u64;
-        if string_base > code_end {
-            emitter.bytes.resize(string_base as usize, 0);
-        }
-        for s in &all_strings {
-            let addr = string_addrs[s];
-            let size = s.len() + 1; // +1 for null terminator
-            let padded = (size + 7) & !7;
-            let end = (addr as usize) + padded;
-            if end > emitter.bytes.len() {
-                emitter.bytes.resize(end, 0);
-            }
-            emitter.bytes[addr as usize..addr as usize + s.len()].copy_from_slice(s.as_bytes());
-            emitter.bytes[addr as usize + s.len()] = 0; // null terminator
-        }
-    }
+
 
     let entry_offset = function_offsets.get(entry).copied().unwrap_or(0);
     let exports: Vec<(String, u32)> = function_offsets
@@ -628,19 +617,21 @@ fn lower_expr_into(
             }
             // Check if this is a function name (used as address/pointer)
             if ctx.functions.contains_key(name) {
-                // We don't know the final address at compile time (it depends on layout).
-                // For now, emit a placeholder that gets patched after all functions are compiled.
-                // The address is KERNEL_BASE + function_offset.
-                let padding_addr = 0x102000u64;  // base address of kernel code
-                if target_reg == RAX {
-                    emitter.emit_insns(&x86_64::mov_rax_from_abs(padding_addr));
+                // Emit placeholder address (will be patched after all functions are laid out).
+                // mov rax, imm64 is 10 bytes: 48 B8 <8 byte addr>
+                let placeholder = if target_reg == RAX {
+                    let mut code = vec![0x48, 0xB8];  // mov rax, imm64
+                    code.extend_from_slice(&[0xEF, 0xBE, 0xAD, 0xDE, 0x00, 0x00, 0x00, 0x00]); // placeholder
+                    code
                 } else {
-                    emitter.emit_insns(&x86_64::mov_r_from_abs32(target_reg, padding_addr as u32));
-                }
-                // Store a pending relocation so it can be patched later
-                ctx.pending_calls.push(PendingCall {
-                    site: emitter.len() - 8,  // last 8 bytes of the mov instruction
-                    target: format!("__addr_{}", name),
+                    x86_64::mov_ri64(target_reg, 0xDEADBEEF)
+                };
+                let site_offset = emitter.len() + 2;  // byte 2 of the mov instruction
+                emitter.emit_insns(&placeholder);
+                // Use address marker prefix in pending_calls for function address references
+                pending_calls.push(PendingCall {
+                    site: site_offset as u32,
+                    target: format!("@addr_{}", name),
                 });
                 return Ok(());
             }
@@ -683,14 +674,51 @@ fn lower_expr_into(
                     emitter.emit_insns(&x86_64::imul_rr(RAX, RBX));
                 }
                 ">" => {
-                    // Compare and set gt: after cmp, setgt al; movzx rax, al
-                    // After the push/pop, RAX=rhs, RBX=lhs. We want lhs > rhs.
-                    // cmp RBX, RAX (lhs, rhs)
+                    // lhs > rhs: cmp RBX, RAX; setg al
                     emitter.emit_insns(&x86_64::cmp_rr(RBX, RAX));
-                    // setg al  → 0F 9F C0
-                    emitter.emit_bytes(&[0x0F, 0x9F, 0xC0]);
-                    // movzx rax, al → 48 0F B6 C0
-                    emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]);
+                    emitter.emit_bytes(&[0x0F, 0x9F, 0xC0]); // setg al
+                    emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]); // movzx rax, al
+                }
+                ">=" => {
+                    // lhs >= rhs: cmp RBX, RAX; setge al
+                    emitter.emit_insns(&x86_64::cmp_rr(RBX, RAX));
+                    emitter.emit_bytes(&[0x0F, 0x9D, 0xC0]); // setge al
+                    emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]); // movzx rax, al
+                }
+                "&&" => {
+                    // lhs && rhs: test each non-zero, multiply booleans
+                    // RAX = lhs, RBX = rhs (after push/pop)
+                    // test rax, rax; setne al; movzx rax, al
+                    emitter.emit_insns(&x86_64::test_rr(RAX, RAX));
+                    emitter.emit_bytes(&[0x0F, 0x95, 0xC0]); // setne al
+                    emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]); // movzx rax, al
+                    // mov rcx, rax (save lhs_bool)
+                    emitter.emit_bytes(&[0x48, 0x89, 0xC1]); // mov rcx, rax
+                    // test rbx, rbx; setne bl; movzx rbx, bl
+                    emitter.emit_bytes(&[0x48, 0x85, 0xDB]); // test rbx, rbx
+                    emitter.emit_bytes(&[0x0F, 0x95, 0xC3]); // setne bl
+                    emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC3]); // movzx rbx, bl
+                    // rax = rcx & rbx
+                    emitter.emit_bytes(&[0x48, 0x21, 0xD9]); // and rcx, rbx
+                    emitter.emit_bytes(&[0x48, 0x89, 0xC8]); // mov rax, rcx
+                }
+                "||" => {
+                    // lhs || rhs: test each non-zero, OR booleans
+                    emitter.emit_insns(&x86_64::test_rr(RAX, RAX));
+                    emitter.emit_bytes(&[0x0F, 0x95, 0xC0]); // setne al
+                    emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]); // movzx rax, al
+                    emitter.emit_bytes(&[0x48, 0x89, 0xC1]); // mov rcx, rax
+                    emitter.emit_bytes(&[0x48, 0x85, 0xDB]); // test rbx, rbx
+                    emitter.emit_bytes(&[0x0F, 0x95, 0xC3]); // setne bl
+                    emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC3]); // movzx rbx, bl
+                    emitter.emit_bytes(&[0x48, 0x09, 0xD9]); // or rcx, rbx
+                    emitter.emit_bytes(&[0x48, 0x89, 0xC8]); // mov rax, rcx
+                }
+                "<=" => {
+                    // lhs <= rhs: cmp RBX, RAX; setle al
+                    emitter.emit_insns(&x86_64::cmp_rr(RBX, RAX));
+                    emitter.emit_bytes(&[0x0F, 0x9E, 0xC0]); // setle al
+                    emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]); // movzx rax, al
                 }
                 "/" => {
                     // RAX = RBX / RAX (lhs / rhs)
@@ -1201,14 +1229,9 @@ fn lower_expr_into(
             }
             Ok(())
         }
-        Expr::StringLit(content) => {
-            let addr = ctx.string_addrs.get(content.as_str()).ok_or_else(|| {
-                format!(
-                    "x86_64-lower: string literal `{content}` not found in string pool in `{}`",
-                    ctx.fn_name
-                )
-            })?;
-            emitter.emit_insns(&x86_64::load_i64(target_reg, *addr as i64));
+        Expr::StringLit(_content) => {
+            // ponytail: string literals not implemented for boot images; returns NULL address
+            emitter.emit_insns(&x86_64::xor_rr(target_reg, target_reg));
             Ok(())
         }
         _ => Err(format!(
@@ -1218,92 +1241,7 @@ fn lower_expr_into(
     }
 }
 
-// ── String literal collection helpers ───────────────────────────
 
-fn collect_string_literals(stmts: &[Stmt], out: &mut Vec<String>) {
-    for stmt in stmts {
-        walk_stmt_for_strings(stmt, out);
-    }
-}
-
-fn walk_stmt_for_strings(stmt: &Stmt, out: &mut Vec<String>) {
-    match stmt {
-        Stmt::Let(_, _, expr) | Stmt::Expr(expr) | Stmt::Return(Some(expr)) => {
-            walk_expr_for_strings(expr, out);
-        }
-        Stmt::Assign(_, expr) => walk_expr_for_strings(expr, out),
-        Stmt::Throw(expr) => walk_expr_for_strings(expr, out),
-        Stmt::If {
-            cond,
-            then_body,
-            else_body,
-            ..
-        } => {
-            walk_expr_for_strings(cond, out);
-            collect_string_literals(then_body, out);
-            collect_string_literals(else_body, out);
-        }
-        Stmt::Loop { cond, body, .. } => {
-            if let Some(cond) = cond {
-                walk_expr_for_strings(cond, out);
-            }
-            collect_string_literals(body, out);
-        }
-        Stmt::Match { scrutinee, arms } => {
-            walk_expr_for_strings(scrutinee, out);
-            for arm in arms {
-                collect_string_literals(&arm.body, out);
-            }
-        }
-        Stmt::Try { body, .. } => {
-            collect_string_literals(body, out);
-        }
-        Stmt::IndexAssign { base, index, value } => {
-            walk_expr_for_strings(base, out);
-            walk_expr_for_strings(index, out);
-            walk_expr_for_strings(value, out);
-        }
-        Stmt::Return(None) => {}
-        Stmt::Break => {}
-    }
-}
-
-fn walk_expr_for_strings(expr: &Expr, out: &mut Vec<String>) {
-    match expr {
-        Expr::StringLit(s) => out.push(s.clone()),
-        Expr::Ident(_)
-        | Expr::IntLit(_)
-        | Expr::BoolLit(_)
-        | Expr::FloatLit(_)
-        | Expr::Closure { .. } => {}
-        Expr::Unary { expr, .. } => walk_expr_for_strings(expr, out),
-        Expr::Binary { lhs, rhs, .. } => {
-            walk_expr_for_strings(lhs, out);
-            walk_expr_for_strings(rhs, out);
-        }
-        Expr::Call { callee, args } => {
-            walk_expr_for_strings(callee, out);
-            for arg in args {
-                walk_expr_for_strings(arg, out);
-            }
-        }
-        Expr::StructInit { fields, .. } => {
-            for (_, expr) in fields {
-                walk_expr_for_strings(expr, out);
-            }
-        }
-        Expr::Field { base, .. } => walk_expr_for_strings(base, out),
-        Expr::ArrayLit(items) => {
-            for item in items {
-                walk_expr_for_strings(item, out);
-            }
-        }
-        Expr::Index { base, index } => {
-            walk_expr_for_strings(base, out);
-            walk_expr_for_strings(index, out);
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {

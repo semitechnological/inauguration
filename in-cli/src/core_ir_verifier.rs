@@ -354,6 +354,8 @@ fn check_stmt(
                     }
                     Ok(())
                 }
+                // Allow Int base (raw memory pointer arithmetic)
+                Some(Typ::Int) => Ok(()),
                 Some(other) => Err((
                     "type-mismatch".to_string(),
                     format!(
@@ -538,6 +540,7 @@ fn check_expr(
             require_type(fn_name, "array index", &Typ::Int, index, facts, env)?;
             if let Some(base_typ) = expr_type(base, facts, env)
                 && !matches!(base_typ, Typ::Array(_))
+                && base_typ != Typ::Int
             {
                 return Err((
                     "type-mismatch".to_string(),
@@ -706,6 +709,9 @@ fn expr_type(expr: &Expr, facts: &ModuleFacts<'_>, env: &HashMap<String, Typ>) -
         Expr::Index { base, .. } => {
             if let Some(Typ::Array(item)) = expr_type(base, facts, env) {
                 Some(*item)
+            } else if expr_type(base, facts, env) == Some(Typ::Int) {
+                // Indexing an Int pointer returns Int
+                Some(Typ::Int)
             } else {
                 None
             }

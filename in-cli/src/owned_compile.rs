@@ -907,11 +907,15 @@ fn native_entry_module(module: &UnifiedModule, entry: &str) -> UnifiedModule {
                 collect_expr_calls(index, out);
             }
             Expr::Closure { body, .. } => collect_stmt_calls(body, out),
+            Expr::Ident(name) => {
+                // Also track function names used as values (address references)
+                // The caller will filter these against module function names.
+                out.insert(name.clone());
+            }
             Expr::IntLit(_)
             | Expr::FloatLit(_)
             | Expr::StringLit(_)
-            | Expr::BoolLit(_)
-            | Expr::Ident(_) => {}
+            | Expr::BoolLit(_) => {}
         }
     }
 
