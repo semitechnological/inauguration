@@ -312,7 +312,7 @@ pub fn resolve_parser_id(path: &Path, cli: ParserCli) -> ResolvedBuildParser {
                     return ResolvedBuildParser::CoreIr(id);
                 }
             }
-            ResolvedBuildParser::Swift
+            ResolvedBuildParser::CoreIr(ParserId::Icore)
         }
     }
 }
@@ -604,11 +604,11 @@ mod tests {
         unsafe {
             std::env::remove_var("IN_PARSER");
         }
-        let path = temp_file_path("unknown.swift");
+        let path = temp_file_path("unknown.xyz");
         std::fs::write(&path, "#!in parser=nope\n").expect("write temp");
         assert!(matches!(
             resolve_parser_id(&path, ParserCli::Auto),
-            ResolvedBuildParser::Swift
+            ResolvedBuildParser::CoreIr(ParserId::Icore)
         ));
         let _ = std::fs::remove_file(&path);
     }
