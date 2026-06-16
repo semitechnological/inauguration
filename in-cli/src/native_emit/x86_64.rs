@@ -146,32 +146,59 @@ pub fn mov_mr(dst: u8, src: u8) -> Vec<u8> {
 }
 
 /// mov r64, [r/m64 + disp8]  (REX.W + 8B /r with ModRM)
-pub fn mov_r_m(reg: u8, base: u8, disp: i32) -> Vec<u8> {
+/// Emit a SIB byte for [RSP + disp] addressing when base is RSP (4) or RBP (5).
+/// Returns None if no SIB is needed.
+fn sib_for_base(base: u8) -> Option<u8> {
+    // RSP (4) and RBP (5) with Mod=01 or Mod=10 require a SIB byte.
+    // For RSP: SIB = 0x24 (scale=0, index=4=no-index, base=4=RSP)
+    if base == RSP { Some(0x24) }
+    else if base == RBP { Some(0x25) }  // [RBP + disp] uses SIB with index=4, base=5
+    else { None }
+}
+
+/// mov [r/m64 + disp8], r64  (REX.W + 89 /r with ModRM)
+/// When base is RSP (4), a SIB byte must follow ModRM.
+pub fn mov_m_r(base: u8, disp: i32, reg: u8) -> Vec<u8> {
     let mut code = vec![rex_wr(reg, base)];
-    code.push(0x8B);
-    if disp == 0 && base != RSP && base != RBP {
+    code.push(0x89);
+    let needs_sib = base == RSP || base == RBP;
+    if disp == 0 && !needs_sib {
         code.push(modrm(0, reg & 7, base & 7));
     } else if disp as i8 as i32 == disp {
         code.push(modrm(1, reg & 7, base & 7));
+        if needs_sib {
+            code.push(sib_for_base(base).unwrap_or(0x24));
+        }
         code.push(disp as u8);
     } else {
         code.push(modrm(2, reg & 7, base & 7));
+        if needs_sib {
+            code.push(sib_for_base(base).unwrap_or(0x24));
+        }
         code.extend_from_slice(&disp.to_le_bytes());
     }
     code
 }
 
-/// mov [r/m64 + disp8], r64  (REX.W + 89 /r with ModRM)
-pub fn mov_m_r(base: u8, disp: i32, reg: u8) -> Vec<u8> {
+/// mov r64, [r/m64 + disp8]  (REX.W + 8B /r with ModRM)
+/// When base is RSP (4), a SIB byte must follow ModRM.
+pub fn mov_r_m(reg: u8, base: u8, disp: i32) -> Vec<u8> {
     let mut code = vec![rex_wr(reg, base)];
-    code.push(0x89);
-    if disp == 0 && base != RSP && base != RBP {
+    code.push(0x8B);
+    let needs_sib = base == RSP || base == RBP;
+    if disp == 0 && !needs_sib {
         code.push(modrm(0, reg & 7, base & 7));
     } else if disp as i8 as i32 == disp {
         code.push(modrm(1, reg & 7, base & 7));
+        if needs_sib {
+            code.push(sib_for_base(base).unwrap_or(0x24));
+        }
         code.push(disp as u8);
     } else {
         code.push(modrm(2, reg & 7, base & 7));
+        if needs_sib {
+            code.push(sib_for_base(base).unwrap_or(0x24));
+        }
         code.extend_from_slice(&disp.to_le_bytes());
     }
     code

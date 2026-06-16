@@ -1640,9 +1640,12 @@ fn cmd_emit_bootstrap(
         )));
     }
 
-    let mut image = Vec::with_capacity(tramp_size + result.code.len());
+    // The lowerer now places the entry function first, so entry_offset is 0.
+    let code = &result.code;
+
+    let mut image = Vec::with_capacity(tramp_size + code.len());
     image.extend_from_slice(&trampoline_bytes);
-    image.extend_from_slice(&result.code);
+    image.extend_from_slice(code);
 
     // Write boot image
     if let Some(parent) = out_path.parent() {

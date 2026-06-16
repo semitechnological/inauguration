@@ -171,8 +171,14 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
     let mut function_offsets: HashMap<String, u32> = HashMap::new();
     let mut all_pending_calls: Vec<PendingCall> = Vec::new();
 
+    // Sort functions so the entry function is always first (so the trampoline
+    // can jump to a known offset 0 in the compiled code section).
     let mut names: Vec<String> = functions.keys().cloned().collect();
-    names.sort();
+    names.sort_by(|a, b| {
+        if a == entry { std::cmp::Ordering::Less }
+        else if b == entry { std::cmp::Ordering::Greater }
+        else { a.cmp(b) }
+    });
 
     for name in &names {
         let func = &functions[name];
@@ -391,6 +397,20 @@ fn lower_stmt(
         }
         Stmt::Expr(expr) => {
             lower_expr_into(emitter, ctx, expr, RAX, pending_calls)?;
+            Ok(())
+        }
+        Stmt::IndexAssign { base, index, value } => {
+            // a[i] = value → compute addr = base + i*8, store value
+            lower_expr_into(emitter, ctx, base, RDI, pending_calls)?;
+            lower_expr_into(emitter, ctx, index, RAX, pending_calls)?;
+            // RAX = index; shl rax, 3 (multiply by 8 for Int)
+            emitter.emit_bytes(&[0x48, 0xC1, 0xE0, 0x03]); // shl rax, 3
+            // add rdi, rax
+            emitter.emit_bytes(&[0x48, 0x01, 0xC7]);
+            // value into rsi
+            lower_expr_into(emitter, ctx, value, RSI, pending_calls)?;
+            // mov [rdi], rsi  → 48 89 37
+            emitter.emit_bytes(&[0x48, 0x89, 0x37]);
             Ok(())
         }
         Stmt::If {
@@ -1038,6 +1058,21 @@ fn lower_expr_into(
                     ));
                 }
             }
+            if target_reg != RAX {
+                emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
+            }
+            Ok(())
+        }
+        Expr::Index { base, index } => {
+            // a[i] → compute addr = base + i*8, load 8 bytes
+            lower_expr_into(emitter, ctx, base, RDI, pending_calls)?;
+            lower_expr_into(emitter, ctx, index, RAX, pending_calls)?;
+            // shl rax, 3 (multiply by 8)
+            emitter.emit_bytes(&[0x48, 0xC1, 0xE0, 0x03]);
+            // add rdi, rax
+            emitter.emit_bytes(&[0x48, 0x01, 0xC7]);
+            // mov rax, [rdi]
+            emitter.emit_bytes(&[0x48, 0x8B, 0x07]);
             if target_reg != RAX {
                 emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
             }

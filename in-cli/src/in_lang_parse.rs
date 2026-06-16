@@ -1507,6 +1507,7 @@ fn parse_while_stmt(s: &str) -> Result<Stmt, String> {
     })
 }
 
+
 fn parse_match_stmt(s: &str) -> Result<Stmt, String> {
     let rest = trim(s)
         .strip_prefix("match ")
@@ -1652,6 +1653,10 @@ fn parse_stmt_line(line: &str) -> Result<Stmt, String> {
     if s.starts_with("while ") {
         return parse_while_stmt(s);
     }
+    // `for` is handled by parse_function_body expansion
+    if s.starts_with("for ") {
+        return Err(".in: unexpected `for` statement (should be expanded by parse_function_body)".into());
+    }
     if s.starts_with("match ") {
         return parse_match_stmt(s);
     }
@@ -1677,9 +1682,68 @@ fn parse_stmt_line(line: &str) -> Result<Stmt, String> {
 fn parse_function_body(inner: &str) -> Result<Vec<Stmt>, String> {
     let mut stmts = Vec::new();
     for part in split_function_statements(inner) {
-        stmts.push(parse_stmt_line(&part)?);
+        let trimmed = trim(&part);
+        if trimmed.starts_with("for ") {
+            // Expand for loop into multiple statements (let + while)
+            stmts.extend(parse_for_expanded(&part)?);
+        } else {
+            stmts.push(parse_stmt_line(&part)?);
+        }
     }
     Ok(stmts)
+}
+
+/// Parse a `for i in start..end { body }` and expand to:
+///   let i = start
+///   while i < end { body; i = i + 1 }
+fn parse_for_expanded(s: &str) -> Result<Vec<Stmt>, String> {
+    let rest = trim(s)
+        .strip_prefix("for ")
+        .ok_or_else(|| ".in: internal for parse".to_string())?;
+    let open = rest
+        .find('{')
+        .ok_or_else(|| ".in: `for` needs `{` body".to_string())?;
+    let header = trim(&rest[..open]);
+    let parts: Vec<&str> = header.splitn(2, " in ").collect();
+    if parts.len() != 2 {
+        return Err(".in: `for` needs `<var> in <range>`".into());
+    }
+    let var_name = trim(parts[0]);
+    if var_name.is_empty() {
+        return Err(".in: `for` loop variable name missing".into());
+    }
+    let range_part = trim(parts[1]);
+    let range_segs: Vec<&str> = range_part.splitn(2, "..").collect();
+    if range_segs.len() != 2 {
+        return Err(".in: `for` range needs `start..end`".into());
+    }
+    let start_expr = parse_expr(trim(range_segs[0]));
+    let end_expr = parse_expr(trim(range_segs[1]));
+    let (inner, _) = brace_content_bounds_after_open(rest, open)
+        .ok_or_else(|| ".in: unclosed `for` body".to_string())?;
+    let mut body = parse_function_body(inner)?;
+    // Add i = i + 1 at end of body
+    body.push(Stmt::Assign(
+        var_name.to_string(),
+        Expr::Binary {
+            op: "+".to_string(),
+            lhs: Box::new(Expr::Ident(var_name.to_string())),
+            rhs: Box::new(Expr::IntLit(1)),
+        },
+    ));
+    let while_loop = Stmt::Loop {
+        kind: LoopKind::While,
+        cond: Some(Expr::Binary {
+            op: "<".to_string(),
+            lhs: Box::new(Expr::Ident(var_name.to_string())),
+            rhs: Box::new(end_expr),
+        }),
+        body,
+    };
+    Ok(vec![
+        Stmt::Let(var_name.to_string(), Some(Typ::Int), start_expr),
+        while_loop,
+    ])
 }
 
 #[allow(clippy::type_complexity)]
