@@ -1645,7 +1645,9 @@ fn cmd_emit_bootstrap(
     // The lowerer places the entry function first, so entry_offset is 0.
     // The trampoline's KERNEL_ENTRY is at KCODE_BASE + 0x100, so we emit
     // an SCI (Space Component Image) header between the trampoline and code.
-    let code = &result.code;
+    let mut code = result.code;
+    // ponytail: peephole disabled until patterns are verified safe
+    // inauguration::core_opt::peephole_x86_64(&mut code);
     const SCI_HEADER_SIZE: usize = 256;
     const SCI_CODE_OFFSET: usize = 0x100;
     let mut sci_header = vec![0u8; SCI_HEADER_SIZE];
@@ -1691,7 +1693,7 @@ fn cmd_emit_bootstrap(
     let mut image = Vec::with_capacity(tramp_size + SCI_HEADER_SIZE + code.len());
     image.extend_from_slice(&trampoline_bytes);
     image.extend_from_slice(&sci_header);
-    image.extend_from_slice(code);
+    image.extend_from_slice(&code);
 
     // Write boot image
     if let Some(parent) = out_path.parent() {
@@ -1775,7 +1777,7 @@ fn cmd_emit_bootstrap(
         "object_schemas": schemas,
         "deterministic": deterministic,
         "checkpoint": checkpoint,
-        "code_size": result.code.len(),
+        "code_size": code.len(),
         "provenance": {
             "compiler": "inauguration",
             "compiler_version": env!("CARGO_PKG_VERSION"),
@@ -1790,7 +1792,7 @@ fn cmd_emit_bootstrap(
         "boot image: {} bytes (trampoline: {} + kernel: {})",
         image.len(),
         tramp_size,
-        result.code.len()
+        code.len()
     );
     Ok(())
 }
