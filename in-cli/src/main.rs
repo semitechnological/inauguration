@@ -1031,14 +1031,12 @@ fn run_pipeline_for_path(
     let (sil_source, swift_frontend_emit_us) = {
         let emit_start = std::time::Instant::now();
         let sil_source = match parser_registry::parse_with_resolved(resolved, path) {
-            Ok(Some(module)) => {
-                inauguration::compiler::driver::lower_unified_module(
-                    &module,
-                    module.effective_module_id(module_id),
-                )
-            }
+            Ok(Some(module)) => inauguration::compiler::driver::lower_unified_module(
+                &module,
+                module.effective_module_id(module_id),
+            ),
             Ok(None) => Err(InError::Message(
-                "Swift Tree-sitter Core IR not available; use .in / .icore".to_string()
+                "Swift Tree-sitter Core IR not available; use .in / .icore".to_string(),
             ))?,
             Err(e) => {
                 let hint = "Hint: for `.in` use `fn main() -> void`; for `.icore` see docs/architecture/general-compiler.md; polyglot Core IR uses Tree-sitter grammars with bounded extraction where wired. Unsupported languages need `.icore`.";
@@ -1412,8 +1410,10 @@ fn cmd_ocaml(invocation_cwd: &Path, path: &str) -> Result<()> {
         invocation_cwd.join(path)
     };
     let module = inauguration::compiler::tree_front::parse_polyglot_file(
-        inauguration::parser_registry::ParserId::OCaml, &resolved
-    ).map_err(|e| InError::Message(format!("ocaml front: {e}")))?;
+        inauguration::parser_registry::ParserId::OCaml,
+        &resolved,
+    )
+    .map_err(|e| InError::Message(format!("ocaml front: {e}")))?;
     println!("parsed {} declarations", module.decls.len());
     for (i, decl) in module.decls.iter().enumerate() {
         println!("  {}: {:?}", i + 1, decl);
@@ -1662,7 +1662,11 @@ fn cmd_emit_bootstrap(
     // Byte 48-55: Flags (bit0 = deterministic)
     let mut flags = 0u64;
     for decl in &module.decls {
-        if let inauguration::core_ir::Decl::Component { deterministic: true, .. } = decl {
+        if let inauguration::core_ir::Decl::Component {
+            deterministic: true,
+            ..
+        } = decl
+        {
             flags |= 1;
         }
     }
@@ -1706,31 +1710,49 @@ fn cmd_emit_bootstrap(
     for decl in &module.decls {
         match decl {
             inauguration::core_ir::Decl::Component {
-                name, target: t, deterministic: det, checkpoint: chk,
-                imports: imps, exports: exps, capabilities: capabs, ..
+                name,
+                target: t,
+                deterministic: det,
+                checkpoint: chk,
+                imports: imps,
+                exports: exps,
+                capabilities: capabs,
+                ..
             } => {
                 component = serde_json::json!(name);
                 target = serde_json::json!(t);
                 deterministic = serde_json::json!(det);
                 checkpoint = serde_json::json!(chk);
-                imports = serde_json::json!(imps.iter().map(|i| {
-                    serde_json::json!({"name": i.name, "interface": i.interface})
-                }).collect::<Vec<_>>());
-                exports = serde_json::json!(exps.iter().map(|e| {
-                    serde_json::json!({"name": e.name, "interface": e.interface})
-                }).collect::<Vec<_>>());
-                caps = serde_json::json!(capabs.iter().map(|c| {
-                    serde_json::json!({
-                        "name": c.name,
-                        "capability_type": c.capability_type,
-                        "args": c.args,
-                    })
-                }).collect::<Vec<_>>());
+                imports = serde_json::json!(
+                    imps.iter()
+                        .map(|i| { serde_json::json!({"name": i.name, "interface": i.interface}) })
+                        .collect::<Vec<_>>()
+                );
+                exports = serde_json::json!(
+                    exps.iter()
+                        .map(|e| { serde_json::json!({"name": e.name, "interface": e.interface}) })
+                        .collect::<Vec<_>>()
+                );
+                caps = serde_json::json!(
+                    capabs
+                        .iter()
+                        .map(|c| {
+                            serde_json::json!({
+                                "name": c.name,
+                                "capability_type": c.capability_type,
+                                "args": c.args,
+                            })
+                        })
+                        .collect::<Vec<_>>()
+                );
             }
             inauguration::core_ir::Decl::Struct { name, fields, .. } => {
-                let schema_fields: Vec<serde_json::Value> = fields.iter().map(|(fn_, typ)| {
-                    serde_json::json!({"name": fn_, "type": format!("{:?}", typ)})
-                }).collect();
+                let schema_fields: Vec<serde_json::Value> = fields
+                    .iter()
+                    .map(
+                        |(fn_, typ)| serde_json::json!({"name": fn_, "type": format!("{:?}", typ)}),
+                    )
+                    .collect();
                 schemas.push(serde_json::json!({
                     "name": name,
                     "fields": schema_fields,
@@ -1755,7 +1777,10 @@ fn cmd_emit_bootstrap(
             "compiler_version": env!("CARGO_PKG_VERSION"),
         }
     });
-    let _ = std::fs::write(&meta_path, serde_json::to_string_pretty(&meta).unwrap_or_else(|_| "{}".to_string()));
+    let _ = std::fs::write(
+        &meta_path,
+        serde_json::to_string_pretty(&meta).unwrap_or_else(|_| "{}".to_string()),
+    );
 
     eprintln!(
         "boot image: {} bytes (trampoline: {} + kernel: {})",

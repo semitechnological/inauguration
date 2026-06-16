@@ -14,7 +14,6 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use tree_sitter::{Language, Node, Parser};
 
-
 type ZigLayoutFields = Vec<(String, String)>;
 type ZigLayoutSpec = (BoundaryRepr, ZigLayoutFields);
 type ZigLayoutSpecs = HashMap<String, ZigLayoutSpec>;
@@ -35,8 +34,17 @@ pub fn parse_polyglot_file(id: ParserId, path: &Path) -> Result<UnifiedModule, S
                     let name_n = n.child_by_field_name("name")?;
                     let name = normalize_entry(node_txt(s, name_n).trim());
                     let params = v_params(s, n);
-                    let body = n.child_by_field_name("body").map(|b| v_body(s, b)).unwrap_or_default();
-                    Some(Decl::Function { name, params, ret: Typ::Void, body, type_params: vec![] })
+                    let body = n
+                        .child_by_field_name("body")
+                        .map(|b| v_body(s, b))
+                        .unwrap_or_default();
+                    Some(Decl::Function {
+                        name,
+                        params,
+                        ret: Typ::Void,
+                        body,
+                        type_params: vec![],
+                    })
                 })
             })
         }
@@ -102,13 +110,27 @@ fn dispatch(id: ParserId, path: &Path, src: &str) -> Result<UnifiedModule, Strin
             parse_lang(ts_lang, src, extract_ts_with_classes)
         }
         ParserId::Go => parse_lang(tree_sitter_go::LANGUAGE.into(), src, |b, r| {
-            extract_fn_nodes(b, r, &["function_declaration", "method_declaration"], |src, n| {
-                let name_n = n.child_by_field_name("name")?;
-                let name = normalize_entry(node_txt(src, name_n).trim());
-                let params = go_params(src, n);
-                let body = n.child_by_field_name("body").map(|b| go_body(src, b)).unwrap_or_default();
-                Some(Decl::Function { name, params, ret: Typ::Void, body, type_params: vec![] })
-            })
+            extract_fn_nodes(
+                b,
+                r,
+                &["function_declaration", "method_declaration"],
+                |src, n| {
+                    let name_n = n.child_by_field_name("name")?;
+                    let name = normalize_entry(node_txt(src, name_n).trim());
+                    let params = go_params(src, n);
+                    let body = n
+                        .child_by_field_name("body")
+                        .map(|b| go_body(src, b))
+                        .unwrap_or_default();
+                    Some(Decl::Function {
+                        name,
+                        params,
+                        ret: Typ::Void,
+                        body,
+                        type_params: vec![],
+                    })
+                },
+            )
         }),
         ParserId::Rust => parse_lang(tree_sitter_rust::LANGUAGE.into(), src, extract_rust),
         ParserId::Zig => parse_lang(tree_sitter_zig::LANGUAGE.into(), src, extract_zig),
@@ -4943,8 +4965,6 @@ fn erlang_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
     ast_body(src, body, ERLANGAST)
 }
 
-
-
 fn extract_julia(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
     let mut decls = Vec::new();
 
@@ -5532,13 +5552,27 @@ const SWIFT_AST: AstShape = AstShape {
     arg_wrapper_kinds: &[],
     paren_kinds: &["tuple_expression"],
     binary_kinds: &[
-        "infix_expression", "comparison_expression", "equality_expression",
-        "conjunction_expression", "disjunction_expression", "additive_expression",
-        "multiplicative_expression", "bitwise_operation",
+        "infix_expression",
+        "comparison_expression",
+        "equality_expression",
+        "conjunction_expression",
+        "disjunction_expression",
+        "additive_expression",
+        "multiplicative_expression",
+        "bitwise_operation",
     ],
     unary_kinds: &["prefix_expression", "postfix_expression"],
-    int_kinds: &["integer_literal", "hex_literal", "oct_literal", "bin_literal"],
-    string_kinds: &["line_string_literal", "multi_line_string_literal", "raw_string_literal"],
+    int_kinds: &[
+        "integer_literal",
+        "hex_literal",
+        "oct_literal",
+        "bin_literal",
+    ],
+    string_kinds: &[
+        "line_string_literal",
+        "multi_line_string_literal",
+        "raw_string_literal",
+    ],
     type_kinds: &["type", "user_type", "array_type", "optional_type"],
     local_decl_prefixes: &["let ", "var "],
     shell_first_kinds: &[],
@@ -5555,13 +5589,22 @@ fn extract_swift(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
         let name_n = n.child_by_field_name("name")?;
         let name = normalize_entry(node_txt(src, name_n).trim());
         let params = swift_params(src, n);
-        let ret = n.child_by_field_name("return_type")
+        let ret = n
+            .child_by_field_name("return_type")
             .and_then(|t| first_named(t, "type_annotation").or(Some(t)))
             .map(|t| Typ::Named(node_txt(src, t).trim().to_string()))
             .unwrap_or(Typ::Void);
-        let body = n.child_by_field_name("body")
-            .map(|b| swift_body(src, b)).unwrap_or_default();
-        Some(Decl::Function { name, params, ret, body, type_params: vec![] })
+        let body = n
+            .child_by_field_name("body")
+            .map(|b| swift_body(src, b))
+            .unwrap_or_default();
+        Some(Decl::Function {
+            name,
+            params,
+            ret,
+            body,
+            type_params: vec![],
+        })
     })
 }
 
@@ -5570,13 +5613,17 @@ fn swift_params(src: &[u8], func: Node<'_>) -> Vec<(String, Typ)> {
     if let Some(params) = func.child_by_field_name("parameters") {
         let mut w = params.walk();
         for ch in params.named_children(&mut w) {
-            if !matches!(ch.kind(), "parameter" | "simple_identifier") { continue; }
-            let name = ch.child_by_field_name("name")
+            if !matches!(ch.kind(), "parameter" | "simple_identifier") {
+                continue;
+            }
+            let name = ch
+                .child_by_field_name("name")
                 .or_else(|| first_named(ch, "simple_identifier"))
                 .or_else(|| first_named(ch, "identifier"))
                 .map(|n| node_txt(src, n).trim().to_string())
                 .unwrap_or_else(|| "_".to_string());
-            let ty = ch.child_by_field_name("type")
+            let ty = ch
+                .child_by_field_name("type")
                 .and_then(|t| first_named(t, "type_annotation").or(Some(t)))
                 .map(|t| Typ::Named(node_txt(src, t).trim().to_string()))
                 .unwrap_or(Typ::Named("Any".into()));
@@ -5624,7 +5671,9 @@ fn go_params(src: &[u8], func: Node<'_>) -> Vec<(String, Typ)> {
     if let Some(plist) = func.child_by_field_name("parameters") {
         let mut w = plist.walk();
         for ch in plist.named_children(&mut w) {
-            if ch.kind() != "parameter_declaration" { continue; }
+            if ch.kind() != "parameter_declaration" {
+                continue;
+            }
             let name = first_named(ch, "identifier")
                 .map(|n| node_txt(src, n).trim().to_string())
                 .unwrap_or_else(|| "_".to_string());
@@ -5677,9 +5726,17 @@ fn extract_ocaml(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
         let pattern = n.child_by_field_name("pattern")?;
         let name = ocaml_name_from_pattern(src, pattern);
         let params = ocaml_params(src, n);
-        let body = n.child_by_field_name("body")
-            .map(|b| ocaml_body(src, b)).unwrap_or_default();
-        Some(Decl::Function { name, params, ret: Typ::Void, body, type_params: vec![] })
+        let body = n
+            .child_by_field_name("body")
+            .map(|b| ocaml_body(src, b))
+            .unwrap_or_default();
+        Some(Decl::Function {
+            name,
+            params,
+            ret: Typ::Void,
+            body,
+            type_params: vec![],
+        })
     })
 }
 
@@ -5746,11 +5803,18 @@ fn extract_haskell(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
         let name_n = n.child_by_field_name("name")?;
         let name = normalize_entry(node_txt(src, name_n).trim());
         let params = haskell_params(src, n);
-        let ret = n.child_by_field_name("result")
+        let ret = n
+            .child_by_field_name("result")
             .map(|r| Typ::Named(node_txt(src, r).trim().to_string()))
             .unwrap_or(Typ::Void);
         let body = haskell_body(src, n);
-        Some(Decl::Function { name, params, ret, body, type_params: vec![] })
+        Some(Decl::Function {
+            name,
+            params,
+            ret,
+            body,
+            type_params: vec![],
+        })
     })
 }
 
@@ -5818,12 +5882,16 @@ fn v_params(src: &[u8], func: Node<'_>) -> Vec<(String, Typ)> {
     if let Some(plist) = func.child_by_field_name("parameters") {
         let mut w = plist.walk();
         for ch in plist.named_children(&mut w) {
-            if ch.kind() != "parameter_declaration" { continue; }
-            let name = ch.child_by_field_name("name")
+            if ch.kind() != "parameter_declaration" {
+                continue;
+            }
+            let name = ch
+                .child_by_field_name("name")
                 .or_else(|| first_named(ch, "identifier"))
                 .map(|n| node_txt(src, n).trim().to_string())
                 .unwrap_or_else(|| "_".to_string());
-            let ty = ch.child_by_field_name("type")
+            let ty = ch
+                .child_by_field_name("type")
                 .or_else(|| first_named(ch, "type_identifier"))
                 .map(|t| Typ::Named(node_txt(src, t).trim().to_string()))
                 .unwrap_or(Typ::Named("Any".into()));

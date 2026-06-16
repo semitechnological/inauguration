@@ -521,8 +521,8 @@ mod tests {
         }
     }
 
-#[test]
-#[test]
+    #[test]
+    #[test]
     fn all_languages_are_level_four_or_five() {
         for entry in LANGUAGE_SUPPORT.iter() {
             assert!(entry.level >= 4, "{} should be level >= 4", entry.language);
@@ -545,9 +545,7 @@ mod tests {
     #[test]
     fn routed_languages_have_examples() {
         for entry in LANGUAGE_SUPPORT.iter().filter(|entry| {
-            entry.parser_id.is_some()
-                && entry.language != "in"
-                && entry.language != "icore"
+            entry.parser_id.is_some() && entry.language != "in" && entry.language != "icore"
         }) {
             assert!(
                 !entry.example.is_empty(),

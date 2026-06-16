@@ -219,7 +219,7 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
 
     // Resolve pending calls and function address references
     // SCI header occupies 256 bytes at KCODE_BASE (0x102000), code starts at +0x100
-const KERNEL_BASE: u64 = 0x102100;
+    const KERNEL_BASE: u64 = 0x102100;
 
     // Resolve calls — collect string refs, resolve function addresses and calls
     let mut str_refs: Vec<(u32, String)> = Vec::new();
@@ -1072,7 +1072,7 @@ fn lower_expr_into(
                         lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
                         emitter.emit_insns(&x86_64::push_r(RDI)); // save address
                         lower_expr_into(emitter, ctx, &args[1], RSI, pending_calls)?;
-                        emitter.emit_insns(&x86_64::pop_r(RDI));  // restore address
+                        emitter.emit_insns(&x86_64::pop_r(RDI)); // restore address
                         // mov [rdi], sil  → 40 88 37
                         emitter.emit_bytes(&[0x40, 0x88, 0x37]);
                     } else {

@@ -131,7 +131,9 @@ impl ParserId {
                 "dynamic OO / scripting"
             }
             ParserId::JavaScript | ParserId::TypeScript => "ECMAScript-shaped",
-            ParserId::Go | ParserId::V | ParserId::Rust | ParserId::Swift | ParserId::Zig => "systems / curly-brace",
+            ParserId::Go | ParserId::V | ParserId::Rust | ParserId::Swift | ParserId::Zig => {
+                "systems / curly-brace"
+            }
             ParserId::Dart | ParserId::Lua => "OO / embeddable",
             ParserId::Clojure
             | ParserId::Elixir
@@ -360,7 +362,6 @@ pub fn parse_with_resolved(
                 .map_err(ParserRegistryError::Msg)
                 .map(Some)
         }
-
 
         ResolvedBuildParser::CoreIr(ParserId::Rust) => {
             crate::compiler::rust_front::parse_rust_file(path)

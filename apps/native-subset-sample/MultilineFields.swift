@@ -1,6 +1,6 @@
 struct Account {
-  id: Int
-  owner: String
+  var id: Int
+  var owner: String
 }
 
 func owner(account: Account) -> String {

@@ -1,9 +1,9 @@
-// Minimal sources understood by inauguration's in-tree subset front (swift_subset).
-// Build without swiftc: IN_NATIVE_SWIFT_SIL=only in build --path apps/native-subset-sample/App.swift --module-id App
+// Swift sample for inauguration's Tree-sitter Core IR front.
+// Build: in build --path apps/native-subset-sample/App.swift --module-id App
 
 struct User {
-  id: Int
-  name: String
+  var id: Int
+  var name: String
 }
 
 func userName(user: User) -> String {

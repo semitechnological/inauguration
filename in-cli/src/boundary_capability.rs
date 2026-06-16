@@ -166,7 +166,10 @@ mod tests {
     fn icore_reports_boundary_ir_interchange_level() {
         let entry = language_support_for_parser(ParserId::Icore.as_str()).expect("icore");
         assert_eq!(boundary_level_for(entry), 3);
-        assert_eq!(effective_level_for(entry), entry.level.min(boundary_level_for(entry)));
+        assert_eq!(
+            effective_level_for(entry),
+            entry.level.min(boundary_level_for(entry))
+        );
         let gates = boundary_gates_for(3);
         assert!(gates.contains(&"boundary-ir-verify"));
         assert!(gates.contains(&"boundary-ir-attach"));
@@ -185,7 +188,10 @@ mod tests {
             let entry = language_support_for_parser(parser_id.as_str())
                 .unwrap_or_else(|| panic!("{}", parser_id.as_str()));
             assert!(boundary_level_for(entry) >= 2, "{}", entry.language);
-            assert_eq!(effective_level_for(entry), entry.level.min(boundary_level_for(entry)));
+            assert_eq!(
+                effective_level_for(entry),
+                entry.level.min(boundary_level_for(entry))
+            );
         }
     }
 
@@ -193,7 +199,10 @@ mod tests {
     fn rust_reports_family_typecheck_level() {
         let entry = language_support_for_parser(ParserId::Rust.as_str()).expect("rust");
         assert!(boundary_level_for(entry) >= 3);
-        assert_eq!(effective_level_for(entry), entry.level.min(boundary_level_for(entry)));
+        assert_eq!(
+            effective_level_for(entry),
+            entry.level.min(boundary_level_for(entry))
+        );
     }
 
     #[test]

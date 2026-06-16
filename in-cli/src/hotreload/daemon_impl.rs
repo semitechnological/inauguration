@@ -518,8 +518,13 @@ fn compile_check_uncached(path: &Path) -> CompileCheckResult {
         .map(|m| m.is_some())
         .unwrap_or(false);
     let frontend_kind = parser_registry::parser_id_from_extension(
-        &path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase()
-    ).map(|id| id.as_str().to_string());
+        &path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase(),
+    )
+    .map(|id| id.as_str().to_string());
     CompileCheckResult {
         ok,
         cache_hit: false,
@@ -1061,13 +1066,9 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("hotreload-sil-edges-{}", now_ms()));
         let _ = std::fs::create_dir_all(&dir);
         let f = dir.join("App.swift");
-        std::fs::write(
-            &f,
-            "func helper() {}\nfunc main() { helper() }\n",
-        )
-        .expect("write swift");
+        std::fs::write(&f, "func helper() {}\nfunc main() { helper() }\n").expect("write swift");
         if let Some(n) = sil_subset_call_edge_count(&f) {
-            assert!(n >= 0, "sil graph available, got {n}");
+            assert!(true, "sil graph available, got {n}");
         }
         let _ = std::fs::remove_file(&f);
         let _ = std::fs::remove_dir(&dir);

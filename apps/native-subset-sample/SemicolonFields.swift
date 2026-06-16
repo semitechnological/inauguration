@@ -1,6 +1,6 @@
 struct Pair {
-  left: Int;
-  right: Int;
+  var left: Int
+  var right: Int
 }
 
 func left(pair: Pair) -> Int {
