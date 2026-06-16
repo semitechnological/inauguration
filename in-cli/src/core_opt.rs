@@ -546,6 +546,192 @@ fn collect_used_in_expr(e: &Expr, out: &mut HashSet<String>) {
     walk_expr(e, &mut |e| { if let Expr::Ident(n) = e { out.insert(n.clone()); } });
 }
 
+/// Table-driven x86-64 instruction length decoder.
+/// Returns the total byte length of the instruction starting at `code[pos]`.
+/// Used by the peephole to correctly identify instruction boundaries.
+fn x86_64_insn_length(code: &[u8], pos: usize) -> usize {
+    let mut p = pos;
+
+    // ── Skip legacy prefixes ──
+    while p < code.len() {
+        match code[p] {
+            // Group 1: lock, repne, repe
+            0xF0 | 0xF2 | 0xF3 => { p += 1; }
+            // Group 2: segment overrides, branch hints
+            0x2E | 0x36 | 0x3E | 0x26 | 0x64 | 0x65 => { p += 1; }
+            // Group 3: operand size override
+            0x66 => { p += 1; }
+            // Group 4: address size override
+            0x67 => { p += 1; }
+            // REX prefix (0x40-0x4F)
+            _ if (0x40..=0x4F).contains(&code[p]) => { p += 1; }
+            _ => break,
+        }
+    }
+
+    if p >= code.len() {
+        return code.len() - pos;
+    }
+
+    // ── Opcode ──
+    let op1 = code[p];
+    p += 1;
+
+    // Two-byte opcode (0x0F prefix)
+    let op2: Option<u8> = if op1 == 0x0F && p < code.len() {
+        let o2 = code[p];
+        p += 1;
+        Some(o2)
+    } else {
+        None
+    };
+
+    // Three-byte opcode (0x0F 0x38/0x3A)
+    let _op3: Option<u8> = if let Some(0x38 | 0x3A) = op2 {
+        if p < code.len() { let o3 = code[p]; p += 1; Some(o3) } else { None }
+    } else {
+        None
+    };
+
+    // ── Determine if ModRM follows ──
+    // Most non-immediate, non-relative opcodes use ModRM.
+    // Exceptions: opcodes with implicit operands.
+    let opcode_total = if let Some(o2) = op2 { o2 } else { op1 };
+    let two_byte = op2.is_some();
+
+    let has_modrm = match (two_byte, opcode_total) {
+        // Immediate-only: push/pop, mov al/ax/eax/rax, etc.
+        (false, 0x50..=0x5F) => false, // push r64 / pop r64
+        (false, 0x60..=0x6F) => true,  // pusha/pusha/pushad/pop variants
+        (false, 0x70..=0x7F) => false, // jcc rel8 (handled by caller)
+        (false, 0x9C) => false,        // pushfq
+        (false, 0x9D) => false,        // popfq
+        (false, 0x9E) => false,        // sahf
+        (false, 0x9F) => false,        // lahf
+        (false, 0xA0..=0xAF) => true,  // mov al,[addr] etc.
+        (false, 0xB0..=0xBF) => false, // mov r8..r15, imm8/32/64
+        (false, 0xC0..=0xC1) => true,  // shift by imm8
+        (false, 0xC2) => false,        // ret near imm16
+        (false, 0xC3) => false,        // ret
+        (false, 0xC6..=0xC7) => true,  // mov r/m, imm
+        (false, 0xCA) => false,        // ret far imm16
+        (false, 0xCB) => false,        // ret far
+        (false, 0xCC) => false,        // int3
+        (false, 0xCD) => false,        // int imm8
+        (false, 0xCE) => false,        // into
+        (false, 0xCF) => false,        // iret
+        (false, 0xD0..=0xD3) => true,  // shift by 1/cl
+        (false, 0xD4..=0xD5) => true,  // aam/aad
+        (false, 0xD6) => false,        // salc (undefined)
+        (false, 0xD7) => true,         // xlat
+        (false, 0xE0..=0xE3) => false, // loop/loope/loopne/jecxz (rel8)
+        (false, 0xE4..=0xE7) => false, // in/out imm8
+        (false, 0xE8..=0xEB) => false, // call/jmp rel32, jmp rel8 (handled by caller)
+        (false, 0xEC..=0xEF) => false, // in/out dx
+        (false, 0xF4) => false,        // hlt
+        (false, 0xF5) => false,        // cmc
+        (false, 0xF6..=0xF7) => true,  // test/not/neg/mul/imul/div/idiv r/m
+        (false, 0xF8) => false,        // clc
+        (false, 0xF9) => false,        // stc
+        (false, 0xFA) => false,        // cli
+        (false, 0xFB) => false,        // sti
+        (false, 0xFC) => false,        // cld
+        (false, 0xFD) => false,        // std
+        (false, 0xFE..=0xFF) => true,  // inc/dec/call/jmp/push r/m
+        // Two-byte opcodes
+        (true, 0x00..=0x7F) => true,   // most 0F-prefixed instructions
+        (true, 0x80..=0x8F) => false,  // jcc rel32 (handled by caller)
+        (true, 0x90..=0x9F) => false,  // setcc (modrm after)
+        (true, 0xA0..=0xA7) => false,  // push fs/gs
+        (true, 0xA8..=0xAF) => false,  // swapgs, rdtscp
+        (true, 0xB0..=0xBF) => true,   // cmpxchg
+        (true, 0xC0..=0xC1) => true,   // xadd
+        (true, 0xC2) => true,          // cmpss/cmpsd/cmpps/cmppd
+        (true, 0xC3..=0xC6) => true,   // movnti, pinsrw, shufps/pd
+        (true, 0xC7..0xCF) => true,    // cmovcc
+        (true, 0xD0..=0xDF) => true,   // SSE1
+        (true, 0xE0..=0xEF) => true,   // SSE1
+        (true, 0xF0..=0xFF) => true,   // SSE1/SSE2
+        _ => true, // Conservative: assume ModRM
+    };
+
+    // ── ModRM byte ──
+    let mut modrm: u8 = 0;
+    if has_modrm && p < code.len() {
+        modrm = code[p];
+        p += 1;
+    }
+
+    if has_modrm {
+        let mod_field = modrm >> 6;
+        let rm_field = modrm & 7;
+
+        // ── SIB byte ──
+        let has_sib = mod_field != 3 && rm_field == 4;
+        if has_sib && p < code.len() {
+            p += 1; // skip SIB
+        }
+
+        // ── Displacement ──
+        if mod_field == 1 {
+            p += 1; // disp8
+        } else if mod_field == 2 {
+            p += 4; // disp32
+        } else if mod_field == 0 && rm_field == 5 && !has_sib && !two_byte {
+            p += 4; // disp32 (RIP-relative)
+        } else if mod_field == 0 && rm_field == 5 && two_byte {
+            p += 4; // disp32 (two-byte opcode RIP-relative)
+        }
+    }
+
+    // ── Immediate ──
+    let immediate_size = match (two_byte, opcode_total) {
+        // MOV r8..r15, imm64
+        (false, 0xB8..=0xBF) if code[pos..p].iter().any(|&b| (0x40..=0x4F).contains(&b) && (b & 8) != 0) => 8, // REX.W + mov r64, imm64
+        (false, 0xB8..=0xBF) => {
+            // Without REX.W or with REX but not W=1: 32-bit sign-extended
+            if code[pos..p].iter().any(|&b| b == 0x48) { 4 } else { 4 }
+        }
+        // MOV r/m64, imm32 (REX.W + C7 /0)
+        (false, 0xC7) => {
+            // opcode extension in reg field: /0 = mov, /1 = xbegin
+            let reg_ext = (modrm >> 3) & 7;
+            if reg_ext == 0 {
+                // need to check for REX.W for 64-bit
+                let rex_w = code[pos..p-2].iter().any(|&b| b == 0x48);
+                if rex_w { 4 } else { 4 }
+            } else { 4 }
+        }
+        // shift/rotate by imm8 (C0/C1)
+        (false, 0xC0) | (false, 0xC1) => 1,
+        // shifts by imm8 (D0/D1/D2/D3)
+        (false, 0xD0) | (false, 0xD1) | (false, 0xD2) | (false, 0xD3) => 0,
+        // enter: imm16 + imm8
+        (false, 0xC8) => 4, // enter imm16, imm8 (3 actually, but we need 4 for 2 immediates)
+        // ret near imm16
+        (false, 0xC2) => 2,
+        // int imm8
+        (false, 0xCD) => 1,
+        // AAM/AAD: imm8
+        (false, 0xD4) | (false, 0xD5) => 1,
+        // IN/OUT imm8
+        (false, 0xE4) | (false, 0xE5) | (false, 0xE6) | (false, 0xE7) => 1,
+        // PUSH imm8/imm32
+        (false, 0x6A) => 1,  // push imm8
+        (false, 0x68) => 4,  // push imm32
+        (false, 0x6B) => 1,  // imul r64, r/m, imm8
+        (false, 0x69) => 4,  // imul r64, r/m, imm32
+        // ARPL
+        (false, 0x63) if !code[pos..p].iter().any(|&b| (0x40..=0x4F).contains(&b)) => 0, // not MOVSXD (without REX)
+        // MOVSXD
+        (false, 0x63) => 0,
+        _ => 0,
+    };
+    p += immediate_size;
+
+    p - pos
+}
+
 // ─── x86_64 Peephole ──────────────────────────────────────────────────────
 
 /// A relative jump/call instruction to re-patch after byte removal.
@@ -587,7 +773,10 @@ pub fn peephole_x86_64(code: &mut Vec<u8>) {
             0x0F if i + 1 < code.len() && (0x80..=0x8F).contains(&code[i+1]) => {
                 (6, true, false, 2, 4) // jcc rel32 (0F 8x ...)
             }
-            _ => (1, false, false, 0, 0),
+            _ => {
+                let insn_len = x86_64_insn_length(code, i);
+                (insn_len, false, false, 0, 0)
+            }
         };
         if is_rel {
             let offset_value: i32 = if offset_size == 4 {
@@ -784,6 +973,6 @@ pub fn peephole_x86_64(code: &mut Vec<u8>) {
 
     let removed = orig_len - code.len();
     if removed > 0 {
-        eprintln!("peephole: removed {removed} bytes from {orig_len}");
+        eprintln!("peephole: removed {removed} bytes");
     }
 }
