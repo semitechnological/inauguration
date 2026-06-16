@@ -1257,12 +1257,16 @@ fn lower_expr_into(
                             emitter.emit_bytes(&[0xFF, 0xD0]);
                         } else if args.len() >= 2 {
                             // invoke1(ptr, arg1) or invoke2(ptr, arg1, arg2)
-                            // ptr is rdi, arg1 is rsi
-                            // Save ptr: make rdi = arg1 (rsi), call ptr
-                            // mov rax, rdi (ptr)
+                            // After arg eval: ptr=rdi, arg1=rsi, arg2=rdx
+                            // Called fn expects: rdi=arg1, rsi=arg2
+                            // mov rax, rdi (save ptr)
                             emitter.emit_bytes(&[0x48, 0x89, 0xF8]); // mov rax, rdi
                             // mov rdi, rsi (arg1 → first call arg)
                             emitter.emit_bytes(&[0x48, 0x89, 0xF7]); // mov rdi, rsi
+                            if args.len() >= 3 {
+                                // mov rsi, rdx (arg2 → second call arg)
+                                emitter.emit_bytes(&[0x48, 0x89, 0xD6]); // mov rsi, rdx
+                            }
                             // call rax
                             emitter.emit_bytes(&[0xFF, 0xD0]);
                         }
