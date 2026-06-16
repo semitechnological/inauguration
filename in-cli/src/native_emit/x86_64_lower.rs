@@ -419,7 +419,7 @@ fn collect_string_literals(module: &UnifiedModule) -> Vec<String> {
                 }
             }
             Stmt::Expr(expr) => from_expr(expr, out),
-            Stmt::Break => {}
+            Stmt::Break(_) => {}
         }
     }
     let mut strings = Vec::new();
@@ -623,7 +623,7 @@ fn lower_stmt(
             emitter.emit_bytes(&[0x48, 0x89, 0x37]);
             Ok(())
         }
-        Stmt::Break => {
+        Stmt::Break(_) => {
             // ponytail: break is a no-op for now
             Ok(())
         }

@@ -201,7 +201,7 @@ fn subst_stmt(s: &Stmt, sub: &HashMap<String, Expr>) -> Stmt {
         Stmt::If { cond, then_body, else_body } => Stmt::If { cond: substitute_expr(cond, sub), then_body: substitute_params(then_body, sub), else_body: substitute_params(else_body, sub) },
         Stmt::Loop { kind, cond, body } => Stmt::Loop { kind: kind.clone(), cond: cond.as_ref().map(|c| substitute_expr(c, sub)), body: substitute_params(body, sub) },
         Stmt::Expr(e) => Stmt::Expr(substitute_expr(e, sub)),
-        Stmt::Break => Stmt::Break,
+        Stmt::Break(_) => Stmt::Break(_),
         o => o.clone(),
     }
 }

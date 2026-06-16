@@ -482,7 +482,7 @@ fn collect_body_strings(body: &[Stmt], values: &mut Vec<String>) {
                     collect_body_strings(&catch.body, values);
                 }
             }
-            Stmt::Break => {}
+            Stmt::Break(_) => {}
         }
     }
 }
@@ -614,7 +614,7 @@ fn alloc_declared_locals(
     for stmt in body {
         match stmt {
             Stmt::Let(name, typ, expr) => ctx.alloc_let_local(name, typ.as_ref(), expr, fn_name)?,
-            Stmt::Break => {}
+            Stmt::Break(_) => {}
             Stmt::If {
                 then_body,
                 else_body,
@@ -1056,7 +1056,7 @@ fn lower_stmt(
 
             Ok(())
         }
-        Stmt::Break => Ok(()),
+        Stmt::Break(_) => Ok(()),
     }
 }
 

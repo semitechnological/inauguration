@@ -279,7 +279,7 @@ fn check_stmt(
             }
             Ok(())
         }
-        Stmt::Break => Ok(()),
+        Stmt::Break(_) => Ok(()),
         Stmt::If {
             cond,
             then_body,

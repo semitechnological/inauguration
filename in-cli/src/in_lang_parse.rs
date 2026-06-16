@@ -1660,7 +1660,7 @@ fn parse_stmt_line(line: &str) -> Result<Stmt, String> {
                 .get(5)
                 .map_or(true, |&c| c == b' ' || c == b';' || c == b'}'))
     {
-        return Ok(Stmt::Break);
+        return Ok(Stmt::Break(_));
     }
     // `for` is handled by parse_function_body expansion
     if s.starts_with("for ") {
@@ -2438,7 +2438,7 @@ fn validate_stmt_types(
             validate_expr_shapes(fn_name, struct_fields, value)?;
         }
         Stmt::Return(None) => {}
-        Stmt::Break => {}
+        Stmt::Break(_) => {}
         Stmt::If {
             cond,
             then_body,
@@ -2569,7 +2569,7 @@ fn desugar_method_calls_in_body(
                 }
             }
             Stmt::Return(None) => {}
-            Stmt::Break => {}
+            Stmt::Break(_) => {}
             Stmt::Throw(expr) => {
                 desugar_method_calls_in_expr(expr, env, structs, fn_rets);
             }
@@ -2868,7 +2868,7 @@ fn inline_const_values(module: &mut UnifiedModule) {
                 }
             }
             Stmt::Return(None) => {}
-            Stmt::Break => {}
+            Stmt::Break(_) => {}
         }
     }
 

@@ -97,7 +97,7 @@ fn desugar_closures_in_body(body: &mut [Stmt], counter: &mut usize, extra_decls:
                 }
             }
             Stmt::Return(None) => {}
-            Stmt::Break => {}
+            Stmt::Break(_) => {}
             Stmt::Throw(e) => {
                 desugar_closures_in_expr(e, counter, extra_decls);
             }
@@ -190,7 +190,7 @@ fn rewrite_captures_in_body(body: &mut [Stmt], captures: &HashSet<String>) {
                 }
             }
             Stmt::Return(None) => {}
-            Stmt::Break => {}
+            Stmt::Break(_) => {}
             Stmt::Throw(e) => {
                 rewrite_captures_in_expr(e, captures);
             }
@@ -366,7 +366,7 @@ fn rewrite_method_calls_in_body(body: &mut [Stmt], method_map: &HashMap<String, 
                     rewrite_method_calls_in_body(&mut catch.body, method_map);
                 }
             }
-            Stmt::Break => {}
+            Stmt::Break(_) => {}
         }
     }
 }
@@ -752,7 +752,7 @@ fn collect_stmt_reads(st: &Stmt, reads: &mut HashSet<String>) {
                 collect_body_reads(&arm.body, reads);
             }
         }
-        Stmt::Break => {}
+        Stmt::Break(_) => {}
     }
 }
 
@@ -1196,7 +1196,7 @@ fn lower_stmts_with_env(
                 }
                 out.push_str(&format!("label {try_end_label}\n"));
             }
-            Stmt::Break => {}
+            Stmt::Break(_) => {}
         }
     }
     if !implicit_default {

@@ -117,7 +117,7 @@ fn format_stmt(stmt: &Stmt, depth: usize, out: &mut String) {
             out.push_str(&indent);
             out.push_str("return\n");
         }
-        Stmt::Break => {}
+        Stmt::Break(_) => {}
         Stmt::Return(Some(expr)) => {
             out.push_str(&indent);
             out.push_str("return ");

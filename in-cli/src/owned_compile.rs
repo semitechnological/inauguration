@@ -931,7 +931,7 @@ fn native_entry_module(module: &UnifiedModule, entry: &str) -> UnifiedModule {
                     }
                 }
                 Stmt::Return(None) => {}
-                Stmt::Break => {}
+                Stmt::Break(_) => {}
             }
         }
     }

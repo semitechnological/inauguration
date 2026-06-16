@@ -367,7 +367,7 @@ fn check_stmt(
             }
         }
         Stmt::Expr(expr) => check_expr(fn_name, expr, facts, env, call_edges),
-        Stmt::Break => Ok(()),
+        Stmt::Break(_) => Ok(()),
         Stmt::Return(Some(expr)) => {
             check_expr(fn_name, expr, facts, env, call_edges)?;
             if *ret == Typ::Void {
