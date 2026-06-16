@@ -27,12 +27,19 @@ pub fn parse_polyglot_file(id: ParserId, path: &Path) -> Result<UnifiedModule, S
             "internal: `{}` must use the dedicated front, not tree_front",
             id.as_str()
         )),
-        ParserId::V => Err(format!(
-            "parser `{}` ({}): {}.",
-            id.as_str(),
-            id.family_label(),
-            ICORE_HINT
-        )),
+        ParserId::V => {
+            let src = std::fs::read_to_string(path)
+                .map_err(|e| format!("read {}: {e}", path.display()))?;
+            parse_lang(tree_sitter_v::LANGUAGE.into(), &src, |b, r| {
+                extract_fn_nodes(b, r, &["function_declaration"], |s, n| {
+                    let name_n = n.child_by_field_name("name")?;
+                    let name = normalize_entry(node_txt(s, name_n).trim());
+                    let params = v_params(s, n);
+                    let body = n.child_by_field_name("body").map(|b| v_body(s, b)).unwrap_or_default();
+                    Some(Decl::Function { name, params, ret: Typ::Void, body, type_params: vec![] })
+                })
+            })
+        }
         _ => {
             let src = std::fs::read_to_string(path)
                 .map_err(|e| format!("read {}: {e}", path.display()))?;
@@ -5775,6 +5782,59 @@ fn haskell_body(src: &[u8], func: Node<'_>) -> Vec<Stmt> {
         }
     }
     vec![]
+}
+
+// ─── V ───────────────────────────────────────────────────────────────
+
+const V_AST: AstShape = AstShape {
+    block_kinds: &["block"],
+    return_kinds: &["return_statement"],
+    expr_stmt_kinds: &[],
+    local_decl_kinds: &["short_var_declaration"],
+    assignment_kinds: &["assignment_statement"],
+    if_kinds: &["if_expression"],
+    while_kinds: &["for_statement"],
+    call_kinds: &["call_expression"],
+    arg_container_kinds: &["argument_list"],
+    arg_wrapper_kinds: &[],
+    paren_kinds: &["parenthesized_expression"],
+    binary_kinds: &["binary_expression"],
+    unary_kinds: &["unary_expression"],
+    int_kinds: &["int_literal", "float_literal"],
+    string_kinds: &["interpreted_string_literal", "raw_string_literal"],
+    type_kinds: &["type", "type_identifier"],
+    local_decl_prefixes: &[],
+    shell_first_kinds: &[],
+    shell_last_kinds: &[],
+    try_kinds: &[],
+    catch_kinds: &[],
+    match_kinds: &["match_expression"],
+    first_assignment_is_let: false,
+    strict_args: false,
+};
+
+fn v_params(src: &[u8], func: Node<'_>) -> Vec<(String, Typ)> {
+    let mut out = Vec::new();
+    if let Some(plist) = func.child_by_field_name("parameters") {
+        let mut w = plist.walk();
+        for ch in plist.named_children(&mut w) {
+            if ch.kind() != "parameter_declaration" { continue; }
+            let name = ch.child_by_field_name("name")
+                .or_else(|| first_named(ch, "identifier"))
+                .map(|n| node_txt(src, n).trim().to_string())
+                .unwrap_or_else(|| "_".to_string());
+            let ty = ch.child_by_field_name("type")
+                .or_else(|| first_named(ch, "type_identifier"))
+                .map(|t| Typ::Named(node_txt(src, t).trim().to_string()))
+                .unwrap_or(Typ::Named("Any".into()));
+            out.push((name, ty));
+        }
+    }
+    out
+}
+
+fn v_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
+    ast_body(src, body, V_AST)
 }
 
 // ─── OCaml dispatch ───────────────────────────────────────────────────

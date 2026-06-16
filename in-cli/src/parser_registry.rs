@@ -361,9 +361,7 @@ pub fn parse_with_resolved(
                 .map(Some)
         }
 
-        ResolvedBuildParser::CoreIr(ParserId::V) => crate::compiler::v_front::parse_v_file(path)
-            .map_err(ParserRegistryError::Msg)
-            .map(Some),
+
         ResolvedBuildParser::CoreIr(ParserId::Rust) => {
             crate::compiler::rust_front::parse_rust_file(path)
                 .map_err(ParserRegistryError::Msg)

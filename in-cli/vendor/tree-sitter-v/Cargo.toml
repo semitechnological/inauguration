@@ -1,0 +1,18 @@
+[package]
+name = "tree-sitter-v"
+version = "0.0.1"
+description = "V language grammar for tree-sitter (vendored)"
+license = "MIT"
+edition = "2021"
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+tree-sitter-language = "0.1"
+
+[dev-dependencies]
+tree-sitter = "0.26"
+
+[build-dependencies]
+cc = "1.0"

@@ -75,7 +75,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         extensions: &["v"],
         level: 5,
         level_label: "dedicated bounded body lowering",
-        front: "compiler::v_front",
+        front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL",
         example: "apps/polyglot-sample/sample.v",
         next_step: "Deepen module syntax, structs, and control flow",
