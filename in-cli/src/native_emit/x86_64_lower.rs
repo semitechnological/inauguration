@@ -971,6 +971,14 @@ fn lower_expr_into(
                     }
                     return Ok(());
                 }
+                "pause" => {
+                    // pause → F3 90
+                    emitter.emit_bytes(&[0xF3, 0x90]);
+                    if target_reg != RAX {
+                        emitter.emit_insns(&x86_64::xor_rr(target_reg, target_reg));
+                    }
+                    return Ok(());
+                }
                 "cli" => {
                     // cli  → FA
                     emitter.emit_bytes(&[0xFA]);
