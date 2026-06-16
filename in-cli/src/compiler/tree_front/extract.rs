@@ -27,7 +27,7 @@ pub fn parse_polyglot_file(id: ParserId, path: &Path) -> Result<UnifiedModule, S
             "internal: `{}` must use the dedicated front, not tree_front",
             id.as_str()
         )),
-        ParserId::Go | ParserId::OCaml | ParserId::V => Err(format!(
+        ParserId::V => Err(format!(
             "parser `{}` ({}): {}.",
             id.as_str(),
             id.family_label(),
@@ -94,7 +94,15 @@ fn dispatch(id: ParserId, path: &Path, src: &str) -> Result<UnifiedModule, Strin
             let ts_lang = typescript_lang(path);
             parse_lang(ts_lang, src, extract_ts_with_classes)
         }
-        ParserId::Go => Err("`go` uses dedicated compiler::go_front".to_string()),
+        ParserId::Go => parse_lang(tree_sitter_go::LANGUAGE.into(), src, |b, r| {
+            extract_fn_nodes(b, r, &["function_declaration", "method_declaration"], |src, n| {
+                let name_n = n.child_by_field_name("name")?;
+                let name = normalize_entry(node_txt(src, name_n).trim());
+                let params = go_params(src, n);
+                let body = n.child_by_field_name("body").map(|b| go_body(src, b)).unwrap_or_default();
+                Some(Decl::Function { name, params, ret: Typ::Void, body, type_params: vec![] })
+            })
+        }),
         ParserId::Rust => parse_lang(tree_sitter_rust::LANGUAGE.into(), src, extract_rust),
         ParserId::Zig => parse_lang(tree_sitter_zig::LANGUAGE.into(), src, extract_zig),
         ParserId::Dart => parse_lang(tree_sitter_dart::LANGUAGE.into(), src, extract_dart),
@@ -103,7 +111,8 @@ fn dispatch(id: ParserId, path: &Path, src: &str) -> Result<UnifiedModule, Strin
         ParserId::Erlang => parse_lang(tree_sitter_erlang::LANGUAGE.into(), src, extract_erlang),
         ParserId::Haskell => parse_lang(tree_sitter_haskell::LANGUAGE.into(), src, extract_haskell),
         ParserId::Julia => parse_lang(tree_sitter_julia::LANGUAGE.into(), src, extract_julia),
-        ParserId::Swift => Ok(crate::core_ir::UnifiedModule { identity: crate::core_ir::CoreModuleIdentity::default(), decls: vec![] }),
+        ParserId::Swift => parse_lang(tree_sitter_swift::LANGUAGE.into(), src, extract_swift),
+        ParserId::OCaml => parse_lang(tree_sitter_ocaml::LANGUAGE_OCAML.into(), src, extract_ocaml),
         ParserId::R => parse_lang(tree_sitter_r::LANGUAGE.into(), src, extract_r_lang),
         ParserId::In
         | ParserId::Icore
@@ -112,7 +121,6 @@ fn dispatch(id: ParserId, path: &Path, src: &str) -> Result<UnifiedModule, Strin
         | ParserId::D
         | ParserId::Crystal
         | ParserId::VbNet
-        | ParserId::OCaml
         | ParserId::Odin
         | ParserId::Hare
         | ParserId::V => unreachable!("filtered above"),
@@ -1163,7 +1171,7 @@ fn ast_expr(src: &[u8], expr: Node<'_>, shape: AstShape) -> Option<Expr> {
     }
     if matches!(
         expr.kind(),
-        "member_expression" | "member_access_expression"
+        "member_expression" | "member_access_expression" | "navigation_expression"
     ) {
         return ast_member_expr(src, expr, shape);
     }
@@ -4928,13 +4936,7 @@ fn erlang_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
     ast_body(src, body, ERLANGAST)
 }
 
-fn extract_haskell(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
-    extract_fn_nodes(src, root, &["function"], |src, n| {
-        let name_n = n.child_by_field_name("name")?;
-        let name = normalize_entry(node_txt(src, name_n).trim());
-        Some(decl_fn(name, vec![], Typ::Void))
-    })
-}
+
 
 fn extract_julia(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
     let mut decls = Vec::new();
@@ -5507,6 +5509,275 @@ fn dart_params<'a>(src: &[u8], plist: Node<'a>) -> Vec<(String, Typ)> {
 fn dart_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
     ast_body(src, body, DART_AST)
 }
+
+// ─── Swift ────────────────────────────────────────────────────────────
+
+const SWIFT_AST: AstShape = AstShape {
+    block_kinds: &["statements"],
+    return_kinds: &["control_transfer_statement"],
+    expr_stmt_kinds: &[],
+    local_decl_kinds: &["value_binding_pattern"],
+    assignment_kinds: &["assignment"],
+    if_kinds: &["if_statement"],
+    while_kinds: &["while_statement"],
+    call_kinds: &["call_expression"],
+    arg_container_kinds: &["value_arguments"],
+    arg_wrapper_kinds: &[],
+    paren_kinds: &["tuple_expression"],
+    binary_kinds: &[
+        "infix_expression", "comparison_expression", "equality_expression",
+        "conjunction_expression", "disjunction_expression", "additive_expression",
+        "multiplicative_expression", "bitwise_operation",
+    ],
+    unary_kinds: &["prefix_expression", "postfix_expression"],
+    int_kinds: &["integer_literal", "hex_literal", "oct_literal", "bin_literal"],
+    string_kinds: &["line_string_literal", "multi_line_string_literal", "raw_string_literal"],
+    type_kinds: &["type", "user_type", "array_type", "optional_type"],
+    local_decl_prefixes: &["let ", "var "],
+    shell_first_kinds: &[],
+    shell_last_kinds: &[],
+    try_kinds: &["do_statement"],
+    catch_kinds: &["catch_keyword"],
+    match_kinds: &["switch_statement"],
+    first_assignment_is_let: true,
+    strict_args: false,
+};
+
+fn extract_swift(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
+    extract_fn_nodes(src, root, &["function_declaration"], |src, n| {
+        let name_n = n.child_by_field_name("name")?;
+        let name = normalize_entry(node_txt(src, name_n).trim());
+        let params = swift_params(src, n);
+        let ret = n.child_by_field_name("return_type")
+            .and_then(|t| first_named(t, "type_annotation").or(Some(t)))
+            .map(|t| Typ::Named(node_txt(src, t).trim().to_string()))
+            .unwrap_or(Typ::Void);
+        let body = n.child_by_field_name("body")
+            .map(|b| swift_body(src, b)).unwrap_or_default();
+        Some(Decl::Function { name, params, ret, body, type_params: vec![] })
+    })
+}
+
+fn swift_params(src: &[u8], func: Node<'_>) -> Vec<(String, Typ)> {
+    let mut out = Vec::new();
+    if let Some(params) = func.child_by_field_name("parameters") {
+        let mut w = params.walk();
+        for ch in params.named_children(&mut w) {
+            if !matches!(ch.kind(), "parameter" | "simple_identifier") { continue; }
+            let name = ch.child_by_field_name("name")
+                .or_else(|| first_named(ch, "simple_identifier"))
+                .or_else(|| first_named(ch, "identifier"))
+                .map(|n| node_txt(src, n).trim().to_string())
+                .unwrap_or_else(|| "_".to_string());
+            let ty = ch.child_by_field_name("type")
+                .and_then(|t| first_named(t, "type_annotation").or(Some(t)))
+                .map(|t| Typ::Named(node_txt(src, t).trim().to_string()))
+                .unwrap_or(Typ::Named("Any".into()));
+            out.push((name, ty));
+        }
+    }
+    out
+}
+
+fn swift_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
+    ast_body(src, body, SWIFT_AST)
+}
+
+// ─── Go ───────────────────────────────────────────────────────────────
+
+const GO_AST: AstShape = AstShape {
+    block_kinds: &["block"],
+    return_kinds: &["return_statement"],
+    expr_stmt_kinds: &["expression_statement"],
+    local_decl_kinds: &["short_var_declaration", "var_declaration"],
+    assignment_kinds: &["assignment_statement"],
+    if_kinds: &["if_statement"],
+    while_kinds: &["for_statement"],
+    call_kinds: &["call_expression"],
+    arg_container_kinds: &["argument_list"],
+    arg_wrapper_kinds: &[],
+    paren_kinds: &["parenthesized_expression"],
+    binary_kinds: &["binary_expression"],
+    unary_kinds: &["unary_expression"],
+    int_kinds: &["int_literal"],
+    string_kinds: &["interpreted_string_literal", "raw_string_literal"],
+    type_kinds: &["type", "type_identifier"],
+    local_decl_prefixes: &[],
+    shell_first_kinds: &[],
+    shell_last_kinds: &[],
+    try_kinds: &[],
+    catch_kinds: &[],
+    match_kinds: &["expression_switch_statement", "type_switch_statement"],
+    first_assignment_is_let: false,
+    strict_args: false,
+};
+
+fn go_params(src: &[u8], func: Node<'_>) -> Vec<(String, Typ)> {
+    let mut out = Vec::new();
+    if let Some(plist) = func.child_by_field_name("parameters") {
+        let mut w = plist.walk();
+        for ch in plist.named_children(&mut w) {
+            if ch.kind() != "parameter_declaration" { continue; }
+            let name = first_named(ch, "identifier")
+                .map(|n| node_txt(src, n).trim().to_string())
+                .unwrap_or_else(|| "_".to_string());
+            let ty = first_named(ch, "type_identifier")
+                .or_else(|| first_named(ch, "pointer_type"))
+                .or_else(|| first_named(ch, "type"))
+                .map(|t| Typ::Named(node_txt(src, t).trim().to_string()))
+                .unwrap_or(Typ::Named("Any".into()));
+            out.push((name, ty));
+        }
+    }
+    out
+}
+
+fn go_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
+    ast_body(src, body, GO_AST)
+}
+
+// ─── OCaml ────────────────────────────────────────────────────────────
+
+const OCAML_AST: AstShape = AstShape {
+    block_kinds: &["sequence_expression"],
+    return_kinds: &[],
+    expr_stmt_kinds: &[],
+    local_decl_kinds: &["let_binding"],
+    assignment_kinds: &[],
+    if_kinds: &["if_expression"],
+    while_kinds: &["while_expression"],
+    call_kinds: &["application_expression"],
+    arg_container_kinds: &[],
+    arg_wrapper_kinds: &[],
+    paren_kinds: &["parenthesized_expression"],
+    binary_kinds: &["infix_expression"],
+    unary_kinds: &["prefix_expression"],
+    int_kinds: &["number"],
+    string_kinds: &["string"],
+    type_kinds: &["constructed_type", "type_variable"],
+    local_decl_prefixes: &[],
+    shell_first_kinds: &[],
+    shell_last_kinds: &[],
+    try_kinds: &["try_expression"],
+    catch_kinds: &[],
+    match_kinds: &["match_expression"],
+    first_assignment_is_let: true,
+    strict_args: false,
+};
+
+fn extract_ocaml(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
+    extract_fn_nodes(src, root, &["let_binding"], |src, n| {
+        let pattern = n.child_by_field_name("pattern")?;
+        let name = ocaml_name_from_pattern(src, pattern);
+        let params = ocaml_params(src, n);
+        let body = n.child_by_field_name("body")
+            .map(|b| ocaml_body(src, b)).unwrap_or_default();
+        Some(Decl::Function { name, params, ret: Typ::Void, body, type_params: vec![] })
+    })
+}
+
+fn ocaml_name_from_pattern(src: &[u8], pattern: Node<'_>) -> String {
+    let mut w = pattern.walk();
+    for ch in pattern.named_children(&mut w) {
+        if ch.kind() == "value_name" {
+            return normalize_entry(node_txt(src, ch).trim());
+        }
+    }
+    normalize_entry(node_txt(src, pattern).trim())
+}
+
+fn ocaml_params(src: &[u8], binding: Node<'_>) -> Vec<(String, Typ)> {
+    let mut out = Vec::new();
+    let mut w = binding.walk();
+    for ch in binding.named_children(&mut w) {
+        if ch.kind() == "parameter" {
+            let name = first_named(ch, "value_name")
+                .or_else(|| first_named(ch, "value_pattern"))
+                .map(|n| node_txt(src, n).trim().to_string())
+                .unwrap_or_else(|| "_".to_string());
+            out.push((name, Typ::Named("a".into())));
+        }
+    }
+    out
+}
+
+fn ocaml_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
+    ast_body(src, body, OCAML_AST)
+}
+
+// ─── Haskell ───────────────────────────────────────────────────────────
+
+const HASKELL_AST: AstShape = AstShape {
+    block_kinds: &["expressions", "declarations"],
+    return_kinds: &[],
+    expr_stmt_kinds: &[],
+    local_decl_kinds: &["local_binds"],
+    assignment_kinds: &[],
+    if_kinds: &["conditional"],
+    while_kinds: &[],
+    call_kinds: &["apply"],
+    arg_container_kinds: &[],
+    arg_wrapper_kinds: &[],
+    paren_kinds: &["parens"],
+    binary_kinds: &[],
+    unary_kinds: &["negation"],
+    int_kinds: &["integer"],
+    string_kinds: &["string"],
+    type_kinds: &["type"],
+    local_decl_prefixes: &[],
+    shell_first_kinds: &[],
+    shell_last_kinds: &[],
+    try_kinds: &[],
+    catch_kinds: &[],
+    match_kinds: &["case", "alternatives"],
+    first_assignment_is_let: false,
+    strict_args: false,
+};
+
+fn extract_haskell(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
+    extract_fn_nodes(src, root, &["function"], |src, n| {
+        let name_n = n.child_by_field_name("name")?;
+        let name = normalize_entry(node_txt(src, name_n).trim());
+        let params = haskell_params(src, n);
+        let ret = n.child_by_field_name("result")
+            .map(|r| Typ::Named(node_txt(src, r).trim().to_string()))
+            .unwrap_or(Typ::Void);
+        let body = haskell_body(src, n);
+        Some(Decl::Function { name, params, ret, body, type_params: vec![] })
+    })
+}
+
+fn haskell_params(src: &[u8], func: Node<'_>) -> Vec<(String, Typ)> {
+    let mut out = Vec::new();
+    if let Some(patterns) = func.child_by_field_name("patterns") {
+        let mut w = patterns.walk();
+        for ch in patterns.named_children(&mut w) {
+            let name = match ch.kind() {
+                "variable" => node_txt(src, ch).trim().to_string(),
+                "wildcard" => "_".to_string(),
+                _ => continue,
+            };
+            out.push((name, Typ::Named("a".into())));
+        }
+    }
+    out
+}
+
+fn haskell_body(src: &[u8], func: Node<'_>) -> Vec<Stmt> {
+    let mut w = func.walk();
+    for ch in func.named_children(&mut w) {
+        if ch.kind() == "match" {
+            if let Some(expr) = ch.child_by_field_name("expression") {
+                if let Some(e) = ast_expr(src, expr, HASKELL_AST) {
+                    return vec![Stmt::Expr(e)];
+                }
+            }
+        }
+    }
+    vec![]
+}
+
+// ─── OCaml dispatch ───────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {

@@ -130,18 +130,38 @@ fn main() {
 
     let lib_path = out_dir.join("libinc_compiler.a");
 
-    let mut ar = Command::new("ar");
-    ar.arg("crs").arg(&lib_path);
+    // Build archive with proper member alignment for macOS linker
+    let mut ar_cmd = Command::new("ar");
+    ar_cmd.arg("crs").arg(&lib_path);
     for obj in &c_objects {
-        ar.arg(obj);
+        ar_cmd.arg(obj);
     }
-    let ar_status = ar.status();
-    match ar_status {
+    match ar_cmd.status() {
         Ok(s) if s.success() => {}
         _ => {
             println!("cargo:warning=ar failed to create static library");
             return;
         }
+    }
+    // Repack to ensure 8-byte alignment for 64-bit Mach-O linker
+    let unpack_dir = out_dir.join("repack");
+    let _ = std::fs::create_dir_all(&unpack_dir);
+    let mut x_cmd = Command::new("ar");
+    x_cmd.arg("x").arg(&lib_path).current_dir(&unpack_dir);
+    if x_cmd.status().map(|s| s.success()).unwrap_or(false) {
+        let _ = std::fs::remove_file(&lib_path);
+        let mut r_cmd = Command::new("ar");
+        r_cmd.arg("crs").arg(&lib_path);
+        if let Ok(entries) = std::fs::read_dir(&unpack_dir) {
+            let mut objs: Vec<_> = entries.filter_map(|e| e.ok()).collect();
+            objs.sort_by_key(|e| e.file_name());
+            for entry in &objs {
+                r_cmd.arg(entry.path());
+            }
+        }
+        let _ = r_cmd.status();
+        let _ = std::fs::remove_dir_all(&unpack_dir);
+        println!("cargo:warning=repacked {} with proper alignment", lib_path.display());
     }
 
     println!("cargo:rustc-link-search=native={}", out_dir.display());

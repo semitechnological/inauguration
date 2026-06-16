@@ -360,9 +360,7 @@ pub fn parse_with_resolved(
                 .map_err(ParserRegistryError::Msg)
                 .map(Some)
         }
-        ResolvedBuildParser::CoreIr(ParserId::Go) => crate::compiler::go_front::parse_go_file(path)
-            .map_err(ParserRegistryError::Msg)
-            .map(Some),
+
         ResolvedBuildParser::CoreIr(ParserId::V) => crate::compiler::v_front::parse_v_file(path)
             .map_err(ParserRegistryError::Msg)
             .map(Some),
@@ -371,11 +369,7 @@ pub fn parse_with_resolved(
                 .map_err(ParserRegistryError::Msg)
                 .map(Some)
         }
-        ResolvedBuildParser::CoreIr(ParserId::OCaml) => {
-            crate::compiler::ocaml_front::parse_ocaml_file(path)
-                .map_err(ParserRegistryError::Msg)
-                .map(Some)
-        }
+
         ResolvedBuildParser::CoreIr(ParserId::Nim) => {
             crate::compiler::nim_boundary::parse_nim_file(path)
                 .map_err(ParserRegistryError::Msg)

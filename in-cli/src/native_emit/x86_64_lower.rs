@@ -218,7 +218,8 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
     }
 
     // Resolve pending calls and function address references
-    const KERNEL_BASE: u64 = 0x102000;
+    // SCI header occupies 256 bytes at KCODE_BASE (0x102000), code starts at +0x100
+const KERNEL_BASE: u64 = 0x102100;
 
     // Resolve calls — collect string refs, resolve function addresses and calls
     let mut str_refs: Vec<(u32, String)> = Vec::new();
