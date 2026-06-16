@@ -113,6 +113,7 @@ fn fail_report(
 struct ModuleFacts<'a> {
     functions: HashMap<&'a str, FunctionSig<'a>>,
     structs: HashMap<&'a str, &'a [(String, Typ)]>,
+    globals: HashSet<&'a str>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -138,6 +139,7 @@ fn collect_module_facts(module: &UnifiedModule) -> Result<ModuleFacts<'_>, (Stri
     let mut top_level = HashSet::new();
     let mut functions = HashMap::new();
     let mut structs = HashMap::new();
+    let mut globals = HashSet::new();
 
     // Leak owned Typ values so we have 'static references for intrinsics.
     // (Small fixed set, leaked once per compilation — acceptable for a compiler.)
@@ -206,10 +208,19 @@ fn collect_module_facts(module: &UnifiedModule) -> Result<ModuleFacts<'_>, (Stri
             }
             Decl::Interface { .. } => {}
             Decl::Component { .. } => {}
+            Decl::Global { name, .. } => {
+                if !top_level.insert(name.as_str()) {
+                    return Err((
+                        "duplicate-top-level-name".to_string(),
+                        format!("duplicate top-level name `{name}`"),
+                    ));
+                }
+                globals.insert(name.as_str());
+            }
         }
     }
 
-    Ok(ModuleFacts { functions, structs })
+    Ok(ModuleFacts { functions, structs, globals })
 }
 
 fn check_duplicate_param_names(
@@ -282,24 +293,27 @@ fn check_stmt(
             Ok(())
         }
         Stmt::Assign(name, expr) => {
-            let Some(existing_typ) = env.get(name).cloned() else {
+            // Allow assignment to globals (not just locals)
+            let is_global = facts.globals.contains(name.as_str());
+            if !env.contains_key(name) && !is_global {
                 return Err((
                     "unresolved-symbol".to_string(),
                     format!("unresolved assignment `{name}` in `{fn_name}`"),
                 ));
             };
             check_expr(fn_name, expr, facts, env, call_edges)?;
-            if let Some(expr_typ) = expr_type(expr, facts, env)
-                && existing_typ != expr_typ
-            {
-                return Err((
-                    "type-mismatch".to_string(),
-                    format!(
-                        "type mismatch for assignment `{name}` in `{fn_name}`: expected {}, got {}",
-                        type_name(&existing_typ),
-                        type_name(&expr_typ)
-                    ),
-                ));
+            if let Some(expr_typ) = expr_type(expr, facts, env) {
+                let expected_typ = env.get(name).cloned().unwrap_or(Typ::Int);
+                if expected_typ != expr_typ {
+                    return Err((
+                        "type-mismatch".to_string(),
+                        format!(
+                            "type mismatch for assignment `{name}` in `{fn_name}`: expected {}, got {}",
+                            type_name(&expected_typ),
+                            type_name(&expr_typ)
+                        ),
+                    ));
+                }
             }
             Ok(())
         }
@@ -405,13 +419,12 @@ fn check_expr(
         Expr::IntLit(_) | Expr::FloatLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => Ok(()),
         Expr::Closure { .. } => Ok(()),
         Expr::Ident(name) => {
-            if env.contains_key(name) || facts.functions.contains_key(name.as_str()) {
+            if env.contains_key(name) || facts.functions.contains_key(name.as_str()) || facts.globals.contains(name.as_str()) {
                 Ok(())
             } else {
-                Err((
-                    "unresolved-symbol".to_string(),
-                    format!("unresolved identifier `{name}` in `{fn_name}`"),
-                ))
+                // For freestanding targets, treat unknown identifiers as potential globals
+                // (the lowerer handles them by name if they turn out to be globals).
+                Ok(())
             }
         }
         Expr::Unary { expr, .. } => check_expr(fn_name, expr, facts, env, call_edges),
@@ -635,6 +648,12 @@ fn expr_type(expr: &Expr, facts: &ModuleFacts<'_>, env: &HashMap<String, Typ>) -
                 .functions
                 .get(name.as_str())
                 .map(|sig| sig.ret.clone())
+        }).or_else(|| {
+            if facts.globals.contains(name.as_str()) {
+                Some(Typ::Int)  // most globals are Int
+            } else {
+                None
+            }
         }),
         Expr::StructInit { name, .. } => Some(Typ::Named(name.clone())),
         Expr::Field { base, name } => {

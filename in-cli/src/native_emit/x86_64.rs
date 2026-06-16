@@ -214,6 +214,40 @@ pub fn ldr64(reg: u8, disp: u16) -> Vec<u8> {
     mov_r_m(reg, RSP, disp as i32)
 }
 
+/// mov rax, [abs64] — load from absolute 64-bit address (uses moffs form, rax only)
+pub fn mov_rax_from_abs(addr: u64) -> Vec<u8> {
+    let mut code = vec![0x48, 0xA1];  // REX.W + MOV RAX, moffs64
+    code.extend_from_slice(&addr.to_le_bytes());
+    code
+}
+
+/// mov [abs64], rax — store to absolute 64-bit address (uses moffs form, rax only)
+pub fn mov_abs_from_rax(addr: u64) -> Vec<u8> {
+    let mut code = vec![0x48, 0xA3];  // REX.W + MOV moffs64, RAX
+    code.extend_from_slice(&addr.to_le_bytes());
+    code
+}
+
+/// mov r64, [abs32] — load from absolute 32-bit address (any register)
+pub fn mov_r_from_abs32(reg: u8, addr: u32) -> Vec<u8> {
+    let mut code = vec![rex_wr(reg, 0), 0x8B];
+    // ModRM: mod=00, reg=reg, r/m=100 (SIB)
+    code.push(modrm(0, reg & 7, 4));
+    // SIB: scale=0, index=4 (none), base=5 (disp32 = absolute)
+    code.push(0x25);
+    code.extend_from_slice(&addr.to_le_bytes());
+    code
+}
+
+/// mov [abs32], r64 — store to absolute 32-bit address (any register)
+pub fn mov_abs32_from_r(reg: u8, addr: u32) -> Vec<u8> {
+    let mut code = vec![rex_wr(reg, 0), 0x89];
+    code.push(modrm(0, reg & 7, 4));
+    code.push(0x25);
+    code.extend_from_slice(&addr.to_le_bytes());
+    code
+}
+
 /// sub r/m64, imm8  (REX.W + 83 /5 ib)
 pub fn sub_rmi8(dst: u8, imm: u8) -> Vec<u8> {
     let mut code = vec![rex_wb(dst), 0x83];

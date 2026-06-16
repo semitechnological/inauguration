@@ -879,6 +879,7 @@ fn summarize_core_ir(module: &UnifiedModule) -> CoreIrSummary {
                 });
             }
             Decl::Class { .. } | Decl::Interface { .. } | Decl::Component { .. } => {}
+            Decl::Global { .. } => {}
         }
     }
     CoreIrSummary {

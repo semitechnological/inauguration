@@ -245,7 +245,9 @@ pub fn split_top_level_decl_blocks(source: &str) -> Vec<String> {
                     || t.starts_with("extern ")
                     || t.starts_with("class ")
                     || t.starts_with("interface ")
-                    || t.starts_with("component "))
+                    || t.starts_with("component ")
+                    || t.starts_with("var ")
+                    || t.starts_with("const "))
             {
                 current = Some(vec![t.to_string()]);
                 depth += delta;
@@ -2002,9 +2004,51 @@ fn parse_module_from_blocks(blocks: &[String]) -> Result<UnifiedModule, String> 
             decls.push(parse_interface_block(block)?);
         } else if line.starts_with("component ") {
             decls.push(parse_component_block(block)?);
+        } else if line.starts_with("var ") {
+            // var name: Type = expr  (global mutable variable)
+            let rest = trim(&line[4..]);
+            if let Some(eq) = rest.find('=') {
+                let lhs = trim(&rest[..eq]);
+                let rhs = trim(&rest[eq+1..]);
+                let (name, typ) = if let Some(colon) = lhs.rfind(':') {
+                    (trim(&lhs[..colon]).to_string(), Some(parse_in_type(trim(&lhs[colon+1..]))))
+                } else {
+                    (lhs.to_string(), None)
+                };
+                let init = parse_expr(rhs);
+                decls.push(Decl::Global {
+                    name,
+                    typ: typ.unwrap_or(crate::core_ir::Typ::Int),
+                    init: Some(Box::new(init)),
+                    mutable: true,
+                });
+            } else {
+                return Err(".in: `var` needs `=` initializer".into());
+            }
+        } else if line.starts_with("const ") {
+            // const name = expr  or  const name: Type = expr
+            let rest = trim(&line[6..]);
+            if let Some(eq) = rest.find('=') {
+                let lhs = trim(&rest[..eq]);
+                let rhs = trim(&rest[eq+1..]);
+                let (name, typ) = if let Some(colon) = lhs.rfind(':') {
+                    (trim(&lhs[..colon]).to_string(), Some(parse_in_type(trim(&lhs[colon+1..]))))
+                } else {
+                    (lhs.to_string(), None)
+                };
+                let init = parse_expr(rhs);
+                decls.push(Decl::Global {
+                    name,
+                    typ: typ.unwrap_or(crate::core_ir::Typ::Int),
+                    init: Some(Box::new(init)),
+                    mutable: false,
+                });
+            } else {
+                return Err(".in: `const` needs `=` initializer".into());
+            }
         } else {
             return Err(
-                ".in: expected top-level `fn`, `struct`, `class`, `interface`, or `component`"
+                ".in: expected top-level `fn`, `struct`, `class`, `interface`, `component`, `var`, or `const`"
                     .into(),
             );
         }
@@ -2159,6 +2203,8 @@ pub fn parse_in_surface_info(source: &str) -> Result<InSurfaceInfo, String> {
                 || line.starts_with("class ")
                 || line.starts_with("interface ")
                 || line.starts_with("component ")
+                || line.starts_with("var ")
+                || line.starts_with("const ")
             {
                 depth += brace_delta(raw_line);
                 if depth < 0 {
@@ -2195,6 +2241,7 @@ fn duplicate_top_level_names(module: &UnifiedModule) -> Vec<String> {
             Decl::Function { name, .. } => names.push(name.clone()),
             Decl::Interface { .. } => {}
             Decl::Component { name, .. } => names.push(name.clone()),
+            Decl::Global { name, .. } => names.push(name.clone()),
         }
     }
     let mut seen = HashSet::new();
@@ -2643,6 +2690,9 @@ fn parse_in_module_without_validation(
     let mut module = parse_module_from_blocks(&blocks)?;
     module.identity = identity;
     desugar_method_calls(&mut module);
+    // Inline const values: replace all Expr::Ident references to consts with their init expressions.
+    // This avoids type-checking and lowering complications for compile-time constants.
+    inline_const_values(&mut module);
     let mut std_decls = Vec::new();
     for import in surface.imports {
         std_decls.extend(
@@ -2674,6 +2724,121 @@ fn parse_in_module_without_validation(
     std_decls.extend(module.decls);
     module.decls = std_decls;
     Ok(module)
+}
+
+/// Replace all `Expr::Ident` references to constant globals with their init expressions.
+/// This avoids type-checking and lowering complexity for compile-time constants.
+fn inline_const_values(module: &mut UnifiedModule) {
+    // Collect const init values: name -> cloned init expression
+    let consts: std::collections::HashMap<String, Expr> = module
+        .decls
+        .iter()
+        .filter_map(|d| match d {
+            Decl::Global { name, init, mutable: false, .. } => {
+                init.as_ref().map(|expr| (name.clone(), *expr.clone()))
+            }
+            _ => None,
+        })
+        .collect();
+
+    if consts.is_empty() {
+        return;
+    }
+
+    fn replace_idents(expr: &mut Expr, consts: &std::collections::HashMap<String, Expr>) {
+        match expr {
+            Expr::Ident(name) => {
+                if let Some(replacement) = consts.get(name) {
+                    *expr = replacement.clone();
+                }
+            }
+            Expr::Unary { expr: inner, .. } => replace_idents(inner, consts),
+            Expr::Binary { lhs, rhs, .. } => {
+                replace_idents(lhs, consts);
+                replace_idents(rhs, consts);
+            }
+            Expr::Call { callee, args } => {
+                replace_idents(callee, consts);
+                for arg in args {
+                    replace_idents(arg, consts);
+                }
+            }
+            Expr::StructInit { fields, .. } => {
+                for (_, expr) in fields {
+                    replace_idents(expr, consts);
+                }
+            }
+            Expr::Field { base, .. } => replace_idents(base, consts),
+            Expr::ArrayLit(items) => {
+                for item in items {
+                    replace_idents(item, consts);
+                }
+            }
+            Expr::Index { base, index } => {
+                replace_idents(base, consts);
+                replace_idents(index, consts);
+            }
+            Expr::Closure { body, .. } => {
+                for stmt in body {
+                    replace_stmt_idents(stmt, consts);
+                }
+            }
+            Expr::IntLit(_) | Expr::FloatLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => {}
+        }
+    }
+
+    fn replace_stmt_idents(stmt: &mut Stmt, consts: &std::collections::HashMap<String, Expr>) {
+        match stmt {
+            Stmt::Let(_, _, expr)
+            | Stmt::Assign(_, expr)
+            | Stmt::Return(Some(expr))
+            | Stmt::Expr(expr)
+            | Stmt::Throw(expr) => replace_idents(expr, consts),
+            Stmt::IndexAssign { base, index, value } => {
+                replace_idents(base, consts);
+                replace_idents(index, consts);
+                replace_idents(value, consts);
+            }
+            Stmt::If { cond, then_body, else_body } => {
+                replace_idents(cond, consts);
+                for s in then_body { replace_stmt_idents(s, consts); }
+                for s in else_body { replace_stmt_idents(s, consts); }
+            }
+            Stmt::Loop { cond: Some(cond), body, .. } => {
+                replace_idents(cond, consts);
+                for s in body { replace_stmt_idents(s, consts); }
+            }
+            Stmt::Loop { cond: None, body, .. } => {
+                for s in body { replace_stmt_idents(s, consts); }
+            }
+            Stmt::Match { scrutinee, arms } => {
+                replace_idents(scrutinee, consts);
+                for arm in arms {
+                    for s in &mut arm.body {
+                        replace_stmt_idents(s, consts);
+                    }
+                }
+            }
+            Stmt::Try { body, catches } => {
+                for s in body { replace_stmt_idents(s, consts); }
+                for catch in catches {
+                    for s in &mut catch.body {
+                        replace_stmt_idents(s, consts);
+                    }
+                }
+            }
+            Stmt::Return(None) => {}
+        }
+    }
+
+    // Walk all function bodies and replace const references
+    for decl in &mut module.decls {
+        if let Decl::Function { body, .. } = decl {
+            for stmt in body.iter_mut() {
+                replace_stmt_idents(stmt, &consts);
+            }
+        }
+    }
 }
 
 fn validate_module(module: &UnifiedModule, require_main: bool) -> Result<(), String> {
@@ -2746,6 +2911,7 @@ fn validate_module(module: &UnifiedModule, require_main: bool) -> Result<(), Str
             }
             Decl::Interface { .. } => {}
             Decl::Component { .. } => {}
+            Decl::Global { .. } => {}
         }
     }
 

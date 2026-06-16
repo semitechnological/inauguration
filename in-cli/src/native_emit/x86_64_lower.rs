@@ -45,6 +45,8 @@ struct LowerCtx<'a> {
     pending_calls: Vec<PendingCall>,
     /// Current function name (for error messages)
     fn_name: String,
+    /// Global variable addresses: name → absolute physical address
+    globals: HashMap<String, u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -66,6 +68,7 @@ impl<'a> LowerCtx<'a> {
         params: &[(String, Typ)],
         structs: &'a HashMap<String, Vec<(String, Typ)>>,
         functions: &'a HashMap<String, FunctionInfo>,
+        globals: HashMap<String, u64>,
     ) -> Self {
         let mut ctx = Self {
             locals: HashMap::new(),
@@ -75,6 +78,7 @@ impl<'a> LowerCtx<'a> {
             functions,
             pending_calls: Vec::new(),
             fn_name: fn_name.to_string(),
+            globals,
         };
         // Allocate stack slots for parameters
         // On x86_64 (System V), first 6 integer args go in RDI, RSI, RDX, RCX, R8, R9
@@ -166,6 +170,7 @@ impl<'a> LowerCtx<'a> {
 pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64CompileResult, String> {
     let functions = collect_functions(module)?;
     let structs = collect_structs(module);
+    let globals = collect_globals(module);
 
     let mut emitter = CodeEmitter::new();
     let mut function_offsets: HashMap<String, u32> = HashMap::new();
@@ -189,6 +194,7 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
             func,
             &structs,
             &functions,
+            &globals,
             &mut all_pending_calls,
         )?;
     }
@@ -259,11 +265,27 @@ fn collect_structs(module: &UnifiedModule) -> HashMap<String, Vec<(String, Typ)>
         .collect()
 }
 
+/// Collect global variable names and assign them fixed absolute addresses.
+/// Returns: (name → address) map.
+fn collect_globals(module: &UnifiedModule) -> HashMap<String, u64> {
+    const GLOBAL_BASE: u64 = 0x6000;
+    let mut globals = HashMap::new();
+    let mut addr = GLOBAL_BASE;
+    for decl in &module.decls {
+        if let Decl::Global { name, .. } = decl {
+            globals.insert(name.clone(), addr);
+            addr += 8;
+        }
+    }
+    globals
+}
+
 fn lower_function(
     emitter: &mut CodeEmitter,
     func: &FunctionInfo,
     structs: &HashMap<String, Vec<(String, Typ)>>,
     functions: &HashMap<String, FunctionInfo>,
+    globals: &HashMap<String, u64>,
     pending_calls: &mut Vec<PendingCall>,
 ) -> Result<(), String> {
     // Validate return type
@@ -277,7 +299,7 @@ fn lower_function(
         }
     }
 
-    let mut ctx = LowerCtx::new(&func.name, &func.params, structs, functions);
+    let mut ctx = LowerCtx::new(&func.name, &func.params, structs, functions, globals.clone());
 
     // Pre-allocate locals for let bindings
     alloc_declared_locals(&mut ctx, &func.body)?;
@@ -390,6 +412,12 @@ fn lower_stmt(
             Ok(())
         }
         Stmt::Assign(name, expr) => {
+            // Check if this is a global variable
+            if let Some(&addr) = ctx.globals.get(name) {
+                lower_expr_into(emitter, ctx, expr, RAX, pending_calls)?;
+                emitter.emit_insns(&x86_64::mov_abs_from_rax(addr));
+                return Ok(());
+            }
             let offset = ctx.slot_offset(name)?;
             lower_expr_into(emitter, ctx, expr, RAX, pending_calls)?;
             emitter.emit_insns(&x86_64::str64(RAX, offset as u16));
@@ -521,6 +549,16 @@ fn lower_expr_into(
             Ok(())
         }
         Expr::Ident(name) => {
+            // Check if this is a global variable
+            if let Some(&addr) = ctx.globals.get(name) {
+                let addr32 = addr as u32;
+                if target_reg == RAX {
+                    emitter.emit_insns(&x86_64::mov_rax_from_abs(addr));
+                } else {
+                    emitter.emit_insns(&x86_64::mov_r_from_abs32(target_reg, addr32));
+                }
+                return Ok(());
+            }
             let offset = ctx.slot_offset(name)?;
             if target_reg == RAX {
                 emitter.emit_insns(&x86_64::ldr64(target_reg, offset as u16));

@@ -393,6 +393,7 @@ fn validate_module(
         match d {
             Decl::Struct { name, .. } | Decl::Function { name, .. } => names.push(name.clone()),
             Decl::Class { .. } | Decl::Interface { .. } | Decl::Component { .. } => {}
+            Decl::Global { .. } => {}
         }
     }
     let mut seen = HashSet::new();
@@ -445,6 +446,7 @@ fn validate_module(
                 }
             }
             Decl::Class { .. } | Decl::Interface { .. } | Decl::Component { .. } => {}
+            Decl::Global { .. } => {}
         }
     }
     Ok(())

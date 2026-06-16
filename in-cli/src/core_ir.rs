@@ -374,4 +374,12 @@ pub enum Decl {
         exports: Vec<ComponentExport>,
         capabilities: Vec<ComponentCapability>,
     },
+    /// A global variable or constant declaration.
+    /// `mutable` is true for `var`, false for `const`.
+    Global {
+        name: String,
+        typ: Typ,
+        init: Option<Box<Expr>>,
+        mutable: bool,
+    },
 }
