@@ -235,7 +235,7 @@ fn ptr_in_expr(e: &Expr, out: &mut Vec<String>) {
                     if let Some(first) = args.first() { if let Expr::Ident(fn_name) = first { if !out.contains(fn_name) { out.push(fn_name.clone()); } } }
                 }
             }
-            for arg in args { if let Expr::Ident(name) = arg { if !out.contains(name) { out.push(name.clone()); } } ptr_in_expr(arg, out); }
+            for arg in args { ptr_in_expr(arg, out); }
             ptr_in_expr(callee, out);
         }
         Expr::Binary { lhs, rhs, .. } => { ptr_in_expr(lhs, out); ptr_in_expr(rhs, out); }
