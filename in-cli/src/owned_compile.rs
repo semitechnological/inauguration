@@ -912,10 +912,7 @@ fn native_entry_module(module: &UnifiedModule, entry: &str) -> UnifiedModule {
                 // The caller will filter these against module function names.
                 out.insert(name.clone());
             }
-            Expr::IntLit(_)
-            | Expr::FloatLit(_)
-            | Expr::StringLit(_)
-            | Expr::BoolLit(_) => {}
+            Expr::IntLit(_) | Expr::FloatLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => {}
         }
     }
 
@@ -960,7 +957,7 @@ fn native_entry_module(module: &UnifiedModule, entry: &str) -> UnifiedModule {
                     }
                 }
                 Stmt::Return(None) => {}
-            Stmt::Break => {}
+                Stmt::Break => {}
             }
         }
     }

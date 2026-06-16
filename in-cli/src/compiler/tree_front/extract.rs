@@ -3492,7 +3492,7 @@ fn rewrite_this_receiver_in_stmt(stmt: &mut Stmt) {
             }
         }
         Stmt::Return(None) => {}
-            Stmt::Break => {}
+        Stmt::Break => {}
     }
 }
 

@@ -949,7 +949,11 @@ mod tests {
             &default_options(),
         );
 
-        assert!(report.ok, "duplicate locals should be allowed: {:?}", report);
+        assert!(
+            report.ok,
+            "duplicate locals should be allowed: {:?}",
+            report
+        );
     }
 
     #[test]

@@ -1654,7 +1654,12 @@ fn parse_stmt_line(line: &str) -> Result<Stmt, String> {
     if s.starts_with("while ") {
         return parse_while_stmt(s);
     }
-    if s.starts_with("break") && (s.len() == 5 || s.as_bytes().get(5).map_or(true, |&c| c == b' ' || c == b';' || c == b'}')) {
+    if s.starts_with("break")
+        && (s.len() == 5
+            || s.as_bytes()
+                .get(5)
+                .map_or(true, |&c| c == b' ' || c == b';' || c == b'}'))
+    {
         return Ok(Stmt::Break);
     }
     // `for` is handled by parse_function_body expansion

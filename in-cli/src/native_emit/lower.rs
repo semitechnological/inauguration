@@ -474,7 +474,7 @@ fn collect_body_strings(body: &[Stmt], values: &mut Vec<String>) {
                 }
             }
             Stmt::Return(None) => {}
-            
+
             Stmt::Throw(expr) => collect_expr_strings(expr, values),
             Stmt::Try { body, catches } => {
                 collect_body_strings(body, values);
@@ -482,7 +482,7 @@ fn collect_body_strings(body: &[Stmt], values: &mut Vec<String>) {
                     collect_body_strings(&catch.body, values);
                 }
             }
-        Stmt::Break => {}
+            Stmt::Break => {}
         }
     }
 }
@@ -1056,7 +1056,7 @@ fn lower_stmt(
 
             Ok(())
         }
-    Stmt::Break => Ok(()),
+        Stmt::Break => Ok(()),
     }
 }
 

@@ -366,7 +366,7 @@ fn rewrite_method_calls_in_body(body: &mut [Stmt], method_map: &HashMap<String, 
                     rewrite_method_calls_in_body(&mut catch.body, method_map);
                 }
             }
-        Stmt::Break => {}
+            Stmt::Break => {}
         }
     }
 }
@@ -752,7 +752,7 @@ fn collect_stmt_reads(st: &Stmt, reads: &mut HashSet<String>) {
                 collect_body_reads(&arm.body, reads);
             }
         }
-    Stmt::Break => {}
+        Stmt::Break => {}
     }
 }
 

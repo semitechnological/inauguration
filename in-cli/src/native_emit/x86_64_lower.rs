@@ -65,8 +65,8 @@ struct PendingCall {
 }
 
 struct PendingAddr {
-    site_offset: u32,  // offset within a `mov rax, imm64` instruction (byte 2 of 10)
-    target: String,     // function name
+    site_offset: u32, // offset within a `mov rax, imm64` instruction (byte 2 of 10)
+    target: String,   // function name
 }
 
 impl<'a> LowerCtx<'a> {
@@ -183,6 +183,7 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
 
     // ponytail: string literals not implemented for boot images; returns NULL address
     let string_addrs: HashMap<String, u64> = HashMap::new();
+    let all_strings = collect_string_literals(module);
 
     let mut emitter = CodeEmitter::new();
     let mut function_offsets: HashMap<String, u32> = HashMap::new();
@@ -218,8 +219,9 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
 
     // Resolve pending calls and function address references
     const KERNEL_BASE: u64 = 0x102000;
-    
-    // Resolve calls
+
+    // Resolve calls — collect string refs, resolve function addresses and calls
+    let mut str_refs: Vec<(u32, String)> = Vec::new();
     for call in &all_pending_calls {
         if call.target.starts_with("@addr_") {
             // Function address reference: write absolute address at site
@@ -228,9 +230,11 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
                 let abs_addr = KERNEL_BASE + func_offset as u64;
                 let site = call.site as usize;
                 if site + 8 <= emitter.bytes.len() {
-                    emitter.bytes[site..site+8].copy_from_slice(&abs_addr.to_le_bytes());
+                    emitter.bytes[site..site + 8].copy_from_slice(&abs_addr.to_le_bytes());
                 }
             }
+        } else if call.target.starts_with("@str_") {
+            str_refs.push((call.site, call.target[5..].to_string()));
         } else {
             let target_offset = function_offsets
                 .get(&call.target)
@@ -240,7 +244,32 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
         }
     }
 
-
+    // Append string data section and patch string literal references
+    if !str_refs.is_empty() || !all_strings.is_empty() {
+        let code_end = emitter.len();
+        let mut str_offset = 0u64;
+        for s in &all_strings {
+            let abs_addr = KERNEL_BASE + code_end as u64 + str_offset;
+            for &(site, ref content) in &str_refs {
+                if content == s {
+                    let site_u = site as usize;
+                    if site_u + 8 <= emitter.bytes.len() {
+                        emitter.bytes[site_u..site_u + 8].copy_from_slice(&abs_addr.to_le_bytes());
+                    }
+                }
+            }
+            // Write string bytes with null terminator, 8-byte aligned
+            let padded = (s.len() + 1 + 7) & !7;
+            let start = code_end as usize + str_offset as usize;
+            let end = start + padded;
+            if end > emitter.bytes.len() {
+                emitter.bytes.resize(end, 0);
+            }
+            emitter.bytes[start..start + s.len()].copy_from_slice(s.as_bytes());
+            emitter.bytes[start + s.len()] = 0;
+            str_offset += padded as u64;
+        }
+    }
 
     let entry_offset = function_offsets.get(entry).copied().unwrap_or(0);
     let exports: Vec<(String, u32)> = function_offsets
@@ -301,6 +330,116 @@ fn collect_structs(module: &UnifiedModule) -> HashMap<String, Vec<(String, Typ)>
 
 /// Collect global variable names and assign them fixed absolute addresses.
 /// Returns: (name → address) map.
+/// Collect all unique string literal contents from the module.
+fn collect_string_literals(module: &UnifiedModule) -> Vec<String> {
+    fn from_expr(expr: &Expr, out: &mut Vec<String>) {
+        match expr {
+            Expr::StringLit(s) => out.push(s.clone()),
+            Expr::Unary { expr, .. } => from_expr(expr, out),
+            Expr::Binary { lhs, rhs, .. } => {
+                from_expr(lhs, out);
+                from_expr(rhs, out);
+            }
+            Expr::StructInit { fields, .. } => {
+                for (_, e) in fields {
+                    from_expr(e, out);
+                }
+            }
+            Expr::Field { base, .. } => from_expr(base, out),
+            Expr::ArrayLit(elts) => {
+                for e in elts {
+                    from_expr(e, out);
+                }
+            }
+            Expr::Index { base, index } => {
+                from_expr(base, out);
+                from_expr(index, out);
+            }
+            Expr::Call { callee, args } => {
+                from_expr(callee, out);
+                for a in args {
+                    from_expr(a, out);
+                }
+            }
+            Expr::Closure { body, .. } => {
+                for s in body {
+                    from_stmt(s, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    fn from_stmt(stmt: &Stmt, out: &mut Vec<String>) {
+        match stmt {
+            Stmt::Let(_, _, expr) => from_expr(expr, out),
+            Stmt::Assign(_, expr) => from_expr(expr, out),
+            Stmt::IndexAssign { base, index, value } => {
+                from_expr(base, out);
+                from_expr(index, out);
+                from_expr(value, out);
+            }
+            Stmt::Return(Some(expr)) => from_expr(expr, out),
+            Stmt::Return(None) => {}
+            Stmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                from_expr(cond, out);
+                for s in then_body {
+                    from_stmt(s, out);
+                }
+                for s in else_body {
+                    from_stmt(s, out);
+                }
+            }
+            Stmt::Loop { body, .. } => {
+                for s in body {
+                    from_stmt(s, out);
+                }
+            }
+            Stmt::Match { scrutinee, arms } => {
+                from_expr(scrutinee, out);
+                for arm in arms {
+                    for s in &arm.body {
+                        from_stmt(s, out);
+                    }
+                }
+            }
+            Stmt::Throw(expr) => from_expr(expr, out),
+            Stmt::Try { body, catches } => {
+                for s in body {
+                    from_stmt(s, out);
+                }
+                for c in catches {
+                    for s in &c.body {
+                        from_stmt(s, out);
+                    }
+                }
+            }
+            Stmt::Expr(expr) => from_expr(expr, out),
+            Stmt::Break => {}
+        }
+    }
+    let mut strings = Vec::new();
+    for decl in &module.decls {
+        if let Decl::Function { body, .. } = decl {
+            for stmt in body {
+                from_stmt(stmt, &mut strings);
+            }
+        }
+        if let Decl::Global {
+            init: Some(expr), ..
+        } = decl
+        {
+            from_expr(expr, &mut strings);
+        }
+    }
+    strings.sort();
+    strings.dedup();
+    strings
+}
+
 fn collect_globals(module: &UnifiedModule) -> HashMap<String, u64> {
     const GLOBAL_BASE: u64 = 0x6000;
     let mut globals = HashMap::new();
@@ -620,13 +759,13 @@ fn lower_expr_into(
                 // Emit placeholder address (will be patched after all functions are laid out).
                 // mov rax, imm64 is 10 bytes: 48 B8 <8 byte addr>
                 let placeholder = if target_reg == RAX {
-                    let mut code = vec![0x48, 0xB8];  // mov rax, imm64
+                    let mut code = vec![0x48, 0xB8]; // mov rax, imm64
                     code.extend_from_slice(&[0xEF, 0xBE, 0xAD, 0xDE, 0x00, 0x00, 0x00, 0x00]); // placeholder
                     code
                 } else {
                     x86_64::mov_ri64(target_reg, 0xDEADBEEF)
                 };
-                let site_offset = emitter.len() + 2;  // byte 2 of the mov instruction
+                let site_offset = emitter.len() + 2; // byte 2 of the mov instruction
                 emitter.emit_insns(&placeholder);
                 // Use address marker prefix in pending_calls for function address references
                 pending_calls.push(PendingCall {
@@ -909,11 +1048,15 @@ fn lower_expr_into(
                     return Ok(());
                 }
                 "load8" => {
-                    // load8(addr: Int) -> Int  → mov rax, [rdi]; mask to byte
+                    // load8(addr: Int) -> Int  → movzx rax, byte [addr]
                     if args.len() >= 1 {
-                        lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
-                        // movzx rax, byte [rdi]  → 48 0F B6 07
-                        emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0x07]);
+                        // Use RCX to avoid clobbering RDI (may hold prior function arg)
+                        lower_expr_into(emitter, ctx, &args[0], RCX, pending_calls)?;
+                        // movzx rax, byte [rcx]  → 48 0F B6 01
+                        emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0x01]);
+                        if target_reg != RAX {
+                            emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
+                        }
                     } else {
                         return Err(format!(
                             "x86_64-lower: `load8` requires 1 argument in `{}`",
@@ -926,7 +1069,9 @@ fn lower_expr_into(
                     // store8(addr: Int, value: Int) -> void
                     if args.len() >= 2 {
                         lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
+                        emitter.emit_insns(&x86_64::push_r(RDI)); // save address
                         lower_expr_into(emitter, ctx, &args[1], RSI, pending_calls)?;
+                        emitter.emit_insns(&x86_64::pop_r(RDI));  // restore address
                         // mov [rdi], sil  → 40 88 37
                         emitter.emit_bytes(&[0x40, 0x88, 0x37]);
                     } else {
@@ -939,9 +1084,12 @@ fn lower_expr_into(
                 }
                 "load16" => {
                     if args.len() >= 1 {
-                        lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
-                        // movzx rax, word [rdi]  → 48 0F B7 07
-                        emitter.emit_bytes(&[0x48, 0x0F, 0xB7, 0x07]);
+                        lower_expr_into(emitter, ctx, &args[0], RCX, pending_calls)?;
+                        // movzx rax, word [rcx]  → 48 0F B7 01
+                        emitter.emit_bytes(&[0x48, 0x0F, 0xB7, 0x01]);
+                        if target_reg != RAX {
+                            emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
+                        }
                     } else {
                         return Err(format!(
                             "x86_64-lower: `load16` requires 1 argument in `{}`",
@@ -953,7 +1101,9 @@ fn lower_expr_into(
                 "store16" => {
                     if args.len() >= 2 {
                         lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
+                        emitter.emit_insns(&x86_64::push_r(RDI));
                         lower_expr_into(emitter, ctx, &args[1], RSI, pending_calls)?;
+                        emitter.emit_insns(&x86_64::pop_r(RDI));
                         // mov [rdi], si  → 66 89 37
                         emitter.emit_bytes(&[0x66, 0x89, 0x37]);
                     } else {
@@ -966,9 +1116,12 @@ fn lower_expr_into(
                 }
                 "load32" => {
                     if args.len() >= 1 {
-                        lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
-                        // mov eax, [rdi]  → 8B 07
-                        emitter.emit_bytes(&[0x8B, 0x07]);
+                        lower_expr_into(emitter, ctx, &args[0], RCX, pending_calls)?;
+                        // mov eax, [rcx]  → 8B 01
+                        emitter.emit_bytes(&[0x8B, 0x01]);
+                        if target_reg != RAX {
+                            emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
+                        }
                     } else {
                         return Err(format!(
                             "x86_64-lower: `load32` requires 1 argument in `{}`",
@@ -980,8 +1133,10 @@ fn lower_expr_into(
                 "store32" => {
                     if args.len() >= 2 {
                         lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
+                        emitter.emit_insns(&x86_64::push_r(RDI));
                         lower_expr_into(emitter, ctx, &args[1], RSI, pending_calls)?;
-                        // mov [rdi], esi  → 89 37  (32-bit, no REX needed for esi->[rdi])
+                        emitter.emit_insns(&x86_64::pop_r(RDI));
+                        // mov [rdi], esi  → 89 37
                         emitter.emit_bytes(&[0x89, 0x37]);
                     } else {
                         return Err(format!(
@@ -993,9 +1148,12 @@ fn lower_expr_into(
                 }
                 "load64" => {
                     if args.len() >= 1 {
-                        lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
-                        // mov rax, [rdi]  → 48 8B 07
-                        emitter.emit_bytes(&[0x48, 0x8B, 0x07]);
+                        lower_expr_into(emitter, ctx, &args[0], RCX, pending_calls)?;
+                        // mov rax, [rcx]  → 48 8B 01
+                        emitter.emit_bytes(&[0x48, 0x8B, 0x01]);
+                        if target_reg != RAX {
+                            emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
+                        }
                     } else {
                         return Err(format!(
                             "x86_64-lower: `load64` requires 1 argument in `{}`",
@@ -1007,7 +1165,9 @@ fn lower_expr_into(
                 "store64" => {
                     if args.len() >= 2 {
                         lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
+                        emitter.emit_insns(&x86_64::push_r(RDI));
                         lower_expr_into(emitter, ctx, &args[1], RSI, pending_calls)?;
+                        emitter.emit_insns(&x86_64::pop_r(RDI));
                         // mov [rdi], rsi  → 48 89 37
                         emitter.emit_bytes(&[0x48, 0x89, 0x37]);
                     } else {
@@ -1229,9 +1389,14 @@ fn lower_expr_into(
             }
             Ok(())
         }
-        Expr::StringLit(_content) => {
-            // ponytail: string literals not implemented for boot images; returns NULL address
-            emitter.emit_insns(&x86_64::xor_rr(target_reg, target_reg));
+        Expr::StringLit(content) => {
+            // RUNTIME-ABSOLUTE: emit placeholder address, patched after all code is laid out
+            let site = emitter.len() + 2; // offset of 8-byte immediate in mov_ri64
+            emitter.emit_insns(&x86_64::mov_ri64(target_reg, 0xDEADBEEF));
+            pending_calls.push(PendingCall {
+                site: site as u32,
+                target: format!("@str_{}", content.clone()),
+            });
             Ok(())
         }
         _ => Err(format!(
@@ -1240,8 +1405,6 @@ fn lower_expr_into(
         )),
     }
 }
-
-
 
 #[cfg(test)]
 mod tests {

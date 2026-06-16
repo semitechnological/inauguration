@@ -1081,7 +1081,7 @@ fn check_stmt_calls(
             }
         }
         Stmt::Return(None) => {}
-            Stmt::Break => {}
+        Stmt::Break => {}
         Stmt::Throw(_) | Stmt::Try { .. } => {}
     }
 }
