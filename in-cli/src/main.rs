@@ -372,6 +372,13 @@ enum Commands {
     #[command(visible_alias = "self-update")]
     Update,
     #[command(about = "Check required tools")]
+    #[command(about = "Evaluate inline .in code (like python -c)")]
+    Eval {
+        #[arg(help = "Inline .in source code to compile and execute")]
+        code: String,
+        #[arg(long, default_value_t = false, help = "Show detailed output")]
+        verbose: bool,
+    },
     Doctor,
     #[command(about = "Summarize hotreload metrics")]
     Bench {
@@ -590,6 +597,7 @@ fn run() -> Result<()> {
             Ok(root) => cmd_update(&root),
             Err(_) => cmd_update_remote(),
         },
+        Commands::Eval { code, verbose } => cmd_eval(&invocation_cwd, &code, verbose),
         Commands::Doctor => cmd_doctor(),
         Commands::Bench { metrics } => {
             cmd_bench(&workspace_root(invocation_cwd.clone())?, &metrics)
@@ -1864,6 +1872,40 @@ fn cmd_run_bytecode(cwd: &Path, path: &str, verbose: bool) -> Result<()> {
 
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
     println!("[bytecode] Finished execution in {:.3}ms", elapsed_ms);
+    Ok(())
+}
+
+fn cmd_eval(cwd: &Path, code: &str, verbose: bool) -> Result<()> {
+    // Write inline code to temp .in file, compile and execute through bytecode VM.
+    let dir = std::env::temp_dir().join("inaug-eval");
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join(format!("{}.in", std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos()));
+    std::fs::write(&path, code).map_err(|e| InError::Message(format!("write eval temp: {e}")))?;
+
+    let source_path = resolve_invocation_path(cwd, &path.to_string_lossy());
+    let output = inauguration::bytecode_compiler::compile_source_path(
+        &source_path, "App", parser_registry::ParserCli::Auto)
+        .map_err(|e| InError::Message(format!("compile: {e}")))?;
+    let result = inauguration::bytecode_compiler::run_bytecode_module(output.module)
+        .map_err(|e| InError::Message(format!("execute: {e}")))?;
+
+    if verbose {
+        eprintln!("> {:?}", result);
+    } else {
+        match &result {
+            inauguration::bytecode::Value::Int(v) => println!("{}", v),
+            inauguration::bytecode::Value::Bool(b) => println!("{}", b),
+            inauguration::bytecode::Value::String(s) => println!("{}", s),
+            inauguration::bytecode::Value::Array(items) => println!("{:?}", items),
+            inauguration::bytecode::Value::Nil => {},
+            _ => eprintln!("{:?}", result),
+        }
+    }
+
+    let _ = std::fs::remove_file(&path);
     Ok(())
 }
 
