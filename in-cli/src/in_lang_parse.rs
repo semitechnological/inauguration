@@ -241,6 +241,7 @@ pub fn split_top_level_decl_blocks(source: &str) -> Vec<(usize, String)> {
             }
             if depth == 0
                 && (t.starts_with("fn ")
+                    || t.starts_with("interrupt fn ")
                     || t.starts_with("struct ")
                     || t.starts_with("extern ")
                     || t.starts_with("class ")
@@ -1969,7 +1970,18 @@ fn parse_module_from_blocks(blocks: &[(usize, String)]) -> Result<UnifiedModule,
         if line.is_empty() {
             continue;
         }
-        if line.starts_with("fn ") {
+        if line.starts_with("interrupt fn ") {
+            let blk = block[10..].to_string();
+            let (name, params, ret, body) = parse_fn_block(&blk, *start_line as u32)?;
+            crate::core_ir::register_interrupt_fn(&name);
+            decls.push(Decl::Function {
+                name: name.clone(),
+                params,
+                ret,
+                body,
+                type_params: vec![],
+            });
+        } else if line.starts_with("fn ") {
             let (name, params, ret, body) = parse_fn_block(block, *start_line as u32)?;
             decls.push(Decl::Function {
                 name,
@@ -2070,7 +2082,7 @@ fn parse_module_from_blocks(blocks: &[(usize, String)]) -> Result<UnifiedModule,
             }
         } else {
             return Err(
-                format!(".in at line {start_line}: expected top-level `fn`, `struct`, `class`, `interface`, `component`, `var`, or `const`")
+                format!(".in at line {start_line}: expected top-level `fn`, `interrupt fn`, `struct`, `class`, `interface`, `component`, `var`, or `const`")
             );
         }
     }
@@ -2220,6 +2232,7 @@ pub fn parse_in_surface_info(source: &str) -> Result<InSurfaceInfo, String> {
                 continue;
             }
             if line.starts_with("fn ")
+                || line.starts_with("interrupt fn ")
                 || line.starts_with("struct ")
                 || line.starts_with("class ")
                 || line.starts_with("interface ")

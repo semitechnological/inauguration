@@ -1,6 +1,20 @@
 //! Cross-frontend core AST (v0). Bodies may be empty until a frontend fills statements.
 
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
+use std::collections::HashSet;
+
+thread_local! {
+    static INTERRUPT_FNS: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
+}
+
+pub fn register_interrupt_fn(name: &str) {
+    INTERRUPT_FNS.with(|fns| fns.borrow_mut().insert(name.to_string()));
+}
+
+pub fn is_interrupt_fn(name: &str) -> bool {
+    INTERRUPT_FNS.with(|fns| fns.borrow().contains(name))
+}
 
 /// Source position span.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

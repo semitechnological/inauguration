@@ -11,7 +11,7 @@
 //!   - struct init/field access (scalar fields only)
 
 use crate::core_ir::{Decl, Expr, Stmt, Typ, UnifiedModule};
-use crate::native_emit::x86_64::{self, CodeEmitter, RAX, RBX, RCX, RDI, RDX, REG_SP, RSI};
+use crate::native_emit::x86_64::{self, CodeEmitter, RBP, RAX, RBX, RCX, RDI, RDX, REG_SP, RSI};
 use std::collections::HashMap;
 
 pub const X86_64_TRIPLE: &str = "x86_64-unknown-none";
@@ -37,6 +37,8 @@ struct LowerCtx<'a> {
     frame_size: u32,
     /// Set when a return statement has been emitted
     emitted_return: bool,
+    /// True if this function is an interrupt handler
+    is_interrupt: bool,
     /// Struct field definitions
     structs: &'a HashMap<String, Vec<(String, Typ)>>,
     /// All functions by name (for call resolution)
@@ -82,6 +84,7 @@ impl<'a> LowerCtx<'a> {
             locals: HashMap::new(),
             frame_size: 0,
             emitted_return: false,
+            is_interrupt: false,
             structs,
             functions,
             pending_calls: Vec::new(),
@@ -206,6 +209,7 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
         let func = &functions[name];
         let offset = emitter.len();
         function_offsets.insert(name.clone(), offset);
+        let is_interrupt = crate::core_ir::is_interrupt_fn(&func.name);
         lower_function(
             &mut emitter,
             func,
@@ -214,6 +218,7 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
             &globals,
             &string_addrs,
             &mut all_pending_calls,
+            is_interrupt,
         )?;
     }
 
@@ -462,6 +467,7 @@ fn lower_function(
     globals: &HashMap<String, u64>,
     string_addrs: &HashMap<String, u64>,
     pending_calls: &mut Vec<PendingCall>,
+    is_interrupt: bool,
 ) -> Result<(), String> {
     // Validate return type
     match &func.ret {
@@ -482,12 +488,21 @@ fn lower_function(
         globals.clone(),
         string_addrs.clone(),
     );
+    ctx.is_interrupt = is_interrupt;
 
     // Pre-allocate locals for let bindings
     alloc_declared_locals(&mut ctx, &func.body)?;
 
-    // Emit prologue
-    emitter.emit_insns(&x86_64::prologue());
+    if is_interrupt {
+        // Interrupt prologue: save all GPRs, then standard frame.
+        // The CPU already pushed SS/RSP/RFLAGS/CS/RIP (+error code for some).
+        for &reg in &[RAX, RCX, RDX, RBX, RBP, RSI, RDI, 8u8,9,10,11,12,13,14,15] {
+            emitter.emit_insns(&x86_64::push_r(reg));
+        }
+        emitter.emit_insns(&x86_64::prologue());
+    } else {
+        emitter.emit_insns(&x86_64::prologue());
+    }
 
     // Allocate stack frame
     let frame_size = ctx.frame_reserve();
@@ -519,7 +534,18 @@ fn lower_function(
         if frame_size > 0 {
             emitter.emit_insns(&x86_64::add_rmi8(REG_SP, frame_size as u8));
         }
-        emitter.emit_insns(&x86_64::epilogue());
+        if is_interrupt {
+            // Interrupt epilogue: restore frame, pop all GPRs in reverse, iretq.
+            // Epilogue from asm: mov rsp, rbp; pop rbp (but NOT ret)
+            emitter.emit_insns(&x86_64::mov_rr(x86_64::REG_SP, x86_64::REG_FP));
+            emitter.emit_insns(&x86_64::pop_r(x86_64::REG_FP));
+            // Pop all saved GPRs (reverse of push order)
+            for &reg in &[15u8,14,13,12,11,10,9,8,RDI,RSI,RBP,RBX,RDX,RCX,RAX] {
+                emitter.emit_insns(&x86_64::pop_r(reg));
+            }
+            // iretq pops RIP/CS/RFLAGS from interrupt stack frame
+            emitter.emit_bytes(&[0x48, 0xCF]);
+        } else { emitter.emit_insns(&x86_64::epilogue()); }
     }
 
     Ok(())
@@ -578,7 +604,17 @@ fn lower_stmt(
             } else if frame_size > 0 {
                 emitter.emit_insns(&x86_64::add_rmi8(REG_SP, frame_size as u8));
             }
-            emitter.emit_insns(&x86_64::epilogue());
+            if ctx.is_interrupt {
+                // Interrupt epilogue: leave, pop all GPRs, iretq
+                emitter.emit_insns(&x86_64::mov_rr(x86_64::REG_SP, x86_64::REG_FP));
+                emitter.emit_insns(&x86_64::pop_r(x86_64::REG_FP));
+                for &reg in &[15u8,14,13,12,11,10,9,8,RDI,RSI,RBP,RBX,RDX,RCX,RAX] {
+                    emitter.emit_insns(&x86_64::pop_r(reg));
+                }
+                emitter.emit_bytes(&[0x48, 0xCF]);
+            } else {
+                emitter.emit_insns(&x86_64::epilogue());
+            }
             ctx.emitted_return = true;
             Ok(())
         }
@@ -1189,10 +1225,25 @@ fn lower_expr_into(
                 }
                 "read_cr2" => {
                     // read_cr2() -> Int  → mov rax, cr2; ret
-                    // mov rax, cr2  → 48 0F 20 D0
                     emitter.emit_bytes(&[0x48, 0x0F, 0x20, 0xD0]);
                     if target_reg != RAX {
                         emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
+                    }
+                    return Ok(());
+                }
+                "read_cr3" => {
+                    // read_cr3() -> Int  → mov rax, cr3; ret
+                    emitter.emit_bytes(&[0x48, 0x0F, 0x20, 0xD8]);
+                    if target_reg != RAX {
+                        emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
+                    }
+                    return Ok(());
+                }
+                "write_cr3" => {
+                    // write_cr3(val: Int) -> void  → mov cr3, rdi
+                    if args.len() >= 1 {
+                        lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
+                        emitter.emit_bytes(&[0x0F, 0x22, 0xC7]); // mov cr3, rdi
                     }
                     return Ok(());
                 }
