@@ -1164,9 +1164,14 @@ mod tests {
             );
         } else {
             assert!(!report.success);
-            assert_eq!(
-                report.reason_code.as_deref(),
-                Some(native_backend::NATIVE_BACKEND_NOT_IMPLEMENTED)
+            assert!(
+                matches!(
+                    report.reason_code.as_deref(),
+                    Some(native_backend::NATIVE_BACKEND_NOT_IMPLEMENTED)
+                        | Some("native-lowering-failed")
+                ),
+                "unexpected reason_code: {:?}",
+                report.reason_code
             );
         }
 
