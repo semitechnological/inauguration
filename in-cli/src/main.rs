@@ -1876,14 +1876,39 @@ fn cmd_run_bytecode(cwd: &Path, path: &str, verbose: bool) -> Result<()> {
 }
 
 fn cmd_eval(cwd: &Path, code: &str, verbose: bool) -> Result<()> {
-    // Write inline code to temp .in file, compile and execute through bytecode VM.
+    // Auto-wrap bare expressions in fn main() if not a full declaration.
+    let trimmed = code.trim();
+    // Auto-wrap: if code is a bare expression/stmt, wrap in fn main.
+    // If it already starts with `return`/`let`/`if`, wrap without double return.
+    let starts_decl = trimmed.starts_with("fn ")
+        || trimmed.starts_with("interrupt fn ")
+        || trimmed.starts_with("struct ")
+        || trimmed.starts_with("const ")
+        || trimmed.starts_with("var ");
+    let is_stmt = trimmed.starts_with("return ") || trimmed.starts_with("if ");
+    // Guess return type from bare expression for ergonomic eval.
+    let guess_type = |s: &str| -> &str {
+        let s = s.trim();
+        if s == "true" || s == "false" { "Bool" }
+        else if s.starts_with('"') { "String" }
+        else { "Int" }
+    };
+    let wrapped = if starts_decl || trimmed.contains("\nfn ") {
+        code.to_string()
+    } else if is_stmt {
+        format!("fn main() -> Int {{ {code} }}")
+    } else {
+        let ret = guess_type(trimmed);
+        format!("fn main() -> {ret} {{ return {code} }}")
+    };
+
     let dir = std::env::temp_dir().join("inaug-eval");
     let _ = std::fs::create_dir_all(&dir);
     let path = dir.join(format!("{}.in", std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos()));
-    std::fs::write(&path, code).map_err(|e| InError::Message(format!("write eval temp: {e}")))?;
+    std::fs::write(&path, &wrapped).map_err(|e| InError::Message(format!("write eval temp: {e}")))?;
 
     let source_path = resolve_invocation_path(cwd, &path.to_string_lossy());
     let output = inauguration::bytecode_compiler::compile_source_path(

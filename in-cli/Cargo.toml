@@ -1,5 +1,5 @@
 [workspace]
-members = ["vendor/tree-sitter-v"]
+members = []
 resolver = "2"
 
 [package]
@@ -64,7 +64,7 @@ tree-sitter-scala = "0.26.0"
 tree-sitter-swift = "0.7.3"
 tree-sitter-ocaml = "0.25.0"
 tree-sitter-typescript = "0.23.2"
-tree-sitter-v = { version = "0.0.1", path = "vendor/tree-sitter-v" }
+tree-sitter-v = "0.0.1"
 tree-sitter-zig = "1.1.2"
 tree-sitter-language = "0.1.7"
 
