@@ -455,16 +455,30 @@ impl BytecodeVM {
                 let text = args.first().map_or(String::new(), Value::to_string_display);
                 let mut tokens = Vec::new();
                 let mut current = String::new();
-                for ch in text.chars() {
+                let mut chars = text.chars().peekable();
+                while let Some(ch) = chars.next() {
                     if ch.is_whitespace() || matches!(ch, '(' | ')') {
                         if !current.is_empty() {
                             tokens.push(Value::String(std::mem::take(&mut current)));
                         }
-                    } else if matches!(ch, '+' | '-' | '*' | '/' | '=') {
+                    } else if matches!(ch, '+' | '-' | '*' | '/') {
                         if !current.is_empty() {
                             tokens.push(Value::String(std::mem::take(&mut current)));
                         }
                         tokens.push(Value::String(ch.to_string()));
+                    } else if matches!(ch, '=' | '!' | '<' | '>') {
+                        if !current.is_empty() {
+                            tokens.push(Value::String(std::mem::take(&mut current)));
+                        }
+                        if chars.peek() == Some(&'=') {
+                            chars.next();
+                            let mut op_str = String::with_capacity(2);
+                            op_str.push(ch);
+                            op_str.push('=');
+                            tokens.push(Value::String(op_str));
+                        } else {
+                            tokens.push(Value::String(ch.to_string()));
+                        }
                     } else {
                         current.push(ch);
                     }

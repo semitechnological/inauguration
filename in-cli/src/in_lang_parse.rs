@@ -2744,6 +2744,15 @@ fn parse_in_module_without_validation(
             );
         }
     }
+    for binding in &surface.semantic_bindings {
+        std_decls.push(Decl::Function {
+            name: binding.alias.clone(),
+            params: vec![("value".into(), Typ::String)],
+            ret: Typ::String,
+            body: Vec::new(),
+            type_params: vec![],
+        });
+    }
     std_decls.extend(module.decls);
     module.decls = std_decls;
     Ok(module)
@@ -3369,6 +3378,35 @@ fn main() -> void { return; }
         let err = parse_in_source("enable unknown-runtime;\nfn main() -> void { return; }\n")
             .expect_err("unknown extension");
         assert!(err.contains("unknown extension"), "{err}");
+    }
+
+    #[test]
+    fn semantic_bindings_lower_as_function_decl_in_core_ir() {
+        let src = r#"
+package hyperchat;
+use database.postgres;
+bind database.postgres as postgres;
+fn main() -> void { return; }
+"#;
+        let module = parse_in_source(src).expect("parse");
+        let has_postgres_decl = module.decls.iter().any(|d| match d {
+            Decl::Function { name, body, .. } if name == "postgres" && body.is_empty() => true,
+            _ => false,
+        });
+        assert!(has_postgres_decl, "bind alias should produce Decl::Function with empty body");
+    }
+
+    #[test]
+    fn semantic_bindings_are_callable_in_sil() {
+        let src = r#"
+package hyperchat;
+use database.postgres;
+bind database.postgres as postgres;
+fn main() -> void { postgres("select 1"); return; }
+"#;
+        let module = parse_in_source(src).expect("parse");
+        let sil = crate::lower_core::lower_to_textual_sil(&module, "test");
+        assert!(sil.contains("function_ref @postgres"), "bind alias should lower to function_ref\n{sil}");
     }
 
     #[test]

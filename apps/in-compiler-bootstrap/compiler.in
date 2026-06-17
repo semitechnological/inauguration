@@ -21,6 +21,10 @@ fn flat_val(parts: [String], start: Int, end: Int, names: String, values: String
   let left: Int = 0;
   if str_table_has(names, parts[i]) {
     left = str_table_get_int(names, values, parts[i]);
+  } else if str_eq(parts[i], "true") {
+    left = 1;
+  } else if str_eq(parts[i], "false") {
+    left = 0;
   } else {
     left = str_to_int(parts[i]);
   }
@@ -32,6 +36,10 @@ fn flat_val(parts: [String], start: Int, end: Int, names: String, values: String
     let right: Int = 0;
     if str_table_has(names, parts[i]) {
       right = str_table_get_int(names, values, parts[i]);
+    } else if str_eq(parts[i], "true") {
+      right = 1;
+    } else if str_eq(parts[i], "false") {
+      right = 0;
     } else {
       right = str_to_int(parts[i]);
     }
@@ -44,13 +52,25 @@ fn flat_val(parts: [String], start: Int, end: Int, names: String, values: String
       left = left + right;
     } else if str_eq(op, "-") {
       left = left - right;
+    } else if str_eq(op, "==") {
+      if left == right { left = 1; } else { left = 0; }
+    } else if str_eq(op, "!=") {
+      if left != right { left = 1; } else { left = 0; }
+    } else if str_eq(op, "<") {
+      if left < right { left = 1; } else { left = 0; }
+    } else if str_eq(op, ">") {
+      if left > right { left = 1; } else { left = 0; }
+    } else if str_eq(op, "<=") {
+      if left <= right { left = 1; } else { left = 0; }
+    } else if str_eq(op, ">=") {
+      if left >= right { left = 1; } else { left = 0; }
     }
   }
   return left;
 }
 
 fn is_op(token: String) -> Bool {
-  return str_eq(token, "+") || str_eq(token, "-") || str_eq(token, "*") || str_eq(token, "/");
+  return str_eq(token, "+") || str_eq(token, "-") || str_eq(token, "*") || str_eq(token, "/") || str_eq(token, "==") || str_eq(token, "!=") || str_eq(token, "<") || str_eq(token, ">") || str_eq(token, "<=") || str_eq(token, ">=");
 }
 
 fn emit_int_expr(value: Int) -> String {
@@ -59,6 +79,10 @@ fn emit_int_expr(value: Int) -> String {
 
 fn emit_call_expr(name: String) -> String {
   return "{" + quote("kind") + ":" + quote("call") + "," + quote("callee") + ":" + quote(name) + "," + quote("args") + ":[]}";
+}
+
+fn emit_bool_expr(value: Bool) -> String {
+  return "{" + quote("kind") + ":" + quote("bool") + "," + quote("value") + ":" + to_string(value) + "}";
 }
 
 fn emit_binary_expr(op: String, lhs: String, rhs: String) -> String {
@@ -99,6 +123,10 @@ fn flat_expr_str(parts: [String], start: Int, end: Int, names: String) -> String
   let left_expr: String = "";
   if str_table_has(names, parts[i]) {
     left_expr = emit_call_expr(parts[i]);
+  } else if str_eq(parts[i], "true") {
+    left_expr = emit_bool_expr(true);
+  } else if str_eq(parts[i], "false") {
+    left_expr = emit_bool_expr(false);
   } else {
     left_expr = emit_int_expr(str_to_int(parts[i]));
   }
@@ -110,6 +138,10 @@ fn flat_expr_str(parts: [String], start: Int, end: Int, names: String) -> String
     let right_expr: String = "";
     if str_table_has(names, parts[i]) {
       right_expr = emit_call_expr(parts[i]);
+    } else if str_eq(parts[i], "true") {
+      right_expr = emit_bool_expr(true);
+    } else if str_eq(parts[i], "false") {
+      right_expr = emit_bool_expr(false);
     } else {
       right_expr = emit_int_expr(str_to_int(parts[i]));
     }
@@ -132,6 +164,7 @@ fn line_supported(line: String, names: String) -> Bool {
   if str_eq(parts[3], "(") { return true; }
   if str_is_int(parts[3]) { return true; }
   if str_table_has(names, parts[3]) { return true; }
+  if str_eq(parts[3], "true") || str_eq(parts[3], "false") { return true; }
   return false;
 }
 
