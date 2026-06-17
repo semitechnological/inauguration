@@ -2,5 +2,6 @@
 
 let base = 40
 let ignored = 7
-let answer = base + (1 * 2)
+let one_if = if(base, 1, 0)
+let answer = base + (one_if * 2)
 answer

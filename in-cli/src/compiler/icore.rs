@@ -221,8 +221,43 @@ fn parse_v2_stmt(value: &Value, context: &str) -> Result<Stmt, String> {
             Ok(Stmt::Expr(parse_v2_expr(value, context)?))
         }
         "call" => Ok(Stmt::Expr(parse_v2_expr(value, context)?)),
+        "if" => parse_if_stmt(object, context),
         other => Err(format!("{context}: unsupported statement kind `{other}`")),
     }
+}
+
+fn parse_if_stmt(object: &Map<String, Value>, context: &str) -> Result<Stmt, String> {
+    let cond = required_field(object, "cond", context)?;
+    let then_body = object
+        .get("then_body")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| format!("{context}: `if` needs `then_body` array"))?;
+    let else_body = object
+        .get("else_body")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let then_stmts: Vec<Stmt> = then_body
+        .iter()
+        .enumerate()
+        .map(|(idx, s)| {
+            let ctx = format!("{context}.then_body[{idx}]");
+            parse_v2_stmt(s, &ctx)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let else_stmts: Vec<Stmt> = else_body
+        .iter()
+        .enumerate()
+        .map(|(idx, s)| {
+            let ctx = format!("{context}.else_body[{idx}]");
+            parse_v2_stmt(s, &ctx)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Stmt::If {
+        cond: parse_v2_expr(cond, context)?,
+        then_body: then_stmts,
+        else_body: else_stmts,
+    })
 }
 
 fn parse_v2_expr(value: &Value, context: &str) -> Result<Expr, String> {
@@ -642,6 +677,105 @@ mod tests {
         }"#;
         let err = parse_icore_source(j).expect_err("unknown binary operator must be rejected");
         assert!(err.contains("unsupported binary operator `%%`"), "{err}");
+    }
+
+    #[test]
+    fn parses_if_else_statement() {
+        let j = r#"{
+            "icoreVersion": 2,
+            "decls": [
+                {
+                    "kind": "function",
+                    "name": "check",
+                    "params": [],
+                    "return": "Int",
+                    "body": [
+                        {
+                            "kind": "if",
+                            "cond": { "kind": "bool", "value": true },
+                            "then_body": [
+                                { "kind": "return", "expr": { "kind": "int", "value": 1 } }
+                            ],
+                            "else_body": [
+                                { "kind": "return", "expr": { "kind": "int", "value": 0 } }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "kind": "function",
+                    "name": "main",
+                    "params": [],
+                    "return": "Void",
+                    "body": []
+                }
+            ]
+        }"#;
+        let m = parse_icore_source(j).expect("ok");
+        let body = m
+            .decls
+            .iter()
+            .find_map(|d| match d {
+                Decl::Function { name, body, .. } if name == "check" => Some(body),
+                _ => None,
+            })
+            .expect("check body");
+        assert_eq!(
+            body,
+            &vec![Stmt::If {
+                cond: Expr::BoolLit(true),
+                then_body: vec![Stmt::Return(Some(Expr::IntLit(1)))],
+                else_body: vec![Stmt::Return(Some(Expr::IntLit(0)))],
+            }]
+        );
+    }
+
+    #[test]
+    fn parses_if_without_else() {
+        let j = r#"{
+            "icoreVersion": 2,
+            "decls": [
+                {
+                    "kind": "function",
+                    "name": "maybe",
+                    "params": [],
+                    "return": "Int",
+                    "body": [
+                        {
+                            "kind": "if",
+                            "cond": { "kind": "bool", "value": false },
+                            "then_body": [
+                                { "kind": "return", "expr": { "kind": "int", "value": 7 } }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "kind": "function",
+                    "name": "main",
+                    "params": [],
+                    "return": "Void",
+                    "body": []
+                }
+            ]
+        }"#;
+        let m = parse_icore_source(j).expect("ok");
+        let body = m
+            .decls
+            .iter()
+            .find_map(|d| match d {
+                Decl::Function { name, body, .. } if name == "maybe" => Some(body),
+                _ => None,
+            })
+            .expect("maybe body");
+        assert_eq!(
+            body,
+            &vec![Stmt::If {
+                cond: Expr::BoolLit(false),
+                then_body: vec![Stmt::Return(Some(Expr::IntLit(7)))],
+                else_body: vec![],
+            }]
+        );
     }
 
     #[test]
