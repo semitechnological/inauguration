@@ -18,7 +18,7 @@ pub fn optimize(decls: &mut Vec<Decl>) {
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
-fn fn_bodies_mut(decls: &mut Vec<Decl>) -> impl Iterator<Item = &mut Vec<Stmt>> {
+fn fn_bodies_mut(decls: &mut [Decl]) -> impl Iterator<Item = &mut Vec<Stmt>> {
     decls.iter_mut().filter_map(|d| match d {
         Decl::Function { body, .. } => Some(body),
         _ => None,
@@ -28,32 +28,60 @@ fn fn_bodies_mut(decls: &mut Vec<Decl>) -> impl Iterator<Item = &mut Vec<Stmt>> 
 fn walk_expr<F: FnMut(&Expr)>(e: &Expr, f: &mut F) {
     f(e);
     match e {
-        Expr::Call { callee, args, ..} => { walk_expr(callee, f); for a in args { walk_expr(a, f); } }
-        Expr::Binary { lhs, rhs, .. } => { walk_expr(lhs, f); walk_expr(rhs, f); }
+        Expr::Call { callee, args, .. } => {
+            walk_expr(callee, f);
+            for a in args {
+                walk_expr(a, f);
+            }
+        }
+        Expr::Binary { lhs, rhs, .. } => {
+            walk_expr(lhs, f);
+            walk_expr(rhs, f);
+        }
         Expr::Unary { expr, .. } => walk_expr(expr, f),
         Expr::Field { base, .. } => walk_expr(base, f),
-        Expr::Index { base, index, ..} => { walk_expr(base, f); walk_expr(index, f); }
-        Expr::StructInit { fields, .. } => { for (_, e) in fields { walk_expr(e, f); } }
+        Expr::Index { base, index, .. } => {
+            walk_expr(base, f);
+            walk_expr(index, f);
+        }
+        Expr::StructInit { fields, .. } => {
+            for (_, e) in fields {
+                walk_expr(e, f);
+            }
+        }
         _ => {}
     }
 }
 
 fn map_expr<F: FnMut(Expr) -> Expr + Copy>(e: Expr, f: &mut F) -> Expr {
     match e {
-        Expr::Call { callee, args, ..} => Expr::Call {
+        Expr::Call { callee, args, .. } => Expr::Call {
             callee: Box::new(map_expr(*callee, f)),
             args: args.into_iter().map(|a| map_expr(a, f)).collect(),
         },
-        Expr::Binary { op, lhs, rhs, ..} => Expr::Binary {
-            op, lhs: Box::new(map_expr(*lhs, f)), rhs: Box::new(map_expr(*rhs, f)),
+        Expr::Binary { op, lhs, rhs, .. } => Expr::Binary {
+            op,
+            lhs: Box::new(map_expr(*lhs, f)),
+            rhs: Box::new(map_expr(*rhs, f)),
         },
-        Expr::Unary { op, expr, ..} => Expr::Unary { op, expr: Box::new(map_expr(*expr, f)) },
-        Expr::Field { base, name, ..} => Expr::Field { base: Box::new(map_expr(*base, f)), name },
-        Expr::Index { base, index, ..} => Expr::Index {
-            base: Box::new(map_expr(*base, f)), index: Box::new(map_expr(*index, f)),
+        Expr::Unary { op, expr, .. } => Expr::Unary {
+            op,
+            expr: Box::new(map_expr(*expr, f)),
         },
-        Expr::StructInit { name, fields, ..} => Expr::StructInit {
-            name, fields: fields.into_iter().map(|(n, e)| (n, map_expr(e, f))).collect(),
+        Expr::Field { base, name, .. } => Expr::Field {
+            base: Box::new(map_expr(*base, f)),
+            name,
+        },
+        Expr::Index { base, index, .. } => Expr::Index {
+            base: Box::new(map_expr(*base, f)),
+            index: Box::new(map_expr(*index, f)),
+        },
+        Expr::StructInit { name, fields, .. } => Expr::StructInit {
+            name,
+            fields: fields
+                .into_iter()
+                .map(|(n, e)| (n, map_expr(e, f)))
+                .collect(),
         },
         other => f(other),
     }
@@ -63,17 +91,29 @@ fn map_stmt<F: FnMut(Expr) -> Expr + Copy>(s: Stmt, f: &mut F) -> Stmt {
     match s {
         Stmt::Let(n, t, e) => Stmt::Let(n, t, map_expr(e, f)),
         Stmt::Assign(n, e) => Stmt::Assign(n, map_expr(e, f)),
-        Stmt::IndexAssign { base, index, value, ..} => Stmt::IndexAssign {
-            base: map_expr(base, f), index: map_expr(index, f), value: map_expr(value, f),
+        Stmt::IndexAssign {
+            base, index, value, ..
+        } => Stmt::IndexAssign {
+            base: map_expr(base, f),
+            index: map_expr(index, f),
+            value: map_expr(value, f),
         },
         Stmt::Return(e) => Stmt::Return(e.map(|e| map_expr(e, f))),
-        Stmt::If { cond, then_body, else_body, ..} => Stmt::If {
+        Stmt::If {
+            cond,
+            then_body,
+            else_body,
+            ..
+        } => Stmt::If {
             cond: map_expr(cond, f),
             then_body: then_body.into_iter().map(|s| map_stmt(s, f)).collect(),
             else_body: else_body.into_iter().map(|s| map_stmt(s, f)).collect(),
         },
-        Stmt::Loop { kind, cond, body, ..} => Stmt::Loop {
-            kind, cond: cond.map(|c| map_expr(c, f)),
+        Stmt::Loop {
+            kind, cond, body, ..
+        } => Stmt::Loop {
+            kind,
+            cond: cond.map(|c| map_expr(c, f)),
             body: body.into_iter().map(|s| map_stmt(s, f)).collect(),
         },
         Stmt::Expr(e) => Stmt::Expr(map_expr(e, f)),
@@ -85,16 +125,22 @@ fn map_stmt<F: FnMut(Expr) -> Expr + Copy>(s: Stmt, f: &mut F) -> Stmt {
 
 const INLINE_THRESHOLD: usize = 2;
 
-fn inline_small_functions(decls: &mut Vec<Decl>) {
+fn inline_small_functions(decls: &mut [Decl]) {
     let mut functions: HashMap<String, Decl> = HashMap::new();
     let mut ptr_refs: Vec<String> = Vec::new();
-    for d in decls.iter() { if let Decl::Function { name, .. } = d { functions.insert(name.clone(), d.clone()); } }
+    for d in decls.iter() {
+        if let Decl::Function { name, .. } = d {
+            functions.insert(name.clone(), d.clone());
+        }
+    }
     detect_ptr_refs(decls, &mut ptr_refs);
 
     let candidates: Vec<String> = functions.iter()
         .filter(|(n, d)| matches!(d, Decl::Function { body, .. } if body.len() <= INLINE_THRESHOLD && !ptr_refs.contains(n) && !has_cf(body)))
         .map(|(n, _)| n.clone()).collect();
-    if candidates.is_empty() { return; }
+    if candidates.is_empty() {
+        return;
+    }
 
     for decl in decls.iter_mut() {
         if let Decl::Function { body, .. } = decl {
@@ -103,23 +149,32 @@ fn inline_small_functions(decls: &mut Vec<Decl>) {
     }
 }
 
-fn inline_body(stmts: Vec<Stmt>, cand: &[String], fns: &HashMap<String, Decl>, depth: u32) -> Vec<Stmt> {
-    if depth > 10 { return stmts; }
+fn inline_body(
+    stmts: Vec<Stmt>,
+    cand: &[String],
+    fns: &HashMap<String, Decl>,
+    depth: u32,
+) -> Vec<Stmt> {
+    if depth > 10 {
+        return stmts;
+    }
     let mut r = Vec::new();
     for stmt in stmts {
         match stmt {
             Stmt::Let(n, t, e) => {
-                let e = fold_call_ret(inline_in_expr(e, cand, fns, depth+1), cand, fns);
+                let e = fold_call_ret(inline_in_expr(e, cand, fns, depth + 1), cand, fns);
                 r.push(Stmt::Let(n, t, e));
             }
             Stmt::Expr(e) => {
-                let e = inline_in_expr(e, cand, fns, depth+1);
+                let e = inline_in_expr(e, cand, fns, depth + 1);
                 match try_inline_void(&e, cand, fns) {
                     Some(s) => r.extend(s),
                     None => r.push(Stmt::Expr(e)),
                 }
             }
-            s => r.push(map_stmt(s, &mut |e| inline_in_expr(e, cand, fns, depth+1))),
+            s => r.push(map_stmt(s, &mut |e| {
+                inline_in_expr(e, cand, fns, depth + 1)
+            })),
         }
     }
     r
@@ -127,23 +182,33 @@ fn inline_body(stmts: Vec<Stmt>, cand: &[String], fns: &HashMap<String, Decl>, d
 
 fn inline_in_expr(e: Expr, cand: &[String], fns: &HashMap<String, Decl>, depth: u32) -> Expr {
     map_expr(e, &mut |e| match e {
-        Expr::Call { callee, args, ..} if depth < 10 => {
+        Expr::Call { callee, args, .. } if depth < 10 => {
             let name = match *callee {
                 Expr::Ident(ref n) => n.clone(),
-                other => return Expr::Call { callee: Box::new(other), args },
+                other => {
+                    return Expr::Call {
+                        callee: Box::new(other),
+                        args,
+                    };
+                }
             };
             if cand.contains(&name) {
                 if let Some(Decl::Function { body, params, .. }) = fns.get(&name) {
                     if let Some(Stmt::Return(Some(ret))) = body.first() {
                         let mut sub = HashMap::new();
                         for (i, (p, _)) in params.iter().enumerate() {
-                            if i < args.len() { sub.insert(p.clone(), args[i].clone()); }
+                            if i < args.len() {
+                                sub.insert(p.clone(), args[i].clone());
+                            }
                         }
                         return substitute_expr(ret, &sub);
                     }
                 }
             }
-            Expr::Call { callee: Box::new(Expr::Ident(name)), args }
+            Expr::Call {
+                callee: Box::new(Expr::Ident(name)),
+                args,
+            }
         }
         other => other,
     })
@@ -151,14 +216,16 @@ fn inline_in_expr(e: Expr, cand: &[String], fns: &HashMap<String, Decl>, depth: 
 
 /// Replace a call-to-small-fn with its return value (for let-bindings).
 fn fold_call_ret(e: Expr, cand: &[String], fns: &HashMap<String, Decl>) -> Expr {
-    if let Expr::Call { callee, args, ..} = &e {
+    if let Expr::Call { callee, args, .. } = &e {
         if let Expr::Ident(name) = callee.as_ref() {
             if cand.contains(name) {
                 if let Some(Decl::Function { body, params, .. }) = fns.get(name) {
                     if let Some(Stmt::Return(Some(ret))) = body.first() {
                         let mut sub = HashMap::new();
                         for (i, (p, _)) in params.iter().enumerate() {
-                            if i < args.len() { sub.insert(p.clone(), args[i].clone()); }
+                            if i < args.len() {
+                                sub.insert(p.clone(), args[i].clone());
+                            }
                         }
                         return substitute_expr(ret, &sub);
                     }
@@ -170,17 +237,26 @@ fn fold_call_ret(e: Expr, cand: &[String], fns: &HashMap<String, Decl>) -> Expr 
 }
 
 fn try_inline_void(e: &Expr, cand: &[String], fns: &HashMap<String, Decl>) -> Option<Vec<Stmt>> {
-    if let Expr::Call { callee, args, ..} = e {
+    if let Expr::Call { callee, args, .. } = e {
         if let Expr::Ident(name) = callee.as_ref() {
             if cand.contains(name) {
-                if let Some(Decl::Function { body, params, ret, .. }) = fns.get(name) {
-                    if *ret != Typ::Void { return None; }
+                if let Some(Decl::Function {
+                    body, params, ret, ..
+                }) = fns.get(name)
+                {
+                    if *ret != Typ::Void {
+                        return None;
+                    }
                     let mut sub = HashMap::new();
                     for (i, (p, _)) in params.iter().enumerate() {
-                        if i < args.len() { sub.insert(p.clone(), args[i].clone()); }
+                        if i < args.len() {
+                            sub.insert(p.clone(), args[i].clone());
+                        }
                     }
-                    let r: Vec<Stmt> = substitute_params(body, &sub).into_iter()
-                        .filter(|s| !matches!(s, Stmt::Return(None))).collect();
+                    let r: Vec<Stmt> = substitute_params(body, &sub)
+                        .into_iter()
+                        .filter(|s| !matches!(s, Stmt::Return(None)))
+                        .collect();
                     return Some(r);
                 }
             }
@@ -196,10 +272,31 @@ fn subst_stmt(s: &Stmt, sub: &HashMap<String, Expr>) -> Stmt {
     match s {
         Stmt::Let(n, t, e) => Stmt::Let(n.clone(), t.clone(), substitute_expr(e, sub)),
         Stmt::Assign(n, e) => Stmt::Assign(n.clone(), substitute_expr(e, sub)),
-        Stmt::IndexAssign { base, index, value, ..} => Stmt::IndexAssign { base: substitute_expr(base, sub), index: substitute_expr(index, sub), value: substitute_expr(value, sub) },
+        Stmt::IndexAssign {
+            base, index, value, ..
+        } => Stmt::IndexAssign {
+            base: substitute_expr(base, sub),
+            index: substitute_expr(index, sub),
+            value: substitute_expr(value, sub),
+        },
         Stmt::Return(e) => Stmt::Return(e.as_ref().map(|e| substitute_expr(e, sub))),
-        Stmt::If { cond, then_body, else_body, ..} => Stmt::If { cond: substitute_expr(cond, sub), then_body: substitute_params(then_body, sub), else_body: substitute_params(else_body, sub) },
-        Stmt::Loop { kind, cond, body, ..} => Stmt::Loop { kind: kind.clone(), cond: cond.as_ref().map(|c| substitute_expr(c, sub)), body: substitute_params(body, sub) },
+        Stmt::If {
+            cond,
+            then_body,
+            else_body,
+            ..
+        } => Stmt::If {
+            cond: substitute_expr(cond, sub),
+            then_body: substitute_params(then_body, sub),
+            else_body: substitute_params(else_body, sub),
+        },
+        Stmt::Loop {
+            kind, cond, body, ..
+        } => Stmt::Loop {
+            kind: kind.clone(),
+            cond: cond.as_ref().map(|c| substitute_expr(c, sub)),
+            body: substitute_params(body, sub),
+        },
         Stmt::Expr(e) => Stmt::Expr(substitute_expr(e, sub)),
         Stmt::Break => Stmt::Break,
         o => o.clone(),
@@ -211,17 +308,40 @@ fn substitute_expr(e: &Expr, sub: &HashMap<String, Expr>) -> Expr {
         other => other,
     })
 }
-fn has_cf(stmts: &[Stmt]) -> bool { stmts.iter().any(|s| matches!(s, Stmt::If { .. } | Stmt::Loop { .. })) }
+fn has_cf(stmts: &[Stmt]) -> bool {
+    stmts
+        .iter()
+        .any(|s| matches!(s, Stmt::If { .. } | Stmt::Loop { .. }))
+}
 
 fn detect_ptr_refs(decls: &[Decl], out: &mut Vec<String>) {
-    for d in decls { if let Decl::Function { body, .. } = d { ptr_in_stmts(body, out); } }
+    for d in decls {
+        if let Decl::Function { body, .. } = d {
+            ptr_in_stmts(body, out);
+        }
+    }
 }
 fn ptr_in_stmts(stmts: &[Stmt], out: &mut Vec<String>) {
     for s in stmts {
         match s {
-            Stmt::Let(_, _, e) | Stmt::Assign(_, e) | Stmt::Return(Some(e)) | Stmt::Expr(e) => ptr_in_expr(e, out),
-            Stmt::IndexAssign { base, index, value, ..} => { ptr_in_expr(base, out); ptr_in_expr(index, out); ptr_in_expr(value, out); }
-            Stmt::If { then_body, else_body, .. } => { ptr_in_stmts(then_body, out); ptr_in_stmts(else_body, out); }
+            Stmt::Let(_, _, e) | Stmt::Assign(_, e) | Stmt::Return(Some(e)) | Stmt::Expr(e) => {
+                ptr_in_expr(e, out)
+            }
+            Stmt::IndexAssign {
+                base, index, value, ..
+            } => {
+                ptr_in_expr(base, out);
+                ptr_in_expr(index, out);
+                ptr_in_expr(value, out);
+            }
+            Stmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                ptr_in_stmts(then_body, out);
+                ptr_in_stmts(else_body, out);
+            }
             Stmt::Loop { body, .. } => ptr_in_stmts(body, out),
             _ => {}
         }
@@ -229,20 +349,41 @@ fn ptr_in_stmts(stmts: &[Stmt], out: &mut Vec<String>) {
 }
 fn ptr_in_expr(e: &Expr, out: &mut Vec<String>) {
     match e {
-        Expr::Call { callee, args, ..} => {
+        Expr::Call { callee, args, .. } => {
             if let Expr::Ident(name) = callee.as_ref() {
                 if matches!(name.as_str(), "invoke" | "invoke1" | "invoke2") {
-                    if let Some(first) = args.first() { if let Expr::Ident(fn_name) = first { if !out.contains(fn_name) { out.push(fn_name.clone()); } } }
+                    if let Some(Expr::Ident(fn_name)) = args.first() {
+                        if !out.contains(fn_name) {
+                            out.push(fn_name.clone());
+                        }
+                    }
                 }
             }
-            for arg in args { if let Expr::Ident(name) = arg { if !out.contains(name) { out.push(name.clone()); } } ptr_in_expr(arg, out); }
+            for arg in args {
+                if let Expr::Ident(name) = arg {
+                    if !out.contains(name) {
+                        out.push(name.clone());
+                    }
+                }
+                ptr_in_expr(arg, out);
+            }
             ptr_in_expr(callee, out);
         }
-        Expr::Binary { lhs, rhs, .. } => { ptr_in_expr(lhs, out); ptr_in_expr(rhs, out); }
+        Expr::Binary { lhs, rhs, .. } => {
+            ptr_in_expr(lhs, out);
+            ptr_in_expr(rhs, out);
+        }
         Expr::Unary { expr, .. } => ptr_in_expr(expr, out),
         Expr::Field { base, .. } => ptr_in_expr(base, out),
-        Expr::Index { base, index, ..} => { ptr_in_expr(base, out); ptr_in_expr(index, out); }
-        Expr::StructInit { fields, .. } => { for (_, e) in fields { ptr_in_expr(e, out); } }
+        Expr::Index { base, index, .. } => {
+            ptr_in_expr(base, out);
+            ptr_in_expr(index, out);
+        }
+        Expr::StructInit { fields, .. } => {
+            for (_, e) in fields {
+                ptr_in_expr(e, out);
+            }
+        }
         _ => {}
     }
 }
@@ -250,61 +391,116 @@ fn ptr_in_expr(e: &Expr, out: &mut Vec<String>) {
 // ─── Algebraic Simplification ──────────────────────────────────────────────
 
 /// x+0→x, x*1→x, x&-1→x, x|0→x, x^0→x, x<<0→x, etc.
-fn algebraic_simplify(decls: &mut Vec<Decl>) {
+fn algebraic_simplify(decls: &mut [Decl]) {
     for body in fn_bodies_mut(decls) {
-        *body = body.iter().map(|s| map_stmt(s.clone(), &mut |e| simplify_expr(e))).collect();
+        *body = body
+            .iter()
+            .map(|s| map_stmt(s.clone(), &mut |e| simplify_expr(e)))
+            .collect();
     }
 }
 
 fn simplify_expr(e: Expr) -> Expr {
     // Clone-and-match on owned value to avoid borrow gymnastics
     match e.clone() {
-        Expr::Binary { op, lhs, rhs, ..} => {
+        Expr::Binary { op, lhs, rhs, .. } => {
             let is_zero = |e: &Expr| matches!(e, Expr::IntLit(0));
-            let is_one  = |e: &Expr| matches!(e, Expr::IntLit(1));
+            let is_one = |e: &Expr| matches!(e, Expr::IntLit(1));
             let is_neg1 = |e: &Expr| matches!(e, Expr::IntLit(-1));
             match op.as_str() {
                 "add" | "bor" | "xor" => {
-                    if is_zero(&lhs) { return *rhs; }
-                    if is_zero(&rhs) { return *lhs; }
+                    if is_zero(&lhs) {
+                        return *rhs;
+                    }
+                    if is_zero(&rhs) {
+                        return *lhs;
+                    }
                 }
                 "land" => {
-                    if is_zero(&lhs) || is_zero(&rhs) { return Expr::IntLit(0); }
-                    if is_one(&lhs)  { return *rhs; }
-                    if is_one(&rhs)  { return *lhs; }
+                    if is_zero(&lhs) || is_zero(&rhs) {
+                        return Expr::IntLit(0);
+                    }
+                    if is_one(&lhs) {
+                        return *rhs;
+                    }
+                    if is_one(&rhs) {
+                        return *lhs;
+                    }
                 }
                 "lor" => {
-                    if is_one(&lhs) || is_one(&rhs) { return Expr::IntLit(1); }
-                    if is_zero(&lhs) { return *rhs; }
-                    if is_zero(&rhs) { return *lhs; }
+                    if is_one(&lhs) || is_one(&rhs) {
+                        return Expr::IntLit(1);
+                    }
+                    if is_zero(&lhs) {
+                        return *rhs;
+                    }
+                    if is_zero(&rhs) {
+                        return *lhs;
+                    }
                 }
-                "sub" => { if is_zero(&rhs) { return *lhs; } }
+                "sub" => {
+                    if is_zero(&rhs) {
+                        return *lhs;
+                    }
+                }
                 "mul" => {
-                    if is_zero(&lhs) || is_zero(&rhs) { return Expr::IntLit(0); }
-                    if is_one(&lhs)  { return *rhs; }
-                    if is_one(&rhs)  { return *lhs; }
+                    if is_zero(&lhs) || is_zero(&rhs) {
+                        return Expr::IntLit(0);
+                    }
+                    if is_one(&lhs) {
+                        return *rhs;
+                    }
+                    if is_one(&rhs) {
+                        return *lhs;
+                    }
                 }
-                "div" => { if is_one(&rhs) { return *lhs; } }
+                "div" => {
+                    if is_one(&rhs) {
+                        return *lhs;
+                    }
+                }
                 "band" => {
-                    if is_zero(&lhs) || is_zero(&rhs) { return Expr::IntLit(0); }
-                    if is_neg1(&lhs) { return *rhs; }
-                    if is_neg1(&rhs) { return *lhs; }
+                    if is_zero(&lhs) || is_zero(&rhs) {
+                        return Expr::IntLit(0);
+                    }
+                    if is_neg1(&lhs) {
+                        return *rhs;
+                    }
+                    if is_neg1(&rhs) {
+                        return *lhs;
+                    }
                 }
-                "shl" | "shr" => { if is_zero(&rhs) { return *lhs; } }
+                "shl" | "shr" => {
+                    if is_zero(&rhs) {
+                        return *lhs;
+                    }
+                }
                 _ => {}
             }
             e
         }
-        Expr::Unary { op, expr, ..} => {
+        Expr::Unary { op, expr, .. } => {
             match op.as_str() {
                 "neg" => {
-                    if let Expr::Unary { op: inner_op, expr: inner_expr } = *expr {
-                        if inner_op == "neg" { return *inner_expr; }
+                    if let Expr::Unary {
+                        op: inner_op,
+                        expr: inner_expr,
+                    } = *expr
+                    {
+                        if inner_op == "neg" {
+                            return *inner_expr;
+                        }
                     }
                 }
                 "not" => {
-                    if let Expr::Unary { op: inner_op, expr: inner_expr2 } = *expr {
-                        if inner_op == "not" { return *inner_expr2; }
+                    if let Expr::Unary {
+                        op: inner_op,
+                        expr: inner_expr2,
+                    } = *expr
+                    {
+                        if inner_op == "not" {
+                            return *inner_expr2;
+                        }
                     }
                 }
                 _ => {}
@@ -323,13 +519,17 @@ fn remove_dead_functions(decls: &mut Vec<Decl>) {
     let mut called: HashSet<String> = HashSet::new();
     for d in decls.iter() {
         if let Decl::Function { body, .. } = d {
-            for s in body { collect_calls_in_stmt(s, &mut called); }
+            for s in body {
+                collect_calls_in_stmt(s, &mut called);
+            }
         }
     }
     // Entry function and ptr-refs are always kept
     let mut ptr_refs: Vec<String> = Vec::new();
     detect_ptr_refs(decls, &mut ptr_refs);
-    for n in &ptr_refs { called.insert(n.clone()); }
+    for n in &ptr_refs {
+        called.insert(n.clone());
+    }
 
     // Keep entry, remove the rest
     let entry = "kernel_entry";
@@ -342,10 +542,38 @@ fn remove_dead_functions(decls: &mut Vec<Decl>) {
 
 fn collect_calls_in_stmt(s: &Stmt, out: &mut HashSet<String>) {
     match s {
-        Stmt::Let(_, _, e) | Stmt::Assign(_, e) | Stmt::Return(Some(e)) | Stmt::Expr(e) => collect_calls_in_expr(e, out),
-        Stmt::IndexAssign { base, index, value, ..} => { collect_calls_in_expr(base, out); collect_calls_in_expr(index, out); collect_calls_in_expr(value, out); }
-        Stmt::If { cond, then_body, else_body, ..} => { collect_calls_in_expr(cond, out); for s in then_body { collect_calls_in_stmt(s, out); } for s in else_body { collect_calls_in_stmt(s, out); } }
-        Stmt::Loop { cond, body, .. } => { if let Some(c) = cond { collect_calls_in_expr(c, out); } for s in body { collect_calls_in_stmt(s, out); } }
+        Stmt::Let(_, _, e) | Stmt::Assign(_, e) | Stmt::Return(Some(e)) | Stmt::Expr(e) => {
+            collect_calls_in_expr(e, out)
+        }
+        Stmt::IndexAssign {
+            base, index, value, ..
+        } => {
+            collect_calls_in_expr(base, out);
+            collect_calls_in_expr(index, out);
+            collect_calls_in_expr(value, out);
+        }
+        Stmt::If {
+            cond,
+            then_body,
+            else_body,
+            ..
+        } => {
+            collect_calls_in_expr(cond, out);
+            for s in then_body {
+                collect_calls_in_stmt(s, out);
+            }
+            for s in else_body {
+                collect_calls_in_stmt(s, out);
+            }
+        }
+        Stmt::Loop { cond, body, .. } => {
+            if let Some(c) = cond {
+                collect_calls_in_expr(c, out);
+            }
+            for s in body {
+                collect_calls_in_stmt(s, out);
+            }
+        }
         _ => {}
     }
 }
@@ -363,15 +591,18 @@ fn collect_calls_in_expr(e: &Expr, out: &mut HashSet<String>) {
 // ─── Constant Folding ──────────────────────────────────────────────────────
 
 /// Evaluate compile-time integer expressions: `3 + 4` → `7`.
-fn fold_constants_in_decls(decls: &mut Vec<Decl>) {
+fn fold_constants_in_decls(decls: &mut [Decl]) {
     for body in fn_bodies_mut(decls) {
-        *body = body.iter().map(|s| map_stmt(s.clone(), &mut |e| fold_expr(e))).collect();
+        *body = body
+            .iter()
+            .map(|s| map_stmt(s.clone(), &mut |e| fold_expr(e)))
+            .collect();
     }
 }
 
 fn fold_expr(e: Expr) -> Expr {
     match &e {
-        Expr::Binary { op, lhs, rhs, ..} => {
+        Expr::Binary { op, lhs, rhs, .. } => {
             if let (Expr::IntLit(a), Expr::IntLit(b)) = (lhs.as_ref(), rhs.as_ref()) {
                 // ponytail: skip div-by-zero (would change runtime behavior)
                 let result = match op.as_str() {
@@ -401,7 +632,7 @@ fn fold_expr(e: Expr) -> Expr {
             }
             e
         }
-        Expr::Unary { op, expr, ..} => {
+        Expr::Unary { op, expr, .. } => {
             if let Expr::IntLit(n) = expr.as_ref() {
                 let result = match op.as_str() {
                     "neg" => Some(-n),
@@ -421,7 +652,7 @@ fn fold_expr(e: Expr) -> Expr {
 // ─── Constant Propagation ──────────────────────────────────────────────────
 
 /// Replace `let x = C; ... x ...` (x used once) with `... C ...`, remove the let.
-fn propagate_constants(decls: &mut Vec<Decl>) {
+fn propagate_constants(decls: &mut [Decl]) {
     for body in fn_bodies_mut(decls) {
         propagate_in_body(body);
     }
@@ -437,14 +668,18 @@ fn propagate_in_body(stmts: &mut Vec<Stmt>) {
         count_uses_in_stmt(s, &mut consts);
     }
 
-    let single_use: HashSet<String> = consts.iter()
+    let single_use: HashSet<String> = consts
+        .iter()
         .filter(|(_, (_, count))| *count == 1)
         .map(|(n, _)| n.clone())
         .collect();
-    if single_use.is_empty() { return; }
+    if single_use.is_empty() {
+        return;
+    }
 
     // Build substitution map
-    let sub: HashMap<String, Expr> = consts.iter()
+    let sub: HashMap<String, Expr> = consts
+        .iter()
         .filter(|(n, _)| single_use.contains(n.as_str()))
         .map(|(n, (v, _))| (n.clone(), Expr::IntLit(*v)))
         .collect();
@@ -460,10 +695,36 @@ fn count_uses_in_stmt(s: &Stmt, consts: &mut HashMap<String, (i64, usize)>) {
     match s {
         Stmt::Let(_, _, e) => count_uses_in_expr(e, consts),
         Stmt::Assign(_, e) => count_uses_in_expr(e, consts),
-        Stmt::IndexAssign { base, index, value, ..} => { count_uses_in_expr(base, consts); count_uses_in_expr(index, consts); count_uses_in_expr(value, consts); }
+        Stmt::IndexAssign {
+            base, index, value, ..
+        } => {
+            count_uses_in_expr(base, consts);
+            count_uses_in_expr(index, consts);
+            count_uses_in_expr(value, consts);
+        }
         Stmt::Return(Some(e)) => count_uses_in_expr(e, consts),
-        Stmt::If { cond, then_body, else_body, ..} => { count_uses_in_expr(cond, consts); for s in then_body { count_uses_in_stmt(s, consts); } for s in else_body { count_uses_in_stmt(s, consts); } }
-        Stmt::Loop { cond, body, .. } => { if let Some(c) = cond { count_uses_in_expr(c, consts); } for s in body { count_uses_in_stmt(s, consts); } }
+        Stmt::If {
+            cond,
+            then_body,
+            else_body,
+            ..
+        } => {
+            count_uses_in_expr(cond, consts);
+            for s in then_body {
+                count_uses_in_stmt(s, consts);
+            }
+            for s in else_body {
+                count_uses_in_stmt(s, consts);
+            }
+        }
+        Stmt::Loop { cond, body, .. } => {
+            if let Some(c) = cond {
+                count_uses_in_expr(c, consts);
+            }
+            for s in body {
+                count_uses_in_stmt(s, consts);
+            }
+        }
         Stmt::Expr(e) => count_uses_in_expr(e, consts),
         _ => {}
     }
@@ -492,7 +753,7 @@ fn replace_in_expr(e: Expr, sub: &HashMap<String, Expr>) -> Expr {
 
 // ─── Dead Code Elimination ─────────────────────────────────────────────────
 
-fn dead_code_eliminate(decls: &mut Vec<Decl>) {
+fn dead_code_eliminate(decls: &mut [Decl]) {
     for body in fn_bodies_mut(decls) {
         dce_body(body);
     }
@@ -503,7 +764,10 @@ fn dce_body(stmts: &mut Vec<Stmt>) {
     let mut cleaned: Vec<Stmt> = Vec::with_capacity(stmts.len());
     for s in stmts.iter() {
         if matches!(s, Stmt::Return(None)) {
-            if cleaned.last().map_or(false, |p| matches!(p, Stmt::Return(None))) {
+            if cleaned
+                .last()
+                .map_or(false, |p| matches!(p, Stmt::Return(None)))
+            {
                 continue;
             }
         }
@@ -522,7 +786,14 @@ fn dce_body(stmts: &mut Vec<Stmt>) {
     // Recurse
     for s in stmts.iter_mut() {
         match s {
-            Stmt::If { then_body, else_body, .. } => { dce_body(then_body); dce_body(else_body); }
+            Stmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                dce_body(then_body);
+                dce_body(else_body);
+            }
             Stmt::Loop { body, .. } => dce_body(body),
             _ => {}
         }
@@ -532,18 +803,47 @@ fn dce_body(stmts: &mut Vec<Stmt>) {
 fn collect_used(stmts: &[Stmt], out: &mut HashSet<String>) {
     for s in stmts {
         match s {
-            Stmt::Assign(n, e) => { out.insert(n.clone()); collect_used_in_expr(e, out); }
-            Stmt::IndexAssign { base, index, value, ..} => { collect_used_in_expr(base, out); collect_used_in_expr(index, out); collect_used_in_expr(value, out); }
-            Stmt::Let(_, _, e) | Stmt::Return(Some(e)) | Stmt::Expr(e) => collect_used_in_expr(e, out),
-            Stmt::If { cond, then_body, else_body, ..} => { collect_used_in_expr(cond, out); collect_used(then_body, out); collect_used(else_body, out); }
-            Stmt::Loop { cond, body, .. } => { if let Some(c) = cond { collect_used_in_expr(c, out); } collect_used(body, out); }
+            Stmt::Assign(n, e) => {
+                out.insert(n.clone());
+                collect_used_in_expr(e, out);
+            }
+            Stmt::IndexAssign {
+                base, index, value, ..
+            } => {
+                collect_used_in_expr(base, out);
+                collect_used_in_expr(index, out);
+                collect_used_in_expr(value, out);
+            }
+            Stmt::Let(_, _, e) | Stmt::Return(Some(e)) | Stmt::Expr(e) => {
+                collect_used_in_expr(e, out)
+            }
+            Stmt::If {
+                cond,
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_used_in_expr(cond, out);
+                collect_used(then_body, out);
+                collect_used(else_body, out);
+            }
+            Stmt::Loop { cond, body, .. } => {
+                if let Some(c) = cond {
+                    collect_used_in_expr(c, out);
+                }
+                collect_used(body, out);
+            }
             _ => {}
         }
     }
 }
 
 fn collect_used_in_expr(e: &Expr, out: &mut HashSet<String>) {
-    walk_expr(e, &mut |e| { if let Expr::Ident(n) = e { out.insert(n.clone()); } });
+    walk_expr(e, &mut |e| {
+        if let Expr::Ident(n) = e {
+            out.insert(n.clone());
+        }
+    });
 }
 
 /// Table-driven x86-64 instruction length decoder.
@@ -556,15 +856,25 @@ fn x86_64_insn_length(code: &[u8], pos: usize) -> usize {
     while p < code.len() {
         match code[p] {
             // Group 1: lock, repne, repe
-            0xF0 | 0xF2 | 0xF3 => { p += 1; }
+            0xF0 | 0xF2 | 0xF3 => {
+                p += 1;
+            }
             // Group 2: segment overrides, branch hints
-            0x2E | 0x36 | 0x3E | 0x26 | 0x64 | 0x65 => { p += 1; }
+            0x2E | 0x36 | 0x3E | 0x26 | 0x64 | 0x65 => {
+                p += 1;
+            }
             // Group 3: operand size override
-            0x66 => { p += 1; }
+            0x66 => {
+                p += 1;
+            }
             // Group 4: address size override
-            0x67 => { p += 1; }
+            0x67 => {
+                p += 1;
+            }
             // REX prefix (0x40-0x4F)
-            _ if (0x40..=0x4F).contains(&code[p]) => { p += 1; }
+            _ if (0x40..=0x4F).contains(&code[p]) => {
+                p += 1;
+            }
             _ => break,
         }
     }
@@ -588,7 +898,13 @@ fn x86_64_insn_length(code: &[u8], pos: usize) -> usize {
 
     // Three-byte opcode (0x0F 0x38/0x3A)
     let _op3: Option<u8> = if let Some(0x38 | 0x3A) = op2 {
-        if p < code.len() { let o3 = code[p]; p += 1; Some(o3) } else { None }
+        if p < code.len() {
+            let o3 = code[p];
+            p += 1;
+            Some(o3)
+        } else {
+            None
+        }
     } else {
         None
     };
@@ -639,20 +955,20 @@ fn x86_64_insn_length(code: &[u8], pos: usize) -> usize {
         (false, 0xFD) => false,        // std
         (false, 0xFE..=0xFF) => true,  // inc/dec/call/jmp/push r/m
         // Two-byte opcodes
-        (true, 0x00..=0x7F) => true,   // most 0F-prefixed instructions
-        (true, 0x80..=0x8F) => false,  // jcc rel32 (handled by caller)
-        (true, 0x90..=0x9F) => false,  // setcc (modrm after)
-        (true, 0xA0..=0xA7) => false,  // push fs/gs
-        (true, 0xA8..=0xAF) => false,  // swapgs, rdtscp
-        (true, 0xB0..=0xBF) => true,   // cmpxchg
-        (true, 0xC0..=0xC1) => true,   // xadd
-        (true, 0xC2) => true,          // cmpss/cmpsd/cmpps/cmppd
-        (true, 0xC3..=0xC6) => true,   // movnti, pinsrw, shufps/pd
-        (true, 0xC7..0xCF) => true,    // cmovcc
-        (true, 0xD0..=0xDF) => true,   // SSE1
-        (true, 0xE0..=0xEF) => true,   // SSE1
-        (true, 0xF0..=0xFF) => true,   // SSE1/SSE2
-        _ => true, // Conservative: assume ModRM
+        (true, 0x00..=0x7F) => true,  // most 0F-prefixed instructions
+        (true, 0x80..=0x8F) => false, // jcc rel32 (handled by caller)
+        (true, 0x90..=0x9F) => false, // setcc (modrm after)
+        (true, 0xA0..=0xA7) => false, // push fs/gs
+        (true, 0xA8..=0xAF) => false, // swapgs, rdtscp
+        (true, 0xB0..=0xBF) => true,  // cmpxchg
+        (true, 0xC0..=0xC1) => true,  // xadd
+        (true, 0xC2) => true,         // cmpss/cmpsd/cmpps/cmppd
+        (true, 0xC3..=0xC6) => true,  // movnti, pinsrw, shufps/pd
+        (true, 0xC7..=0xCF) => true,  // cmovcc
+        (true, 0xD0..=0xDF) => true,  // SSE1
+        (true, 0xE0..=0xEF) => true,  // SSE1
+        (true, 0xF0..=0xFF) => true,  // SSE1/SSE2
+        _ => true,                    // Conservative: assume ModRM
     };
 
     // ── ModRM byte ──
@@ -687,10 +1003,16 @@ fn x86_64_insn_length(code: &[u8], pos: usize) -> usize {
     // ── Immediate ──
     let immediate_size = match (two_byte, opcode_total) {
         // MOV r8..r15, imm64
-        (false, 0xB8..=0xBF) if code[pos..p].iter().any(|&b| (0x40..=0x4F).contains(&b) && (b & 8) != 0) => 8, // REX.W + mov r64, imm64
+        (false, 0xB8..=0xBF)
+            if code[pos..p]
+                .iter()
+                .any(|&b| (0x40..=0x4F).contains(&b) && (b & 8) != 0) =>
+        {
+            8
+        } // REX.W + mov r64, imm64
         (false, 0xB8..=0xBF) => {
             // Without REX.W or with REX but not W=1: 32-bit sign-extended
-            if code[pos..p].iter().any(|&b| b == 0x48) { 4 } else { 4 }
+            if code[pos..p].contains(&0x48) { 4 } else { 4 }
         }
         // MOV r/m64, imm32 (REX.W + C7 /0)
         (false, 0xC7) => {
@@ -698,9 +1020,11 @@ fn x86_64_insn_length(code: &[u8], pos: usize) -> usize {
             let reg_ext = (modrm >> 3) & 7;
             if reg_ext == 0 {
                 // need to check for REX.W for 64-bit
-                let rex_w = code[pos..p-2].iter().any(|&b| b == 0x48);
+                let rex_w = code[pos..p - 2].contains(&0x48);
                 if rex_w { 4 } else { 4 }
-            } else { 4 }
+            } else {
+                4
+            }
         }
         // shift/rotate by imm8 (C0/C1)
         (false, 0xC0) | (false, 0xC1) => 1,
@@ -717,10 +1041,10 @@ fn x86_64_insn_length(code: &[u8], pos: usize) -> usize {
         // IN/OUT imm8
         (false, 0xE4) | (false, 0xE5) | (false, 0xE6) | (false, 0xE7) => 1,
         // PUSH imm8/imm32
-        (false, 0x6A) => 1,  // push imm8
-        (false, 0x68) => 4,  // push imm32
-        (false, 0x6B) => 1,  // imul r64, r/m, imm8
-        (false, 0x69) => 4,  // imul r64, r/m, imm32
+        (false, 0x6A) => 1, // push imm8
+        (false, 0x68) => 4, // push imm32
+        (false, 0x6B) => 1, // imul r64, r/m, imm8
+        (false, 0x69) => 4, // imul r64, r/m, imm32
         // ARPL
         (false, 0x63) if !code[pos..p].iter().any(|&b| (0x40..=0x4F).contains(&b)) => 0, // not MOVSXD (without REX)
         // MOVSXD
@@ -737,12 +1061,12 @@ fn x86_64_insn_length(code: &[u8], pos: usize) -> usize {
 /// A relative jump/call instruction to re-patch after byte removal.
 #[derive(Debug)]
 struct RelJump {
-    pos: usize,       // start position in code buffer
-    len: usize,       // instruction length (2, 5, or 6 bytes)
+    pos: usize,         // start position in code buffer
+    len: usize,         // instruction length (2, 5, or 6 bytes)
     offset_byte: usize, // position of the offset bytes (pos+1 for most, pos+2 for 0F 8x)
     offset_value: i32,  // original signed offset
-    target: usize,       // absolute target position after instruction
-    is_call: bool,       // true for call (E8)
+    target: usize,      // absolute target position after instruction
+    is_call: bool,      // true for call (E8)
 }
 
 /// Scan the code buffer and remove redundant `mov r, r` instructions where
@@ -764,13 +1088,11 @@ pub fn peephole_x86_64(code: &mut Vec<u8>) {
     while i < code.len() {
         let b = code[i];
         let (len, is_rel, is_call, offset_idx, offset_size) = match b {
-            0xE8 => (5, true, true, 1, 4),  // call rel32
-            0xE9 => (5, true, false, 1, 4), // jmp rel32
-            0xEB => (2, true, false, 1, 1), // jmp rel8
-            0x74 | 0x75 | 0x7C | 0x7D | 0x7E | 0x7F
-            | 0x70 | 0x71 | 0x72 | 0x73 | 0x76 | 0x77
-            | 0x78 | 0x79 | 0x7A | 0x7B => (2, true, false, 1, 1), // jcc rel8
-            0x0F if i + 1 < code.len() && (0x80..=0x8F).contains(&code[i+1]) => {
+            0xE8 => (5, true, true, 1, 4),         // call rel32
+            0xE9 => (5, true, false, 1, 4),        // jmp rel32
+            0xEB => (2, true, false, 1, 1),        // jmp rel8
+            0x70..=0x7F => (2, true, false, 1, 1), // jcc rel8
+            0x0F if i + 1 < code.len() && (0x80..=0x8F).contains(&code[i + 1]) => {
                 (6, true, false, 2, 4) // jcc rel32 (0F 8x ...)
             }
             _ => {
@@ -797,7 +1119,7 @@ pub fn peephole_x86_64(code: &mut Vec<u8>) {
                 offset_byte: i + offset_idx,
                 offset_value,
                 target,
-                is_call: is_call,
+                is_call,
             });
         }
         i += len;
@@ -825,13 +1147,13 @@ pub fn peephole_x86_64(code: &mut Vec<u8>) {
     while i < code.len() {
         let is_redundant_mov = if i + 1 < code.len() {
             let (opcode, modrm) = if code[i] == 0x48 && i + 2 < code.len() {
-                (code[i+1], code[i+2])
+                (code[i + 1], code[i + 2])
             } else {
-                (code[i], code[i+1])
+                (code[i], code[i + 1])
             };
-            let mod_field = modrm >> 6;      // bits 7:6
+            let mod_field = modrm >> 6; // bits 7:6
             let reg_field = (modrm >> 3) & 7; // bits 5:3
-            let rm_field = modrm & 7;         // bits 2:0
+            let rm_field = modrm & 7; // bits 2:0
             if mod_field == 3 && reg_field == rm_field {
                 matches!(opcode, 0x89 | 0x8B)
             } else {
@@ -841,11 +1163,18 @@ pub fn peephole_x86_64(code: &mut Vec<u8>) {
             false
         };
         if is_redundant_mov {
-            let mov_len = if i + 2 < code.len() && code[i] == 0x48 { 3 } else { 2 };
+            let mov_len = if i + 2 < code.len() && code[i] == 0x48 {
+                3
+            } else {
+                2
+            };
             // Safety: only remove if no jump targets this instruction
             let is_jump_target = (0..mov_len).any(|delta| target_set.contains(&(i + delta)));
             if !is_jump_target {
-                remove.push(RemoveRange { start: i, len: mov_len });
+                remove.push(RemoveRange {
+                    start: i,
+                    len: mov_len,
+                });
             }
             i += mov_len;
         } else {
@@ -857,13 +1186,13 @@ pub fn peephole_x86_64(code: &mut Vec<u8>) {
     while i < code.len() {
         let is_redundant_mov = if i + 1 < code.len() {
             let (opcode, modrm) = if code[i] == 0x48 && i + 2 < code.len() {
-                (code[i+1], code[i+2])
+                (code[i + 1], code[i + 2])
             } else {
-                (code[i], code[i+1])
+                (code[i], code[i + 1])
             };
-            let mod_field = modrm >> 6;      // bits 7:6
+            let mod_field = modrm >> 6; // bits 7:6
             let reg_field = (modrm >> 3) & 7; // bits 5:3
-            let rm_field = modrm & 7;         // bits 2:0
+            let rm_field = modrm & 7; // bits 2:0
             if mod_field == 3 && reg_field == rm_field {
                 matches!(opcode, 0x89 | 0x8B)
             } else {
@@ -873,8 +1202,15 @@ pub fn peephole_x86_64(code: &mut Vec<u8>) {
             false
         };
         if is_redundant_mov {
-            let mov_len = if i + 2 < code.len() && code[i] == 0x48 { 3 } else { 2 };
-            remove.push(RemoveRange { start: i, len: mov_len });
+            let mov_len = if i + 2 < code.len() && code[i] == 0x48 {
+                3
+            } else {
+                2
+            };
+            remove.push(RemoveRange {
+                start: i,
+                len: mov_len,
+            });
             i += mov_len;
         } else {
             i += 1;
@@ -885,15 +1221,18 @@ pub fn peephole_x86_64(code: &mut Vec<u8>) {
     // Remove trailing `66 90` (2-byte NOP) and `90` (single NOP)
     let mut trailing = 0;
     let mut j = code.len();
-    while j >= 2 && code[j-2] == 0x66 && code[j-1] == 0x90 {
+    while j >= 2 && code[j - 2] == 0x66 && code[j - 1] == 0x90 {
         trailing += 2;
         j -= 2;
     }
-    if j >= 1 && code[j-1] == 0x90 {
+    if j >= 1 && code[j - 1] == 0x90 {
         trailing += 1;
     }
     if trailing > 0 {
-        remove.push(RemoveRange { start: code.len() - trailing, len: trailing });
+        remove.push(RemoveRange {
+            start: code.len() - trailing,
+            len: trailing,
+        });
     }
 
     // Nothing to do?
@@ -961,7 +1300,7 @@ pub fn peephole_x86_64(code: &mut Vec<u8>) {
         } else {
             // rel32: 4 byte offset
             let new_offset_i32 = new_offset as i32;
-            code[offset_byte..offset_byte+4].copy_from_slice(&new_offset_i32.to_le_bytes());
+            code[offset_byte..offset_byte + 4].copy_from_slice(&new_offset_i32.to_le_bytes());
         }
     }
 

@@ -1653,7 +1653,7 @@ fn cmd_emit_bootstrap(
     // The lowerer places the entry function first, so entry_offset is 0.
     // The trampoline's KERNEL_ENTRY is at KCODE_BASE + 0x100, so we emit
     // an SCI (Space Component Image) header between the trampoline and code.
-    let mut code = result.code;
+    let code = result.code;
     // ponytail: peephole disabled — x86_64_insn_length decoder needs more
     // edge-case verification against the full kernel binary before enabling.
     // inauguration::core_opt::peephole_x86_64(&mut code);
@@ -1889,9 +1889,13 @@ fn cmd_eval(cwd: &Path, code: &str, verbose: bool) -> Result<()> {
     // Guess return type from bare expression for ergonomic eval.
     let guess_type = |s: &str| -> &str {
         let s = s.trim();
-        if s == "true" || s == "false" { "Bool" }
-        else if s.starts_with('"') { "String" }
-        else { "Int" }
+        if s == "true" || s == "false" {
+            "Bool"
+        } else if s.starts_with('"') {
+            "String"
+        } else {
+            "Int"
+        }
     };
     let wrapped = if starts_decl || trimmed.contains("\nfn ") {
         code.to_string()
@@ -1904,16 +1908,23 @@ fn cmd_eval(cwd: &Path, code: &str, verbose: bool) -> Result<()> {
 
     let dir = std::env::temp_dir().join("inaug-eval");
     let _ = std::fs::create_dir_all(&dir);
-    let path = dir.join(format!("{}.in", std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos()));
-    std::fs::write(&path, &wrapped).map_err(|e| InError::Message(format!("write eval temp: {e}")))?;
+    let path = dir.join(format!(
+        "{}.in",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    std::fs::write(&path, &wrapped)
+        .map_err(|e| InError::Message(format!("write eval temp: {e}")))?;
 
     let source_path = resolve_invocation_path(cwd, &path.to_string_lossy());
     let output = inauguration::bytecode_compiler::compile_source_path(
-        &source_path, "App", parser_registry::ParserCli::Auto)
-        .map_err(|e| InError::Message(format!("compile: {e}")))?;
+        &source_path,
+        "App",
+        parser_registry::ParserCli::Auto,
+    )
+    .map_err(|e| InError::Message(format!("compile: {e}")))?;
     let result = inauguration::bytecode_compiler::run_bytecode_module(output.module)
         .map_err(|e| InError::Message(format!("execute: {e}")))?;
 
@@ -1925,7 +1936,7 @@ fn cmd_eval(cwd: &Path, code: &str, verbose: bool) -> Result<()> {
             inauguration::bytecode::Value::Bool(b) => println!("{}", b),
             inauguration::bytecode::Value::String(s) => println!("{}", s),
             inauguration::bytecode::Value::Array(items) => println!("{:?}", items),
-            inauguration::bytecode::Value::Nil => {},
+            inauguration::bytecode::Value::Nil => {}
             _ => eprintln!("{:?}", result),
         }
     }

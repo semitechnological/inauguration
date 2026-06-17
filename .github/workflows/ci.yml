@@ -27,10 +27,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Format rust-driver
-        run: cargo fmt --check
+        run: cargo fmt --check --all
         working-directory: compiler/rust-driver
       - name: Clippy rust-driver
-        run: cargo clippy --all-targets --all-features --locked -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
         working-directory: compiler/rust-driver
       - name: Test hybrid-cli package
         run: cargo test -p hybrid-cli
@@ -61,6 +61,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Build in binary
+        run: cargo build --release --bin in
+        working-directory: in-cli
+      - name: Add in binary to PATH
+        run: echo "$PWD/in-cli/target/release" >> "$GITHUB_PATH"
       - name: in build (.swift Tree-sitter sample)
         run: ./scripts/check-native-subset-sample.sh
 
@@ -74,6 +79,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Build in binary
+        run: cargo build --release --bin in
+        working-directory: in-cli
+      - name: Add in binary to PATH
+        run: echo "$PWD/in-cli/target/release" >> "$GITHUB_PATH"
       - name: in build (.in v0 sample)
         run: ./scripts/check-in-lang-sample.sh
 
@@ -87,6 +97,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Build in binary
+        run: cargo build --release --bin in
+        working-directory: in-cli
+      - name: Add in binary to PATH
+        run: echo "$PWD/in-cli/target/release" >> "$GITHUB_PATH"
       - name: in build (.icore sample)
         run: ./scripts/check-icore-sample.sh
 
@@ -103,10 +118,9 @@ jobs:
         run: cargo build --release --bin in
         working-directory: in-cli
       - name: Add in binary to PATH
-        run: echo "$PWD/target/release" >> "$GITHUB_PATH"
-        working-directory: in-cli
+        run: echo "$PWD/in-cli/target/release" >> "$GITHUB_PATH"
       - name: Run in test
-        run: in test
+        run: command in test
 
   in-test-macos:
     name: in test (macos)
@@ -119,14 +133,13 @@ jobs:
         run: cargo build --release --bin in
         working-directory: in-cli
       - name: Add in binary to PATH
-        run: echo "$PWD/target/release" >> "$GITHUB_PATH"
-        working-directory: in-cli
+        run: echo "$PWD/in-cli/target/release" >> "$GITHUB_PATH"
       - name: Run in test
-        run: in test
+        run: command in test
       - name: Run in test owned-native
         env:
           IN_TEST_SKIP_SWIFT: "1"
-        run: in test --owned-native
+        run: command in test --owned-native
 
   hybrid-libs:
     name: Hybrid library crates

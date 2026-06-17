@@ -21,7 +21,11 @@ pub enum ErrorCategory {
 
 impl CompileError {
     pub fn parse(msg: impl Into<String>) -> Self {
-        Self { category: ErrorCategory::Parse, message: msg.into(), span: None }
+        Self {
+            category: ErrorCategory::Parse,
+            message: msg.into(),
+            span: None,
+        }
     }
     pub fn parse_at(line: u32, col: u32, file: &str, msg: impl Into<String>) -> Self {
         Self {
@@ -31,19 +35,39 @@ impl CompileError {
         }
     }
     pub fn type_error(msg: impl Into<String>) -> Self {
-        Self { category: ErrorCategory::TypeError, message: msg.into(), span: None }
+        Self {
+            category: ErrorCategory::TypeError,
+            message: msg.into(),
+            span: None,
+        }
     }
     pub fn verifier(msg: impl Into<String>) -> Self {
-        Self { category: ErrorCategory::Verifier, message: msg.into(), span: None }
+        Self {
+            category: ErrorCategory::Verifier,
+            message: msg.into(),
+            span: None,
+        }
     }
     pub fn lower(msg: impl Into<String>) -> Self {
-        Self { category: ErrorCategory::Lower, message: msg.into(), span: None }
+        Self {
+            category: ErrorCategory::Lower,
+            message: msg.into(),
+            span: None,
+        }
     }
     pub fn io(msg: impl Into<String>) -> Self {
-        Self { category: ErrorCategory::Io, message: msg.into(), span: None }
+        Self {
+            category: ErrorCategory::Io,
+            message: msg.into(),
+            span: None,
+        }
     }
     pub fn internal(msg: impl Into<String>) -> Self {
-        Self { category: ErrorCategory::Internal, message: msg.into(), span: None }
+        Self {
+            category: ErrorCategory::Internal,
+            message: msg.into(),
+            span: None,
+        }
     }
 }
 
@@ -58,7 +82,11 @@ impl fmt::Display for CompileError {
             ErrorCategory::Internal => "internal error",
         };
         if let Some(span) = &self.span {
-            write!(f, "{cat} at {}:{}:{}: {}", span.file, span.line, span.col, self.message)
+            write!(
+                f,
+                "{cat} at {}:{}:{}: {}",
+                span.file, span.line, span.col, self.message
+            )
         } else {
             write!(f, "{cat}: {}", self.message)
         }

@@ -265,7 +265,9 @@ impl Pass for Cleanup {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hybrid_core::{IrBasicBlock, IrFunction, IrInstruction, IrModule, IrOpcode, IrType, IrValue};
+    use hybrid_core::{
+        IrBasicBlock, IrFunction, IrInstruction, IrModule, IrOpcode, IrType, IrValue,
+    };
 
     fn make_test_module() -> IrModule {
         let mut module = IrModule::new("test");
@@ -298,7 +300,11 @@ mod tests {
         let mut func = IrFunction::new("f", vec![], IrType::Void);
 
         let mut block = IrBasicBlock::new("dead");
-        block.terminator = Some(IrInstruction::new(IrOpcode::Unreachable, IrType::Void, vec![]));
+        block.terminator = Some(IrInstruction::new(
+            IrOpcode::Unreachable,
+            IrType::Void,
+            vec![],
+        ));
         func.add_block(block);
 
         let mut live = IrBasicBlock::new("live");
@@ -319,7 +325,11 @@ mod tests {
         let mut func = IrFunction::new("f", vec![], IrType::Void);
 
         let mut block = IrBasicBlock::new("dead");
-        block.terminator = Some(IrInstruction::new(IrOpcode::Unreachable, IrType::Void, vec![]));
+        block.terminator = Some(IrInstruction::new(
+            IrOpcode::Unreachable,
+            IrType::Void,
+            vec![],
+        ));
         func.add_block(block);
 
         let mut live = IrBasicBlock::new("live");

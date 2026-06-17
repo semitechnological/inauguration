@@ -243,7 +243,11 @@ impl CodegenBackend for NullBackend {
         BackendKind::RawBinary
     }
 
-    fn emit(&self, module: &IrModule, _spec: &ComponentSpec) -> Result<BackendOutput, BackendError> {
+    fn emit(
+        &self,
+        module: &IrModule,
+        _spec: &ComponentSpec,
+    ) -> Result<BackendOutput, BackendError> {
         if module.functions.is_empty() {
             return Err(BackendError::EmptyModule);
         }
@@ -271,7 +275,7 @@ mod tests {
     use super::*;
     use hybrid_core::{
         ArtifactKind::*, ComponentSpec, IrBasicBlock, IrFunction, IrInstruction, IrModule,
-        IrOpcode, IrType, IrValue, OptimizationLevel,
+        IrOpcode, IrType, OptimizationLevel,
     };
 
     fn spec(target: &str, kind: ArtifactKind) -> ComponentSpec {
@@ -341,8 +345,14 @@ mod tests {
     fn backend_extension_variants() {
         assert_eq!(backend_extension(BackendKind::X86_64Elf, false, true), "a");
         assert_eq!(backend_extension(BackendKind::X86_64Elf, true, false), "so");
-        assert_eq!(backend_extension(BackendKind::AArch64MachO, false, false), "o");
+        assert_eq!(
+            backend_extension(BackendKind::AArch64MachO, false, false),
+            "o"
+        );
         assert_eq!(backend_extension(BackendKind::Wasm32, false, false), "wasm");
-        assert_eq!(backend_extension(BackendKind::RawBinary, false, false), "bin");
+        assert_eq!(
+            backend_extension(BackendKind::RawBinary, false, false),
+            "bin"
+        );
     }
 }

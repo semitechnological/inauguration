@@ -254,7 +254,11 @@ pub fn split_top_level_decl_blocks(source: &str) -> Vec<(usize, String)> {
                 depth += delta;
                 if depth == 0 {
                     let buf = current.take().expect("just set");
-                    let text = buf.into_iter().map(|(_, s)| s).collect::<Vec<_>>().join("\n");
+                    let text = buf
+                        .into_iter()
+                        .map(|(_, s)| s)
+                        .collect::<Vec<_>>()
+                        .join("\n");
                     out.push((line_no + 1, text));
                 }
                 continue;
@@ -263,7 +267,10 @@ pub fn split_top_level_decl_blocks(source: &str) -> Vec<(usize, String)> {
         }
 
         if !(t.is_empty() || t.starts_with("//")) {
-            current.as_mut().expect("inside decl").push((line_no + 1, t.to_string()));
+            current
+                .as_mut()
+                .expect("inside decl")
+                .push((line_no + 1, t.to_string()));
         }
         depth += delta;
         if depth < 0 {
@@ -272,7 +279,11 @@ pub fn split_top_level_decl_blocks(source: &str) -> Vec<(usize, String)> {
         if depth == 0 {
             let buf = current.take().expect("inside decl");
             let start_line = buf.first().map(|(l, _)| *l).unwrap_or(1);
-            let text = buf.into_iter().map(|(_, s)| s).collect::<Vec<_>>().join("\n");
+            let text = buf
+                .into_iter()
+                .map(|(_, s)| s)
+                .collect::<Vec<_>>()
+                .join("\n");
             out.push((start_line, text));
         }
     }
@@ -281,7 +292,11 @@ pub fn split_top_level_decl_blocks(source: &str) -> Vec<(usize, String)> {
 
 /// Legacy: line-oriented filter (single-line decls only). Prefer [`split_top_level_decl_blocks`].
 pub fn filter_top_level_in_decl_lines(source: &str) -> String {
-    split_top_level_decl_blocks(source).into_iter().map(|(_, text)| text).collect::<Vec<_>>().join("\n")
+    split_top_level_decl_blocks(source)
+        .into_iter()
+        .map(|(_, text)| text)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn split_and_trim(sep: char, s: &str) -> Vec<String> {
@@ -1454,7 +1469,7 @@ fn parse_assign_stmt(s: &str) -> Option<Stmt> {
     }
     let value = parse_expr(trim(&s[eq_pos + 1..]));
     match parse_expr(name) {
-        Expr::Index { base, index, ..} => Some(Stmt::IndexAssign {
+        Expr::Index { base, index, .. } => Some(Stmt::IndexAssign {
             base: *base,
             index: *index,
             value,
@@ -1762,7 +1777,10 @@ fn parse_for_expanded(s: &str) -> Result<Vec<Stmt>, String> {
 }
 
 #[allow(clippy::type_complexity)]
-fn parse_fn_block(block: &str, fn_line: u32) -> Result<(String, Vec<(String, Typ)>, Typ, Vec<Stmt>), String> {
+fn parse_fn_block(
+    block: &str,
+    fn_line: u32,
+) -> Result<(String, Vec<(String, Typ)>, Typ, Vec<Stmt>), String> {
     let t = trim(block);
     let rest = t
         .strip_prefix("fn ")
@@ -1772,8 +1790,8 @@ fn parse_fn_block(block: &str, fn_line: u32) -> Result<(String, Vec<(String, Typ
         let (name, params, ret) = parse_fn_header(header);
         let body_inner = brace_content_after_open(rest, brace_idx)
             .ok_or_else(|| format!(".in at line {fn_line}: unclosed `{{` in function body"))?;
-        let body = parse_function_body(body_inner)
-            .map_err(|e| format!(".in at line {fn_line}: {e}"))?;
+        let body =
+            parse_function_body(body_inner).map_err(|e| format!(".in at line {fn_line}: {e}"))?;
         Ok((name, params, ret, body))
     } else {
         let (name, params, ret) = parse_fn_header(rest);
@@ -1998,16 +2016,18 @@ fn parse_module_from_blocks(blocks: &[(usize, String)]) -> Result<UnifiedModule,
                 .trim()
                 .strip_prefix("extern ")
                 .ok_or_else(|| format!(".in at line {start_line}: expected `extern`"))?;
-            let (_, header) = rest
-                .split_once(" fn ")
-                .ok_or_else(|| format!(".in at line {start_line}: expected `extern <language> fn name(...)`"))?;
+            let (_, header) = rest.split_once(" fn ").ok_or_else(|| {
+                format!(".in at line {start_line}: expected `extern <language> fn name(...)`")
+            })?;
             let header = header
                 .split_once(" requires ")
                 .map(|(left, _)| left)
                 .unwrap_or(header);
             let (name, params, ret) = parse_fn_header(header);
             if name != binding.name {
-                return Err(format!(".in at line {start_line}: extern binding name mismatch"));
+                return Err(format!(
+                    ".in at line {start_line}: extern binding name mismatch"
+                ));
             }
             decls.push(Decl::Function {
                 name,
@@ -2026,14 +2046,19 @@ fn parse_module_from_blocks(blocks: &[(usize, String)]) -> Result<UnifiedModule,
             });
             decls.extend(methods);
         } else if line.starts_with("class ") {
-            decls.push(parse_class_block(block)
-                .map_err(|e| format!(".in at line {start_line}: {e}"))?);
+            decls.push(
+                parse_class_block(block).map_err(|e| format!(".in at line {start_line}: {e}"))?,
+            );
         } else if line.starts_with("interface ") {
-            decls.push(parse_interface_block(block)
-                .map_err(|e| format!(".in at line {start_line}: {e}"))?);
+            decls.push(
+                parse_interface_block(block)
+                    .map_err(|e| format!(".in at line {start_line}: {e}"))?,
+            );
         } else if line.starts_with("component ") {
-            decls.push(parse_component_block(block)
-                .map_err(|e| format!(".in at line {start_line}: {e}"))?);
+            decls.push(
+                parse_component_block(block)
+                    .map_err(|e| format!(".in at line {start_line}: {e}"))?,
+            );
         } else if line.starts_with("var ") {
             let rest = trim(&line[4..]);
             if let Some(eq) = rest.find('=') {
@@ -2055,7 +2080,9 @@ fn parse_module_from_blocks(blocks: &[(usize, String)]) -> Result<UnifiedModule,
                     mutable: true,
                 });
             } else {
-                return Err(format!(".in at line {start_line}: `var` needs `=` initializer"));
+                return Err(format!(
+                    ".in at line {start_line}: `var` needs `=` initializer"
+                ));
             }
         } else if line.starts_with("const ") {
             let rest = trim(&line[6..]);
@@ -2081,9 +2108,9 @@ fn parse_module_from_blocks(blocks: &[(usize, String)]) -> Result<UnifiedModule,
                 return Err(".in: `const` needs `=` initializer".into());
             }
         } else {
-            return Err(
-                format!(".in at line {start_line}: expected top-level `fn`, `interrupt fn`, `struct`, `class`, `interface`, `component`, `var`, or `const`")
-            );
+            return Err(format!(
+                ".in at line {start_line}: expected top-level `fn`, `interrupt fn`, `struct`, `class`, `interface`, `component`, `var`, or `const`"
+            ));
         }
     }
     Ok(UnifiedModule::new(decls))
@@ -2387,11 +2414,11 @@ fn validate_expr_shapes(
             }
             Ok(())
         }
-        Expr::Index { base, index, ..} => {
+        Expr::Index { base, index, .. } => {
             validate_expr_shapes(fn_name, structs, base)?;
             validate_expr_shapes(fn_name, structs, index)
         }
-        Expr::Call { callee, args, ..} => {
+        Expr::Call { callee, args, .. } => {
             validate_expr_shapes(fn_name, structs, callee)?;
             for arg in args {
                 validate_expr_shapes(fn_name, structs, arg)?;
@@ -2399,7 +2426,7 @@ fn validate_expr_shapes(
             Ok(())
         }
         Expr::Field { base, .. } => validate_expr_shapes(fn_name, structs, base),
-        Expr::StructInit { name, fields, ..} => {
+        Expr::StructInit { name, fields, .. } => {
             let schema = structs.get(name).ok_or(format!(
                 ".in: unknown struct initializer `{name}` in fn {fn_name}"
             ))?;
@@ -2451,7 +2478,9 @@ fn validate_stmt_types(
         | Stmt::Expr(expr) => {
             validate_expr_shapes(fn_name, struct_fields, expr)?;
         }
-        Stmt::IndexAssign { base, index, value, ..} => {
+        Stmt::IndexAssign {
+            base, index, value, ..
+        } => {
             validate_expr_shapes(fn_name, struct_fields, base)?;
             validate_expr_shapes(fn_name, struct_fields, index)?;
             validate_expr_shapes(fn_name, struct_fields, value)?;
@@ -2491,7 +2520,7 @@ fn validate_stmt_types(
         Stmt::Throw(expr) => {
             validate_expr_shapes(fn_name, struct_fields, expr)?;
         }
-        Stmt::Try { body, catches, ..} => {
+        Stmt::Try { body, catches, .. } => {
             for stmt in body {
                 validate_stmt_types(fn_name, structs, struct_fields, stmt)?;
             }
@@ -2557,7 +2586,9 @@ fn desugar_method_calls_in_body(
             Stmt::Assign(_, expr) | Stmt::Return(Some(expr)) | Stmt::Expr(expr) => {
                 desugar_method_calls_in_expr(expr, env, structs, fn_rets);
             }
-            Stmt::IndexAssign { base, index, value, ..} => {
+            Stmt::IndexAssign {
+                base, index, value, ..
+            } => {
                 desugar_method_calls_in_expr(base, env, structs, fn_rets);
                 desugar_method_calls_in_expr(index, env, structs, fn_rets);
                 desugar_method_calls_in_expr(value, env, structs, fn_rets);
@@ -2592,7 +2623,7 @@ fn desugar_method_calls_in_body(
             Stmt::Throw(expr) => {
                 desugar_method_calls_in_expr(expr, env, structs, fn_rets);
             }
-            Stmt::Try { body, catches, ..} => {
+            Stmt::Try { body, catches, .. } => {
                 let mut try_env = env.clone();
                 desugar_method_calls_in_body(body, &mut try_env, structs, fn_rets);
                 for catch in catches {
@@ -2627,11 +2658,11 @@ fn desugar_method_calls_in_expr(
                 desugar_method_calls_in_expr(item, env, structs, fn_rets);
             }
         }
-        Expr::Index { base, index, ..} => {
+        Expr::Index { base, index, .. } => {
             desugar_method_calls_in_expr(base, env, structs, fn_rets);
             desugar_method_calls_in_expr(index, env, structs, fn_rets);
         }
-        Expr::Call { callee, args, ..} => {
+        Expr::Call { callee, args, .. } => {
             for arg in args.iter_mut() {
                 desugar_method_calls_in_expr(arg, env, structs, fn_rets);
             }
@@ -2669,7 +2700,7 @@ fn infer_in_expr_type(
         Expr::BoolLit(_) => Some(Typ::Bool),
         Expr::Ident(name) => env.get(name).cloned(),
         Expr::StructInit { name, .. } => Some(Typ::Named(name.clone())),
-        Expr::Field { base, name, ..} => {
+        Expr::Field { base, name, .. } => {
             if let Some(Typ::Named(struct_name)) = infer_in_expr_type(base, env, structs, fn_rets) {
                 structs
                     .get(&struct_name)
@@ -2692,7 +2723,7 @@ fn infer_in_expr_type(
                 None
             }
         }
-        Expr::Unary { op, expr, ..} => match op.as_str() {
+        Expr::Unary { op, expr, .. } => match op.as_str() {
             "!" => Some(Typ::Bool),
             "-" => Some(Typ::Int),
             _ => infer_in_expr_type(expr, env, structs, fn_rets),
@@ -2805,7 +2836,7 @@ fn inline_const_values(module: &mut UnifiedModule) {
                 replace_idents(lhs, consts);
                 replace_idents(rhs, consts);
             }
-            Expr::Call { callee, args, ..} => {
+            Expr::Call { callee, args, .. } => {
                 replace_idents(callee, consts);
                 for arg in args {
                     replace_idents(arg, consts);
@@ -2822,7 +2853,7 @@ fn inline_const_values(module: &mut UnifiedModule) {
                     replace_idents(item, consts);
                 }
             }
-            Expr::Index { base, index, ..} => {
+            Expr::Index { base, index, .. } => {
                 replace_idents(base, consts);
                 replace_idents(index, consts);
             }
@@ -2842,7 +2873,9 @@ fn inline_const_values(module: &mut UnifiedModule) {
             | Stmt::Return(Some(expr))
             | Stmt::Expr(expr)
             | Stmt::Throw(expr) => replace_idents(expr, consts),
-            Stmt::IndexAssign { base, index, value, ..} => {
+            Stmt::IndexAssign {
+                base, index, value, ..
+            } => {
                 replace_idents(base, consts);
                 replace_idents(index, consts);
                 replace_idents(value, consts);
@@ -2885,7 +2918,7 @@ fn inline_const_values(module: &mut UnifiedModule) {
                     }
                 }
             }
-            Stmt::Try { body, catches, ..} => {
+            Stmt::Try { body, catches, .. } => {
                 for s in body {
                     replace_stmt_idents(s, consts);
                 }
@@ -3402,11 +3435,11 @@ bind database.postgres as postgres;
 fn main() -> void { return; }
 "#;
         let module = parse_in_source(src).expect("parse");
-        let has_postgres_decl = module.decls.iter().any(|d| match d {
-            Decl::Function { name, body, .. } if name == "postgres" && body.is_empty() => true,
-            _ => false,
-        });
-        assert!(has_postgres_decl, "bind alias should produce Decl::Function with empty body");
+        let has_postgres_decl = module.decls.iter().any(|d| matches!(d, Decl::Function { name, body, .. } if name == "postgres" && body.is_empty()));
+        assert!(
+            has_postgres_decl,
+            "bind alias should produce Decl::Function with empty body"
+        );
     }
 
     #[test]
@@ -3419,7 +3452,10 @@ fn main() -> void { postgres("select 1"); return; }
 "#;
         let module = parse_in_source(src).expect("parse");
         let sil = crate::lower_core::lower_to_textual_sil(&module, "test");
-        assert!(sil.contains("function_ref @postgres"), "bind alias should lower to function_ref\n{sil}");
+        assert!(
+            sil.contains("function_ref @postgres"),
+            "bind alias should lower to function_ref\n{sil}"
+        );
     }
 
     #[test]

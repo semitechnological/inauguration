@@ -3496,7 +3496,9 @@ fn rewrite_this_receiver_in_stmt(stmt: &mut Stmt) {
         | Stmt::Return(Some(expr))
         | Stmt::Expr(expr)
         | Stmt::Throw(expr) => rewrite_this_receiver_in_expr(expr),
-        Stmt::IndexAssign { base, index, value, ..} => {
+        Stmt::IndexAssign {
+            base, index, value, ..
+        } => {
             rewrite_this_receiver_in_expr(base);
             rewrite_this_receiver_in_expr(index);
             rewrite_this_receiver_in_expr(value);
@@ -3554,11 +3556,11 @@ fn rewrite_this_receiver_in_expr(expr: &mut Expr) {
                 rewrite_this_receiver_in_expr(item);
             }
         }
-        Expr::Index { base, index, ..} => {
+        Expr::Index { base, index, .. } => {
             rewrite_this_receiver_in_expr(base);
             rewrite_this_receiver_in_expr(index);
         }
-        Expr::Call { callee, args, ..} => {
+        Expr::Call { callee, args, .. } => {
             rewrite_this_receiver_in_expr(callee);
             for arg in args {
                 rewrite_this_receiver_in_expr(arg);
@@ -3621,7 +3623,9 @@ fn rewrite_constructor_calls_in_stmt(stmt: &mut Stmt, class_fields: &HashMap<Str
         | Stmt::Expr(expr)
         | Stmt::Throw(expr) => rewrite_constructor_calls_in_expr(expr, class_fields),
         Stmt::Break => {}
-        Stmt::IndexAssign { base, index, value, ..} => {
+        Stmt::IndexAssign {
+            base, index, value, ..
+        } => {
             rewrite_constructor_calls_in_expr(base, class_fields);
             rewrite_constructor_calls_in_expr(index, class_fields);
             rewrite_constructor_calls_in_expr(value, class_fields);
@@ -3659,7 +3663,7 @@ fn rewrite_constructor_calls_in_stmt(stmt: &mut Stmt, class_fields: &HashMap<Str
 
 fn rewrite_constructor_calls_in_expr(expr: &mut Expr, class_fields: &HashMap<String, Vec<String>>) {
     match expr {
-        Expr::Call { callee, args, ..} => {
+        Expr::Call { callee, args, .. } => {
             rewrite_constructor_calls_in_expr(callee, class_fields);
             for arg in args.iter_mut() {
                 rewrite_constructor_calls_in_expr(arg, class_fields);
@@ -3700,7 +3704,7 @@ fn rewrite_constructor_calls_in_expr(expr: &mut Expr, class_fields: &HashMap<Str
                 rewrite_constructor_calls_in_expr(item, class_fields);
             }
         }
-        Expr::Index { base, index, ..} => {
+        Expr::Index { base, index, .. } => {
             rewrite_constructor_calls_in_expr(base, class_fields);
             rewrite_constructor_calls_in_expr(index, class_fields);
         }

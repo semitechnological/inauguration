@@ -25,8 +25,8 @@ use serde::{Deserialize, Serialize};
 /// Core IR type representation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IrType {
-    Int(i32),       // Int with bit width (e.g. Int(64))
-    Float(i32),     // Float with bit width (e.g. Float(32), Float(64))
+    Int(i32),   // Int with bit width (e.g. Int(64))
+    Float(i32), // Float with bit width (e.g. Float(32), Float(64))
     Bool,
     I8,
     I16,
@@ -66,7 +66,18 @@ impl IrType {
     }
 
     pub fn is_integer(&self) -> bool {
-        matches!(self, IrType::Int(_) | IrType::I8 | IrType::I16 | IrType::I32 | IrType::I64 | IrType::U8 | IrType::U16 | IrType::U32 | IrType::U64)
+        matches!(
+            self,
+            IrType::Int(_)
+                | IrType::I8
+                | IrType::I16
+                | IrType::I32
+                | IrType::I64
+                | IrType::U8
+                | IrType::U16
+                | IrType::U32
+                | IrType::U64
+        )
     }
 
     pub fn is_float(&self) -> bool {

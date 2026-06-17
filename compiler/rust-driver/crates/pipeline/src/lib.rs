@@ -44,7 +44,7 @@
 
 use hybrid_backend::{select_backend, BackendError, BackendOutput, CodegenBackend, NullBackend};
 use hybrid_core::{
-    ComponentMetadata, ComponentSpec, CompilerConfig, Diagnostic, IrBasicBlock, IrFunction,
+    CompilerConfig, ComponentMetadata, ComponentSpec, Diagnostic, IrBasicBlock, IrFunction,
     IrInstruction, IrModule, IrOpcode, IrType, OptimizationLevel,
 };
 use hybrid_passes::PassManager;
@@ -161,8 +161,7 @@ impl Compiler {
         };
 
         // Validate backend from component spec
-        let _kind = select_backend(&config.component)
-            .map_err(CompileError::Backend)?;
+        let _kind = select_backend(&config.component).map_err(CompileError::Backend)?;
 
         // For now, use NullBackend; real backend wiring comes from in-cli
         let backend: Box<dyn CodegenBackend> = Box::new(NullBackend);
@@ -187,7 +186,11 @@ impl Compiler {
         let mut module = IrModule::new(&self.config.component.name);
 
         // Create an empty entry function matching the spec
-        let entry_name = self.config.component.entry_point.clone()
+        let entry_name = self
+            .config
+            .component
+            .entry_point
+            .clone()
             .unwrap_or_else(|| "main".to_string());
 
         let mut func = IrFunction::new(&entry_name, vec![], IrType::Void);
@@ -316,8 +319,6 @@ impl Compiler {
     }
 }
 
-
-
 // ─── Tests ───────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -331,8 +332,10 @@ mod tests {
     #[test]
     fn compiler_creates_from_spec() {
         let compiler = Compiler::new(test_spec()).unwrap();
-        assert!(compiler.backend.kind() == hybrid_backend::BackendKind::AArch64MachO
-            || compiler.backend.kind() == hybrid_backend::BackendKind::RawBinary);
+        assert!(
+            compiler.backend.kind() == hybrid_backend::BackendKind::AArch64MachO
+                || compiler.backend.kind() == hybrid_backend::BackendKind::RawBinary
+        );
     }
 
     #[test]
@@ -358,6 +361,4 @@ mod tests {
         let _result = compiler.compile("fn main() {}").unwrap();
         compiler.print_timings(); // smoke test
     }
-
-
 }

@@ -70,7 +70,9 @@ fn desugar_closures_in_body(body: &mut [Stmt], counter: &mut usize, extra_decls:
             Stmt::Let(_, _, e) | Stmt::Assign(_, e) | Stmt::Return(Some(e)) | Stmt::Expr(e) => {
                 desugar_closures_in_expr(e, counter, extra_decls);
             }
-            Stmt::IndexAssign { base, index, value, ..} => {
+            Stmt::IndexAssign {
+                base, index, value, ..
+            } => {
                 desugar_closures_in_expr(base, counter, extra_decls);
                 desugar_closures_in_expr(index, counter, extra_decls);
                 desugar_closures_in_expr(value, counter, extra_decls);
@@ -90,7 +92,9 @@ fn desugar_closures_in_body(body: &mut [Stmt], counter: &mut usize, extra_decls:
                 }
                 desugar_closures_in_body(body, counter, extra_decls);
             }
-            Stmt::Match { scrutinee, arms, ..} => {
+            Stmt::Match {
+                scrutinee, arms, ..
+            } => {
                 desugar_closures_in_expr(scrutinee, counter, extra_decls);
                 for arm in arms {
                     desugar_closures_in_body(&mut arm.body, counter, extra_decls);
@@ -101,7 +105,7 @@ fn desugar_closures_in_body(body: &mut [Stmt], counter: &mut usize, extra_decls:
             Stmt::Throw(e) => {
                 desugar_closures_in_expr(e, counter, extra_decls);
             }
-            Stmt::Try { body, catches, ..} => {
+            Stmt::Try { body, catches, .. } => {
                 desugar_closures_in_body(body, counter, extra_decls);
                 for catch in catches {
                     desugar_closures_in_body(&mut catch.body, counter, extra_decls);
@@ -133,7 +137,7 @@ fn collect_declared_vars_in_body(body: &[Stmt], out: &mut HashSet<String>) {
                     collect_declared_vars_in_body(&arm.body, out);
                 }
             }
-            Stmt::Try { body, catches, ..} => {
+            Stmt::Try { body, catches, .. } => {
                 collect_declared_vars_in_body(body, out);
                 for catch in catches {
                     collect_declared_vars_in_body(&catch.body, out);
@@ -163,7 +167,9 @@ fn rewrite_captures_in_body(body: &mut [Stmt], captures: &HashSet<String>) {
             Stmt::Let(_, _, e) | Stmt::Assign(_, e) | Stmt::Return(Some(e)) | Stmt::Expr(e) => {
                 rewrite_captures_in_expr(e, captures);
             }
-            Stmt::IndexAssign { base, index, value, ..} => {
+            Stmt::IndexAssign {
+                base, index, value, ..
+            } => {
                 rewrite_captures_in_expr(base, captures);
                 rewrite_captures_in_expr(index, captures);
                 rewrite_captures_in_expr(value, captures);
@@ -183,7 +189,9 @@ fn rewrite_captures_in_body(body: &mut [Stmt], captures: &HashSet<String>) {
                 }
                 rewrite_captures_in_body(body, captures);
             }
-            Stmt::Match { scrutinee, arms, ..} => {
+            Stmt::Match {
+                scrutinee, arms, ..
+            } => {
                 rewrite_captures_in_expr(scrutinee, captures);
                 for arm in arms {
                     rewrite_captures_in_body(&mut arm.body, captures);
@@ -194,7 +202,7 @@ fn rewrite_captures_in_body(body: &mut [Stmt], captures: &HashSet<String>) {
             Stmt::Throw(e) => {
                 rewrite_captures_in_expr(e, captures);
             }
-            Stmt::Try { body, catches, ..} => {
+            Stmt::Try { body, catches, .. } => {
                 rewrite_captures_in_body(body, captures);
                 for catch in catches {
                     rewrite_captures_in_body(&mut catch.body, captures);
@@ -228,11 +236,11 @@ fn rewrite_captures_in_expr(expr: &mut Expr, captures: &HashSet<String>) {
                 rewrite_captures_in_expr(item, captures);
             }
         }
-        Expr::Index { base, index, ..} => {
+        Expr::Index { base, index, .. } => {
             rewrite_captures_in_expr(base, captures);
             rewrite_captures_in_expr(index, captures);
         }
-        Expr::Call { callee, args, ..} => {
+        Expr::Call { callee, args, .. } => {
             rewrite_captures_in_expr(callee, captures);
             for arg in args {
                 rewrite_captures_in_expr(arg, captures);
@@ -306,11 +314,11 @@ fn desugar_closures_in_expr(expr: &mut Expr, counter: &mut usize, extra_decls: &
                 desugar_closures_in_expr(item, counter, extra_decls);
             }
         }
-        Expr::Index { base, index, ..} => {
+        Expr::Index { base, index, .. } => {
             desugar_closures_in_expr(base, counter, extra_decls);
             desugar_closures_in_expr(index, counter, extra_decls);
         }
-        Expr::Call { callee, args, ..} => {
+        Expr::Call { callee, args, .. } => {
             desugar_closures_in_expr(callee, counter, extra_decls);
             for arg in args {
                 desugar_closures_in_expr(arg, counter, extra_decls);
@@ -330,7 +338,9 @@ fn rewrite_method_calls_in_body(body: &mut [Stmt], method_map: &HashMap<String, 
             Stmt::Let(_, _, e) | Stmt::Assign(_, e) | Stmt::Return(Some(e)) | Stmt::Expr(e) => {
                 rewrite_method_calls_in_expr(e, method_map);
             }
-            Stmt::IndexAssign { base, index, value, ..} => {
+            Stmt::IndexAssign {
+                base, index, value, ..
+            } => {
                 rewrite_method_calls_in_expr(base, method_map);
                 rewrite_method_calls_in_expr(index, method_map);
                 rewrite_method_calls_in_expr(value, method_map);
@@ -350,7 +360,9 @@ fn rewrite_method_calls_in_body(body: &mut [Stmt], method_map: &HashMap<String, 
                 }
                 rewrite_method_calls_in_body(body, method_map);
             }
-            Stmt::Match { scrutinee, arms, ..} => {
+            Stmt::Match {
+                scrutinee, arms, ..
+            } => {
                 rewrite_method_calls_in_expr(scrutinee, method_map);
                 for arm in arms {
                     rewrite_method_calls_in_body(&mut arm.body, method_map);
@@ -360,7 +372,7 @@ fn rewrite_method_calls_in_body(body: &mut [Stmt], method_map: &HashMap<String, 
             Stmt::Throw(e) => {
                 rewrite_method_calls_in_expr(e, method_map);
             }
-            Stmt::Try { body, catches, ..} => {
+            Stmt::Try { body, catches, .. } => {
                 rewrite_method_calls_in_body(body, method_map);
                 for catch in catches {
                     rewrite_method_calls_in_body(&mut catch.body, method_map);
@@ -373,11 +385,11 @@ fn rewrite_method_calls_in_body(body: &mut [Stmt], method_map: &HashMap<String, 
 
 fn rewrite_method_calls_in_expr(expr: &mut Expr, method_map: &HashMap<String, String>) {
     match expr {
-        Expr::Call { callee, args, ..} => {
+        Expr::Call { callee, args, .. } => {
             for arg in args.iter_mut() {
                 rewrite_method_calls_in_expr(arg, method_map);
             }
-            if let Expr::Field { base, name, ..} = callee.as_mut() {
+            if let Expr::Field { base, name, .. } = callee.as_mut() {
                 if let Some(mangled) = method_map.get(name) {
                     let new_args: Vec<Expr> =
                         std::iter::once(*std::mem::replace(base, Box::new(Expr::IntLit(0))))
@@ -412,7 +424,7 @@ fn rewrite_method_calls_in_expr(expr: &mut Expr, method_map: &HashMap<String, St
                 rewrite_method_calls_in_expr(item, method_map);
             }
         }
-        Expr::Index { base, index, ..} => {
+        Expr::Index { base, index, .. } => {
             rewrite_method_calls_in_expr(base, method_map);
             rewrite_method_calls_in_expr(index, method_map);
         }
@@ -479,7 +491,7 @@ fn lower_expr(
             out.push_str(&format!("%{id} = integer_literal $Builtin.Int64, 0\n"));
             id
         }
-        Expr::Unary { op, expr, ..} => {
+        Expr::Unary { op, expr, .. } => {
             if let Some(n) = fold_unary_int(op, expr) {
                 let id = *ssa;
                 *ssa += 1;
@@ -498,7 +510,7 @@ fn lower_expr(
             out.push_str(&format!("%{id} = builtin_unop {op:?} %{arg}\n"));
             id
         }
-        Expr::Binary { op, lhs, rhs, ..} => {
+        Expr::Binary { op, lhs, rhs, .. } => {
             if let Some(n) = fold_int_binop(op, lhs, rhs) {
                 let id = *ssa;
                 *ssa += 1;
@@ -520,7 +532,7 @@ fn lower_expr(
             ));
             id
         }
-        Expr::StructInit { name, fields, ..} => {
+        Expr::StructInit { name, fields, .. } => {
             let mut rendered_fields = Vec::new();
             for (field, expr) in fields {
                 let value_id = lower_expr(expr, env, direct_env, ssa, out);
@@ -534,7 +546,7 @@ fn lower_expr(
             ));
             id
         }
-        Expr::Field { base, name, ..} => {
+        Expr::Field { base, name, .. } => {
             let base_id = lower_expr(base, env, direct_env, ssa, out);
             let id = *ssa;
             *ssa += 1;
@@ -556,7 +568,7 @@ fn lower_expr(
             out.push_str(&format!("%{id} = array_init {rendered_items}\n"));
             id
         }
-        Expr::Index { base, index, ..} => {
+        Expr::Index { base, index, .. } => {
             let base_id = lower_expr(base, env, direct_env, ssa, out);
             let index_id = lower_expr(index, env, direct_env, ssa, out);
             let id = *ssa;
@@ -564,7 +576,7 @@ fn lower_expr(
             out.push_str(&format!("%{id} = index_access %{base_id}, %{index_id}\n"));
             id
         }
-        Expr::Call { callee, args, ..} => {
+        Expr::Call { callee, args, .. } => {
             let mut arg_ids = Vec::new();
             if let Expr::Ident(name) = callee.as_ref() {
                 let r = *ssa;
@@ -609,8 +621,8 @@ fn lower_expr(
 fn const_int(e: &Expr) -> Option<i64> {
     match e {
         Expr::IntLit(n) => Some(*n),
-        Expr::Unary { op, expr, ..} => fold_unary_int(op, expr),
-        Expr::Binary { op, lhs, rhs, ..} => fold_int_binop(op, lhs, rhs),
+        Expr::Unary { op, expr, .. } => fold_unary_int(op, expr),
+        Expr::Binary { op, lhs, rhs, .. } => fold_int_binop(op, lhs, rhs),
         _ => None,
     }
 }
@@ -618,8 +630,8 @@ fn const_int(e: &Expr) -> Option<i64> {
 fn const_bool(e: &Expr) -> Option<bool> {
     match e {
         Expr::BoolLit(b) => Some(*b),
-        Expr::Unary { op, expr, ..} => fold_unary_bool(op, expr),
-        Expr::Binary { op, lhs, rhs, ..} => fold_bool_binop(op, lhs, rhs),
+        Expr::Unary { op, expr, .. } => fold_unary_bool(op, expr),
+        Expr::Binary { op, lhs, rhs, .. } => fold_bool_binop(op, lhs, rhs),
         _ => None,
     }
 }
@@ -696,11 +708,11 @@ fn collect_expr_reads(e: &Expr, reads: &mut HashSet<String>) {
                 collect_expr_reads(item, reads);
             }
         }
-        Expr::Index { base, index, ..} => {
+        Expr::Index { base, index, .. } => {
             collect_expr_reads(base, reads);
             collect_expr_reads(index, reads);
         }
-        Expr::Call { callee, args, ..} => {
+        Expr::Call { callee, args, .. } => {
             collect_expr_reads(callee, reads);
             for arg in args {
                 collect_expr_reads(arg, reads);
@@ -716,7 +728,9 @@ fn collect_stmt_reads(st: &Stmt, reads: &mut HashSet<String>) {
         Stmt::Let(_, _, e) | Stmt::Assign(_, e) | Stmt::Expr(e) | Stmt::Return(Some(e)) => {
             collect_expr_reads(e, reads)
         }
-        Stmt::IndexAssign { base, index, value, ..} => {
+        Stmt::IndexAssign {
+            base, index, value, ..
+        } => {
             collect_expr_reads(base, reads);
             collect_expr_reads(index, reads);
             collect_expr_reads(value, reads);
@@ -736,7 +750,9 @@ fn collect_stmt_reads(st: &Stmt, reads: &mut HashSet<String>) {
             }
             collect_body_reads(body, reads);
         }
-        Stmt::Match { scrutinee, arms, ..} => {
+        Stmt::Match {
+            scrutinee, arms, ..
+        } => {
             collect_expr_reads(scrutinee, reads);
             for arm in arms {
                 collect_body_reads(&arm.body, reads);
@@ -746,7 +762,7 @@ fn collect_stmt_reads(st: &Stmt, reads: &mut HashSet<String>) {
         Stmt::Throw(e) => {
             collect_expr_reads(e, reads);
         }
-        Stmt::Try { body, catches, ..} => {
+        Stmt::Try { body, catches, .. } => {
             collect_body_reads(body, reads);
             for arm in catches {
                 collect_body_reads(&arm.body, reads);
@@ -994,7 +1010,9 @@ fn lower_stmts_with_env(
                     out.push_str(&format!("store_var {name} %{id}\n"));
                 }
             }
-            Stmt::IndexAssign { base, index, value, ..} => {
+            Stmt::IndexAssign {
+                base, index, value, ..
+            } => {
                 let Expr::Ident(name) = base else {
                     let _ = lower_expr(base, env, direct_env, ssa, &mut out);
                     let _ = lower_expr(index, env, direct_env, ssa, &mut out);
@@ -1078,7 +1096,9 @@ fn lower_stmts_with_env(
                 out.push_str(&format!("br {head_label}\n"));
                 out.push_str(&format!("label {end_label}\n"));
             }
-            Stmt::Match { scrutinee, arms, ..} => {
+            Stmt::Match {
+                scrutinee, arms, ..
+            } => {
                 let scrutinee_id = lower_expr(scrutinee, env, direct_env, ssa, &mut out);
                 let label_id = *ssa;
                 *ssa += 1;
@@ -1162,7 +1182,7 @@ fn lower_stmts_with_env(
                 }
                 return out;
             }
-            Stmt::Try { body, catches, ..} => {
+            Stmt::Try { body, catches, .. } => {
                 let label_id = *ssa;
                 *ssa += 1;
                 let try_body_label = format!("bb_try_body_{label_id}");

@@ -27,11 +27,19 @@ pub struct Span {
 impl Span {
     #[must_use]
     pub fn new(line: u32, col: u32, file: &str) -> Self {
-        Self { line, col, file: file.to_string() }
+        Self {
+            line,
+            col,
+            file: file.to_string(),
+        }
     }
     #[must_use]
     pub fn unknown() -> Self {
-        Self { line: 0, col: 0, file: String::new() }
+        Self {
+            line: 0,
+            col: 0,
+            file: String::new(),
+        }
     }
 }
 
@@ -47,7 +55,6 @@ impl std::fmt::Display for Span {
 
 /// Source position attached to a Core IR node.
 pub type NodeSpan = Option<Span>;
-
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct FloatVal(pub f64);

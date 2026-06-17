@@ -19,7 +19,12 @@ struct Args {
     compile: Option<PathBuf>,
 
     /// Target triple (replaces LLVM -target).
-    #[arg(short, long, default_value = "aarch64-apple-darwin", help = "Target triple")]
+    #[arg(
+        short,
+        long,
+        default_value = "aarch64-apple-darwin",
+        help = "Target triple"
+    )]
     target: String,
 
     /// Artifact kind.
@@ -40,11 +45,21 @@ struct Args {
     output: Option<PathBuf>,
 
     /// Entry point.
-    #[arg(short = 'e', long, default_value = "main", help = "Entry point function")]
+    #[arg(
+        short = 'e',
+        long,
+        default_value = "main",
+        help = "Entry point function"
+    )]
     entry: String,
 
     /// Optimization level.
-    #[arg(short = 'O', long, default_value_t = 1, help = "Optimization level (0-3)")]
+    #[arg(
+        short = 'O',
+        long,
+        default_value_t = 1,
+        help = "Optimization level (0-3)"
+    )]
     opt: u8,
 
     /// List available backends.
@@ -72,7 +87,10 @@ struct Args {
     metadata_only: bool,
 
     /// Freestanding target (no OS).
-    #[arg(long, help = "Freestanding target (x86_64-unknown-none, aarch64-unknown-none)")]
+    #[arg(
+        long,
+        help = "Freestanding target (x86_64-unknown-none, aarch64-unknown-none)"
+    )]
     freestanding: bool,
 
     /// Deterministic build.
@@ -103,8 +121,15 @@ fn main() {
                 BackendKind::RawBinary => "raw",
             };
             let caps = backend_capabilities(triple);
-            let status = if caps.implemented { "implemented" } else { "contract" };
-            println!("  {:40} {:10} format={}", triple, status, caps.object_format);
+            let status = if caps.implemented {
+                "implemented"
+            } else {
+                "contract"
+            };
+            println!(
+                "  {:40} {:10} format={}",
+                triple, status, caps.object_format
+            );
         }
         return;
     }
@@ -249,12 +274,11 @@ fn main() {
                     .output
                     .clone()
                     .unwrap_or_else(|| PathBuf::from(format!("{}.component.json", source_name)));
-                match serde_json::to_writer_pretty(std::fs::File::create(&md_path).unwrap(), &metadata) {
-                    Ok(_) => println!(
-                        "  Metadata `{}` → {}",
-                        source_name,
-                        md_path.display()
-                    ),
+                match serde_json::to_writer_pretty(
+                    std::fs::File::create(&md_path).unwrap(),
+                    &metadata,
+                ) {
+                    Ok(_) => println!("  Metadata `{}` → {}", source_name, md_path.display()),
                     Err(e) => eprintln!("Error writing metadata: {e}"),
                 }
             }
