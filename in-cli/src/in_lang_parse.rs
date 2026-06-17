@@ -446,10 +446,8 @@ fn strip_line_comment_outside_strings(seg: &str) -> &str {
         }
         match c {
             '"' => in_string = true,
-            '/' => {
-                if seg.get(i + 1..).is_some_and(|t| t.starts_with('/')) {
-                    return trim(&seg[..i]);
-                }
+            '/' if seg.get(i + 1..).is_some_and(|t| t.starts_with('/')) => {
+                return trim(&seg[..i]);
             }
             _ => {}
         }

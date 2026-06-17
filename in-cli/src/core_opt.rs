@@ -470,10 +470,8 @@ fn simplify_expr(e: Expr) -> Expr {
                         return *lhs;
                     }
                 }
-                "shl" | "shr" => {
-                    if is_zero(&rhs) {
-                        return *lhs;
-                    }
+                "shl" | "shr" if is_zero(&rhs) => {
+                    return *lhs;
                 }
                 _ => {}
             }
@@ -1241,7 +1239,7 @@ pub fn peephole_x86_64(code: &mut Vec<u8>) {
     }
 
     // Sort remove ranges by position (ascending) and merge overlaps
-    remove.sort_by(|a, b| a.start.cmp(&b.start));
+    remove.sort_by_key(|r| r.start);
     let mut merged: Vec<RemoveRange> = Vec::new();
     for r in remove {
         if let Some(last) = merged.last_mut() {
@@ -1305,7 +1303,7 @@ pub fn peephole_x86_64(code: &mut Vec<u8>) {
     }
 
     // ── Pass 5: remove bytes (highest first to avoid shifting) ──
-    remove.sort_by(|a, b| b.start.cmp(&a.start));
+    remove.sort_by_key(|r| std::cmp::Reverse(r.start));
     for r in remove {
         code.drain(r.start..r.start + r.len);
     }

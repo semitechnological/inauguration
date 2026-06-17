@@ -565,7 +565,7 @@ pub mod bench {
             let sq_sum: f64 = timings
                 .iter()
                 .map(|&t| {
-                    let diff = if t > mean { t - mean } else { mean - t };
+                    let diff = t.abs_diff(mean);
                     (diff as f64) * (diff as f64)
                 })
                 .sum();

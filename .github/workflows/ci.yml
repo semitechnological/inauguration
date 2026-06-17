@@ -129,6 +129,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
       - name: Build in binary
         run: cargo build --release --bin in
         working-directory: in-cli
