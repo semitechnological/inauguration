@@ -118,39 +118,66 @@ fn flatten_expr(expr_str: String, names: String, values: String) -> String {
   return flatten_expr(flat, names, values);
 }
 
+fn emit_cmp_int(op: String, lhs: Int, rhs: Int) -> Int {
+  if str_eq(op, "==") { if lhs == rhs { return 1; } else { return 0; } }
+  if str_eq(op, "!=") { if lhs != rhs { return 1; } else { return 0; } }
+  if str_eq(op, "<") { if lhs < rhs { return 1; } else { return 0; } }
+  if str_eq(op, ">") { if lhs > rhs { return 1; } else { return 0; } }
+  if str_eq(op, "<=") { if lhs <= rhs { return 1; } else { return 0; } }
+  if str_eq(op, ">=") { if lhs >= rhs { return 1; } else { return 0; } }
+  return 0;
+}
+
 fn flat_expr_str(parts: [String], start: Int, end: Int, names: String) -> String {
   let i: Int = start;
-  let left_expr: String = "";
+  let left_expr: String = emit_int_expr(0);
+  let left_val: Int = 0;
   if str_table_has(names, parts[i]) {
     left_expr = emit_call_expr(parts[i]);
+    left_val = 0;
   } else if str_eq(parts[i], "true") {
-    left_expr = emit_bool_expr(true);
+    left_expr = emit_int_expr(1);
+    left_val = 1;
   } else if str_eq(parts[i], "false") {
-    left_expr = emit_bool_expr(false);
+    left_expr = emit_int_expr(0);
+    left_val = 0;
   } else {
-    left_expr = emit_int_expr(str_to_int(parts[i]));
+    left_val = str_to_int(parts[i]);
+    left_expr = emit_int_expr(left_val);
   }
   i = i + 1;
   while i < end {
     let op: String = parts[i];
     i = i + 1;
     if i > end { return left_expr; }
-    let right_expr: String = "";
+    let right_val: Int = 0;
     if str_table_has(names, parts[i]) {
-      right_expr = emit_call_expr(parts[i]);
+      right_val = 0;
+      if i + 1 < end {
+        left_expr = emit_binary_expr(op, left_expr, emit_call_expr(parts[i]));
+      } else {
+        left_expr = emit_binary_expr(op, left_expr, emit_call_expr(parts[i]));
+      }
     } else if str_eq(parts[i], "true") {
-      right_expr = emit_bool_expr(true);
+      right_val = 1;
+      left_expr = emit_int_expr(emit_cmp_int(op, left_val, right_val));
     } else if str_eq(parts[i], "false") {
-      right_expr = emit_bool_expr(false);
+      right_val = 0;
+      left_expr = emit_int_expr(emit_cmp_int(op, left_val, right_val));
     } else {
-      right_expr = emit_int_expr(str_to_int(parts[i]));
+      right_val = str_to_int(parts[i]);
+      if str_eq(op, "==") || str_eq(op, "!=") || str_eq(op, "<") || str_eq(op, ">") || str_eq(op, "<=") || str_eq(op, ">=") {
+        left_expr = emit_int_expr(emit_cmp_int(op, left_val, right_val));
+      } else {
+        if i + 1 < end {
+          left_expr = emit_binary_expr(op, left_expr, emit_int_expr(right_val));
+        } else {
+          left_expr = emit_binary_expr(op, left_expr, emit_int_expr(right_val));
+        }
+      }
+      left_val = right_val;
     }
     i = i + 1;
-    if i < end {
-      left_expr = emit_binary_expr(op, left_expr, right_expr);
-    } else {
-      left_expr = emit_binary_expr(op, left_expr, right_expr);
-    }
   }
   return left_expr;
 }

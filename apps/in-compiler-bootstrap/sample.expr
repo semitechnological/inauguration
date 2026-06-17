@@ -1,10 +1,5 @@
-# tiny bootstrap input with comparisons and bools
+# tiny bootstrap input
 
 let base = 40
-let t = true
-let f = false
-let eq = 1 == 1
-let ne = 1 != 2
-let lt = 1 < 2
-let answer = base + eq
+let answer = base + (1 * 2)
 answer
