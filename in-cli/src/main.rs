@@ -1959,6 +1959,10 @@ fn normalize_eval_code(parser_id: parser_registry::ParserId, code: &str) -> Stri
             .replace("console.log(", "print(")
             .replace("println(", "print("),
         parser_registry::ParserId::Rust => code.replace("println!(", "print("),
+        parser_registry::ParserId::Java => code.replace("System.out.println(", "print("),
+        parser_registry::ParserId::Kotlin | parser_registry::ParserId::Scala => {
+            code.replace("println(", "print(")
+        }
         parser_registry::ParserId::Cpp => normalize_in_eval_code(code),
         parser_registry::ParserId::HolyC => {
             let trimmed = code.trim();
@@ -4118,9 +4122,31 @@ mod tests {
     }
 
     #[test]
+    fn eval_normalizes_kotlin_println() {
+        let plans = super::eval_plans(
+            inauguration::parser_registry::ParserId::Kotlin,
+            "println(\"hi\")",
+        );
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].wrapped, "fun main() {\n    print(\"hi\")\n}");
+        assert!(!plans[0].print_result);
+    }
+
+    #[test]
     fn eval_prefers_printed_scala_expression() {
         let plans = super::eval_plans(inauguration::parser_registry::ParserId::Scala, "1 + 2");
         assert_eq!(plans[0].wrapped, "def main(): Unit = {\n  print(1 + 2)\n}");
+        assert!(!plans[0].print_result);
+    }
+
+    #[test]
+    fn eval_normalizes_scala_println() {
+        let plans = super::eval_plans(
+            inauguration::parser_registry::ParserId::Scala,
+            "println(\"hi\")",
+        );
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].wrapped, "def main(): Unit = {\n  print(\"hi\")\n}");
         assert!(!plans[0].print_result);
     }
 
