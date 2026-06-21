@@ -148,6 +148,51 @@ impl ParserId {
             ParserId::Odin | ParserId::Hare | ParserId::HolyC => "systems / native",
         }
     }
+
+    #[must_use]
+    pub const fn default_extension(self) -> &'static str {
+        match self {
+            ParserId::In => "in",
+            ParserId::Icore => "icore",
+            ParserId::C => "c",
+            ParserId::Cpp => "cpp",
+            ParserId::ObjC => "m",
+            ParserId::ObjCpp => "mm",
+            ParserId::Java => "java",
+            ParserId::Kotlin => "kt",
+            ParserId::Scala => "scala",
+            ParserId::CSharp => "cs",
+            ParserId::FSharp => "fs",
+            ParserId::VbNet => "vb",
+            ParserId::Python => "py",
+            ParserId::Ruby => "rb",
+            ParserId::Php => "php",
+            ParserId::Perl => "pl",
+            ParserId::JavaScript => "js",
+            ParserId::TypeScript => "ts",
+            ParserId::Go => "go",
+            ParserId::V => "v",
+            ParserId::Rust => "rs",
+            ParserId::Swift => "swift",
+            ParserId::Zig => "zig",
+            ParserId::Dart => "dart",
+            ParserId::Lua => "lua",
+            ParserId::Clojure => "clj",
+            ParserId::Groovy => "groovy",
+            ParserId::Elixir => "ex",
+            ParserId::Erlang => "erl",
+            ParserId::Haskell => "hs",
+            ParserId::OCaml => "ml",
+            ParserId::Julia => "jl",
+            ParserId::R => "r",
+            ParserId::Nim => "nim",
+            ParserId::D => "d",
+            ParserId::Crystal => "cr",
+            ParserId::Odin => "odin",
+            ParserId::Hare => "ha",
+            ParserId::HolyC => "hc",
+        }
+    }
 }
 
 /// Map a **lowercase** extension (no leading dot) to a tracked front.
@@ -219,6 +264,58 @@ pub fn parser_id_from_magic_token(token: &str) -> Option<ParserId> {
             _ => None,
         }
     })
+}
+
+#[must_use]
+pub fn parser_id_from_cli_token(token: &str) -> Option<ParserId> {
+    let token = token.trim();
+    if token.eq_ignore_ascii_case("in") {
+        Some(ParserId::In)
+    } else if token.eq_ignore_ascii_case("icore") {
+        Some(ParserId::Icore)
+    } else {
+        let lower = token.to_ascii_lowercase();
+        parser_id_from_magic_token(token).or_else(|| match lower.as_str() {
+            "c" => Some(ParserId::C),
+            "cpp" | "c++" => Some(ParserId::Cpp),
+            "objc" | "objective-c" => Some(ParserId::ObjC),
+            "objc++" | "objective-c++" | "objcpp" => Some(ParserId::ObjCpp),
+            "java" => Some(ParserId::Java),
+            "kotlin" => Some(ParserId::Kotlin),
+            "scala" => Some(ParserId::Scala),
+            "csharp" | "c#" => Some(ParserId::CSharp),
+            "fsharp" | "f#" => Some(ParserId::FSharp),
+            "vb" | "vbnet" => Some(ParserId::VbNet),
+            "python" => Some(ParserId::Python),
+            "ruby" => Some(ParserId::Ruby),
+            "php" => Some(ParserId::Php),
+            "perl" => Some(ParserId::Perl),
+            "javascript" | "js" => Some(ParserId::JavaScript),
+            "typescript" | "ts" => Some(ParserId::TypeScript),
+            "go" => Some(ParserId::Go),
+            "v" | "vlang" => Some(ParserId::V),
+            "rust" | "rs" => Some(ParserId::Rust),
+            "swift" => Some(ParserId::Swift),
+            "zig" => Some(ParserId::Zig),
+            "dart" => Some(ParserId::Dart),
+            "lua" => Some(ParserId::Lua),
+            "clojure" | "clj" => Some(ParserId::Clojure),
+            "groovy" => Some(ParserId::Groovy),
+            "elixir" => Some(ParserId::Elixir),
+            "erlang" => Some(ParserId::Erlang),
+            "haskell" => Some(ParserId::Haskell),
+            "ocaml" => Some(ParserId::OCaml),
+            "julia" => Some(ParserId::Julia),
+            "r" => Some(ParserId::R),
+            "nim" => Some(ParserId::Nim),
+            "d" => Some(ParserId::D),
+            "crystal" => Some(ParserId::Crystal),
+            "odin" => Some(ParserId::Odin),
+            "hare" => Some(ParserId::Hare),
+            "holyc" | "holy-c" => Some(ParserId::HolyC),
+            _ => None,
+        })
+    }
 }
 
 /// CLI `--parser`: `auto` (default) or `in` (see `IN_PARSER=in` env override).

@@ -376,8 +376,10 @@ enum Commands {
     #[command(about = "Check required tools")]
     #[command(about = "Evaluate inline .in code (like python -c)")]
     Eval {
-        #[arg(help = "Inline .in source code to compile and execute")]
+        #[arg(help = "Inline source code to compile and execute")]
         code: String,
+        #[arg(long, help = "Parser/language slug such as in, js, ts, rust, python, cpp")]
+        parser: Option<String>,
         #[arg(long, default_value_t = false, help = "Show detailed output")]
         verbose: bool,
     },
@@ -601,7 +603,11 @@ fn run() -> Result<()> {
             Ok(root) => cmd_update(&root),
             Err(_) => cmd_update_remote(),
         },
-        Commands::Eval { code, verbose } => cmd_eval(&invocation_cwd, &code, verbose),
+        Commands::Eval {
+            code,
+            parser,
+            verbose,
+        } => cmd_eval(&invocation_cwd, &code, parser.as_deref(), verbose),
         Commands::Doctor => cmd_doctor(),
         Commands::Bench { metrics } => {
             cmd_bench(&workspace_root(invocation_cwd.clone())?, &metrics)
@@ -1899,7 +1905,7 @@ struct EvalPlan {
     print_result: bool,
 }
 
-fn normalize_eval_code(code: &str) -> String {
+fn normalize_in_eval_code(code: &str) -> String {
     let trimmed = code.trim();
     if let Some(expr) = trimmed
         .strip_prefix("std::cout <<")
@@ -1933,6 +1939,18 @@ fn normalize_eval_code(code: &str) -> String {
     code.replace("println(", "print(")
 }
 
+fn normalize_eval_code(parser_id: parser_registry::ParserId, code: &str) -> String {
+    match parser_id {
+        parser_registry::ParserId::In => normalize_in_eval_code(code),
+        parser_registry::ParserId::JavaScript | parser_registry::ParserId::TypeScript => code
+            .replace("console.log(", "print(")
+            .replace("println(", "print("),
+        parser_registry::ParserId::Rust => code.replace("println!(", "print("),
+        parser_registry::ParserId::Cpp => normalize_in_eval_code(code),
+        _ => code.to_string(),
+    }
+}
+
 fn guess_eval_type(s: &str) -> &'static str {
     let s = s.trim();
     if s == "true" || s == "false" {
@@ -1944,10 +1962,128 @@ fn guess_eval_type(s: &str) -> &'static str {
     }
 }
 
-fn eval_plans(code: &str) -> Vec<EvalPlan> {
-    let normalized = normalize_eval_code(code);
+fn infer_eval_parser(code: &str) -> parser_registry::ParserId {
+    let trimmed = code.trim();
+    if trimmed.contains("std::cout") || trimmed.contains("#include") || trimmed.contains("::") {
+        return parser_registry::ParserId::Cpp;
+    }
+    if trimmed.contains("println!(")
+        || trimmed.starts_with("fn main")
+        || trimmed.starts_with("fn ")
+        || trimmed.contains("let mut ")
+    {
+        return parser_registry::ParserId::Rust;
+    }
+    if trimmed.contains("console.log(") || trimmed.contains("function ") || trimmed.contains("=>") {
+        return if trimmed.contains(": number")
+            || trimmed.contains(": string")
+            || trimmed.contains(": boolean")
+            || trimmed.contains("): ")
+        {
+            parser_registry::ParserId::TypeScript
+        } else {
+            parser_registry::ParserId::JavaScript
+        };
+    }
+    if trimmed.starts_with("def ") || trimmed.contains("\ndef ") {
+        return parser_registry::ParserId::Python;
+    }
+    parser_registry::ParserId::In
+}
+
+fn parse_eval_parser(
+    parser: Option<&str>,
+    code: &str,
+) -> Result<parser_registry::ParserId> {
+    match parser.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(value) if value.eq_ignore_ascii_case("auto") => Ok(infer_eval_parser(code)),
+        Some(value) => parser_registry::parser_id_from_cli_token(value).ok_or_else(|| {
+            InError::Message(format!("unknown eval parser `{value}`"))
+        }),
+        None => Ok(infer_eval_parser(code)),
+    }
+}
+
+fn eval_return_type(parser_id: parser_registry::ParserId, ret: &str) -> String {
+    match parser_id {
+        parser_registry::ParserId::In => ret.to_string(),
+        parser_registry::ParserId::JavaScript => String::new(),
+        parser_registry::ParserId::TypeScript => match ret {
+            "Bool" => "boolean".to_string(),
+            "String" => "string".to_string(),
+            _ => "number".to_string(),
+        },
+        parser_registry::ParserId::Rust => match ret {
+            "Bool" => "bool".to_string(),
+            "String" => "String".to_string(),
+            _ => "i64".to_string(),
+        },
+        parser_registry::ParserId::Python => match ret {
+            "Bool" => "bool".to_string(),
+            "String" => "str".to_string(),
+            _ => "int".to_string(),
+        },
+        parser_registry::ParserId::C | parser_registry::ParserId::Cpp => match ret {
+            "Bool" => "bool".to_string(),
+            _ => "int".to_string(),
+        },
+        _ => String::new(),
+    }
+}
+
+fn wrap_eval_expression(
+    parser_id: parser_registry::ParserId,
+    code: &str,
+    ret: &str,
+) -> Option<String> {
+    let ret = eval_return_type(parser_id, ret);
+    match parser_id {
+        parser_registry::ParserId::In => Some(format!("fn main() -> {ret} {{ return {code} }}")),
+        parser_registry::ParserId::JavaScript => {
+            Some(format!("function main() {{ return {code}; }}"))
+        }
+        parser_registry::ParserId::TypeScript => {
+            Some(format!("function main(): {ret} {{ return {code}; }}"))
+        }
+        parser_registry::ParserId::Rust => {
+            Some(format!("fn main() -> {ret} {{ {code} }}"))
+        }
+        parser_registry::ParserId::Python => {
+            Some(format!("def main() -> {ret}:\n    return {code}"))
+        }
+        parser_registry::ParserId::C | parser_registry::ParserId::Cpp => {
+            if ret == "int" || ret == "bool" {
+                Some(format!("{ret} main() {{ return {code}; }}"))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+fn wrap_eval_statement(parser_id: parser_registry::ParserId, code: &str) -> Option<String> {
+    match parser_id {
+        parser_registry::ParserId::In => Some(format!("fn main() -> void {{ {code} }}")),
+        parser_registry::ParserId::JavaScript => Some(format!("function main() {{ {code} }}")),
+        parser_registry::ParserId::TypeScript => {
+            Some(format!("function main(): void {{ {code} }}"))
+        }
+        parser_registry::ParserId::Rust => Some(format!("fn main() -> i64 {{ {code}\n0\n}}")),
+        parser_registry::ParserId::Python => Some(format!("def main() -> None:\n    {code}")),
+        parser_registry::ParserId::C => Some(format!("int main() {{ {code}; return 0; }}")),
+        parser_registry::ParserId::Cpp => Some(format!("int main() {{ {code}; return 0; }}")),
+        _ => None,
+    }
+}
+
+fn eval_plans(parser_id: parser_registry::ParserId, code: &str) -> Vec<EvalPlan> {
+    let normalized = normalize_eval_code(parser_id, code);
     let trimmed = normalized.trim();
     let starts_decl = trimmed.starts_with("fn ")
+        || trimmed.starts_with("function ")
+        || trimmed.starts_with("def ")
+        || trimmed.starts_with("int main")
         || trimmed.starts_with("interrupt fn ")
         || trimmed.starts_with("struct ")
         || trimmed.starts_with("const ")
@@ -1960,34 +2096,40 @@ fn eval_plans(code: &str) -> Vec<EvalPlan> {
     }
 
     let ret = guess_eval_type(trimmed);
-    vec![
-        EvalPlan {
-            wrapped: format!("fn main() -> {ret} {{ return {normalized} }}"),
+    let mut plans = Vec::new();
+    if let Some(wrapped) = wrap_eval_expression(parser_id, &normalized, ret) {
+        plans.push(EvalPlan {
+            wrapped,
             print_result: true,
-        },
-        EvalPlan {
-            wrapped: format!("fn main() -> void {{ {normalized} }}"),
+        });
+    }
+    if let Some(wrapped) = wrap_eval_statement(parser_id, &normalized) {
+        plans.push(EvalPlan {
+            wrapped,
             print_result: false,
-        },
-    ]
+        });
+    }
+    plans
 }
 
-fn cmd_eval(cwd: &Path, code: &str, verbose: bool) -> Result<()> {
+fn cmd_eval(cwd: &Path, code: &str, parser: Option<&str>, verbose: bool) -> Result<()> {
+    let parser_id = parse_eval_parser(parser, code)?;
     let dir = std::env::temp_dir().join("inaug-eval");
     let _ = std::fs::create_dir_all(&dir);
     let path = dir.join(format!(
-        "{}.in",
+        "{}.{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
-            .as_nanos()
+            .as_nanos(),
+        parser_id.default_extension()
     ));
     let source_path = resolve_invocation_path(cwd, &path.to_string_lossy());
     let mut last_err = None;
     let mut execution = None;
     let mut print_result = false;
 
-    for plan in eval_plans(code) {
+    for plan in eval_plans(parser_id, code) {
         std::fs::write(&path, &plan.wrapped)
             .map_err(|e| InError::Message(format!("write eval temp: {e}")))?;
         match compile_and_run_source_path(&source_path, "App", parser_registry::ParserCli::Auto) {
@@ -3657,8 +3799,20 @@ mod tests {
     }
 
     #[test]
+    fn parse_eval_accepts_parser_flag() {
+        let cli =
+            Cli::try_parse_from(["in", "eval", "--parser", "js", "console.log(\"hi\")"])
+                .expect("cli parse");
+        match cli.command {
+            Commands::Eval { parser, .. } => assert_eq!(parser.as_deref(), Some("js")),
+            _ => panic!("expected eval command"),
+        }
+    }
+
+    #[test]
     fn eval_decl_input_does_not_print_result() {
         let plans = super::eval_plans(
+            inauguration::parser_registry::ParserId::In,
             "fn main() -> void {\n  print(\"hello\")\n}",
         );
         assert_eq!(plans.len(), 1);
@@ -3667,7 +3821,7 @@ mod tests {
 
     #[test]
     fn eval_expression_input_prints_result() {
-        let plans = super::eval_plans("1 + 2");
+        let plans = super::eval_plans(inauguration::parser_registry::ParserId::In, "1 + 2");
         assert_eq!(plans.len(), 2);
         assert!(plans[0].print_result);
         assert!(plans[0].wrapped.contains("return 1 + 2"));
@@ -3675,7 +3829,8 @@ mod tests {
 
     #[test]
     fn eval_print_statement_falls_back_to_void_main() {
-        let plans = super::eval_plans("print(\"hello world\")");
+        let plans =
+            super::eval_plans(inauguration::parser_registry::ParserId::In, "print(\"hello world\")");
         assert_eq!(plans.len(), 2);
         assert_eq!(plans[1].wrapped, "fn main() -> void { print(\"hello world\") }");
         assert!(!plans[1].print_result);
@@ -3683,14 +3838,41 @@ mod tests {
 
     #[test]
     fn eval_normalizes_println_to_print() {
-        let plans = super::eval_plans("println(\"hello world\")");
+        let plans =
+            super::eval_plans(inauguration::parser_registry::ParserId::In, "println(\"hello world\")");
         assert_eq!(plans[1].wrapped, "fn main() -> void { print(\"hello world\") }");
     }
 
     #[test]
     fn eval_normalizes_simple_cpp_cout_to_print() {
-        let plans = super::eval_plans("std::cout << \"Hello World!\\n\";");
-        assert_eq!(plans[1].wrapped, "fn main() -> void { print(\"Hello World!\") }");
+        let plans = super::eval_plans(
+            inauguration::parser_registry::ParserId::Cpp,
+            "std::cout << \"Hello World!\\n\";",
+        );
+        assert_eq!(plans[1].wrapped, "int main() { print(\"Hello World!\"); return 0; }");
+    }
+
+    #[test]
+    fn eval_infers_javascript_from_console_log() {
+        assert_eq!(
+            super::infer_eval_parser("console.log(\"hi\")"),
+            inauguration::parser_registry::ParserId::JavaScript
+        );
+    }
+
+    #[test]
+    fn eval_wraps_javascript_statement_in_main() {
+        let plans = super::eval_plans(
+            inauguration::parser_registry::ParserId::JavaScript,
+            "console.log(\"hi\")",
+        );
+        assert_eq!(plans[1].wrapped, "function main() { print(\"hi\") }");
+    }
+
+    #[test]
+    fn eval_wraps_rust_expression_in_main() {
+        let plans = super::eval_plans(inauguration::parser_registry::ParserId::Rust, "1 + 2");
+        assert_eq!(plans[0].wrapped, "fn main() -> i64 { 1 + 2 }");
     }
 
     #[test]
