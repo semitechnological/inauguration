@@ -1906,19 +1906,29 @@ struct EvalPlan {
 }
 
 fn normalize_in_eval_code(code: &str) -> String {
+    fn normalize_human_in_print_arg(rest: &str) -> String {
+        let rest = rest.trim();
+        let smart_quoted = [
+            ('\'', '\''),
+            ('"', '"'),
+            ('\u{2018}', '\u{2019}'),
+            ('\u{201C}', '\u{201D}'),
+        ];
+        for (open, close) in smart_quoted {
+            if rest.starts_with(open) && rest.ends_with(close) && rest.len() >= open.len_utf8() + close.len_utf8() {
+                let inner = &rest[open.len_utf8()..rest.len() - close.len_utf8()];
+                return format!("\"{inner}\"");
+            }
+        }
+        rest.to_string()
+    }
+
     let trimmed = code.trim();
     if let Some(rest) = trimmed.strip_prefix("std.io.print ") {
-        let rest = rest.trim();
-        if rest.starts_with('\'') && rest.ends_with('\'') && rest.len() >= 2 {
-            return format!("print(\"{}\")", &rest[1..rest.len() - 1]);
-        }
-        return format!("print({rest})");
+        return format!("print({})", normalize_human_in_print_arg(rest));
     }
     if let Some(rest) = trimmed.strip_prefix("print ") {
-        let rest = rest.trim();
-        if rest.starts_with('\'') && rest.ends_with('\'') && rest.len() >= 2 {
-            return format!("print(\"{}\")", &rest[1..rest.len() - 1]);
-        }
+        return format!("print({})", normalize_human_in_print_arg(rest));
     }
     if let Some(expr) = trimmed
         .strip_prefix("std::cout <<")
@@ -4158,6 +4168,24 @@ mod tests {
         let plans = super::eval_plans(
             inauguration::parser_registry::ParserId::In,
             "std.io.print 'hello from .in'",
+        );
+        assert_eq!(plans[0].wrapped, "main:\n  print(\"hello from .in\")");
+    }
+
+    #[test]
+    fn eval_normalizes_human_in_print_statement_with_smart_quotes() {
+        let plans = super::eval_plans(
+            inauguration::parser_registry::ParserId::In,
+            "print ‘hello from .in’",
+        );
+        assert_eq!(plans[0].wrapped, "main:\n  print(\"hello from .in\")");
+    }
+
+    #[test]
+    fn eval_normalizes_human_std_io_print_statement_with_smart_quotes() {
+        let plans = super::eval_plans(
+            inauguration::parser_registry::ParserId::In,
+            "std.io.print ‘hello from .in’",
         );
         assert_eq!(plans[0].wrapped, "main:\n  print(\"hello from .in\")");
     }
