@@ -4,5 +4,5 @@ fn main() -> void {
 }
 
 fn printone(one: Int) -> void {
-  print(one.toStr())
+  print(to_string(one))
 }

@@ -2084,11 +2084,21 @@ fn eval_plans(parser_id: parser_registry::ParserId, code: &str) -> Vec<EvalPlan>
         || trimmed.starts_with("function ")
         || trimmed.starts_with("def ")
         || trimmed.starts_with("int main")
+        || trimmed.starts_with("import ")
+        || trimmed.starts_with("needs ")
+        || trimmed.starts_with("capability ")
+        || trimmed.starts_with("enable ")
+        || trimmed.starts_with("parallel:")
         || trimmed.starts_with("interrupt fn ")
         || trimmed.starts_with("struct ")
         || trimmed.starts_with("const ")
         || trimmed.starts_with("var ");
-    if starts_decl || trimmed.contains("\nfn ") {
+    if starts_decl
+        || trimmed.contains("\nfn ")
+        || trimmed.contains("\nmain:")
+        || trimmed.contains("\nneeds ")
+        || trimmed.contains("\nparallel:")
+    {
         return vec![EvalPlan {
             wrapped: normalized,
             print_result: false,
@@ -3850,6 +3860,16 @@ mod tests {
             "std::cout << \"Hello World!\\n\";",
         );
         assert_eq!(plans[1].wrapped, "int main() { print(\"Hello World!\"); return 0; }");
+    }
+
+    #[test]
+    fn eval_treats_human_facing_in_source_as_module() {
+        let plans = super::eval_plans(
+            inauguration::parser_registry::ParserId::In,
+            "import std.io\n\nmain:\n  print \"hello from .in\"",
+        );
+        assert_eq!(plans.len(), 1);
+        assert!(!plans[0].print_result);
     }
 
     #[test]

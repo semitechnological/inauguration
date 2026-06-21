@@ -1732,21 +1732,33 @@ mod tests {
         if !native_backend::native_subset_host_available() {
             return;
         }
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("repo root")
-            .to_path_buf();
         let cases = [
-            "apps/polyglot-sample/sample.js",
-            "apps/polyglot-sample/sample.ts",
-            "apps/polyglot-sample/sample.py",
-            "apps/polyglot-sample/sample.rb",
-            "apps/polyglot-sample/sample.zig",
-            "apps/polyglot-sample/sample.php",
-            "apps/polyglot-sample/Sample.java",
+            (
+                "sample.js",
+                "function answer() {\n  return 42;\n}\n\nfunction main() {}\n",
+            ),
+            (
+                "sample.ts",
+                "function answer(): number {\n  return 42;\n}\n\nfunction main(): void {}\n",
+            ),
+            (
+                "sample.py",
+                "def answer() -> int:\n    return 42\n\ndef main() -> None:\n    pass\n",
+            ),
+            ("sample.rb", "def answer\n  return 42\nend\n\ndef main\nend\n"),
+            ("sample.zig", "fn answer() i32 {\n    return 42;\n}\n\npub fn main() void {}\n"),
+            (
+                "sample.php",
+                "<?php\n\nfunction answer(): int {\n    return 42;\n}\n\nfunction main(): void {\n}\n",
+            ),
+            (
+                "Sample.java",
+                "class Sample {\n  static int answer() {\n    return 42;\n  }\n\n  public static void main(String[] args) {}\n}\n",
+            ),
         ];
-        for case in cases {
-            let source_path = root.join(case);
+        for (name, source) in cases {
+            let source_path = temp_path(name);
+            fs::write(&source_path, source).unwrap();
             let out_path = temp_path(&format!(
                 "polyglot-{}.bin",
                 source_path
@@ -1755,14 +1767,15 @@ mod tests {
                     .unwrap_or("sample")
             ));
             let report = compile_owned(&default_request(
-                source_path,
+                source_path.clone(),
                 CompileTarget::Native,
                 Some("answer"),
                 Some(out_path.clone()),
             ));
-            assert!(report.success, "{case}: {report:?}");
-            assert_eq!(report.eval_exit_code, Some(42), "{case}");
-            assert!(out_path.exists(), "{case}");
+            assert!(report.success, "{}: {report:?}", source_path.display());
+            assert_eq!(report.eval_exit_code, Some(42), "{}", source_path.display());
+            assert!(out_path.exists(), "{}", source_path.display());
+            fs::remove_file(source_path).unwrap();
             fs::remove_file(out_path).unwrap();
         }
     }

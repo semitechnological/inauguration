@@ -226,6 +226,186 @@ fn trim(s: &str) -> &str {
     s.trim()
 }
 
+fn line_indent(raw: &str) -> usize {
+    raw.chars().take_while(|ch| ch.is_whitespace()).count()
+}
+
+fn strip_trailing_colon(line: &str) -> &str {
+    line.strip_suffix(':').unwrap_or(line).trim()
+}
+
+fn human_call_stmt(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    let (name, rest) = trimmed.split_once(' ')?;
+    if name.is_empty()
+        || rest.is_empty()
+        || name.contains('(')
+        || !name.chars().all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+    {
+        return None;
+    }
+    Some(format!("{name}({rest})"))
+}
+
+fn normalize_human_stmt(line: &str) -> String {
+    let trimmed = line.trim();
+    if trimmed == "done" {
+        return "return".to_string();
+    }
+    if let Some(call) = human_call_stmt(trimmed) {
+        return call;
+    }
+    if trimmed.contains('(')
+        || trimmed.contains('=')
+        || trimmed.starts_with("return")
+        || trimmed.starts_with("let ")
+        || trimmed.starts_with("if ")
+        || trimmed.starts_with("while ")
+        || trimmed.starts_with("match ")
+        || trimmed.starts_with("throw ")
+        || trimmed.starts_with("try ")
+    {
+        return trimmed.to_string();
+    }
+    if trimmed
+        .chars()
+        .all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+    {
+        return format!("{trimmed}()");
+    }
+    trimmed.to_string()
+}
+
+fn next_nonempty_line<'a>(lines: &'a [&'a str], start: usize) -> Option<&'a str> {
+    lines
+        .iter()
+        .skip(start)
+        .map(|line| line.trim())
+        .find(|line| !line.is_empty())
+}
+
+fn normalize_human_in_source(source: &str) -> String {
+    let lines: Vec<&str> = source.lines().collect();
+    let mut out = Vec::new();
+    let mut stack: Vec<(&str, usize)> = Vec::new();
+
+    for (idx, raw_line) in lines.iter().enumerate() {
+        if raw_line.trim().is_empty() {
+            continue;
+        }
+        let indent = line_indent(raw_line);
+        while let Some((_, block_indent)) = stack.last() {
+            if indent <= *block_indent {
+                out.push("}".to_string());
+                stack.pop();
+            } else {
+                break;
+            }
+        }
+
+        let line = raw_line.trim();
+        let next_line = next_nonempty_line(&lines, idx + 1).unwrap_or("");
+        let next_is_field = next_line.contains(':')
+            && !next_line.ends_with(':')
+            && !next_line.contains('(')
+            && !next_line.starts_with('@');
+
+        if stack.last().map(|(kind, _)| *kind) == Some("struct") {
+            if let Some((field, ty)) = line.split_once(':') {
+                out.push(format!("{} {}", trim(ty), trim(field)));
+                continue;
+            }
+        }
+
+        if stack.last().map(|(kind, _)| *kind) == Some("stmt") {
+            if line.ends_with(':') {
+                if line == "parallel:" {
+                    out.push("parallel {".to_string());
+                    stack.push(("stmt", indent));
+                    continue;
+                }
+                let header = strip_trailing_colon(line);
+                let fn_header = if header.starts_with("distributed ") {
+                    format!("distributed fn {} -> void {{", trim(&header["distributed ".len()..]))
+                } else if header.contains('(') {
+                    format!("fn {header} -> void {{")
+                } else {
+                    format!("fn {header}() -> void {{")
+                };
+                out.push(fn_header);
+                stack.push(("stmt", indent));
+                continue;
+            }
+            out.push(normalize_human_stmt(line));
+            continue;
+        }
+
+        if let Some(rest) = line.strip_prefix("needs ") {
+            out.push(format!("capability {};", trim(rest)));
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("import ") {
+            let rest = trim(rest);
+            if rest.ends_with(';') {
+                out.push(line.to_string());
+            } else {
+                out.push(format!("import {rest};"));
+            }
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("enable ") {
+            let rest = trim(rest);
+            if rest.ends_with(';') {
+                out.push(line.to_string());
+            } else {
+                out.push(format!("enable {rest};"));
+            }
+            continue;
+        }
+        if let Some((sig, caps)) = line.split_once(" uses ") {
+            if sig.contains('(') && !line.starts_with("extern ") {
+                out.push(format!(
+                    "extern human fn {} -> void requires {};",
+                    trim(sig),
+                    trim(caps)
+                ));
+                continue;
+            }
+        }
+        if line.ends_with(':') {
+            if line == "parallel:" {
+                out.push("parallel {".to_string());
+                stack.push(("stmt", indent));
+                continue;
+            }
+            if next_is_field {
+                out.push(format!("struct {} {{", strip_trailing_colon(line)));
+                stack.push(("struct", indent));
+                continue;
+            }
+            let header = strip_trailing_colon(line);
+            let fn_header = if header.starts_with("distributed ") {
+                format!("distributed fn {} -> void {{", trim(&header["distributed ".len()..]))
+            } else if header.contains('(') {
+                format!("fn {header} -> void {{")
+            } else {
+                format!("fn {header}() -> void {{")
+            };
+            out.push(fn_header);
+            stack.push(("stmt", indent));
+            continue;
+        }
+        out.push(line.to_string());
+    }
+
+    while !stack.is_empty() {
+        out.push("}".to_string());
+        stack.pop();
+    }
+
+    out.join("\n")
+}
+
 /// Split source into complete top-level `struct` / `fn` declaration blocks (brace-balanced at depth 0).
 pub fn split_top_level_decl_blocks(source: &str) -> Vec<(usize, String)> {
     let mut depth = 0i32;
@@ -3032,7 +3212,7 @@ fn validate_module(module: &UnifiedModule, require_main: bool) -> Result<(), Str
 
 /// Parse and validate `.in` v0.2 source; returns human-readable errors as strings.
 pub fn parse_in_source(source: &str) -> Result<UnifiedModule, String> {
-    let module = parse_in_module_without_validation(source, None)?;
+    let module = parse_in_module_without_validation(&normalize_human_in_source(source), None)?;
     validate_module(&module, true)?;
     Ok(module)
 }
@@ -3064,7 +3244,9 @@ fn parse_in_file_inner(path: &Path, seen: &mut HashSet<PathBuf>) -> Result<Unifi
     if !seen.insert(key) {
         return Ok(UnifiedModule::new(Vec::new()));
     }
-    let source = fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let source = normalize_human_in_source(
+        &fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?,
+    );
     let surface = parse_in_surface_info(&source)?;
     let mut decls = Vec::new();
     for import in surface.imports {
@@ -3413,6 +3595,34 @@ fn main() -> void { return; }
                 .iter()
                 .any(|decl| matches!(decl, Decl::Function { name, .. } if name == "process_video"))
         );
+    }
+
+    #[test]
+    fn human_facing_readme_style_source_parses() {
+        let src = r#"
+import std.io
+
+needs process.stdout
+
+host_log(text: String) uses process.stdout
+
+Message:
+  text: String
+
+main:
+  print "hello from .in"
+  host_log "compiler-visible effect"
+"#;
+        let module = parse_in_source(src).expect("parse");
+        assert!(module.decls.iter().any(|decl| {
+            matches!(decl, Decl::Struct { name, .. } if name == "Message")
+        }));
+        assert!(module.decls.iter().any(|decl| {
+            matches!(decl, Decl::Function { name, .. } if name == "main")
+        }));
+        assert!(module.decls.iter().any(|decl| {
+            matches!(decl, Decl::Function { name, .. } if name == "print")
+        }));
     }
 
     #[test]
