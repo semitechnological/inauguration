@@ -1516,7 +1516,7 @@ fn cmd_compile(
 
     // Handle boot image emission separately
     if matches!(emit, Some(EmitKindCli::Boot)) {
-        return cmd_emit_bootstrap(cwd, &source_path, &out_path, entry, trampoline, metadata);
+        return cmd_emit_boot(cwd, &source_path, &out_path, entry, trampoline, metadata);
     }
     let request = OwnedCompileRequest {
         path: source_path,
@@ -1610,7 +1610,7 @@ fn cmd_compile(
     Ok(())
 }
 
-fn cmd_emit_bootstrap(
+fn cmd_emit_boot(
     cwd: &Path,
     source_path: &Path,
     out_path: &Path,
@@ -1620,11 +1620,9 @@ fn cmd_emit_bootstrap(
 ) -> Result<()> {
     let trampoline_path = trampoline
         .map(|t| resolve_invocation_path(cwd, t))
-        .ok_or_else(|| {
-            InError::Message("--trampoline is required for --emit bootstrap".to_string())
-        })?;
-    let entry_name = entry
-        .ok_or_else(|| InError::Message("--entry is required for --emit bootstrap".to_string()))?;
+        .ok_or_else(|| InError::Message("--trampoline is required for --emit boot".to_string()))?;
+    let entry_name =
+        entry.ok_or_else(|| InError::Message("--entry is required for --emit boot".to_string()))?;
 
     let trampoline_bytes = std::fs::read(&trampoline_path)
         .map_err(|e| InError::Message(format!("read trampoline: {e}")))?;
@@ -1652,7 +1650,7 @@ fn cmd_emit_bootstrap(
 
     // The lowerer places the entry function first, so entry_offset is 0.
     // The trampoline's KERNEL_ENTRY is at KCODE_BASE + 0x100, so we emit
-    // an SCI (Space Component Image) header between the trampoline and code.
+    // a generic component image header between the trampoline and code.
     let code = result.code;
     // ponytail: peephole disabled — x86_64_insn_length decoder needs more
     // edge-case verification against the full kernel binary before enabling.
@@ -1712,7 +1710,7 @@ fn cmd_emit_bootstrap(
     std::fs::write(out_path, &image)
         .map_err(|e| InError::Message(format!("write boot image: {e}")))?;
 
-    // Emit component metadata as JSON sidecar (SCI profile, not Space-branded)
+    // Emit component metadata as JSON sidecar.
     let meta_path = out_path.with_extension("component-metadata.json");
     let mut schemas: Vec<serde_json::Value> = Vec::new();
     let mut component = serde_json::json!(null);

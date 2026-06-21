@@ -223,8 +223,7 @@ pub struct ServiceExport {
 ///
 /// Emitted alongside compiled artifacts when the source contains
 /// component declarations. This is the generic metadata shape
-/// that SCI (Space Component Image) and other component-loading
-/// contracts can consume.
+/// that component-loading contracts can consume.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ComponentMetadata {
     pub component: String,

@@ -3,8 +3,7 @@
 //! Every compilation produces a `ComponentSpec` (describes *how* to build) and
 //! `ComponentMetadata` (describes *what* was built) as a JSON sidecar.
 //!
-//! This is intentionally generic — no Space or any other platform branding.
-//! Space's SCI format is one possible consumer of this metadata.
+//! This is intentionally generic, without platform branding.
 
 use serde::{Deserialize, Serialize};
 

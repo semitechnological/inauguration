@@ -68,6 +68,18 @@ PY
 check "SCI magic present" "$(echo "$SCI_MAGIC" | grep -qi "5343490000000001" && echo true)"
 check "SCI code offset is 0x100" "$([ "$SCI_CODE_OFFSET" -eq 256 ] && echo true)"
 
+META="$BUILD_DIR/test.component-metadata.json"
+check "component metadata sidecar produced" "$([ -f "$META" ] && echo true)"
+python3 - "$META" <<'PY'
+import json, sys
+with open(sys.argv[1]) as f:
+    meta = json.load(f)
+for key in ["component", "target", "entry", "capabilities_required", "provenance"]:
+    if key not in meta:
+        raise SystemExit(f"missing metadata key: {key}")
+PY
+check "component metadata sidecar has boot keys" "true"
+
 if command -v objdump &>/dev/null; then
     objdump -D -b binary -m i386 -M x86-64,intel "$BUILD_DIR/test.bin" 2>/dev/null | head -20
 fi
