@@ -3665,7 +3665,11 @@ fn perl_params<'a>(src: &[u8], n: Node<'a>) -> Vec<(String, Typ)> {
 }
 
 fn perl_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
-    ast_body(src, body, PERLAST)
+    let stmts = ast_body(src, body, PERLAST);
+    if !stmts.is_empty() {
+        return stmts;
+    }
+    simple_bounded_body(node_txt(src, body), "=").unwrap_or_default()
 }
 
 fn extract_js_with_classes(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
@@ -5863,7 +5867,7 @@ fn fsharp_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
 fn simple_bounded_body(text: &str, assign_op: &str) -> Option<Vec<Stmt>> {
     let mut out = Vec::new();
     for raw in text.lines() {
-        let line = raw.trim();
+        let line = raw.trim().trim_end_matches(';').trim();
         if line.is_empty() || line == "{" || line == "}" {
             continue;
         }
@@ -9411,5 +9415,48 @@ sub main {
                 .any(|d| matches!(d, Decl::Function { name, .. } if name == "main")),
             "main function not found"
         );
+    }
+
+    #[test]
+    fn extract_perl_eval_main_body() {
+        let src = r#"sub main {
+    print("hi");
+}
+"#;
+        let m = parse_lang(tree_sitter_perl::LANGUAGE.into(), src, extract_perl).expect("ok");
+        let main = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+            .expect("main");
+        match main {
+            Decl::Function { body, .. } => assert!(!body.is_empty(), "main body empty"),
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn extract_perl_eval_print_shape() {
+        let src = r#"sub main {
+    print(1 + 2);
+}
+"#;
+        let m = parse_lang(tree_sitter_perl::LANGUAGE.into(), src, extract_perl).expect("ok");
+        let main = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+            .expect("main");
+        match main {
+            Decl::Function { body, .. } => match body.as_slice() {
+                [Stmt::Expr(Expr::Call { callee, args, .. })] => {
+                    assert!(matches!(callee.as_ref(), Expr::Ident(name) if name == "print"));
+                    assert_eq!(args.len(), 1);
+                    assert!(matches!(args[0], Expr::Binary { .. }));
+                }
+                other => panic!("unexpected body: {other:?}"),
+            },
+            _ => panic!("expected function"),
+        }
     }
 }
