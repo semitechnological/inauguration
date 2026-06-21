@@ -744,7 +744,7 @@ const JULIAAST: AstShape = AstShape {
     try_kinds: &["try_statement"],
     catch_kinds: &["catch_clause"],
     match_kinds: &[],
-    first_assignment_is_let: false,
+    first_assignment_is_let: true,
     strict_args: false,
 };
 
@@ -758,7 +758,7 @@ const RAST: AstShape = AstShape {
     while_kinds: &["while_statement"],
     call_kinds: &["call"],
     arg_container_kinds: &["arguments"],
-    arg_wrapper_kinds: &[],
+    arg_wrapper_kinds: &["argument", "named_argument"],
     paren_kinds: &["parenthesized_expression"],
     binary_kinds: &["binary_operator"],
     unary_kinds: &["unary_operator"],
@@ -1384,6 +1384,14 @@ fn ast_args(src: &[u8], args: Node<'_>, shape: AstShape) -> Option<Vec<Expr>> {
             out.push(expr);
         } else if shape.strict_args {
             return None;
+        }
+    }
+    if out.is_empty() {
+        let text = node_txt(src, args).trim();
+        if let Some(inner) = text.strip_prefix('(').and_then(|rest| rest.strip_suffix(')'))
+            && let Some(expr) = simple_bounded_expr(inner.trim())
+        {
+            out.push(expr);
         }
     }
     Some(out)
@@ -5391,6 +5399,7 @@ fn julia_function_decl<'a>(src: &[u8], n: Node<'a>) -> Option<Decl> {
     let body = n
         .child_by_field_name("body")
         .or_else(|| first_named(n, "block"))
+        .or_else(|| last_named(n).filter(|child| child.kind() != "signature"))
         .map(|b| julia_body(src, b))
         .unwrap_or_default();
 
@@ -5444,7 +5453,14 @@ fn julia_params<'a>(src: &[u8], sig: &Node<'a>) -> Vec<(String, Typ)> {
 }
 
 fn julia_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
-    ast_body(src, body, JULIAAST)
+    let stmts = ast_body(src, body, JULIAAST);
+    if stmts.is_empty() {
+        simple_bounded_body(node_txt(src, body), "=")
+            .or_else(|| ast_expr(src, body, JULIAAST).map(|expr| vec![Stmt::Expr(expr)]))
+            .unwrap_or_default()
+    } else {
+        stmts
+    }
 }
 
 fn extract_r_lang(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
@@ -5553,7 +5569,12 @@ fn r_params<'a>(src: &[u8], func_node: Node<'a>) -> Vec<(String, Typ)> {
 }
 
 fn r_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
-    ast_body(src, body, RAST)
+    let stmts = ast_body(src, body, RAST);
+    if stmts.is_empty() {
+        simple_bounded_body(node_txt(src, body), "<-").unwrap_or_default()
+    } else {
+        stmts
+    }
 }
 
 fn extract_fsharp(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
@@ -5756,7 +5777,95 @@ fn fsharp_params<'a>(src: &[u8], n: Node<'a>) -> Vec<(String, Typ)> {
 }
 
 fn fsharp_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
-    ast_body(src, body, FSHAST)
+    let stmts = ast_body(src, body, FSHAST);
+    if !stmts.is_empty() {
+        return stmts;
+    }
+    let mut locals = HashSet::new();
+    let mut out = Vec::new();
+    let mut w = body.walk();
+    for ch in body.named_children(&mut w) {
+        if let Some(stmt) = ast_stmt(src, ch, FSHAST, &mut locals) {
+            out.push(stmt);
+        }
+    }
+    if !out.is_empty() {
+        out
+    } else {
+        simple_bounded_body(node_txt(src, body), "=")
+            .or_else(|| ast_expr(src, body, FSHAST).map(|expr| vec![Stmt::Expr(expr)]))
+            .unwrap_or_default()
+    }
+}
+
+fn simple_bounded_body(text: &str, assign_op: &str) -> Option<Vec<Stmt>> {
+    let mut out = Vec::new();
+    for raw in text.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line == "{" || line == "}" {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("let value ") {
+            let expr = rest.trim().strip_prefix(assign_op)?.trim();
+            out.push(Stmt::Let(
+                "value".into(),
+                None,
+                simple_bounded_expr(expr)?,
+            ));
+            continue;
+        }
+        if let Some(expr) = line
+            .strip_prefix("value ")
+            .and_then(|rest| rest.trim().strip_prefix(assign_op))
+        {
+            out.push(Stmt::Let(
+                "value".into(),
+                None,
+                simple_bounded_expr(expr.trim())?,
+            ));
+            continue;
+        }
+        if let Some(expr) = line.strip_prefix("return(").and_then(|rest| rest.strip_suffix(')')) {
+            out.push(Stmt::Return(Some(simple_bounded_expr(expr.trim())?)));
+            continue;
+        }
+        if let Some(expr) = line.strip_prefix("return ") {
+            out.push(Stmt::Return(Some(simple_bounded_expr(expr.trim())?)));
+            continue;
+        }
+        if let Some(expr) = simple_bounded_expr(line) {
+            out.push(Stmt::Expr(expr));
+            continue;
+        }
+    }
+    if out.is_empty() { None } else { Some(out) }
+}
+
+fn simple_bounded_expr(text: &str) -> Option<Expr> {
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    if let Some(inner) = text.strip_prefix("print(").and_then(|rest| rest.strip_suffix(')')) {
+        return Some(Expr::Call {
+            callee: Box::new(Expr::Ident("print".into())),
+            args: vec![simple_bounded_expr(inner)?],
+        });
+    }
+    if let Some((lhs, rhs)) = text.split_once(" + ") {
+        return Some(Expr::Binary {
+            op: "+".into(),
+            lhs: Box::new(simple_bounded_expr(lhs)?),
+            rhs: Box::new(simple_bounded_expr(rhs)?),
+        });
+    }
+    if let Ok(value) = text.parse::<i64>() {
+        return Some(Expr::IntLit(value));
+    }
+    if (text.starts_with('"') && text.ends_with('"')) || (text.starts_with('\'') && text.ends_with('\'')) {
+        return Some(Expr::StringLit(text[1..text.len() - 1].to_string()));
+    }
+    Some(Expr::Ident(text.to_string()))
 }
 
 fn extract_dart(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
@@ -6098,7 +6207,7 @@ const HASKELL_AST: AstShape = AstShape {
 };
 
 fn extract_haskell(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
-    extract_fn_nodes(src, root, &["function"], |src, n| {
+    let decls = extract_fn_nodes(src, root, &["function"], |src, n| {
         let name_n = n.child_by_field_name("name")?;
         let name = normalize_entry(node_txt(src, name_n).trim());
         let params = haskell_params(src, n);
@@ -6114,7 +6223,44 @@ fn extract_haskell(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
             body,
             type_params: vec![],
         })
-    })
+    })?;
+    if !decls.is_empty() {
+        return Ok(decls);
+    }
+    let mut fallback = Vec::new();
+    for raw in std::str::from_utf8(src).ok().unwrap_or_default().lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with("--") {
+            continue;
+        }
+        let Some((left, right)) = line.split_once('=') else {
+            continue;
+        };
+        let left = left.trim();
+        let right = right.trim();
+        if left.is_empty() || right.is_empty() {
+            continue;
+        }
+        let mut parts = left.split_whitespace();
+        let Some(name_part) = parts.next() else {
+            continue;
+        };
+        let name = normalize_entry(name_part);
+        let params = parts
+            .map(|param| (param.to_string(), Typ::Named("a".into())))
+            .collect();
+        let Some(body) = simple_haskell_body(right) else {
+            continue;
+        };
+        fallback.push(Decl::Function {
+            name,
+            params,
+            ret: Typ::Void,
+            body,
+            type_params: vec![],
+        });
+    }
+    Ok(fallback)
 }
 
 fn haskell_params(src: &[u8], func: Node<'_>) -> Vec<(String, Typ)> {
@@ -6145,6 +6291,37 @@ fn haskell_body(src: &[u8], func: Node<'_>) -> Vec<Stmt> {
         }
     }
     vec![]
+}
+
+fn simple_haskell_body(text: &str) -> Option<Vec<Stmt>> {
+    Some(vec![Stmt::Expr(simple_haskell_expr(text.trim())?)])
+}
+
+fn simple_haskell_expr(text: &str) -> Option<Expr> {
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    if let Some(rest) = text.strip_prefix("print ") {
+        return Some(Expr::Call {
+            callee: Box::new(Expr::Ident("print".into())),
+            args: vec![simple_haskell_expr(rest.trim())?],
+        });
+    }
+    if let Some((lhs, rhs)) = text.split_once(" + ") {
+        return Some(Expr::Binary {
+            op: "+".into(),
+            lhs: Box::new(simple_haskell_expr(lhs)?),
+            rhs: Box::new(simple_haskell_expr(rhs)?),
+        });
+    }
+    if let Ok(value) = text.parse::<i64>() {
+        return Some(Expr::IntLit(value));
+    }
+    if (text.starts_with('"') && text.ends_with('"')) || (text.starts_with('\'') && text.ends_with('\'')) {
+        return Some(Expr::StringLit(text[1..text.len() - 1].to_string()));
+    }
+    Some(Expr::Ident(text.to_string()))
 }
 
 // ─── V ───────────────────────────────────────────────────────────────
@@ -8735,6 +8912,29 @@ let main _ =
     }
 
     #[test]
+    fn extract_fsharp_eval_main_body() {
+        let src = r#"let main _ =
+    let value = print("hi")
+    value
+"#;
+        let m = parse_lang(
+            tree_sitter_fsharp::LANGUAGE_FSHARP.into(),
+            src,
+            extract_fsharp,
+        )
+        .expect("ok");
+        let main = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+            .expect("main");
+        match main {
+            Decl::Function { body, .. } => assert!(!body.is_empty(), "main body empty"),
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
     fn extract_erlang_function_clause() {
         let src = r#"-module(calculator).
 -export([answer/0, main/0]).
@@ -8828,6 +9028,24 @@ end
     }
 
     #[test]
+    fn extract_julia_eval_main_body() {
+        let src = r#"function main()
+    print("hi")
+end
+"#;
+        let m = parse_lang(tree_sitter_julia::LANGUAGE.into(), src, extract_julia).expect("ok");
+        let main = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+            .expect("main");
+        match main {
+            Decl::Function { body, .. } => assert!(!body.is_empty(), "main body empty"),
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
     fn extract_r_function() {
         let src = r#"answer <- function(x) {
     return(x + 42)
@@ -8857,6 +9075,97 @@ main <- function() {
                 .any(|d| matches!(d, Decl::Function { name, .. } if name == "main")),
             "main function not found"
         );
+    }
+
+    #[test]
+    fn extract_r_eval_main_body() {
+        let src = r#"main <- function() {
+    print("hi")
+}
+"#;
+        let m = parse_lang(tree_sitter_r::LANGUAGE.into(), src, extract_r_lang).expect("ok");
+        let main = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+            .expect("main");
+        match main {
+            Decl::Function { body, .. } => assert!(!body.is_empty(), "main body empty"),
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn extract_julia_eval_print_shape() {
+        let src = r#"function main()
+    print("hi")
+end
+"#;
+        let m = parse_lang(tree_sitter_julia::LANGUAGE.into(), src, extract_julia).expect("ok");
+        let main = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+            .expect("main");
+        match main {
+            Decl::Function { body, .. } => match body.as_slice() {
+                [Stmt::Expr(Expr::Call { callee, args, .. })] => {
+                    assert_eq!(args.len(), 1);
+                    assert!(matches!(callee.as_ref(), Expr::Ident(name) if name == "print"));
+                }
+                other => panic!("unexpected body: {other:?}"),
+            },
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn extract_r_eval_print_shape() {
+        let src = r#"main <- function() {
+    print("hi")
+}
+"#;
+        let m = parse_lang(tree_sitter_r::LANGUAGE.into(), src, extract_r_lang).expect("ok");
+        let main = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+            .expect("main");
+        match main {
+            Decl::Function { body, .. } => match body.as_slice() {
+                [Stmt::Expr(Expr::Call { callee, args, .. })] => {
+                    assert_eq!(args.len(), 1);
+                    assert!(matches!(callee.as_ref(), Expr::Ident(name) if name == "print"));
+                }
+                other => panic!("unexpected body: {other:?}"),
+            },
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn extract_r_eval_numeric_print_shape() {
+        let src = r#"main <- function() {
+    print(1 + 2)
+}
+"#;
+        let m = parse_lang(tree_sitter_r::LANGUAGE.into(), src, extract_r_lang).expect("ok");
+        let main = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+            .expect("main");
+        match main {
+            Decl::Function { body, .. } => match body.as_slice() {
+                [Stmt::Expr(Expr::Call { callee, args, .. })] => {
+                    assert!(matches!(callee.as_ref(), Expr::Ident(name) if name == "print"));
+                    assert_eq!(args.len(), 1);
+                    assert!(matches!(args[0], Expr::Binary { .. }));
+                }
+                other => panic!("unexpected body: {other:?}"),
+            },
+            _ => panic!("expected function"),
+        }
     }
 
     #[test]

@@ -2141,7 +2141,13 @@ fn wrap_eval_expression(
         parser_registry::ParserId::Scala => {
             Some(format!("def main(): {ret} = {{\n  {code}\n}}"))
         }
+        parser_registry::ParserId::Haskell => {
+            Some(format!("main = {}", render_haskell_eval_expr(code)))
+        }
         parser_registry::ParserId::Nim => Some(format!("proc main(): {ret} =\n  return {code}")),
+        parser_registry::ParserId::FSharp => {
+            Some(format!("let main _ =\n    let value = {code}\n    value"))
+        }
         parser_registry::ParserId::Odin => Some(format!(
             "package main\n\nmain :: proc() -> {ret} {{\n\treturn {code}\n}}\n"
         )),
@@ -2149,6 +2155,12 @@ fn wrap_eval_expression(
         parser_registry::ParserId::Crystal => {
             Some(format!("def main : {ret}\n  {code}\nend"))
         }
+        parser_registry::ParserId::Julia => Some(format!(
+            "function main()\n    value = {code}\n    return value\nend\n"
+        )),
+        parser_registry::ParserId::R => Some(format!(
+            "main <- function() {{\n    value <- {code}\n    return(value)\n}}\n"
+        )),
         parser_registry::ParserId::Ruby => Some(format!("def main\n  {code}\nend")),
         parser_registry::ParserId::Lua => Some(format!("function main()\n  return {code}\nend")),
         parser_registry::ParserId::Perl => {
@@ -2219,12 +2231,20 @@ fn wrap_eval_statement(parser_id: parser_registry::ParserId, code: &str) -> Opti
         parser_registry::ParserId::Zig => Some(format!("pub fn main() void {{\n    {code};\n}}")),
         parser_registry::ParserId::Dart => Some(format!("void main() {{\n  {code};\n}}")),
         parser_registry::ParserId::Scala => Some(format!("def main(): Unit = {{\n  {code}\n}}")),
+        parser_registry::ParserId::Haskell => {
+            Some(format!("main = {}", render_haskell_eval_expr(code)))
+        }
         parser_registry::ParserId::Nim => Some(format!("proc main() =\n  {code}")),
+        parser_registry::ParserId::FSharp => {
+            Some(format!("let main _ =\n    let value = {code}\n    value"))
+        }
         parser_registry::ParserId::Odin => {
             Some(format!("package main\n\nmain :: proc() {{\n\t{code}\n}}\n"))
         }
         parser_registry::ParserId::D => Some(format!("void main() {{ {code}; }}")),
         parser_registry::ParserId::Crystal => Some(format!("def main\n  {code}\nend")),
+        parser_registry::ParserId::Julia => Some(format!("function main()\n    return {code}\nend\n")),
+        parser_registry::ParserId::R => Some(format!("main <- function() {{\n    {code}\n}}\n")),
         parser_registry::ParserId::Ruby => Some(format!("def main\n  {code}\nend")),
         parser_registry::ParserId::Lua => Some(format!("function main()\n  {code}\nend")),
         parser_registry::ParserId::Perl => Some(format!("sub main {{\n    {code};\n}}\n")),
@@ -2262,6 +2282,9 @@ fn prefers_printed_eval_expression(parser_id: parser_registry::ParserId) -> bool
             | parser_registry::ParserId::Dart
             | parser_registry::ParserId::Scala
             | parser_registry::ParserId::Nim
+            | parser_registry::ParserId::FSharp
+            | parser_registry::ParserId::Haskell
+            | parser_registry::ParserId::Julia
             | parser_registry::ParserId::Odin
             | parser_registry::ParserId::D
             | parser_registry::ParserId::Crystal
@@ -2278,6 +2301,21 @@ fn prefers_printed_eval_expression(parser_id: parser_registry::ParserId) -> bool
             | parser_registry::ParserId::OCaml
             | parser_registry::ParserId::Hare
     )
+}
+
+fn render_haskell_eval_expr(code: &str) -> String {
+    let trimmed = code.trim();
+    if let Some(inner) = trimmed
+        .strip_prefix("print(")
+        .and_then(|rest| rest.strip_suffix(')'))
+    {
+        return format!("print {}", inner.trim());
+    }
+    if trimmed.contains(' ') {
+        format!("({trimmed})")
+    } else {
+        trimmed.to_string()
+    }
 }
 
 fn eval_plans(parser_id: parser_registry::ParserId, code: &str) -> Vec<EvalPlan> {
@@ -4161,6 +4199,81 @@ mod tests {
             super::eval_plans(inauguration::parser_registry::ParserId::Go, "print(\"hello\")");
         assert_eq!(plans.len(), 1);
         assert_eq!(plans[0].wrapped, "package main\n\nfunc main() {\n\tprint(\"hello\")\n}");
+        assert!(!plans[0].print_result);
+    }
+
+    #[test]
+    fn eval_prefers_printed_fsharp_expression() {
+        let plans = super::eval_plans(inauguration::parser_registry::ParserId::FSharp, "1 + 2");
+        assert_eq!(
+            plans[0].wrapped,
+            "let main _ =\n    let value = print(1 + 2)\n    value"
+        );
+        assert!(!plans[0].print_result);
+    }
+
+    #[test]
+    fn eval_prefers_printed_haskell_expression() {
+        let plans = super::eval_plans(inauguration::parser_registry::ParserId::Haskell, "1 + 2");
+        assert_eq!(plans[0].wrapped, "main = print 1 + 2");
+        assert!(!plans[0].print_result);
+    }
+
+    #[test]
+    fn eval_wraps_haskell_statement_in_main() {
+        let plans =
+            super::eval_plans(inauguration::parser_registry::ParserId::Haskell, "print(\"hi\")");
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].wrapped, "main = print \"hi\"");
+        assert!(!plans[0].print_result);
+    }
+
+    #[test]
+    fn eval_wraps_fsharp_statement_in_main() {
+        let plans =
+            super::eval_plans(inauguration::parser_registry::ParserId::FSharp, "print(\"hi\")");
+        assert_eq!(plans.len(), 1);
+        assert_eq!(
+            plans[0].wrapped,
+            "let main _ =\n    let value = print(\"hi\")\n    value"
+        );
+        assert!(!plans[0].print_result);
+    }
+
+    #[test]
+    fn eval_prefers_printed_julia_expression() {
+        let plans = super::eval_plans(inauguration::parser_registry::ParserId::Julia, "1 + 2");
+        assert_eq!(plans[0].wrapped, "function main()\n    return print(1 + 2)\nend\n");
+        assert!(!plans[0].print_result);
+    }
+
+    #[test]
+    fn eval_wraps_julia_statement_in_main() {
+        let plans =
+            super::eval_plans(inauguration::parser_registry::ParserId::Julia, "print(\"hi\")");
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].wrapped, "function main()\n    return print(\"hi\")\nend\n");
+        assert!(!plans[0].print_result);
+    }
+
+    #[test]
+    fn eval_wraps_r_expression_in_main() {
+        let plans = super::eval_plans(inauguration::parser_registry::ParserId::R, "1 + 2");
+        assert_eq!(
+            plans[0].wrapped,
+            "main <- function() {\n    value <- 1 + 2\n    return(value)\n}\n"
+        );
+        assert!(plans[0].print_result);
+    }
+
+    #[test]
+    fn eval_wraps_r_statement_in_main() {
+        let plans = super::eval_plans(inauguration::parser_registry::ParserId::R, "print(\"hi\")");
+        assert_eq!(plans.len(), 1);
+        assert_eq!(
+            plans[0].wrapped,
+            "main <- function() {\n    print(\"hi\")\n}\n"
+        );
         assert!(!plans[0].print_result);
     }
 

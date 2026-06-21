@@ -281,6 +281,36 @@ function main(): number {
     }
 
     #[test]
+    fn compiles_fsharp_eval_wrapper_to_runnable_bytecode() {
+        let path = temp_file("main.fs");
+        fs::write(
+            &path,
+            "let main _ =\n    let value = print(\"hello from fsharp\")\n    value\n",
+        )
+        .unwrap();
+
+        let output = compile_source_path(&path, "App", ParserCli::Auto).unwrap();
+        assert_eq!(run_bytecode_module(output.module).unwrap(), Value::Int(0));
+
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn compiles_r_eval_expression_wrapper_to_runnable_bytecode() {
+        let path = temp_file("main.r");
+        fs::write(
+            &path,
+            "main <- function() {\n    value <- 1 + 2\n    return(value)\n}\n",
+        )
+        .unwrap();
+
+        let output = compile_source_path(&path, "App", ParserCli::Auto).unwrap();
+        assert_eq!(run_bytecode_module(output.module).unwrap(), Value::Int(3));
+
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn rejects_unresolved_identifier_before_lowering() {
         let path = temp_file("unresolved-ident.in");
         fs::write(&path, "fn main() -> Int { return missing; }\n").unwrap();
