@@ -6055,7 +6055,7 @@ fn swift_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
 // ─── Go ───────────────────────────────────────────────────────────────
 
 const GO_AST: AstShape = AstShape {
-    block_kinds: &["block"],
+    block_kinds: &["block", "statement_list"],
     return_kinds: &["return_statement"],
     expr_stmt_kinds: &["expression_statement"],
     local_decl_kinds: &["short_var_declaration", "var_declaration"],
@@ -6072,7 +6072,7 @@ const GO_AST: AstShape = AstShape {
     string_kinds: &["interpreted_string_literal", "raw_string_literal"],
     type_kinds: &["type", "type_identifier"],
     local_decl_prefixes: &[],
-    shell_first_kinds: &[],
+    shell_first_kinds: &["block"],
     shell_last_kinds: &[],
     try_kinds: &[],
     catch_kinds: &[],
@@ -9200,6 +9200,79 @@ end
 }
 "#;
         let m = parse_lang(tree_sitter_swift::LANGUAGE.into(), src, extract_swift).expect("ok");
+        let main = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+            .expect("main");
+        match main {
+            Decl::Function { body, .. } => match body.as_slice() {
+                [Stmt::Expr(Expr::Call { callee, args, .. })] => {
+                    assert!(matches!(callee.as_ref(), Expr::Ident(name) if name == "print"));
+                    assert_eq!(args.len(), 1);
+                    assert!(matches!(args[0], Expr::Binary { .. }));
+                }
+                other => panic!("unexpected body: {other:?}"),
+            },
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn extract_go_eval_main_body() {
+        let src = "package main\n\nfunc main() {\n\tprint(\"hi\")\n}\n";
+        let m = parse_lang(tree_sitter_go::LANGUAGE.into(), src, |b, r| {
+            extract_fn_nodes(b, r, &["function_declaration", "method_declaration"], |src, n| {
+                let name_n = n.child_by_field_name("name")?;
+                let name = normalize_entry(node_txt(src, name_n).trim());
+                let params = go_params(src, n);
+                let body = n
+                    .child_by_field_name("body")
+                    .map(|b| go_body(src, b))
+                    .unwrap_or_default();
+                Some(Decl::Function {
+                    name,
+                    params,
+                    ret: Typ::Void,
+                    body,
+                    type_params: vec![],
+                })
+            })
+        })
+        .expect("ok");
+        let main = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+            .expect("main");
+        match main {
+            Decl::Function { body, .. } => assert!(!body.is_empty(), "main body empty"),
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn extract_go_eval_print_shape() {
+        let src = "package main\n\nfunc main() {\n\tprint(1 + 2)\n}\n";
+        let m = parse_lang(tree_sitter_go::LANGUAGE.into(), src, |b, r| {
+            extract_fn_nodes(b, r, &["function_declaration", "method_declaration"], |src, n| {
+                let name_n = n.child_by_field_name("name")?;
+                let name = normalize_entry(node_txt(src, name_n).trim());
+                let params = go_params(src, n);
+                let body = n
+                    .child_by_field_name("body")
+                    .map(|b| go_body(src, b))
+                    .unwrap_or_default();
+                Some(Decl::Function {
+                    name,
+                    params,
+                    ret: Typ::Void,
+                    body,
+                    type_params: vec![],
+                })
+            })
+        })
+        .expect("ok");
         let main = m
             .decls
             .iter()
