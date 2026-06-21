@@ -21,6 +21,17 @@ check() {
 }
 
 mkdir -p "$BUILD_DIR"
+TRAMPOLINE="$BUILD_DIR/trampoline.bin"
+python3 - "$TRAMPOLINE" <<'PY'
+import struct, sys
+path = sys.argv[1]
+buf = bytearray(8192)
+magic = 0x1BADB002
+flags = 0
+checksum = (-(magic + flags)) & 0xffffffff
+buf[:12] = struct.pack("<III", magic, flags, checksum)
+open(path, "wb").write(buf)
+PY
 
 echo "[1/3] Compiling minimal freestanding kernel..."
 cat > "$BUILD_DIR/test.in" << 'EOF'
@@ -31,7 +42,7 @@ EOF
 
 "$IN" compile \
     --path "$BUILD_DIR/test.in" --entry kernel_entry --emit boot \
-    --trampoline /tmp/trampoline.bin \
+    --trampoline "$TRAMPOLINE" \
     --target native --target-triple x86_64-unknown-none --linkage static-lib \
     --out "$BUILD_DIR/test.bin" 2>/dev/null
 
@@ -46,6 +57,17 @@ MB_MAGIC=$(xxd -p -l4 -s 0 "$BUILD_DIR/test.bin" 2>/dev/null || od -A n -t x1 -N
 check "multiboot magic present" "$(echo "$MB_MAGIC" | grep -qi "02b0ad1b" && echo true)"
 
 echo "[3/3] Checking kernel code..."
+SCI_MAGIC=$(xxd -p -l8 -s 8200 "$BUILD_DIR/test.bin" 2>/dev/null || od -A n -t x1 -j 8200 -N8 "$BUILD_DIR/test.bin" 2>/dev/null | tr -d ' ')
+SCI_CODE_OFFSET=$(python3 - "$BUILD_DIR/test.bin" <<'PY'
+import struct, sys
+with open(sys.argv[1], "rb") as f:
+    f.seek(8192 + 24)
+    print(struct.unpack("<Q", f.read(8))[0])
+PY
+)
+check "SCI magic present" "$(echo "$SCI_MAGIC" | grep -qi "5343490000000001" && echo true)"
+check "SCI code offset is 0x100" "$([ "$SCI_CODE_OFFSET" -eq 256 ] && echo true)"
+
 if command -v objdump &>/dev/null; then
     objdump -D -b binary -m i386 -M x86-64,intel "$BUILD_DIR/test.bin" 2>/dev/null | head -20
 fi
