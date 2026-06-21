@@ -2157,6 +2157,9 @@ fn wrap_eval_expression(
         parser_registry::ParserId::Php => {
             Some(format!("<?php\nfunction main() {{\n    return {code};\n}}\n"))
         }
+        parser_registry::ParserId::Erlang => Some(format!(
+            "-module(app).\n-export([main/0]).\n\nmain() ->\n    {code}.\n"
+        )),
         parser_registry::ParserId::Kotlin => {
             Some(format!("fun main(): {ret} {{\n    return {code}\n}}"))
         }
@@ -2223,6 +2226,9 @@ fn wrap_eval_statement(parser_id: parser_registry::ParserId, code: &str) -> Opti
         parser_registry::ParserId::Lua => Some(format!("function main()\n  {code}\nend")),
         parser_registry::ParserId::Perl => Some(format!("sub main {{\n    {code};\n}}\n")),
         parser_registry::ParserId::Php => Some(format!("<?php\nfunction main() {{\n    {code};\n}}\n")),
+        parser_registry::ParserId::Erlang => Some(format!(
+            "-module(app).\n-export([main/0]).\n\nmain() ->\n    {code}.\n"
+        )),
         parser_registry::ParserId::Java => Some(format!(
             "class App {{\n  public static void main(String[] args) {{\n    {code};\n  }}\n}}"
         )),
@@ -2257,6 +2263,7 @@ fn prefers_printed_eval_expression(parser_id: parser_registry::ParserId) -> bool
             | parser_registry::ParserId::Lua
             | parser_registry::ParserId::Perl
             | parser_registry::ParserId::Php
+            | parser_registry::ParserId::Erlang
             | parser_registry::ParserId::Java
             | parser_registry::ParserId::Groovy
             | parser_registry::ParserId::Clojure
@@ -4315,6 +4322,28 @@ mod tests {
         );
         assert_eq!(plans.len(), 1);
         assert_eq!(plans[0].wrapped, "(defn main [] print(\"hi\"))\n");
+        assert!(!plans[0].print_result);
+    }
+
+    #[test]
+    fn eval_prefers_printed_erlang_expression() {
+        let plans = super::eval_plans(inauguration::parser_registry::ParserId::Erlang, "1 + 2");
+        assert_eq!(
+            plans[0].wrapped,
+            "-module(app).\n-export([main/0]).\n\nmain() ->\n    print(1 + 2).\n"
+        );
+        assert!(!plans[0].print_result);
+    }
+
+    #[test]
+    fn eval_wraps_erlang_statement_in_main() {
+        let plans =
+            super::eval_plans(inauguration::parser_registry::ParserId::Erlang, "print(\"hi\")");
+        assert_eq!(plans.len(), 1);
+        assert_eq!(
+            plans[0].wrapped,
+            "-module(app).\n-export([main/0]).\n\nmain() ->\n    print(\"hi\").\n"
+        );
         assert!(!plans[0].print_result);
     }
 
