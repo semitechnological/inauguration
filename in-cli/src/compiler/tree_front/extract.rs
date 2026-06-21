@@ -3477,7 +3477,7 @@ fn php_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
     let mut out = Vec::new();
     for raw in node_txt(src, body).lines() {
         let mut line = raw.trim();
-        if line.is_empty() || line == "{" || line == "}" {
+        if line.is_empty() || line == "{" || line == "}" || line == "->" {
             continue;
         }
         line = line.trim_end_matches(';').trim();
@@ -4442,9 +4442,23 @@ fn extract_rust(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
                 .child_by_field_name("return_type")
                 .map(|t| Typ::Named(node_txt(src, t).trim().to_string()))
                 .unwrap_or(Typ::Void);
-            Some(decl_fn(name, params, ret))
+            let body = n
+                .child_by_field_name("body")
+                .map(|b| rust_body(src, b))
+                .unwrap_or_default();
+            Some(Decl::Function {
+                name,
+                params,
+                ret,
+                body,
+                type_params: vec![],
+            })
         },
     )
+}
+
+fn rust_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
+    strict_simple_bounded_body(node_txt(src, body), "=").unwrap_or_default()
 }
 
 fn rust_params<'a>(src: &[u8], plist: Node<'a>) -> Vec<(String, Typ)> {
@@ -4842,7 +4856,14 @@ fn zig_return_type(src: &[u8], fun: Node<'_>) -> Option<Typ> {
 }
 
 fn zig_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
-    ast_body(src, body, ZIG_AST)
+    if let Some(stmts) = strict_simple_bounded_body(node_txt(src, body), "=") {
+        return stmts;
+    }
+    let stmts = ast_body(src, body, ZIG_AST);
+    if !stmts.is_empty() {
+        return stmts;
+    }
+    simple_bounded_body(node_txt(src, body), "=").unwrap_or_default()
 }
 
 fn extract_lua(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
@@ -5335,7 +5356,19 @@ fn erlang_params<'a>(src: &[u8], n: Node<'a>) -> Vec<(String, Typ)> {
 }
 
 fn erlang_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
-    ast_body(src, body, ERLANGAST)
+    if let Some(stmts) = strict_simple_bounded_body(node_txt(src, body), "=") {
+        return clean_erlang_stmts(stmts);
+    }
+    let stmts = clean_erlang_stmts(ast_body(src, body, ERLANGAST));
+    if !stmts.is_empty() {
+        return stmts;
+    }
+    clean_erlang_stmts(simple_bounded_body(node_txt(src, body), "=").unwrap_or_default())
+}
+
+fn clean_erlang_stmts(mut stmts: Vec<Stmt>) -> Vec<Stmt> {
+    stmts.retain(|stmt| !matches!(stmt, Stmt::Expr(Expr::Ident(name)) if name.contains("->")));
+    stmts
 }
 
 fn extract_julia(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
@@ -5867,8 +5900,8 @@ fn fsharp_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
 fn simple_bounded_body(text: &str, assign_op: &str) -> Option<Vec<Stmt>> {
     let mut out = Vec::new();
     for raw in text.lines() {
-        let line = raw.trim().trim_end_matches(';').trim();
-        if line.is_empty() || line == "{" || line == "}" {
+        let line = raw.trim().trim_end_matches([';', '.']).trim();
+        if line.is_empty() || line == "{" || line == "}" || line == "->" {
             continue;
         }
         if let Some(rest) = line.strip_prefix("let value ") {
@@ -5907,6 +5940,50 @@ fn simple_bounded_body(text: &str, assign_op: &str) -> Option<Vec<Stmt>> {
     if out.is_empty() { None } else { Some(out) }
 }
 
+fn strict_simple_bounded_body(text: &str, assign_op: &str) -> Option<Vec<Stmt>> {
+    let mut out = Vec::new();
+    for raw in text.lines() {
+        let line = raw.trim().trim_end_matches([';', '.']).trim();
+        if line.is_empty() || line == "{" || line == "}" {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("let value ") {
+            let expr = rest.trim().strip_prefix(assign_op)?.trim();
+            out.push(Stmt::Let(
+                "value".into(),
+                None,
+                simple_bounded_expr(expr)?,
+            ));
+            continue;
+        }
+        if let Some(expr) = line
+            .strip_prefix("value ")
+            .and_then(|rest| rest.trim().strip_prefix(assign_op))
+        {
+            out.push(Stmt::Let(
+                "value".into(),
+                None,
+                simple_bounded_expr(expr.trim())?,
+            ));
+            continue;
+        }
+        if let Some(expr) = line.strip_prefix("return(").and_then(|rest| rest.strip_suffix(')')) {
+            out.push(Stmt::Return(Some(simple_bounded_expr(expr.trim())?)));
+            continue;
+        }
+        if let Some(expr) = line.strip_prefix("return ") {
+            out.push(Stmt::Return(Some(simple_bounded_expr(expr.trim())?)));
+            continue;
+        }
+        if let Some(expr) = simple_bounded_expr(line) {
+            out.push(Stmt::Expr(expr));
+            continue;
+        }
+        return None;
+    }
+    if out.is_empty() { None } else { Some(out) }
+}
+
 fn simple_bounded_expr(text: &str) -> Option<Expr> {
     let text = text.trim();
     if text.is_empty() {
@@ -5916,6 +5993,12 @@ fn simple_bounded_expr(text: &str) -> Option<Expr> {
         return Some(Expr::Call {
             callee: Box::new(Expr::Ident("print".into())),
             args: vec![simple_bounded_expr(inner)?],
+        });
+    }
+    if let Some(inner) = text.strip_prefix("print ") {
+        return Some(Expr::Call {
+            callee: Box::new(Expr::Ident("print".into())),
+            args: vec![simple_bounded_expr(inner.trim())?],
         });
     }
     if let Some((lhs, rhs)) = text.split_once(" + ") {
@@ -6240,7 +6323,14 @@ fn ocaml_params(src: &[u8], binding: Node<'_>) -> Vec<(String, Typ)> {
 }
 
 fn ocaml_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
-    ast_body(src, body, OCAML_AST)
+    if let Some(stmts) = strict_simple_bounded_body(node_txt(src, body), "=") {
+        return stmts;
+    }
+    let stmts = ast_body(src, body, OCAML_AST);
+    if !stmts.is_empty() {
+        return stmts;
+    }
+    simple_bounded_body(node_txt(src, body), "=").unwrap_or_default()
 }
 
 // ─── Haskell ───────────────────────────────────────────────────────────
@@ -6785,6 +6875,31 @@ class X {
     }
 
     #[test]
+    fn extract_rust_eval_print_shape() {
+        let src = "fn main() -> i64 {\nprint(\"hi\");\n0\n}\n";
+        let m = parse_lang(tree_sitter_rust::LANGUAGE.into(), src, extract_rust).expect("ok");
+        let main = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+            .expect("main");
+        match main {
+            Decl::Function { body, .. } => assert!(
+                matches!(
+                    body.as_slice(),
+                    [
+                        Stmt::Expr(Expr::Call { callee, args, .. }),
+                        Stmt::Expr(Expr::IntLit(0))
+                    ] if matches!(callee.as_ref(), Expr::Ident(name) if name == "print")
+                        && matches!(args.as_slice(), [Expr::StringLit(value)] if value == "hi")
+                ),
+                "{body:?}"
+            ),
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
     fn zig_function_declarations_extract() {
         let src =
             "fn helper(value: i32) i32 { return value; }\npub fn main() void { _ = helper(1); }\n";
@@ -6801,6 +6916,29 @@ class X {
                 .any(|d| matches!(d, Decl::Function { name, .. } if name == "main")),
             "{m:?}"
         );
+    }
+
+    #[test]
+    fn extract_zig_eval_print_shape() {
+        let src = "pub fn main() void {\n    print(\"hi\");\n}\n";
+        let m = parse_lang(tree_sitter_zig::LANGUAGE.into(), src, extract_zig).expect("ok");
+        match m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+            .expect("main")
+        {
+            Decl::Function { body, .. } => assert!(
+                matches!(
+                    body.as_slice(),
+                    [Stmt::Expr(Expr::Call { callee, args, .. })]
+                        if matches!(callee.as_ref(), Expr::Ident(name) if name == "print")
+                            && matches!(args.as_slice(), [Expr::StringLit(value)] if value == "hi")
+                ),
+                "{body:?}"
+            ),
+            _ => panic!("expected function"),
+        }
     }
 
     #[test]
@@ -9065,8 +9203,31 @@ main() ->
                 methods
                     .iter()
                     .any(|m| matches!(m, Decl::Function { name, .. } if name == "answer"))
-            });
+        });
         assert!(found_answer || found_in_class, "answer function not found");
+    }
+
+    #[test]
+    fn extract_erlang_eval_print_shape() {
+        let src = "-module(app).\n-export([main/0]).\n\nmain() ->\n    print(\"hi\").\n";
+        let m = parse_lang(tree_sitter_erlang::LANGUAGE.into(), src, extract_erlang).expect("ok");
+        let main = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+            .expect("main");
+        match main {
+            Decl::Function { body, .. } => assert!(
+                matches!(
+                    body.as_slice(),
+                    [Stmt::Expr(Expr::Call { callee, args, .. })]
+                        if matches!(callee.as_ref(), Expr::Ident(name) if name == "print")
+                            && matches!(args.as_slice(), [Expr::StringLit(value)] if value == "hi")
+                ),
+                "{body:?}"
+            ),
+            _ => panic!("expected function"),
+        }
     }
 
     #[test]
@@ -9144,6 +9305,30 @@ end
             .expect("main");
         match main {
             Decl::Function { body, .. } => assert!(!body.is_empty(), "main body empty"),
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn extract_ocaml_eval_print_shape() {
+        let src = "let main () =\n  print \"hi\"\n";
+        let m = parse_lang(tree_sitter_ocaml::LANGUAGE_OCAML.into(), src, extract_ocaml)
+            .expect("ok");
+        let main = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+            .expect("main");
+        match main {
+            Decl::Function { body, .. } => assert!(
+                matches!(
+                    body.as_slice(),
+                    [Stmt::Expr(Expr::Call { callee, args, .. })]
+                        if matches!(callee.as_ref(), Expr::Ident(name) if name == "print")
+                            && matches!(args.as_slice(), [Expr::StringLit(value)] if value == "hi")
+                ),
+                "{body:?}"
+            ),
             _ => panic!("expected function"),
         }
     }

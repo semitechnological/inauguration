@@ -2236,7 +2236,7 @@ fn wrap_eval_statement(parser_id: parser_registry::ParserId, code: &str) -> Opti
         parser_registry::ParserId::TypeScript => {
             Some(format!("function main(): void {{ {code} }}"))
         }
-        parser_registry::ParserId::Rust => Some(format!("fn main() -> i64 {{ {code}\n0\n}}")),
+        parser_registry::ParserId::Rust => Some(format!("fn main() -> i64 {{ {code};\n0\n}}")),
         parser_registry::ParserId::Python => Some(format!("def main() -> None:\n    {code}")),
         parser_registry::ParserId::Swift => Some(format!("func main() -> Void {{\n  {code}\n}}")),
         parser_registry::ParserId::Go => Some(format!("package main\n\nfunc main() {{\n\t{code}\n}}")),
@@ -4219,6 +4219,15 @@ mod tests {
     fn eval_wraps_rust_expression_in_main() {
         let plans = super::eval_plans(inauguration::parser_registry::ParserId::Rust, "1 + 2");
         assert_eq!(plans[0].wrapped, "fn main() -> i64 { 1 + 2 }");
+    }
+
+    #[test]
+    fn eval_wraps_rust_statement_in_main() {
+        let plans =
+            super::eval_plans(inauguration::parser_registry::ParserId::Rust, "print(\"hi\")");
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].wrapped, "fn main() -> i64 { print(\"hi\");\n0\n}");
+        assert!(!plans[0].print_result);
     }
 
     #[test]
