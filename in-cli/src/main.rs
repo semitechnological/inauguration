@@ -367,6 +367,8 @@ enum Commands {
         all: bool,
         #[arg(long, default_value_t = false)]
         serial: bool,
+        #[arg(value_name = "PATH")]
+        paths: Vec<String>,
     },
     /// Reinstall the `in` CLI from the enclosing inauguration checkout (`cargo install --path in-cli`).
     #[command(visible_alias = "self-update")]
@@ -582,6 +584,7 @@ fn run() -> Result<()> {
             owned_native,
             all,
             serial,
+            paths,
         } => cmd_test(
             &workspace_root(invocation_cwd.clone())?,
             TestOptions {
@@ -591,6 +594,7 @@ fn run() -> Result<()> {
                 owned_native,
                 all,
                 serial,
+                paths,
             },
         ),
         Commands::Update => match workspace_root(invocation_cwd.clone()) {
@@ -2180,7 +2184,7 @@ fn cmd_backend(
     Ok(())
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct TestOptions {
     self_host: bool,
     toolchain: bool,
@@ -2188,6 +2192,7 @@ struct TestOptions {
     owned_native: bool,
     all: bool,
     serial: bool,
+    paths: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -2212,6 +2217,21 @@ struct TestGroupResult {
 }
 
 fn cmd_test(root: &Path, options: TestOptions) -> Result<()> {
+    if !options.paths.is_empty() {
+        return run_test_groups(
+            vec![TestGroup {
+                name: "selected conformance fixtures (scripts/run-conformance.sh)",
+                commands: vec![TestCommand {
+                    program: "bash".to_string(),
+                    args: std::iter::once("scripts/run-conformance.sh".to_string())
+                        .chain(options.paths)
+                        .collect(),
+                    cwd: root.to_path_buf(),
+                }],
+            }],
+            true,
+        );
+    }
     let include_toolchain = options.all || options.toolchain;
     let include_external = options.all || options.external_parity;
     let include_owned_native = options.all || options.owned_native;
@@ -3553,6 +3573,15 @@ mod tests {
                 assert!(owned_native);
                 assert!(!all);
             }
+            _ => panic!("expected test command"),
+        }
+    }
+
+    #[test]
+    fn parse_test_accepts_fixture_path() {
+        let cli = Cli::try_parse_from(["in", "test", "example.in"]).expect("cli parse");
+        match cli.command {
+            Commands::Test { paths, .. } => assert_eq!(paths, vec!["example.in"]),
             _ => panic!("expected test command"),
         }
     }

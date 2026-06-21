@@ -177,6 +177,24 @@ mod tests {
     }
 
     #[test]
+    fn compiles_int_to_str_method_call_to_runnable_bytecode() {
+        let path = temp_file("int-tostr.in");
+        fs::write(
+            &path,
+            "fn main() -> String { let one: Int = 1; return one.toStr(); }\n",
+        )
+        .unwrap();
+
+        let output = compile_source_path(&path, "App", ParserCli::Auto).unwrap();
+        assert_eq!(
+            run_bytecode_module(output.module).unwrap(),
+            Value::String("1".to_string())
+        );
+
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn compiles_javascript_class_method_to_runnable_bytecode() {
         let path = temp_file("counter.js");
         fs::write(

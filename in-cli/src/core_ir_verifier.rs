@@ -148,6 +148,7 @@ pub fn is_intrinsic(name: &str) -> bool {
             | "invoke"
             | "invoke1"
             | "invoke2"
+            | "to_string"
     )
 }
 
@@ -163,7 +164,8 @@ fn collect_module_facts(module: &UnifiedModule) -> Result<ModuleFacts<'_>, (Stri
     let int_ret: &'static Typ = Box::leak(Box::new(Typ::Int));
 
     // Seed builtin intrinsics so calls to them don't fail verification.
-    let intrinsics: [(&str, &'static Typ); 22] = [
+    let string_ret: &'static Typ = Box::leak(Box::new(Typ::String));
+    let intrinsics: [(&str, &'static Typ); 23] = [
         ("outb", void_ret),
         ("inb", int_ret),
         ("outl", void_ret),
@@ -186,6 +188,7 @@ fn collect_module_facts(module: &UnifiedModule) -> Result<ModuleFacts<'_>, (Stri
         ("invoke", int_ret),
         ("invoke1", int_ret),
         ("invoke2", int_ret),
+        ("to_string", string_ret),
     ];
     for (name, ret) in intrinsics {
         functions.insert(name, FunctionSig { params: &[], ret });

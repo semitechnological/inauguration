@@ -16,9 +16,19 @@ if [[ -n "${NO_COLOR:-}" ]]; then
 fi
 
 declare -a FIXTURES=()
-while IFS= read -r f; do
-  FIXTURES+=("$f")
-done < <(find conformance -type f \( -name '*.in' -o -name '*.java' \) | sort)
+if [[ $# -gt 0 ]]; then
+  for fixture in "$@"; do
+    if [[ "$fixture" = /* ]]; then
+      FIXTURES+=("$fixture")
+    else
+      FIXTURES+=("$ROOT/$fixture")
+    fi
+  done
+else
+  while IFS= read -r f; do
+    FIXTURES+=("$f")
+  done < <(find conformance -type f \( -name '*.in' -o -name '*.java' \) | sort)
+fi
 
 results() { echo "$1" >> "${RESULTS_FILE:?}"; }
 
