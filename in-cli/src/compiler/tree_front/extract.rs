@@ -1197,6 +1197,13 @@ fn ast_stmt_or_body(
 }
 
 fn ast_expr(src: &[u8], expr: Node<'_>, shape: AstShape) -> Option<Expr> {
+    if expr.kind() == "print_intrinsic" {
+        let inner = expr.named_child(0)?;
+        return Some(Expr::Call {
+            callee: Box::new(Expr::Ident("print".to_string())),
+            args: vec![ast_expr(src, inner, shape)?],
+        });
+    }
     if matches!(expr.kind(), "this" | "this_expression") {
         return Some(Expr::Ident("this".to_string()));
     }
@@ -3463,7 +3470,55 @@ fn php_params<'a>(src: &[u8], plist: Node<'a>) -> Vec<(String, Typ)> {
 }
 
 fn php_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
-    ast_body(src, body, PHPAST)
+    let stmts = ast_body(src, body, PHPAST);
+    if !stmts.is_empty() {
+        return stmts;
+    }
+    let mut out = Vec::new();
+    for raw in node_txt(src, body).lines() {
+        let mut line = raw.trim();
+        if line.is_empty() || line == "{" || line == "}" {
+            continue;
+        }
+        line = line.trim_end_matches(';').trim();
+        if let Some(expr) = line
+            .strip_prefix("return ")
+            .and_then(simple_bounded_expr)
+        {
+            out.push(Stmt::Return(Some(expr)));
+            continue;
+        }
+        if line == "return" {
+            out.push(Stmt::Return(None));
+            continue;
+        }
+        if let Some((lhs, rhs)) = line.split_once(" = ")
+            && let Some(expr) = simple_bounded_expr(rhs.trim())
+        {
+            out.push(Stmt::Assign(lhs.trim().trim_start_matches('$').to_string(), expr));
+            continue;
+        }
+        if let Some(expr) = simple_bounded_expr(line.trim_start_matches('$')) {
+            out.push(Stmt::Expr(expr));
+        }
+    }
+    if out.is_empty() {
+        let mut stack = vec![body];
+        while let Some(node) = stack.pop() {
+            if node.kind() == "print_intrinsic"
+                && let Some(expr) = ast_expr(src, node, PHPAST)
+            {
+                out.push(Stmt::Expr(expr));
+                continue;
+            }
+            let mut w = node.walk();
+            for ch in node.named_children(&mut w) {
+                stack.push(ch);
+            }
+        }
+        out.reverse();
+    }
+    out
 }
 
 fn extract_perl(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
@@ -8630,6 +8685,43 @@ class Calculator {
             matches!(main, Decl::Function { .. }),
             "main should be a function"
         );
+    }
+
+    #[test]
+    fn php_eval_main_body_extracts() {
+        let src = "<?php\nfunction main() {\n    print(\"hi\");\n}\n";
+        let m = parse_lang(tree_sitter_php::LANGUAGE_PHP.into(), src, extract_php).expect("ok");
+        let main = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+            .expect("main");
+        match main {
+            Decl::Function { body, .. } => assert!(!body.is_empty(), "main body empty"),
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn php_eval_print_shape_extracts() {
+        let src = "<?php\nfunction main() {\n    print(1 + 2);\n}\n";
+        let m = parse_lang(tree_sitter_php::LANGUAGE_PHP.into(), src, extract_php).expect("ok");
+        let main = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+            .expect("main");
+        match main {
+            Decl::Function { body, .. } => match body.as_slice() {
+                [Stmt::Expr(Expr::Call { callee, args, .. })] => {
+                    assert!(matches!(callee.as_ref(), Expr::Ident(name) if name == "print"));
+                    assert_eq!(args.len(), 1);
+                    assert!(matches!(args[0], Expr::Binary { .. }));
+                }
+                other => panic!("unexpected body: {other:?}"),
+            },
+            _ => panic!("expected function"),
+        }
     }
 
     #[test]
