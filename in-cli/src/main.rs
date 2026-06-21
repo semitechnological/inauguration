@@ -1877,37 +1877,67 @@ fn cmd_run_bytecode(cwd: &Path, path: &str, verbose: bool) -> Result<()> {
     Ok(())
 }
 
-fn cmd_eval(cwd: &Path, code: &str, verbose: bool) -> Result<()> {
-    // Auto-wrap bare expressions in fn main() if not a full declaration.
+struct SourceExecution {
+    output: inauguration::bytecode_compiler::BytecodeCompileOutput,
+    result: inauguration::bytecode::Value,
+}
+
+fn compile_and_run_source_path(
+    source_path: &Path,
+    module_id: &str,
+    parser: ParserCli,
+) -> Result<SourceExecution> {
+    let output = inauguration::bytecode_compiler::compile_source_path(source_path, module_id, parser)
+        .map_err(|e| InError::Message(format!("bytecode compile: {e}")))?;
+    let result = inauguration::bytecode_compiler::run_bytecode_module(output.module.clone())
+        .map_err(|e| InError::Message(format!("bytecode execution: {e}")))?;
+    Ok(SourceExecution { output, result })
+}
+
+struct EvalPlan {
+    wrapped: String,
+    print_result: bool,
+}
+
+fn guess_eval_type(s: &str) -> &'static str {
+    let s = s.trim();
+    if s == "true" || s == "false" {
+        "Bool"
+    } else if s.starts_with('"') {
+        "String"
+    } else {
+        "Int"
+    }
+}
+
+fn eval_plans(code: &str) -> Vec<EvalPlan> {
     let trimmed = code.trim();
-    // Auto-wrap: if code is a bare expression/stmt, wrap in fn main.
-    // If it already starts with `return`/`let`/`if`, wrap without double return.
     let starts_decl = trimmed.starts_with("fn ")
         || trimmed.starts_with("interrupt fn ")
         || trimmed.starts_with("struct ")
         || trimmed.starts_with("const ")
         || trimmed.starts_with("var ");
-    let is_stmt = trimmed.starts_with("return ") || trimmed.starts_with("if ");
-    // Guess return type from bare expression for ergonomic eval.
-    let guess_type = |s: &str| -> &str {
-        let s = s.trim();
-        if s == "true" || s == "false" {
-            "Bool"
-        } else if s.starts_with('"') {
-            "String"
-        } else {
-            "Int"
-        }
-    };
-    let wrapped = if starts_decl || trimmed.contains("\nfn ") {
-        code.to_string()
-    } else if is_stmt {
-        format!("fn main() -> Int {{ {code} }}")
-    } else {
-        let ret = guess_type(trimmed);
-        format!("fn main() -> {ret} {{ return {code} }}")
-    };
+    if starts_decl || trimmed.contains("\nfn ") {
+        return vec![EvalPlan {
+            wrapped: code.to_string(),
+            print_result: false,
+        }];
+    }
 
+    let ret = guess_eval_type(trimmed);
+    vec![
+        EvalPlan {
+            wrapped: format!("fn main() -> {ret} {{ return {code} }}"),
+            print_result: true,
+        },
+        EvalPlan {
+            wrapped: format!("fn main() -> void {{ {code} }}"),
+            print_result: false,
+        },
+    ]
+}
+
+fn cmd_eval(cwd: &Path, code: &str, verbose: bool) -> Result<()> {
     let dir = std::env::temp_dir().join("inaug-eval");
     let _ = std::fs::create_dir_all(&dir);
     let path = dir.join(format!(
@@ -1917,22 +1947,34 @@ fn cmd_eval(cwd: &Path, code: &str, verbose: bool) -> Result<()> {
             .unwrap_or_default()
             .as_nanos()
     ));
-    std::fs::write(&path, &wrapped)
-        .map_err(|e| InError::Message(format!("write eval temp: {e}")))?;
-
     let source_path = resolve_invocation_path(cwd, &path.to_string_lossy());
-    let output = inauguration::bytecode_compiler::compile_source_path(
-        &source_path,
-        "App",
-        parser_registry::ParserCli::Auto,
-    )
-    .map_err(|e| InError::Message(format!("compile: {e}")))?;
-    let result = inauguration::bytecode_compiler::run_bytecode_module(output.module)
-        .map_err(|e| InError::Message(format!("execute: {e}")))?;
+    let mut last_err = None;
+    let mut execution = None;
+    let mut print_result = false;
+
+    for plan in eval_plans(code) {
+        std::fs::write(&path, &plan.wrapped)
+            .map_err(|e| InError::Message(format!("write eval temp: {e}")))?;
+        match compile_and_run_source_path(&source_path, "App", parser_registry::ParserCli::Auto) {
+            Ok(run) => {
+                print_result = plan.print_result;
+                execution = Some(run);
+                break;
+            }
+            Err(err) => last_err = Some(err),
+        }
+    }
+
+    let _ = std::fs::remove_file(&path);
+    let execution = match execution {
+        Some(run) => run,
+        None => return Err(last_err.unwrap_or_else(|| InError::Message("eval failed".to_string()))),
+    };
+    let result = execution.result;
 
     if verbose {
         eprintln!("> {:?}", result);
-    } else {
+    } else if print_result {
         match &result {
             inauguration::bytecode::Value::Int(v) => println!("{}", v),
             inauguration::bytecode::Value::Bool(b) => println!("{}", b),
@@ -1942,8 +1984,6 @@ fn cmd_eval(cwd: &Path, code: &str, verbose: bool) -> Result<()> {
             _ => eprintln!("{:?}", result),
         }
     }
-
-    let _ = std::fs::remove_file(&path);
     Ok(())
 }
 
@@ -1972,12 +2012,8 @@ fn cmd_execute_bytecode(cwd: &Path, path: &str, module_id: &str, verbose: bool) 
     }
 
     // Lower to SIL
-    let output = inauguration::bytecode_compiler::compile_source_path(
-        &source_path,
-        module_id,
-        ParserCli::Auto,
-    )
-    .map_err(|e| InError::Message(format!("bytecode compile: {e}")))?;
+    let execution = compile_and_run_source_path(&source_path, module_id, ParserCli::Auto)?;
+    let output = execution.output;
 
     if verbose {
         eprintln!("[bytecode] Generated SIL ({} bytes)", output.sil.len());
@@ -2018,8 +2054,7 @@ fn cmd_execute_bytecode(cwd: &Path, path: &str, module_id: &str, verbose: bool) 
         );
     }
 
-    let result = inauguration::bytecode_compiler::run_bytecode_module(output.module)
-        .map_err(|e| InError::Message(format!("bytecode execution: {e}")))?;
+    let result = execution.result;
 
     if verbose {
         eprintln!("[bytecode] Execution completed with result: {:?}", result);
@@ -3584,6 +3619,31 @@ mod tests {
             Commands::Test { paths, .. } => assert_eq!(paths, vec!["example.in"]),
             _ => panic!("expected test command"),
         }
+    }
+
+    #[test]
+    fn eval_decl_input_does_not_print_result() {
+        let plans = super::eval_plans(
+            "fn main() -> void {\n  print(\"hello\")\n}",
+        );
+        assert_eq!(plans.len(), 1);
+        assert!(!plans[0].print_result);
+    }
+
+    #[test]
+    fn eval_expression_input_prints_result() {
+        let plans = super::eval_plans("1 + 2");
+        assert_eq!(plans.len(), 2);
+        assert!(plans[0].print_result);
+        assert!(plans[0].wrapped.contains("return 1 + 2"));
+    }
+
+    #[test]
+    fn eval_print_statement_falls_back_to_void_main() {
+        let plans = super::eval_plans("print(\"hello world\")");
+        assert_eq!(plans.len(), 2);
+        assert_eq!(plans[1].wrapped, "fn main() -> void { print(\"hello world\") }");
+        assert!(!plans[1].print_result);
     }
 
     #[test]
