@@ -1899,6 +1899,40 @@ struct EvalPlan {
     print_result: bool,
 }
 
+fn normalize_eval_code(code: &str) -> String {
+    let trimmed = code.trim();
+    if let Some(expr) = trimmed
+        .strip_prefix("std::cout <<")
+        .and_then(|rest| rest.trim().strip_suffix(';'))
+    {
+        let parts: Vec<&str> = expr
+            .split("<<")
+            .map(str::trim)
+            .filter(|part| !part.is_empty() && *part != "std::endl")
+            .collect();
+        if !parts.is_empty() {
+            let part_count = parts.len();
+            let parts: Vec<String> = parts
+                .into_iter()
+                .enumerate()
+                .map(|(idx, part)| {
+                    if idx + 1 == part_count
+                        && part.starts_with('"')
+                        && part.ends_with('"')
+                        && part.contains("\\n")
+                    {
+                        part.replacen("\\n\"", "\"", 1)
+                    } else {
+                        part.to_string()
+                    }
+                })
+                .collect();
+            return format!("print({})", parts.join(" + "));
+        }
+    }
+    code.replace("println(", "print(")
+}
+
 fn guess_eval_type(s: &str) -> &'static str {
     let s = s.trim();
     if s == "true" || s == "false" {
@@ -1911,7 +1945,8 @@ fn guess_eval_type(s: &str) -> &'static str {
 }
 
 fn eval_plans(code: &str) -> Vec<EvalPlan> {
-    let trimmed = code.trim();
+    let normalized = normalize_eval_code(code);
+    let trimmed = normalized.trim();
     let starts_decl = trimmed.starts_with("fn ")
         || trimmed.starts_with("interrupt fn ")
         || trimmed.starts_with("struct ")
@@ -1919,7 +1954,7 @@ fn eval_plans(code: &str) -> Vec<EvalPlan> {
         || trimmed.starts_with("var ");
     if starts_decl || trimmed.contains("\nfn ") {
         return vec![EvalPlan {
-            wrapped: code.to_string(),
+            wrapped: normalized,
             print_result: false,
         }];
     }
@@ -1927,11 +1962,11 @@ fn eval_plans(code: &str) -> Vec<EvalPlan> {
     let ret = guess_eval_type(trimmed);
     vec![
         EvalPlan {
-            wrapped: format!("fn main() -> {ret} {{ return {code} }}"),
+            wrapped: format!("fn main() -> {ret} {{ return {normalized} }}"),
             print_result: true,
         },
         EvalPlan {
-            wrapped: format!("fn main() -> void {{ {code} }}"),
+            wrapped: format!("fn main() -> void {{ {normalized} }}"),
             print_result: false,
         },
     ]
@@ -3644,6 +3679,18 @@ mod tests {
         assert_eq!(plans.len(), 2);
         assert_eq!(plans[1].wrapped, "fn main() -> void { print(\"hello world\") }");
         assert!(!plans[1].print_result);
+    }
+
+    #[test]
+    fn eval_normalizes_println_to_print() {
+        let plans = super::eval_plans("println(\"hello world\")");
+        assert_eq!(plans[1].wrapped, "fn main() -> void { print(\"hello world\") }");
+    }
+
+    #[test]
+    fn eval_normalizes_simple_cpp_cout_to_print() {
+        let plans = super::eval_plans("std::cout << \"Hello World!\\n\";");
+        assert_eq!(plans[1].wrapped, "fn main() -> void { print(\"Hello World!\") }");
     }
 
     #[test]
