@@ -1960,6 +1960,17 @@ fn normalize_eval_code(parser_id: parser_registry::ParserId, code: &str) -> Stri
             .replace("println(", "print("),
         parser_registry::ParserId::Rust => code.replace("println!(", "print("),
         parser_registry::ParserId::Cpp => normalize_in_eval_code(code),
+        parser_registry::ParserId::HolyC => {
+            let trimmed = code.trim();
+            if let Some(inner) = trimmed
+                .strip_prefix("print(\"")
+                .and_then(|rest| rest.strip_suffix("\")"))
+            {
+                format!("\"{inner}\"")
+            } else {
+                code.to_string()
+            }
+        }
         _ => code.to_string(),
     }
 }
@@ -2141,7 +2152,7 @@ fn wrap_eval_expression(
             Some(format!("export fn main() {ret} = {{\n\treturn {code};\n}};"))
         }
         parser_registry::ParserId::HolyC => {
-            Some(format!("{ret} main()\n{{\n  return {code};\n}}"))
+            Some(format!("{ret} Main()\n{{\n  return {code};\n}}\nMain;"))
         }
         parser_registry::ParserId::C | parser_registry::ParserId::Cpp => {
             if ret == "int" || ret == "bool" {
@@ -2191,7 +2202,7 @@ fn wrap_eval_statement(parser_id: parser_registry::ParserId, code: &str) -> Opti
         parser_registry::ParserId::Kotlin => Some(format!("fun main() {{\n    {code}\n}}")),
         parser_registry::ParserId::OCaml => Some(format!("let main () =\n  {code}")),
         parser_registry::ParserId::Hare => Some(format!("export fn main() void = {{\n\t{code};\n}};")),
-        parser_registry::ParserId::HolyC => Some(format!("Void main()\n{{\n  {code};\n}}")),
+        parser_registry::ParserId::HolyC => Some(format!("U0 Main()\n{{\n  {code};\n}}\nMain;")),
         parser_registry::ParserId::C => Some(format!("int main() {{ {code}; return 0; }}")),
         parser_registry::ParserId::Cpp => Some(format!("int main() {{ {code}; return 0; }}")),
         _ => None,
@@ -2213,7 +2224,6 @@ fn prefers_printed_eval_expression(parser_id: parser_registry::ParserId) -> bool
             | parser_registry::ParserId::Lua
             | parser_registry::ParserId::OCaml
             | parser_registry::ParserId::Hare
-            | parser_registry::ParserId::HolyC
     )
 }
 
@@ -4123,6 +4133,21 @@ mod tests {
         assert_eq!(plans.len(), 1);
         assert_eq!(plans[0].wrapped, "func main() -> Void {\n  return\n}");
         assert!(!plans[0].print_result);
+    }
+
+    #[test]
+    fn eval_wraps_holyc_expression_in_main() {
+        let plans = super::eval_plans(inauguration::parser_registry::ParserId::HolyC, "1 + 2");
+        assert_eq!(plans[0].wrapped, "I64 Main()\n{\n  return 1 + 2;\n}\nMain;");
+        assert!(plans[0].print_result);
+    }
+
+    #[test]
+    fn eval_wraps_holyc_statement_in_main() {
+        let plans =
+            super::eval_plans(inauguration::parser_registry::ParserId::HolyC, "print(\"hi\")");
+        assert_eq!(plans[0].wrapped, "U8 * Main()\n{\n  return \"hi\";\n}\nMain;");
+        assert!(plans[0].print_result);
     }
 
     #[test]

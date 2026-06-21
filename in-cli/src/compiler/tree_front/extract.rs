@@ -1628,7 +1628,7 @@ fn holyc_expression_statement(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
         .named_children(&mut w)
         .next()
         .and_then(|c| holyc_expr(src, c))?;
-    Some(Stmt::Return(Some(expr)))
+    Some(Stmt::Expr(expr))
 }
 
 fn holyc_print_stmt(src: &[u8], print: Node<'_>) -> Option<Stmt> {
@@ -1647,10 +1647,10 @@ fn holyc_print_stmt(src: &[u8], print: Node<'_>) -> Option<Stmt> {
             args.push(a);
         }
     }
-    Some(Stmt::Return(Some(Expr::Call {
-        callee: Box::new(Expr::Ident("Print".into())),
+    Some(Stmt::Expr(Expr::Call {
+        callee: Box::new(Expr::Ident("print".into())),
         args,
-    })))
+    }))
 }
 
 fn holyc_if(src: &[u8], stmt: Node<'_>) -> Option<Stmt> {
@@ -1694,6 +1694,35 @@ fn holyc_stmt_list(src: &[u8], node: Node<'_>) -> Vec<Stmt> {
     holyc_stmt(src, node).into_iter().collect()
 }
 
+fn holyc_string_lit(raw: &str) -> String {
+    let text = raw.trim();
+    if text.len() >= 2 && text.starts_with('"') && text.ends_with('"') {
+        let mut out = String::new();
+        let mut chars = text[1..text.len() - 1].chars();
+        while let Some(ch) = chars.next() {
+            if ch != '\\' {
+                out.push(ch);
+                continue;
+            }
+            match chars.next() {
+                Some('n') => out.push('\n'),
+                Some('r') => out.push('\r'),
+                Some('t') => out.push('\t'),
+                Some('"') => out.push('"'),
+                Some('\\') => out.push('\\'),
+                Some(other) => {
+                    out.push('\\');
+                    out.push(other);
+                }
+                None => out.push('\\'),
+            }
+        }
+        out
+    } else {
+        text.to_string()
+    }
+}
+
 fn holyc_expr(src: &[u8], node: Node<'_>) -> Option<Expr> {
     match node.kind() {
         "identifier" => Some(Expr::Ident(node_txt(src, node).trim().to_string())),
@@ -1703,7 +1732,7 @@ fn holyc_expr(src: &[u8], node: Node<'_>) -> Option<Expr> {
             .ok()
             .map(Expr::IntLit)
             .or(Some(Expr::Ident(node_txt(src, node).trim().to_string()))),
-        "string_literal" => Some(Expr::StringLit(node_txt(src, node).trim().to_string())),
+        "string_literal" => Some(Expr::StringLit(holyc_string_lit(node_txt(src, node)))),
         "call_expression" => {
             let callee = node
                 .child_by_field_name("function")
