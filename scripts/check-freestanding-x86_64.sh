@@ -3,7 +3,7 @@
 set -euo pipefail
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
-IN="$DIR/../in-cli/target/release/in"
+IN="${IN_BIN:-$DIR/../in-cli/target/release/in}"
 BUILD_DIR="${BUILD_DIR:-/tmp/in-freestanding-check}"
 
 PASS=0

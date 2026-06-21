@@ -2245,7 +2245,7 @@ fn cmd_test(root: &Path, options: TestOptions) -> Result<()> {
     run_test_groups(groups, options.serial)
 }
 
-fn owned_native_test_step_names() -> [&'static str; 9] {
+fn owned_native_test_step_names() -> [&'static str; 11] {
     [
         "owned native compiler (scripts/check-owned-native-compiler.sh)",
         "native answer sample (scripts/check-native-answer-sample.sh)",
@@ -2256,6 +2256,8 @@ fn owned_native_test_step_names() -> [&'static str; 9] {
         "abi layouts (scripts/check-abi-layouts.sh)",
         "dynamic loader (scripts/check-dynamic-loader.sh)",
         "target matrix (scripts/check-target-matrix.sh)",
+        "freestanding x86_64 (scripts/check-freestanding-x86_64.sh)",
+        "component metadata (scripts/check-component-metadata.sh)",
     ]
 }
 
@@ -2276,6 +2278,10 @@ fn owned_native_script_for_step(name: &str) -> &'static str {
         "scripts/check-abi-layouts.sh"
     } else if name.contains("dynamic loader") {
         "scripts/check-dynamic-loader.sh"
+    } else if name.contains("freestanding x86_64") {
+        "scripts/check-freestanding-x86_64.sh"
+    } else if name.contains("component metadata") {
+        "scripts/check-component-metadata.sh"
     } else {
         "scripts/check-target-matrix.sh"
     }
@@ -3453,6 +3459,16 @@ mod tests {
             steps
                 .iter()
                 .any(|step| step.contains("check-target-matrix.sh"))
+        );
+        assert!(
+            steps
+                .iter()
+                .any(|step| step.contains("check-freestanding-x86_64.sh"))
+        );
+        assert!(
+            steps
+                .iter()
+                .any(|step| step.contains("check-component-metadata.sh"))
         );
     }
 

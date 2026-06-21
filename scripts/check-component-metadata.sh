@@ -8,7 +8,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 INAUG_DIR="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="/tmp/component-metadata-check"
-IN_CLI="$INAUG_DIR/in-cli/target/release/in"
+IN_CLI="${IN_BIN:-$INAUG_DIR/in-cli/target/release/in}"
 
 echo "=== Component Metadata Check ==="
 
