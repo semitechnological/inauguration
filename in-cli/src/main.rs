@@ -1907,6 +1907,19 @@ struct EvalPlan {
 
 fn normalize_in_eval_code(code: &str) -> String {
     let trimmed = code.trim();
+    if let Some(rest) = trimmed.strip_prefix("std.io.print ") {
+        let rest = rest.trim();
+        if rest.starts_with('\'') && rest.ends_with('\'') && rest.len() >= 2 {
+            return format!("print(\"{}\")", &rest[1..rest.len() - 1]);
+        }
+        return format!("print({rest})");
+    }
+    if let Some(rest) = trimmed.strip_prefix("print ") {
+        let rest = rest.trim();
+        if rest.starts_with('\'') && rest.ends_with('\'') && rest.len() >= 2 {
+            return format!("print(\"{}\")", &rest[1..rest.len() - 1]);
+        }
+    }
     if let Some(expr) = trimmed
         .strip_prefix("std::cout <<")
         .and_then(|rest| rest.trim().strip_suffix(';'))
@@ -2064,7 +2077,21 @@ fn wrap_eval_expression(
 
 fn wrap_eval_statement(parser_id: parser_registry::ParserId, code: &str) -> Option<String> {
     match parser_id {
-        parser_registry::ParserId::In => Some(format!("fn main() -> void {{ {code} }}")),
+        parser_registry::ParserId::In => {
+            let trimmed = code.trim();
+            if trimmed.starts_with("import ")
+                || trimmed.starts_with("needs ")
+                || trimmed.starts_with("capability ")
+                || trimmed.starts_with("enable ")
+                || trimmed.starts_with("parallel:")
+                || trimmed.starts_with("main:")
+                || trimmed.contains('\n')
+            {
+                Some(code.to_string())
+            } else {
+                Some(format!("main:\n  {trimmed}"))
+            }
+        }
         parser_registry::ParserId::JavaScript => Some(format!("function main() {{ {code} }}")),
         parser_registry::ParserId::TypeScript => {
             Some(format!("function main(): void {{ {code} }}"))
@@ -3842,7 +3869,7 @@ mod tests {
         let plans =
             super::eval_plans(inauguration::parser_registry::ParserId::In, "print(\"hello world\")");
         assert_eq!(plans.len(), 2);
-        assert_eq!(plans[1].wrapped, "fn main() -> void { print(\"hello world\") }");
+        assert_eq!(plans[1].wrapped, "main:\n  print(\"hello world\")");
         assert!(!plans[1].print_result);
     }
 
@@ -3850,7 +3877,7 @@ mod tests {
     fn eval_normalizes_println_to_print() {
         let plans =
             super::eval_plans(inauguration::parser_registry::ParserId::In, "println(\"hello world\")");
-        assert_eq!(plans[1].wrapped, "fn main() -> void { print(\"hello world\") }");
+        assert_eq!(plans[1].wrapped, "main:\n  print(\"hello world\")");
     }
 
     #[test]
@@ -3870,6 +3897,24 @@ mod tests {
         );
         assert_eq!(plans.len(), 1);
         assert!(!plans[0].print_result);
+    }
+
+    #[test]
+    fn eval_normalizes_human_in_print_statement() {
+        let plans = super::eval_plans(
+            inauguration::parser_registry::ParserId::In,
+            "print 'hello from .in'",
+        );
+        assert_eq!(plans[1].wrapped, "main:\n  print(\"hello from .in\")");
+    }
+
+    #[test]
+    fn eval_normalizes_human_std_io_print_statement() {
+        let plans = super::eval_plans(
+            inauguration::parser_registry::ParserId::In,
+            "std.io.print 'hello from .in'",
+        );
+        assert_eq!(plans[1].wrapped, "main:\n  print(\"hello from .in\")");
     }
 
     #[test]
