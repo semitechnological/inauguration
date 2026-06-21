@@ -2142,6 +2142,9 @@ fn wrap_eval_expression(
             Some(format!("def main(): {ret} = {{\n  {code}\n}}"))
         }
         parser_registry::ParserId::Nim => Some(format!("proc main(): {ret} =\n  return {code}")),
+        parser_registry::ParserId::Odin => Some(format!(
+            "package main\n\nmain :: proc() -> {ret} {{\n\treturn {code}\n}}\n"
+        )),
         parser_registry::ParserId::D => Some(format!("{ret} main() {{ return {code}; }}")),
         parser_registry::ParserId::Crystal => {
             Some(format!("def main : {ret}\n  {code}\nend"))
@@ -2211,6 +2214,9 @@ fn wrap_eval_statement(parser_id: parser_registry::ParserId, code: &str) -> Opti
         parser_registry::ParserId::Dart => Some(format!("void main() {{\n  {code};\n}}")),
         parser_registry::ParserId::Scala => Some(format!("def main(): Unit = {{\n  {code}\n}}")),
         parser_registry::ParserId::Nim => Some(format!("proc main() =\n  {code}")),
+        parser_registry::ParserId::Odin => {
+            Some(format!("package main\n\nmain :: proc() {{\n\t{code}\n}}\n"))
+        }
         parser_registry::ParserId::D => Some(format!("void main() {{ {code}; }}")),
         parser_registry::ParserId::Crystal => Some(format!("def main\n  {code}\nend")),
         parser_registry::ParserId::Ruby => Some(format!("def main\n  {code}\nend")),
@@ -2244,6 +2250,7 @@ fn prefers_printed_eval_expression(parser_id: parser_registry::ParserId) -> bool
             | parser_registry::ParserId::Dart
             | parser_registry::ParserId::Scala
             | parser_registry::ParserId::Nim
+            | parser_registry::ParserId::Odin
             | parser_registry::ParserId::D
             | parser_registry::ParserId::Crystal
             | parser_registry::ParserId::Ruby
@@ -4164,6 +4171,28 @@ mod tests {
     fn eval_prefers_printed_scala_expression() {
         let plans = super::eval_plans(inauguration::parser_registry::ParserId::Scala, "1 + 2");
         assert_eq!(plans[0].wrapped, "def main(): Unit = {\n  print(1 + 2)\n}");
+        assert!(!plans[0].print_result);
+    }
+
+    #[test]
+    fn eval_prefers_printed_odin_expression() {
+        let plans = super::eval_plans(inauguration::parser_registry::ParserId::Odin, "1 + 2");
+        assert_eq!(
+            plans[0].wrapped,
+            "package main\n\nmain :: proc() {\n\tprint(1 + 2)\n}\n"
+        );
+        assert!(!plans[0].print_result);
+    }
+
+    #[test]
+    fn eval_wraps_odin_statement_in_main() {
+        let plans =
+            super::eval_plans(inauguration::parser_registry::ParserId::Odin, "print(\"hi\")");
+        assert_eq!(plans.len(), 1);
+        assert_eq!(
+            plans[0].wrapped,
+            "package main\n\nmain :: proc() {\n\tprint(\"hi\")\n}\n"
+        );
         assert!(!plans[0].print_result);
     }
 
