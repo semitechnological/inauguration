@@ -4,7 +4,7 @@ set -euo pipefail
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 IN="${IN_BIN:-$DIR/../in-cli/target/release/in}"
-BUILD_DIR="${BUILD_DIR:-/tmp/in-freestanding-check}"
+BUILD_DIR="${BUILD_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/in-freestanding-check.XXXXXX")}"
 
 PASS=0
 FAIL=0
@@ -20,6 +20,7 @@ check() {
     fi
 }
 
+rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 TRAMPOLINE="$BUILD_DIR/trampoline.bin"
 python3 - "$TRAMPOLINE" <<'PY'
@@ -35,6 +36,12 @@ PY
 
 echo "[1/3] Compiling minimal freestanding kernel..."
 cat > "$BUILD_DIR/test.in" << 'EOF'
+component freestanding_check {
+  target "x86_64-unknown-none"
+  deterministic true
+  capability boot: Multiboot(read)
+}
+
 fn kernel_entry(mb_info: Int) -> Int {
   return 42
 }
@@ -77,6 +84,16 @@ with open(sys.argv[1]) as f:
 for key in ["component", "target", "entry", "capabilities_required", "provenance"]:
     if key not in meta:
         raise SystemExit(f"missing metadata key: {key}")
+if meta["component"] != "freestanding_check":
+    raise SystemExit("unexpected metadata component")
+if meta["target"] != "x86_64-unknown-none":
+    raise SystemExit("unexpected metadata target")
+if meta["entry"] != "kernel_entry":
+    raise SystemExit("unexpected metadata entry")
+if meta["provenance"].get("compiler") != "inauguration":
+    raise SystemExit("unexpected metadata compiler")
+if meta.get("code_size", 0) <= 0:
+    raise SystemExit("metadata code_size was not positive")
 PY
 check "component metadata sidecar has boot keys" "true"
 

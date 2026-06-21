@@ -337,19 +337,11 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
     report.parsed_function_count = count_functions(&module);
 
     let effective_entry = request.entry.clone().or(pkg_entry);
-    let semantic_module = if request.target == CompileTarget::Native {
-        effective_entry
-            .as_deref()
-            .map(|entry| native_entry_module(&module, entry))
-            .unwrap_or_else(|| module.clone())
-    } else {
-        module.clone()
-    };
     let verify_opts = core_ir_verifier::VerifyOptions {
         entry: effective_entry.clone(),
-        require_entry: effective_entry.as_deref() == Some("main"),
+        require_entry: effective_entry.is_some(),
     };
-    let verify_report = core_ir_verifier::verify_module(&semantic_module, &verify_opts);
+    let verify_report = core_ir_verifier::verify_module(&module, &verify_opts);
     if !verify_report.ok {
         report.reason_code = Some(format!(
             "verify-{}",
@@ -360,6 +352,15 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         report.call_edge_count = verify_report.call_edges.len();
         return finalize_report(&mut report, started, &cwd, &frontend_hash);
     }
+
+    let semantic_module = if request.target == CompileTarget::Native {
+        effective_entry
+            .as_deref()
+            .map(|entry| native_entry_module(&module, entry))
+            .unwrap_or_else(|| module.clone())
+    } else {
+        module.clone()
+    };
 
     if request.target != CompileTarget::Native
         && let Err(err) = crate::family_typecheck::typecheck_resolved(&resolved, &semantic_module)
@@ -1176,6 +1177,29 @@ mod tests {
         }
 
         fs::remove_file(source_path).unwrap();
+    }
+
+    #[test]
+    fn native_compile_rejects_missing_explicit_entry() {
+        let source_path = temp_path("native-missing-entry.in");
+        let out_path = temp_path("native-missing-entry.out");
+        fs::write(&source_path, "fn main() -> Int { return 42; }\n").unwrap();
+
+        let report = compile_owned(&default_request(
+            source_path.clone(),
+            CompileTarget::Native,
+            Some("answer"),
+            Some(out_path.clone()),
+        ));
+
+        assert!(!report.success, "{:?}", report);
+        assert_eq!(
+            report.reason_code.as_deref(),
+            Some("verify-missing-entry-symbol")
+        );
+
+        fs::remove_file(source_path).unwrap();
+        let _ = fs::remove_file(out_path);
     }
 
     #[test]

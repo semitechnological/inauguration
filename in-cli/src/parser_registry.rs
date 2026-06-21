@@ -72,6 +72,7 @@ pub enum ParserId {
     Crystal,
     Odin,
     Hare,
+    HolyC,
 }
 
 impl ParserId {
@@ -116,6 +117,7 @@ impl ParserId {
             ParserId::Crystal => "crystal",
             ParserId::Odin => "odin",
             ParserId::Hare => "hare",
+            ParserId::HolyC => "holyc",
         }
     }
 
@@ -143,7 +145,7 @@ impl ParserId {
             ParserId::Groovy => "JVM scripting",
             ParserId::Julia | ParserId::R => "numeric / scientific",
             ParserId::Nim | ParserId::D | ParserId::Crystal => "ALGOL-descended",
-            ParserId::Odin | ParserId::Hare => "systems / native",
+            ParserId::Odin | ParserId::Hare | ParserId::HolyC => "systems / native",
         }
     }
 }
@@ -190,6 +192,7 @@ pub fn parser_id_from_extension(ext: &str) -> Option<ParserId> {
         "cr" => Some(ParserId::Crystal),
         "odin" => Some(ParserId::Odin),
         "ha" => Some(ParserId::Hare),
+        "hc" => Some(ParserId::HolyC),
         _ => None,
     }
 }
@@ -212,6 +215,7 @@ pub fn parser_id_from_magic_token(token: &str) -> Option<ParserId> {
             "cplusplus" | "c++" => Some(ParserId::Cpp),
             "ocaml" => Some(ParserId::OCaml),
             "icore" => Some(ParserId::Icore),
+            "holyc" | "holy-c" => Some(ParserId::HolyC),
             _ => None,
         }
     })
@@ -528,6 +532,10 @@ mod tests {
         assert!(matches!(
             resolve_parser_id(Path::new("main.ha"), ParserCli::Auto),
             ResolvedBuildParser::CoreIr(ParserId::Hare)
+        ));
+        assert!(matches!(
+            resolve_parser_id(Path::new("main.hc"), ParserCli::Auto),
+            ResolvedBuildParser::CoreIr(ParserId::HolyC)
         ));
     }
 

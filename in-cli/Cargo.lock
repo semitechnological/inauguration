@@ -476,6 +476,7 @@ dependencies = [
  "tree-sitter-go",
  "tree-sitter-groovy",
  "tree-sitter-haskell",
+ "tree-sitter-holyc",
  "tree-sitter-java",
  "tree-sitter-javascript",
  "tree-sitter-julia",
@@ -1097,6 +1098,16 @@ name = "tree-sitter-haskell"
 version = "0.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "977c51e504548cba13fc27cb5a2edab2124cf6716a1934915d07ab99523b05a4"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-holyc"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b2823218c52b5c8f58e4ed0a6b1106bf16516801b4b4bb465ee1770c38cc006"
 dependencies = [
  "cc",
  "tree-sitter-language",

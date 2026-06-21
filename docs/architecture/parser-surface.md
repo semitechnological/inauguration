@@ -1,6 +1,6 @@
 # Parser surface (`in build`)
 
-`in-cli/src/parser_registry.rs` resolves which **front** runs before the hybrid SIL pipeline. All 36 tracked languages go through the same unified path: Tree-sitter grammar (or dedicated front) → `UnifiedModule` → `family_typecheck` → Core IR → SIL → codegen.
+`in-cli/src/parser_registry.rs` resolves which **front** runs before the hybrid SIL pipeline. All 37 tracked languages go through the same unified path: Tree-sitter grammar (or dedicated front) → `UnifiedModule` → `family_typecheck` → Core IR → SIL → codegen.
 
 Resolution order:
 1. `--parser in` / `--parser icore` → force that Core IR front  
@@ -55,6 +55,7 @@ Resolution order:
 | OCaml | `ml`, `mli` | `ocaml` | Tree-sitter |
 | Odin | `odin` | `odin` | dedicated boundary |
 | Hare | `ha` | `hare` | dedicated boundary |
+| HolyC | `hc`, `HC` | `holyc` | [tree-sitter-holyc](https://github.com/undivisible/tree-sitter-holyc) |
 | D | `d` | `d` | dedicated boundary |
 | Crystal | `cr` | `crystal` | dedicated boundary |
 
@@ -62,11 +63,11 @@ Resolution order:
 
 ## Current compatibility ladder
 
-All 36 languages run the same pipeline: grammar → `UnifiedModule` → `family_typecheck` → Core IR → SIL → codegen. Difference is extraction depth:
+All 37 languages run the same pipeline: grammar → `UnifiedModule` → `family_typecheck` → Core IR → SIL → codegen. Difference is extraction depth:
 
 | Level | Meaning | Languages |
 |-------|---------|-----------|
 | 5 | Dedicated front or dedicated boundary front with verified extraction | `in`, `icore`, `V`, `JavaScript`, `TypeScript`, `Odin` |
-| 4 | Tree-sitter body extraction + family typecheck + SIL artifact emission | All other 30 languages |
+| 4 | Tree-sitter body extraction + family typecheck + SIL artifact emission | All other 31 languages |
 
 Run **`in languages --json`** for the full machine-readable split.

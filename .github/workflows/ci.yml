@@ -121,6 +121,10 @@ jobs:
         run: echo "$PWD/in-cli/target/release" >> "$GITHUB_PATH"
       - name: Run in test
         run: command in test
+      - name: Run in test owned-native
+        run: command in test --owned-native
+      - name: Check diff whitespace
+        run: git diff --check
 
   in-test-macos:
     name: in test (macos)
@@ -143,6 +147,8 @@ jobs:
         env:
           IN_TEST_SKIP_SWIFT: "1"
         run: command in test --owned-native
+      - name: Check diff whitespace
+        run: git diff --check
 
   hybrid-libs:
     name: Hybrid library crates

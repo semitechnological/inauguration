@@ -81,7 +81,7 @@ pub mod vm;
 mod in_pipeline_tests {
     use crate::compiler::{driver, icore, tree_front};
     use crate::core_ir::Decl;
-    use crate::core_ir::{Expr, Stmt};
+    use crate::core_ir::{Expr, Stmt, Typ};
     use crate::hybrid_sil;
     use crate::in_lang_parse;
     use crate::lower_core;
@@ -223,6 +223,56 @@ public class Hello {
             !artifact.instructions.is_empty() || !report.call_edges.is_empty(),
             "hybrid_sil should see instructions or call edges from lowered Java SIL; sil:\n{sil}"
         );
+    }
+
+    #[test]
+    fn holyc_tree_front_extracts_main_and_bare_call() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock before UNIX_EPOCH")
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!(
+            "inauguration-holyc-tree-front-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let _guard = TempDirGuard::new(temp_dir.clone());
+
+        let path = temp_dir.join("sample.hc");
+        fs::write(
+            &path,
+            r#"U0 Main()
+{
+  "Hello\n";
+}
+Main;
+"#,
+        )
+        .expect("write HolyC source");
+
+        let module = tree_front::parse_polyglot_file(ParserId::HolyC, &path).expect("parse HolyC");
+        let names: Vec<_> = module
+            .decls
+            .iter()
+            .filter_map(|d| match d {
+                Decl::Function { name, .. } => Some(name.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(names.contains(&"main"), "decls: {names:?}");
+        let main = module
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+            .expect("main");
+        match main {
+            Decl::Function { body, ret, .. } => {
+                assert!(matches!(ret, Typ::Void));
+                assert!(!body.is_empty(), "expected print stmt in Main body");
+            }
+            _ => panic!("expected function"),
+        }
     }
 
     #[test]

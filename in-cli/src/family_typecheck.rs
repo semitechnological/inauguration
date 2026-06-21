@@ -34,6 +34,7 @@ pub fn uses_family_typecheck(parser_id: ParserId) -> bool {
             | ParserId::Nim
             | ParserId::Odin
             | ParserId::Hare
+            | ParserId::HolyC
             | ParserId::D
             | ParserId::Crystal
             | ParserId::Clojure

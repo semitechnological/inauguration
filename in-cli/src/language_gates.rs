@@ -64,6 +64,7 @@ pub fn polyglot_sample_for(entry: &LanguageSupport) -> Option<&'static str> {
         "R" => Some("apps/polyglot-sample/sample.r"),
         "Odin" => Some("apps/polyglot-sample/sample.odin"),
         "Hare" => Some("apps/polyglot-sample/sample.ha"),
+        "HolyC" => Some("apps/polyglot-sample/sample.hc"),
         "D" => Some("apps/polyglot-sample/sample.d"),
         "Crystal" => Some("apps/polyglot-sample/sample.cr"),
         "Clojure" => Some("apps/polyglot-sample/sample.clj"),

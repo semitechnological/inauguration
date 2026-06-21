@@ -42,6 +42,12 @@ jobs:
         env:
           IN_TEST_SKIP_SWIFT: ${{ matrix.skip_swift }}
         run: in test
+      - name: Run in test owned-native
+        env:
+          IN_TEST_SKIP_SWIFT: "1"
+        run: in test --owned-native
+      - name: Check diff whitespace
+        run: git diff --check
 
   build:
     needs: prerelease-gate

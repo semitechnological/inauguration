@@ -66,6 +66,7 @@ tree-sitter-ocaml = "0.25.0"
 tree-sitter-typescript = "0.23.2"
 tree-sitter-v = "0.0.2"
 tree-sitter-zig = "1.1.2"
+tree-sitter-holyc = "0.0.1"
 tree-sitter-language = "0.1.7"
 
 [target.'cfg(unix)'.dependencies]

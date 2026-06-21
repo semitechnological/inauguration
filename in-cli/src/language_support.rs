@@ -432,6 +432,17 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         example: "apps/polyglot-sample/sample.ha",
         next_step: "Deepen types, exports, and boundary probe verification",
     },
+    LanguageSupport {
+        language: "HolyC",
+        parser_id: Some("holyc"),
+        extensions: &["hc", "HC"],
+        level: 4,
+        level_label: "Tree-sitter function and bare-call extraction with print-as-stmt lowering",
+        front: "compiler::tree_front (tree-sitter-holyc)",
+        runtime_boundary: "Core IR and textual SIL; TempleOS runtime is not bundled",
+        example: "apps/polyglot-sample/sample.hc",
+        next_step: "Declarators, classes, asm strings, deeper body lowering",
+    },
 ];
 
 #[must_use]
@@ -491,6 +502,7 @@ mod tests {
             ParserId::Crystal,
             ParserId::Odin,
             ParserId::Hare,
+            ParserId::HolyC,
         ] {
             assert!(
                 LANGUAGE_SUPPORT

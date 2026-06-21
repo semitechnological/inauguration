@@ -46,7 +46,7 @@ Rust types: `in_cli::boundary_ir::BoundaryModule`, `CompileArtifact`.
 |----|--------|--------|
 | `In` | `.in` files (and `#!in parser=in`) | `in_lang_parse` → `UnifiedModule` → `compiler::driver` / `lower_core`; parser-side surface facts feed agent `effects` / `capabilities` |
 | `Icore` | `.icore` files (and `#!in parser=icore`) | `compiler::icore` v1 declarations, v2 bounded body JSON, or **v3 Boundary IR** (`boundary` section + optional semantic decls) → `CompileArtifact` → same lowering |
-| `swift`, `go`, `ocaml`, `haskell`, `c`, `cpp`, `java`, `python`, … | Known extensions or `#!in parser=<slug>` | **Tree-sitter polyglot** — [`compiler::tree_front`](../../in-cli/src/compiler/tree_front/mod.rs) grammar-backed AST → `UnifiedModule`. All 36 languages share the same pipeline. |
+| `swift`, `go`, `ocaml`, `haskell`, `c`, `cpp`, `java`, `python`, … | Known extensions or `#!in parser=<slug>` | **Tree-sitter polyglot** — [`compiler::tree_front`](../../in-cli/src/compiler/tree_front/mod.rs) grammar-backed AST → `UnifiedModule`. All 37 languages share the same pipeline. |
 
 ## Resolution order for `in build`
 
@@ -58,7 +58,7 @@ See **`in-cli/src/parser_registry.rs`** (`resolve_parser_id`) and [parser-surfac
 4. **Extension map** — `.in`, `.icore`, `.java`, `.cpp`, … → Core IR path (full parsers for `.in`/`.icore`; Tree-sitter for other wired extensions).  
 5. Unknown extensions: fail closed with an `.icore` hint.
 
-All 36 languages now route through Core IR. Swift was unified into the Tree-sitter pipeline (the old `swift_subset`/`native_swift_sil`/`sil_emit` modules have been deleted).
+All 37 languages now route through Core IR. Swift was unified into the Tree-sitter pipeline (the old `swift_subset`/`native_swift_sil`/`sil_emit` modules have been deleted).
 
 ## Related
 
