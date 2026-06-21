@@ -98,7 +98,7 @@ PY
 check "component metadata sidecar has boot keys" "true"
 
 if command -v objdump &>/dev/null; then
-    objdump -D -b binary -m i386 -M x86-64,intel "$BUILD_DIR/test.bin" 2>/dev/null | head -20
+    objdump -D -b binary -m i386 -M x86-64,intel "$BUILD_DIR/test.bin" 2>/dev/null | sed -n '1,20p'
 fi
 
 echo ""
