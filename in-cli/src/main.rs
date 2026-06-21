@@ -2157,6 +2157,9 @@ fn wrap_eval_expression(
         parser_registry::ParserId::Php => {
             Some(format!("<?php\nfunction main() {{\n    return {code};\n}}\n"))
         }
+        parser_registry::ParserId::Elixir => {
+            Some(format!("defmodule App do\n  def main do\n    {code}\n  end\nend\n"))
+        }
         parser_registry::ParserId::Erlang => Some(format!(
             "-module(app).\n-export([main/0]).\n\nmain() ->\n    {code}.\n"
         )),
@@ -2226,6 +2229,9 @@ fn wrap_eval_statement(parser_id: parser_registry::ParserId, code: &str) -> Opti
         parser_registry::ParserId::Lua => Some(format!("function main()\n  {code}\nend")),
         parser_registry::ParserId::Perl => Some(format!("sub main {{\n    {code};\n}}\n")),
         parser_registry::ParserId::Php => Some(format!("<?php\nfunction main() {{\n    {code};\n}}\n")),
+        parser_registry::ParserId::Elixir => {
+            Some(format!("defmodule App do\n  def main do\n    {code}\n  end\nend\n"))
+        }
         parser_registry::ParserId::Erlang => Some(format!(
             "-module(app).\n-export([main/0]).\n\nmain() ->\n    {code}.\n"
         )),
@@ -2263,6 +2269,7 @@ fn prefers_printed_eval_expression(parser_id: parser_registry::ParserId) -> bool
             | parser_registry::ParserId::Lua
             | parser_registry::ParserId::Perl
             | parser_registry::ParserId::Php
+            | parser_registry::ParserId::Elixir
             | parser_registry::ParserId::Erlang
             | parser_registry::ParserId::Java
             | parser_registry::ParserId::Groovy
@@ -4322,6 +4329,28 @@ mod tests {
         );
         assert_eq!(plans.len(), 1);
         assert_eq!(plans[0].wrapped, "(defn main [] print(\"hi\"))\n");
+        assert!(!plans[0].print_result);
+    }
+
+    #[test]
+    fn eval_prefers_printed_elixir_expression() {
+        let plans = super::eval_plans(inauguration::parser_registry::ParserId::Elixir, "1 + 2");
+        assert_eq!(
+            plans[0].wrapped,
+            "defmodule App do\n  def main do\n    print(1 + 2)\n  end\nend\n"
+        );
+        assert!(!plans[0].print_result);
+    }
+
+    #[test]
+    fn eval_wraps_elixir_statement_in_main() {
+        let plans =
+            super::eval_plans(inauguration::parser_registry::ParserId::Elixir, "print(\"hi\")");
+        assert_eq!(plans.len(), 1);
+        assert_eq!(
+            plans[0].wrapped,
+            "defmodule App do\n  def main do\n    print(\"hi\")\n  end\nend\n"
+        );
         assert!(!plans[0].print_result);
     }
 

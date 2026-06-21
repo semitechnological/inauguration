@@ -259,6 +259,28 @@ function main(): number {
     }
 
     #[test]
+    fn compiles_elixir_main_wrapper_to_runnable_bytecode() {
+        let path = temp_file("main.ex");
+        fs::write(
+            &path,
+            "defmodule App do\n  def main do\n    print(\"hello from elixir\")\n  end\nend\n",
+        )
+        .unwrap();
+
+        let output = compile_source_path(&path, "App", ParserCli::Auto).unwrap();
+        assert!(
+            output
+                .module
+                .functions
+                .iter()
+                .any(|function| function.name == "main")
+        );
+        assert_eq!(run_bytecode_module(output.module).unwrap(), Value::Int(0));
+
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn rejects_unresolved_identifier_before_lowering() {
         let path = temp_file("unresolved-ident.in");
         fs::write(&path, "fn main() -> Int { return missing; }\n").unwrap();

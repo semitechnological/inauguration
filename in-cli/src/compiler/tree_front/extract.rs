@@ -4878,6 +4878,7 @@ fn lua_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
 
 fn extract_elixir(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
     let mut decls = Vec::new();
+    let mut module_methods = Vec::new();
 
     let mut mod_nodes = Vec::new();
     collect_kinds(root, &["call"], &mut mod_nodes);
@@ -4897,6 +4898,7 @@ fn extract_elixir(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
         if let Some(second) = kids.get(1).copied() {
             let mod_name = node_txt(src, second).trim().to_string();
             let (fields, methods) = elixir_module_body(src, c);
+            module_methods.extend(methods.iter().cloned());
             decls.push(Decl::Class {
                 name: mod_name,
                 fields,
@@ -4943,6 +4945,16 @@ fn extract_elixir(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
         }
         if let Some(d) = elixir_function_decl(src, c) {
             decls.push(d);
+        }
+    }
+
+    for method in module_methods {
+        if let Decl::Function { name, .. } = &method
+            && !decls
+                .iter()
+                .any(|decl| matches!(decl, Decl::Function { name: existing, .. } if existing == name))
+        {
+            decls.push(method);
         }
     }
 
@@ -5047,19 +5059,20 @@ fn elixir_function_decl<'a>(src: &[u8], c: Node<'a>) -> Option<Decl> {
     if !matches!(node_txt(src, head).trim(), "def" | "defp" | "defmacro") {
         return None;
     }
-    let name_idx = kids.iter().position(|k| {
-        matches!(k.kind(), "identifier" | "keyword" | "operator_identifier")
-            && !matches!(node_txt(src, *k).trim(), "def" | "defp" | "defmacro")
-    })?;
-    let name_n = kids[name_idx];
-    let name = normalize_entry(node_txt(src, name_n).trim().trim_start_matches(':'));
+    let name_n = kids.get(1).copied()?;
+    let name_text = node_txt(src, name_n).trim();
+    let name = normalize_entry(
+        name_text
+            .trim_start_matches(':')
+            .split('(')
+            .next()
+            .unwrap_or(name_text)
+            .trim(),
+    );
 
     let mut params = Vec::new();
-    let args_idx = kids
-        .iter()
-        .position(|k| matches!(k.kind(), "arguments" | "parenthesized_call"));
-    if let Some(aidx) = args_idx {
-        let args_node = kids[aidx];
+    if matches!(name_n.kind(), "arguments" | "parenthesized_call") {
+        let args_node = name_n;
         let mut aw = args_node.walk();
         for ch in args_node.named_children(&mut aw) {
             if ch.kind() == "identifier" {
@@ -8780,8 +8793,8 @@ end
             .iter()
             .any(|d| matches!(d, Decl::Function { name, .. } if name == "main"));
         assert!(
-            found_class || found_answer || found_main,
-            "expected Calculator module or answer/main functions (found class={found_class}, answer={found_answer}, main={found_main})"
+            found_class && found_answer && found_main,
+            "expected Calculator module plus answer/main functions (found class={found_class}, answer={found_answer}, main={found_main})"
         );
     }
 
