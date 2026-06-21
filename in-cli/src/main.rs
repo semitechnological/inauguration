@@ -2203,6 +2203,12 @@ fn wrap_eval_statement(parser_id: parser_registry::ParserId, code: &str) -> Opti
         parser_registry::ParserId::Crystal => Some(format!("def main\n  {code}\nend")),
         parser_registry::ParserId::Ruby => Some(format!("def main\n  {code}\nend")),
         parser_registry::ParserId::Lua => Some(format!("function main()\n  {code}\nend")),
+        parser_registry::ParserId::Java => Some(format!(
+            "class App {{\n  public static void main(String[] args) {{\n    {code};\n  }}\n}}"
+        )),
+        parser_registry::ParserId::Groovy => Some(format!(
+            "class App {{\n  static void main(String[] args) {{\n    {code}\n  }}\n}}"
+        )),
         parser_registry::ParserId::Kotlin => Some(format!("fun main() {{\n    {code}\n}}")),
         parser_registry::ParserId::OCaml => Some(format!("let main () =\n  {code}")),
         parser_registry::ParserId::Hare => Some(format!("export fn main() void = {{\n\t{code};\n}};")),
@@ -2226,6 +2232,8 @@ fn prefers_printed_eval_expression(parser_id: parser_registry::ParserId) -> bool
             | parser_registry::ParserId::Crystal
             | parser_registry::ParserId::Ruby
             | parser_registry::ParserId::Lua
+            | parser_registry::ParserId::Java
+            | parser_registry::ParserId::Groovy
             | parser_registry::ParserId::OCaml
             | parser_registry::ParserId::Hare
     )
@@ -4136,6 +4144,52 @@ mod tests {
     fn eval_prefers_printed_scala_expression() {
         let plans = super::eval_plans(inauguration::parser_registry::ParserId::Scala, "1 + 2");
         assert_eq!(plans[0].wrapped, "def main(): Unit = {\n  print(1 + 2)\n}");
+        assert!(!plans[0].print_result);
+    }
+
+    #[test]
+    fn eval_prefers_printed_java_expression() {
+        let plans = super::eval_plans(inauguration::parser_registry::ParserId::Java, "1 + 2");
+        assert_eq!(
+            plans[0].wrapped,
+            "class App {\n  public static void main(String[] args) {\n    print(1 + 2);\n  }\n}"
+        );
+        assert!(!plans[0].print_result);
+    }
+
+    #[test]
+    fn eval_wraps_java_statement_in_class_main() {
+        let plans = super::eval_plans(
+            inauguration::parser_registry::ParserId::Java,
+            "System.out.println(\"hi\")",
+        );
+        assert_eq!(plans.len(), 1);
+        assert_eq!(
+            plans[0].wrapped,
+            "class App {\n  public static void main(String[] args) {\n    print(\"hi\");\n  }\n}"
+        );
+        assert!(!plans[0].print_result);
+    }
+
+    #[test]
+    fn eval_prefers_printed_groovy_expression() {
+        let plans = super::eval_plans(inauguration::parser_registry::ParserId::Groovy, "1 + 2");
+        assert_eq!(
+            plans[0].wrapped,
+            "class App {\n  static void main(String[] args) {\n    print(1 + 2)\n  }\n}"
+        );
+        assert!(!plans[0].print_result);
+    }
+
+    #[test]
+    fn eval_wraps_groovy_statement_in_class_main() {
+        let plans =
+            super::eval_plans(inauguration::parser_registry::ParserId::Groovy, "print(\"hi\")");
+        assert_eq!(plans.len(), 1);
+        assert_eq!(
+            plans[0].wrapped,
+            "class App {\n  static void main(String[] args) {\n    print(\"hi\")\n  }\n}"
+        );
         assert!(!plans[0].print_result);
     }
 
