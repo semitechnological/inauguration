@@ -2148,11 +2148,17 @@ fn wrap_eval_expression(
         }
         parser_registry::ParserId::Ruby => Some(format!("def main\n  {code}\nend")),
         parser_registry::ParserId::Lua => Some(format!("function main()\n  return {code}\nend")),
+        parser_registry::ParserId::Perl => {
+            Some(format!("sub main {{\n    return {code};\n}}\n"))
+        }
         parser_registry::ParserId::Php => {
             Some(format!("<?php\nfunction main() {{\n    return {code};\n}}\n"))
         }
         parser_registry::ParserId::Kotlin => {
             Some(format!("fun main(): {ret} {{\n    return {code}\n}}"))
+        }
+        parser_registry::ParserId::Clojure => {
+            Some(format!("(defn main [] {code})\n"))
         }
         parser_registry::ParserId::VbNet => {
             Some(format!("Function main() As Integer\n    main = {code}\nEnd Function\n"))
@@ -2209,6 +2215,7 @@ fn wrap_eval_statement(parser_id: parser_registry::ParserId, code: &str) -> Opti
         parser_registry::ParserId::Crystal => Some(format!("def main\n  {code}\nend")),
         parser_registry::ParserId::Ruby => Some(format!("def main\n  {code}\nend")),
         parser_registry::ParserId::Lua => Some(format!("function main()\n  {code}\nend")),
+        parser_registry::ParserId::Perl => Some(format!("sub main {{\n    {code};\n}}\n")),
         parser_registry::ParserId::Php => Some(format!("<?php\nfunction main() {{\n    {code};\n}}\n")),
         parser_registry::ParserId::Java => Some(format!(
             "class App {{\n  public static void main(String[] args) {{\n    {code};\n  }}\n}}"
@@ -2217,6 +2224,7 @@ fn wrap_eval_statement(parser_id: parser_registry::ParserId, code: &str) -> Opti
             "class App {{\n  static void main(String[] args) {{\n    {code}\n  }}\n}}"
         )),
         parser_registry::ParserId::Kotlin => Some(format!("fun main() {{\n    {code}\n}}")),
+        parser_registry::ParserId::Clojure => Some(format!("(defn main [] {code})\n")),
         parser_registry::ParserId::VbNet => Some(format!("Sub main()\n    {code}\nEnd Sub\n")),
         parser_registry::ParserId::OCaml => Some(format!("let main () =\n  {code}")),
         parser_registry::ParserId::Hare => Some(format!("export fn main() void = {{\n\t{code};\n}};")),
@@ -2240,9 +2248,11 @@ fn prefers_printed_eval_expression(parser_id: parser_registry::ParserId) -> bool
             | parser_registry::ParserId::Crystal
             | parser_registry::ParserId::Ruby
             | parser_registry::ParserId::Lua
+            | parser_registry::ParserId::Perl
             | parser_registry::ParserId::Php
             | parser_registry::ParserId::Java
             | parser_registry::ParserId::Groovy
+            | parser_registry::ParserId::Clojure
             | parser_registry::ParserId::VbNet
             | parser_registry::ParserId::OCaml
             | parser_registry::ParserId::Hare
@@ -4241,6 +4251,41 @@ mod tests {
             super::eval_plans(inauguration::parser_registry::ParserId::VbNet, "print(\"hi\")");
         assert_eq!(plans.len(), 1);
         assert_eq!(plans[0].wrapped, "Sub main()\n    print(\"hi\")\nEnd Sub\n");
+        assert!(!plans[0].print_result);
+    }
+
+    #[test]
+    fn eval_prefers_printed_perl_expression() {
+        let plans = super::eval_plans(inauguration::parser_registry::ParserId::Perl, "1 + 2");
+        assert_eq!(plans[0].wrapped, "sub main {\n    print(1 + 2);\n}\n");
+        assert!(!plans[0].print_result);
+    }
+
+    #[test]
+    fn eval_wraps_perl_statement_in_main() {
+        let plans =
+            super::eval_plans(inauguration::parser_registry::ParserId::Perl, "print(\"hi\")");
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].wrapped, "sub main {\n    print(\"hi\");\n}\n");
+        assert!(!plans[0].print_result);
+    }
+
+    #[test]
+    fn eval_prefers_printed_clojure_expression() {
+        let plans =
+            super::eval_plans(inauguration::parser_registry::ParserId::Clojure, "1 + 2");
+        assert_eq!(plans[0].wrapped, "(defn main [] print(1 + 2))\n");
+        assert!(!plans[0].print_result);
+    }
+
+    #[test]
+    fn eval_wraps_clojure_statement_in_main() {
+        let plans = super::eval_plans(
+            inauguration::parser_registry::ParserId::Clojure,
+            "print(\"hi\")",
+        );
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].wrapped, "(defn main [] print(\"hi\"))\n");
         assert!(!plans[0].print_result);
     }
 
