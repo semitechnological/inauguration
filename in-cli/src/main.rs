@@ -2036,6 +2036,54 @@ fn eval_return_type(parser_id: parser_registry::ParserId, ret: &str) -> String {
             "String" => "str".to_string(),
             _ => "int".to_string(),
         },
+        parser_registry::ParserId::Swift => match ret {
+            "Bool" => "Bool".to_string(),
+            "String" => "String".to_string(),
+            _ => "Int".to_string(),
+        },
+        parser_registry::ParserId::Go
+        | parser_registry::ParserId::V
+        | parser_registry::ParserId::Nim
+        | parser_registry::ParserId::D => match ret {
+            "Bool" => "bool".to_string(),
+            "String" => "string".to_string(),
+            _ => "int".to_string(),
+        },
+        parser_registry::ParserId::Zig => match ret {
+            "Bool" => "bool".to_string(),
+            "String" => "[]const u8".to_string(),
+            _ => "i32".to_string(),
+        },
+        parser_registry::ParserId::Dart => match ret {
+            "Bool" => "bool".to_string(),
+            "String" => "String".to_string(),
+            _ => "int".to_string(),
+        },
+        parser_registry::ParserId::Scala => match ret {
+            "Bool" => "Boolean".to_string(),
+            "String" => "String".to_string(),
+            _ => "Int".to_string(),
+        },
+        parser_registry::ParserId::Kotlin => match ret {
+            "Bool" => "Boolean".to_string(),
+            "String" => "String".to_string(),
+            _ => "Int".to_string(),
+        },
+        parser_registry::ParserId::Crystal => match ret {
+            "Bool" => "Bool".to_string(),
+            "String" => "String".to_string(),
+            _ => "Int32".to_string(),
+        },
+        parser_registry::ParserId::Hare => match ret {
+            "Bool" => "bool".to_string(),
+            "String" => "str".to_string(),
+            _ => "int".to_string(),
+        },
+        parser_registry::ParserId::HolyC => match ret {
+            "Bool" => "Bool".to_string(),
+            "String" => "U8 *".to_string(),
+            _ => "I64".to_string(),
+        },
         parser_registry::ParserId::C | parser_registry::ParserId::Cpp => match ret {
             "Bool" => "bool".to_string(),
             _ => "int".to_string(),
@@ -2063,6 +2111,37 @@ fn wrap_eval_expression(
         }
         parser_registry::ParserId::Python => {
             Some(format!("def main() -> {ret}:\n    return {code}"))
+        }
+        parser_registry::ParserId::Swift => {
+            Some(format!("func main() -> {ret} {{\n  return {code}\n}}"))
+        }
+        parser_registry::ParserId::Go => Some(format!("package main\n\nfunc main() {ret} {{\n\treturn {code}\n}}")),
+        parser_registry::ParserId::V => Some(format!("module main\n\nfn main() {ret} {{\n\treturn {code}\n}}")),
+        parser_registry::ParserId::Zig => {
+            Some(format!("pub fn main() {ret} {{\n    return {code};\n}}"))
+        }
+        parser_registry::ParserId::Dart => {
+            Some(format!("{ret} main() {{\n  return {code};\n}}"))
+        }
+        parser_registry::ParserId::Scala => {
+            Some(format!("def main(): {ret} = {{\n  {code}\n}}"))
+        }
+        parser_registry::ParserId::Nim => Some(format!("proc main(): {ret} =\n  return {code}")),
+        parser_registry::ParserId::D => Some(format!("{ret} main() {{ return {code}; }}")),
+        parser_registry::ParserId::Crystal => {
+            Some(format!("def main : {ret}\n  {code}\nend"))
+        }
+        parser_registry::ParserId::Ruby => Some(format!("def main\n  {code}\nend")),
+        parser_registry::ParserId::Lua => Some(format!("function main()\n  return {code}\nend")),
+        parser_registry::ParserId::Kotlin => {
+            Some(format!("fun main(): {ret} {{\n    return {code}\n}}"))
+        }
+        parser_registry::ParserId::OCaml => Some(format!("let main () =\n  {code}")),
+        parser_registry::ParserId::Hare => {
+            Some(format!("export fn main() {ret} = {{\n\treturn {code};\n}};"))
+        }
+        parser_registry::ParserId::HolyC => {
+            Some(format!("{ret} main()\n{{\n  return {code};\n}}"))
         }
         parser_registry::ParserId::C | parser_registry::ParserId::Cpp => {
             if ret == "int" || ret == "bool" {
@@ -2098,10 +2177,44 @@ fn wrap_eval_statement(parser_id: parser_registry::ParserId, code: &str) -> Opti
         }
         parser_registry::ParserId::Rust => Some(format!("fn main() -> i64 {{ {code}\n0\n}}")),
         parser_registry::ParserId::Python => Some(format!("def main() -> None:\n    {code}")),
+        parser_registry::ParserId::Swift => Some(format!("func main() -> Void {{\n  {code}\n}}")),
+        parser_registry::ParserId::Go => Some(format!("package main\n\nfunc main() {{\n\t{code}\n}}")),
+        parser_registry::ParserId::V => Some(format!("module main\n\nfn main() {{\n\t{code}\n}}")),
+        parser_registry::ParserId::Zig => Some(format!("pub fn main() void {{\n    {code};\n}}")),
+        parser_registry::ParserId::Dart => Some(format!("void main() {{\n  {code};\n}}")),
+        parser_registry::ParserId::Scala => Some(format!("def main(): Unit = {{\n  {code}\n}}")),
+        parser_registry::ParserId::Nim => Some(format!("proc main() =\n  {code}")),
+        parser_registry::ParserId::D => Some(format!("void main() {{ {code}; }}")),
+        parser_registry::ParserId::Crystal => Some(format!("def main\n  {code}\nend")),
+        parser_registry::ParserId::Ruby => Some(format!("def main\n  {code}\nend")),
+        parser_registry::ParserId::Lua => Some(format!("function main()\n  {code}\nend")),
+        parser_registry::ParserId::Kotlin => Some(format!("fun main() {{\n    {code}\n}}")),
+        parser_registry::ParserId::OCaml => Some(format!("let main () =\n  {code}")),
+        parser_registry::ParserId::Hare => Some(format!("export fn main() void = {{\n\t{code};\n}};")),
+        parser_registry::ParserId::HolyC => Some(format!("Void main()\n{{\n  {code};\n}}")),
         parser_registry::ParserId::C => Some(format!("int main() {{ {code}; return 0; }}")),
         parser_registry::ParserId::Cpp => Some(format!("int main() {{ {code}; return 0; }}")),
         _ => None,
     }
+}
+
+fn prefers_printed_eval_expression(parser_id: parser_registry::ParserId) -> bool {
+    matches!(
+        parser_id,
+        parser_registry::ParserId::Swift
+            | parser_registry::ParserId::Go
+            | parser_registry::ParserId::V
+            | parser_registry::ParserId::Dart
+            | parser_registry::ParserId::Scala
+            | parser_registry::ParserId::Nim
+            | parser_registry::ParserId::D
+            | parser_registry::ParserId::Crystal
+            | parser_registry::ParserId::Ruby
+            | parser_registry::ParserId::Lua
+            | parser_registry::ParserId::OCaml
+            | parser_registry::ParserId::Hare
+            | parser_registry::ParserId::HolyC
+    )
 }
 
 fn eval_plans(parser_id: parser_registry::ParserId, code: &str) -> Vec<EvalPlan> {
@@ -2110,7 +2223,20 @@ fn eval_plans(parser_id: parser_registry::ParserId, code: &str) -> Vec<EvalPlan>
     let starts_decl = trimmed.starts_with("fn ")
         || trimmed.starts_with("function ")
         || trimmed.starts_with("def ")
+        || trimmed.starts_with("func ")
+        || trimmed.starts_with("proc ")
+        || trimmed.starts_with("fun ")
+        || trimmed.starts_with("pub fn ")
+        || trimmed.starts_with("export fn ")
+        || trimmed.starts_with("let ")
         || trimmed.starts_with("int main")
+        || trimmed.starts_with("void main")
+        || trimmed.starts_with("module ")
+        || trimmed.starts_with("package ")
+        || trimmed.starts_with("class ")
+        || trimmed.starts_with("trait ")
+        || trimmed.starts_with("sub ")
+        || trimmed.starts_with("<?php")
         || trimmed.starts_with("import ")
         || trimmed.starts_with("needs ")
         || trimmed.starts_with("capability ")
@@ -2132,8 +2258,26 @@ fn eval_plans(parser_id: parser_registry::ParserId, code: &str) -> Vec<EvalPlan>
         }];
     }
 
+    if trimmed.starts_with("print(") {
+        return wrap_eval_statement(parser_id, &normalized)
+            .into_iter()
+            .map(|wrapped| EvalPlan {
+                wrapped,
+                print_result: false,
+            })
+            .collect();
+    }
+
     let ret = guess_eval_type(trimmed);
     let mut plans = Vec::new();
+    if prefers_printed_eval_expression(parser_id) {
+        if let Some(wrapped) = wrap_eval_statement(parser_id, &format!("print({trimmed})")) {
+            plans.push(EvalPlan {
+                wrapped,
+                print_result: false,
+            });
+        }
+    }
     if let Some(wrapped) = wrap_eval_expression(parser_id, &normalized, ret) {
         plans.push(EvalPlan {
             wrapped,
@@ -3868,16 +4012,16 @@ mod tests {
     fn eval_print_statement_falls_back_to_void_main() {
         let plans =
             super::eval_plans(inauguration::parser_registry::ParserId::In, "print(\"hello world\")");
-        assert_eq!(plans.len(), 2);
-        assert_eq!(plans[1].wrapped, "main:\n  print(\"hello world\")");
-        assert!(!plans[1].print_result);
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].wrapped, "main:\n  print(\"hello world\")");
+        assert!(!plans[0].print_result);
     }
 
     #[test]
     fn eval_normalizes_println_to_print() {
         let plans =
             super::eval_plans(inauguration::parser_registry::ParserId::In, "println(\"hello world\")");
-        assert_eq!(plans[1].wrapped, "main:\n  print(\"hello world\")");
+        assert_eq!(plans[0].wrapped, "main:\n  print(\"hello world\")");
     }
 
     #[test]
@@ -3886,7 +4030,7 @@ mod tests {
             inauguration::parser_registry::ParserId::Cpp,
             "std::cout << \"Hello World!\\n\";",
         );
-        assert_eq!(plans[1].wrapped, "int main() { print(\"Hello World!\"); return 0; }");
+        assert_eq!(plans[0].wrapped, "int main() { print(\"Hello World!\"); return 0; }");
     }
 
     #[test]
@@ -3905,7 +4049,7 @@ mod tests {
             inauguration::parser_registry::ParserId::In,
             "print 'hello from .in'",
         );
-        assert_eq!(plans[1].wrapped, "main:\n  print(\"hello from .in\")");
+        assert_eq!(plans[0].wrapped, "main:\n  print(\"hello from .in\")");
     }
 
     #[test]
@@ -3914,7 +4058,7 @@ mod tests {
             inauguration::parser_registry::ParserId::In,
             "std.io.print 'hello from .in'",
         );
-        assert_eq!(plans[1].wrapped, "main:\n  print(\"hello from .in\")");
+        assert_eq!(plans[0].wrapped, "main:\n  print(\"hello from .in\")");
     }
 
     #[test]
@@ -3931,13 +4075,54 @@ mod tests {
             inauguration::parser_registry::ParserId::JavaScript,
             "console.log(\"hi\")",
         );
-        assert_eq!(plans[1].wrapped, "function main() { print(\"hi\") }");
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].wrapped, "function main() { print(\"hi\") }");
     }
 
     #[test]
     fn eval_wraps_rust_expression_in_main() {
         let plans = super::eval_plans(inauguration::parser_registry::ParserId::Rust, "1 + 2");
         assert_eq!(plans[0].wrapped, "fn main() -> i64 { 1 + 2 }");
+    }
+
+    #[test]
+    fn eval_wraps_swift_expression_in_main() {
+        let plans = super::eval_plans(inauguration::parser_registry::ParserId::Swift, "1 + 2");
+        assert_eq!(plans[0].wrapped, "func main() -> Void {\n  print(1 + 2)\n}");
+        assert!(!plans[0].print_result);
+    }
+
+    #[test]
+    fn eval_wraps_go_statement_in_main() {
+        let plans =
+            super::eval_plans(inauguration::parser_registry::ParserId::Go, "print(\"hello\")");
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].wrapped, "package main\n\nfunc main() {\n\tprint(\"hello\")\n}");
+        assert!(!plans[0].print_result);
+    }
+
+    #[test]
+    fn eval_wraps_kotlin_expression_in_main() {
+        let plans = super::eval_plans(inauguration::parser_registry::ParserId::Kotlin, "1 + 2");
+        assert_eq!(plans[0].wrapped, "fun main(): Int {\n    return 1 + 2\n}");
+    }
+
+    #[test]
+    fn eval_prefers_printed_scala_expression() {
+        let plans = super::eval_plans(inauguration::parser_registry::ParserId::Scala, "1 + 2");
+        assert_eq!(plans[0].wrapped, "def main(): Unit = {\n  print(1 + 2)\n}");
+        assert!(!plans[0].print_result);
+    }
+
+    #[test]
+    fn eval_treats_swift_source_as_declaration_input() {
+        let plans = super::eval_plans(
+            inauguration::parser_registry::ParserId::Swift,
+            "func main() -> Void {\n  return\n}",
+        );
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].wrapped, "func main() -> Void {\n  return\n}");
+        assert!(!plans[0].print_result);
     }
 
     #[test]
