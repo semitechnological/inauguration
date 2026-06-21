@@ -989,7 +989,10 @@ fn ast_assignment(
         .child_by_field_name("right")
         .or_else(|| expr.child_by_field_name("value"))
         .or_else(|| expr.named_child(expr.named_child_count().saturating_sub(1) as u32))?;
-    let left = if matches!(left.kind(), "identifier" | "name" | "variable_name") {
+    let left = if matches!(
+        left.kind(),
+        "identifier" | "name" | "variable_name" | "simple_identifier"
+    ) {
         left
     } else if kind_in(left, shape.arg_wrapper_kinds) {
         first_named(left, "identifier")?
@@ -1206,7 +1209,7 @@ fn ast_expr(src: &[u8], expr: Node<'_>, shape: AstShape) -> Option<Expr> {
     if matches!(expr.kind(), "new_expression" | "object_creation_expression") {
         return ast_new_expr(src, expr, shape);
     }
-    if expr.kind() == "identifier" {
+    if matches!(expr.kind(), "identifier" | "simple_identifier") {
         return Some(Expr::Ident(node_txt(src, expr).trim().to_string()));
     }
     if expr.kind() == "name" {
@@ -1345,6 +1348,10 @@ fn ast_call_expr(src: &[u8], call: Node<'_>, shape: AstShape) -> Option<Expr> {
         })
         .or_else(|| {
             first_named(call, "identifier")
+                .map(|id| Expr::Ident(node_txt(src, id).trim().to_string()))
+        })
+        .or_else(|| {
+            first_named(call, "simple_identifier")
                 .map(|id| Expr::Ident(node_txt(src, id).trim().to_string()))
         })?;
     let mut args = Vec::new();
@@ -5950,7 +5957,7 @@ fn dart_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
 const SWIFT_AST: AstShape = AstShape {
     block_kinds: &["statements"],
     return_kinds: &["control_transfer_statement"],
-    expr_stmt_kinds: &[],
+    expr_stmt_kinds: &["expression_statement"],
     local_decl_kinds: &["value_binding_pattern"],
     assignment_kinds: &["assignment"],
     if_kinds: &["if_statement"],
@@ -9150,6 +9157,49 @@ end
 }
 "#;
         let m = parse_lang(tree_sitter_r::LANGUAGE.into(), src, extract_r_lang).expect("ok");
+        let main = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+            .expect("main");
+        match main {
+            Decl::Function { body, .. } => match body.as_slice() {
+                [Stmt::Expr(Expr::Call { callee, args, .. })] => {
+                    assert!(matches!(callee.as_ref(), Expr::Ident(name) if name == "print"));
+                    assert_eq!(args.len(), 1);
+                    assert!(matches!(args[0], Expr::Binary { .. }));
+                }
+                other => panic!("unexpected body: {other:?}"),
+            },
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn extract_swift_eval_main_body() {
+        let src = r#"func main() -> Void {
+  print("hi")
+}
+"#;
+        let m = parse_lang(tree_sitter_swift::LANGUAGE.into(), src, extract_swift).expect("ok");
+        let main = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+            .expect("main");
+        match main {
+            Decl::Function { body, .. } => assert!(!body.is_empty(), "main body empty"),
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn extract_swift_eval_print_shape() {
+        let src = r#"func main() -> Void {
+  print(1 + 2)
+}
+"#;
+        let m = parse_lang(tree_sitter_swift::LANGUAGE.into(), src, extract_swift).expect("ok");
         let main = m
             .decls
             .iter()
