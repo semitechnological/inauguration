@@ -24,10 +24,10 @@ echo "════════════════════════�
 echo "  inauguration · verify · remove-language-gates"
 echo "══════════════════════════════════════════════════"
 
-# ── 1. Single-language eval ──
+# ── 1. 33 languages eval 42 ──
 echo ""
-echo "${CYAN}[1/5] 33 languages return 42${RESET}"
-echo "  ${DIM}in eval '42' --parser <lang>${RESET}"
+echo "${CYAN}[1/4] 33 languages return 42${RESET}"
+echo "  ${DIM}in eval --parser <lang> '42'${RESET}"
 failed=""
 for lang in in c cpp objc objcpp rust zig go swift java kotlin scala csharp fsharp vbnet python ruby php perl javascript typescript lua dart haskell ocaml elixir erlang julia r nim d crystal odin hare holyc groovy clojure; do
   out=$($IN eval --parser "$lang" '42' 2>/dev/null) || { failed="$failed $lang"; }
@@ -40,25 +40,19 @@ fi
 
 # ── 2. Auto-detect IO ──
 echo ""
-echo "${CYAN}[2/5] Auto-detect polyglot IO (no ## markers)${RESET}"
-echo "  ${DIM}input: print() | console.log() | println!() | std.io.print()${RESET}"
+echo "${CYAN}[2/4] Auto-detect polyglot IO (no markers, content-detected)${RESET}"
+echo "  ${DIM}each language uses unique print syntax${RESET}"
 check "io-demo" '$IN eval --path examples/polyglot/io.poly' "hello from python"
 
-# ── 3. Polyglot math ──
+# ── 3. Polyglot compute ──
 echo ""
-echo "${CYAN}[3/5] Polyglot math (## fences for disambiguation)${RESET}"
-echo "  ${DIM}input: 9 languages all compute 2+3*4${RESET}"
-check "math-demo" '$IN eval --path examples/polyglot/math.poly' "14"
-
-# ── 4. Auto-detect compute ──
-echo ""
-echo "${CYAN}[4/5] Auto-detect compute (blank lines)${RESET}"
-echo "  ${DIM}input: 2+3*4 | 42*2 | 100+200${RESET}"
+echo "${CYAN}[3/4] Polyglot compute (## fences, 5 languages different results)${RESET}"
+echo "  ${DIM}python:14 js:84 rust:300 zig:56 go:60${RESET}"
 check "compute-demo" '$IN eval --path examples/polyglot/compute.poly' "14"
 
-# ── 5. Capability table ──
+# ── 4. Capability table ──
 echo ""
-echo "${CYAN}[5/5] Capability table (no levels)${RESET}"
+echo "${CYAN}[4/4] Capability table — parse/lower/typecheck/boundary/bytecode${RESET}"
 echo "  ${DIM}in languages --json${RESET}"
 out=$($IN languages --json 2>/dev/null || true)
 if [ -n "$out" ]; then
@@ -75,8 +69,10 @@ echo "════════════════════════�
 printf "  ${GREEN}%d PASS${RESET} · ${RED}%d FAIL${RESET} · %d total\n" "$pass" "$fail" $((pass+fail))
 [ "$fail" -eq 0 ] && echo "  All checks passed."
 echo ""
-echo "Run examples directly:"
+echo "Run examples:"
 echo "  in eval --path examples/polyglot/io.poly"
-echo "  in eval --path examples/polyglot/math.poly"
 echo "  in eval --path examples/polyglot/compute.poly"
+echo ""
+echo "Eval supports: arithmetic, literals, print/console.log/println!"
+echo "For full programs (loops, functions): in compile --path file.in"
 echo "══════════════════════════════════════════════════"
