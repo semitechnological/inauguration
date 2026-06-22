@@ -11,12 +11,19 @@ use crate::core_ir::{Decl, UnifiedModule};
 use crate::core_ir::{Expr, LoopKind, MatchArm, Stmt, Typ};
 use quote::ToTokens;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 type RustLayoutSpecs = HashMap<String, (BoundaryRepr, Vec<(String, syn::Type)>)>;
 
 pub fn parse_rust_file(path: &Path) -> Result<UnifiedModule, String> {
-    parse_rust_artifact(path).map(|artifact| artifact.semantic)
+    let src = std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let module_id = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("rust")
+        .to_string();
+    parse_rust_artifact_source_with_dir(&src, &module_id, path.parent().unwrap_or(Path::new(".")))
+        .map(|artifact| artifact.semantic)
 }
 
 pub fn parse_rust_artifact(path: &Path) -> Result<CompileArtifact, String> {
@@ -34,8 +41,16 @@ pub fn parse_rust_source(src: &str) -> Result<UnifiedModule, String> {
 }
 
 pub fn parse_rust_artifact_source(src: &str, module_id: &str) -> Result<CompileArtifact, String> {
+    parse_rust_artifact_source_with_dir(src, module_id, Path::new("."))
+}
+
+pub fn parse_rust_artifact_source_with_dir(
+    src: &str,
+    module_id: &str,
+    base_dir: &Path,
+) -> Result<CompileArtifact, String> {
     let file = syn::parse_file(src).map_err(|e| format!("rust parse failed: {e}"))?;
-    let semantic = lower_file_items(&file)?;
+    let semantic = lower_file_items_at(&file, base_dir)?;
     let boundary = extract_boundary_module(&file, module_id);
     Ok(match boundary {
         Some(boundary) => CompileArtifact::with_boundary(semantic, boundary),
@@ -44,7 +59,12 @@ pub fn parse_rust_artifact_source(src: &str, module_id: &str) -> Result<CompileA
 }
 
 fn lower_file_items(file: &syn::File) -> Result<UnifiedModule, String> {
+    lower_file_items_at(file, &PathBuf::from("."))
+}
+
+fn lower_file_items_at(file: &syn::File, base_dir: &Path) -> Result<UnifiedModule, String> {
     let mut decls = Vec::new();
+
     for item in &file.items {
         match item {
             syn::Item::Struct(s) => {
@@ -55,6 +75,38 @@ fn lower_file_items(file: &syn::File) -> Result<UnifiedModule, String> {
                 });
             }
             syn::Item::Fn(f) => decls.push(lower_fn(f.clone())),
+            syn::Item::Mod(m) => {
+                // Handle `mod foo;` (external file) and `mod foo { ... }` (inline)
+                if let Some((_brace, items)) = &m.content {
+                    // Inline module — process its items
+                    let inner_file = syn::File {
+                        shebang: None,
+                        attrs: vec![],
+                        items: items.clone(),
+                    };
+                    if let Ok(inner) = lower_file_items_at(&inner_file, base_dir) {
+                        decls.extend(inner.decls);
+                    }
+                } else {
+                    // External module: look for <base>/<mod_name>.rs or <base>/<mod_name>/mod.rs
+                    let mod_name = m.ident.to_string();
+                    let candidate_rs = base_dir.join(format!("{mod_name}.rs"));
+                    let candidate_mod = base_dir.join(format!("{mod_name}/mod.rs"));
+                    for candidate in [&candidate_rs, &candidate_mod] {
+                        if candidate.exists() {
+                            if let Ok(src) = std::fs::read_to_string(candidate) {
+                                if let Ok(sub_file) = syn::parse_file(&src) {
+                                    let sub_dir = candidate.parent().unwrap_or(base_dir);
+                                    if let Ok(inner) = lower_file_items_at(&sub_file, sub_dir) {
+                                        decls.extend(inner.decls);
+                                    }
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
             _ => {}
         }
     }
