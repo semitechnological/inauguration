@@ -779,20 +779,22 @@ const RAST: AstShape = AstShape {
 
 const PERLAST: AstShape = AstShape {
     block_kinds: &["block"],
-    return_kinds: &["return_statement", "return_expression"],
-    expr_stmt_kinds: &["expression_statement"],
-    local_decl_kinds: &["my_statement", "our_statement"],
-    assignment_kinds: &["assignment_expression"],
+    return_kinds: &["return_expression"],
+    expr_stmt_kinds: &[],
+    local_decl_kinds: &[],
+    assignment_kinds: &[],
     if_kinds: &["if_statement"],
     while_kinds: &["while_statement"],
-    call_kinds: &["call_expression"],
+    // ponytail: tree-sitter-perl 1.1.2 merged call/expr into binary_expression;
+    // call extraction handled in perl-specific code
+    call_kinds: &["call_expression_with_spaced_args", "call_expression_with_bareword"],
     arg_container_kinds: &["arguments"],
     arg_wrapper_kinds: &[],
-    paren_kinds: &["parenthesized_expression"],
+    paren_kinds: &[],
     binary_kinds: &["binary_expression"],
     unary_kinds: &["unary_expression"],
-    int_kinds: &["number"],
-    string_kinds: &["string"],
+    int_kinds: &["integer"],
+    string_kinds: &["string_double_quoted"],
     type_kinds: &[],
     local_decl_prefixes: &[],
     shell_first_kinds: &[],
@@ -3603,12 +3605,12 @@ fn perl_package_body<'a>(src: &[u8], pkg: Node<'a>) -> (Vec<(String, Typ)>, Vec<
     let mut methods = Vec::new();
 
     let mut my_nodes = Vec::new();
-    collect_kinds(pkg, &["my_statement", "our_statement"], &mut my_nodes);
+    collect_kinds(pkg, &["variable_declaration"], &mut my_nodes);
     for my_stmt in my_nodes {
         let mut vars = Vec::new();
         collect_kinds(
             my_stmt,
-            &["variable_name", "scalar", "array", "hash", "identifier"],
+            &["scalar_variable", "array", "hash", "identifier"],
             &mut vars,
         );
         for v in vars {
@@ -3672,11 +3674,11 @@ fn perl_params<'a>(src: &[u8], n: Node<'a>) -> Vec<(String, Typ)> {
         if let Some(b) = body_node {
             let mut w = b.walk();
             for ch in b.named_children(&mut w) {
-                if ch.kind() == "my_statement" || ch.kind() == "our_statement" {
+                if ch.kind() == "variable_declaration" {
                     let mut vars = Vec::new();
                     collect_kinds(
                         ch,
-                        &["variable_name", "scalar", "array", "hash", "identifier"],
+                        &["scalar_variable", "array", "hash", "identifier"],
                         &mut vars,
                     );
                     for v in vars {
@@ -3696,9 +3698,122 @@ fn perl_params<'a>(src: &[u8], n: Node<'a>) -> Vec<(String, Typ)> {
 }
 
 fn perl_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
-    let stmts = ast_body(src, body, PERLAST);
-    if !stmts.is_empty() {
-        return stmts;
+    // ponytail: tree-sitter-perl 1.1.2 uses binary_expression for both
+    // assignments and binary ops, and variable_declaration for my/our.
+    // The generic ast_body can't distinguish them, so we handle manually.
+    let mut out = Vec::new();
+    let mut w = body.walk();
+    for ch in body.named_children(&mut w) {
+        match ch.kind() {
+            "return_expression" => {
+                out.push(Stmt::Return(
+                    ast_return_expr(src, ch, PERLAST).unwrap_or(None),
+                ));
+            }
+            "call_expression_with_spaced_args" | "call_expression_with_bareword" => {
+                if let Some(expr) = ast_expr(src, ch, PERLAST) {
+                    out.push(Stmt::Expr(expr));
+                }
+            }
+            "if_statement" | "while_statement" => {
+                let kind = ch.kind();
+                // condition is wrapped in array child
+                let mut cw = ch.walk();
+                let cond = ch
+                    .named_children(&mut cw)
+                    .find(|c| c.kind() == "array")
+                    .and_then(|a| a.named_child(0))
+                    .and_then(|ex| ast_expr(src, ex, PERLAST));
+                let mut cw2 = ch.walk();
+                let blocks: Vec<Node<'_>> =
+                    ch.named_children(&mut cw2).filter(|c| c.kind() == "block").collect();
+                if kind == "if_statement" {
+                    if let Some(cond) = cond {
+                        let then_body = blocks.first()
+                            .map(|b| perl_body(src, *b))
+                            .unwrap_or_default();
+                        let else_body = if blocks.len() > 1 {
+                            perl_body(src, blocks[1])
+                        } else if let Some(ec) = ch.named_children(&mut ch.walk())
+                            .find(|c| c.kind() == "else_clause")
+                        {
+                            let mut ew = ec.walk();
+                            ec.named_children(&mut ew)
+                                .find(|b| b.kind() == "block")
+                                .map(|b| perl_body(src, b))
+                                .unwrap_or_default()
+                        } else {
+                            vec![]
+                        };
+                        out.push(Stmt::If {
+                            cond,
+                            then_body,
+                            else_body,
+                        });
+                    }
+                } else {
+                    if let Some(cond) = cond {
+                        let body = blocks.first()
+                            .map(|b| perl_body(src, *b))
+                            .unwrap_or_default();
+                        out.push(Stmt::Loop {
+                            kind: crate::core_ir::LoopKind::While,
+                            cond: Some(cond),
+                            body,
+                        });
+                    }
+                }
+            }
+            "binary_expression" => {
+                // ponytail: Perl binary_expression has no field names;
+                // use positional children: left=named_child(0), right=named_child(1)
+                let left = ch.named_child(0);
+                let right = ch.named_child(1);
+                if let Some(l) = left {
+                    match l.kind() {
+                        "variable_declaration" => {
+                            // my $x = 42
+                            let name = l
+                                .named_children(&mut l.walk())
+                                .find(|c| c.kind() == "scalar_variable")
+                                .map(|v| node_txt(src, v).trim().trim_start_matches('$').to_string());
+                            if let Some(n) = name {
+                                if let Some(r) = right {
+                                    if let Some(e) = ast_expr(src, r, PERLAST) {
+                                        out.push(Stmt::Let(n, None, e));
+                                    }
+                                }
+                            }
+                        }
+                        "scalar_variable" => {
+                            // $x = 42  (assignment)
+                            let name = node_txt(src, l).trim().trim_start_matches('$').to_string();
+                            if let Some(r) = right {
+                                if let Some(e) = ast_expr(src, r, PERLAST) {
+                                    out.push(Stmt::Assign(name, e));
+                                }
+                            }
+                        }
+                        _ => {
+                            // regular binary expression: 2 + 3 * 4
+                            if let Some(e) = ast_expr(src, ch, PERLAST) {
+                                out.push(Stmt::Expr(e));
+                            }
+                        }
+                    }
+                } else if let Some(e) = ast_expr(src, ch, PERLAST) {
+                    out.push(Stmt::Expr(e));
+                }
+            }
+            _ => {
+                if let Some(e) = ast_expr(src, ch, PERLAST) {
+                    out.push(Stmt::Expr(e));
+                }
+            }
+        }
+    }
+    if !out.is_empty() {
+        return out;
     }
     simple_bounded_body(node_txt(src, body), "=").unwrap_or_default()
 }
