@@ -656,3 +656,310 @@ pub struct RuntimeMetrics {
     pub patch_success_permille: u16,
     pub fallback_count: u64,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ─── IrType ────────────────────────────────────────────────────────
+
+    #[test]
+    fn ir_type_int_constructor() {
+        let t = IrType::int(64);
+        assert_eq!(t, IrType::Int(64));
+    }
+
+    #[test]
+    fn ir_type_size_bytes() {
+        assert_eq!(IrType::I8.size_bytes(), Some(1));
+        assert_eq!(IrType::U8.size_bytes(), Some(1));
+        assert_eq!(IrType::I16.size_bytes(), Some(2));
+        assert_eq!(IrType::U16.size_bytes(), Some(2));
+        assert_eq!(IrType::I32.size_bytes(), Some(4));
+        assert_eq!(IrType::U32.size_bytes(), Some(4));
+        assert_eq!(IrType::F32.size_bytes(), Some(4));
+        assert_eq!(IrType::I64.size_bytes(), Some(8));
+        assert_eq!(IrType::U64.size_bytes(), Some(8));
+        assert_eq!(IrType::F64.size_bytes(), Some(8));
+        assert_eq!(IrType::Bool.size_bytes(), Some(8));
+        assert_eq!(IrType::Ptr(Box::new(IrType::I32)).size_bytes(), Some(8));
+        assert_eq!(IrType::Void.size_bytes(), Some(0));
+        assert_eq!(IrType::Never.size_bytes(), Some(0));
+        assert_eq!(IrType::Named("Foo".to_string()).size_bytes(), None);
+    }
+
+    #[test]
+    fn ir_type_is_integer() {
+        assert!(IrType::I32.is_integer());
+        assert!(IrType::U64.is_integer());
+        assert!(IrType::Int(32).is_integer());
+        assert!(!IrType::Bool.is_integer());
+        assert!(!IrType::F32.is_integer());
+        assert!(!IrType::Void.is_integer());
+    }
+
+    #[test]
+    fn ir_type_is_float() {
+        assert!(IrType::F32.is_float());
+        assert!(IrType::F64.is_float());
+        assert!(IrType::Float(32).is_float());
+        assert!(!IrType::I32.is_float());
+    }
+
+    // ─── IrValue ───────────────────────────────────────────────────────
+
+    #[test]
+    fn ir_value_zero_const() {
+        assert!(IrValue::ZERO.is_zero());
+        assert_eq!(IrValue::ZERO.0, 0);
+    }
+
+    #[test]
+    fn ir_value_non_zero() {
+        let v = IrValue(99);
+        assert!(!v.is_zero());
+    }
+
+    // ─── IrInstruction ─────────────────────────────────────────────────
+
+    #[test]
+    fn ir_instruction_new() {
+        let inst = IrInstruction::new(IrOpcode::Add, IrType::I64, vec![IrValue(1), IrValue(2)]);
+        assert_eq!(inst.opcode, IrOpcode::Add);
+        assert_eq!(inst.result_type, IrType::I64);
+        assert_eq!(inst.operands, vec![IrValue(1), IrValue(2)]);
+        assert!(inst.immediate.is_none());
+        assert!(inst.constant.is_none());
+    }
+
+    #[test]
+    fn ir_instruction_with_imm() {
+        let inst = IrInstruction::new(IrOpcode::Sub, IrType::I32, vec![]).with_imm(10);
+        assert_eq!(inst.immediate, Some(10));
+    }
+
+    // ─── IrBasicBlock ──────────────────────────────────────────────────
+
+    #[test]
+    fn ir_basic_block_new() {
+        let bb = IrBasicBlock::new("entry");
+        assert_eq!(bb.label, "entry");
+        assert!(bb.instructions.is_empty());
+        assert!(bb.terminator.is_none());
+    }
+
+    // ─── IrFunction ────────────────────────────────────────────────────
+
+    #[test]
+    fn ir_function_fresh_value_increments() {
+        let mut f = IrFunction::new("f", vec![], IrType::Void);
+        assert_eq!(f.next_value_id, 1);
+        let v1 = f.fresh_value();
+        assert_eq!(v1.0, 1);
+        let v2 = f.fresh_value();
+        assert_eq!(v2.0, 2);
+        assert_eq!(f.next_value_id, 3);
+    }
+
+    #[test]
+    fn ir_function_add_block() {
+        let mut f = IrFunction::new("f", vec![], IrType::Void);
+        f.add_block(IrBasicBlock::new("bb0"));
+        assert_eq!(f.blocks.len(), 1);
+    }
+
+    // ─── IrModule ──────────────────────────────────────────────────────
+
+    #[test]
+    fn ir_module_new() {
+        let m = IrModule::new("test");
+        assert_eq!(m.name, "test");
+        assert!(m.functions.is_empty());
+        assert!(m.component.is_none());
+    }
+
+    #[test]
+    fn ir_module_get_function() {
+        let mut m = IrModule::new("m");
+        m.functions.push(IrFunction::new("main", vec![], IrType::Void));
+        assert!(m.get_function("main").is_some());
+        assert!(m.get_function("nope").is_none());
+    }
+
+    #[test]
+    fn ir_module_add_string() {
+        let mut m = IrModule::new("m");
+        assert_eq!(m.add_string("hello"), 0);
+        assert_eq!(m.add_string("world"), 1);
+        assert_eq!(m.string_literals.len(), 2);
+    }
+
+    // ─── ComponentSpec ──────────────────────────────────────────────────
+
+    #[test]
+    fn component_spec_host_executable() {
+        let spec = ComponentSpec::host_executable("app", Some("main"));
+        assert_eq!(spec.name, "app");
+        assert_eq!(spec.artifact_kind, ArtifactKind::Executable);
+        assert_eq!(spec.entry_point, Some("main".to_string()));
+        assert!(!spec.target.is_empty());
+    }
+
+    #[test]
+    fn component_spec_host_triple() {
+        let triple = ComponentSpec::host_triple();
+        assert!(!triple.is_empty());
+        // Should contain an arch and OS separator
+        assert!(triple.contains('-'));
+    }
+
+    #[test]
+    fn component_spec_object_format() {
+        let spec_linux = ComponentSpec {
+            target: "x86_64-unknown-linux-gnu".to_string(),
+            ..ComponentSpec::host_executable("t", None)
+        };
+        assert_eq!(spec_linux.object_format(), "elf");
+
+        let spec_mac = ComponentSpec {
+            target: "aarch64-apple-darwin".to_string(),
+            ..ComponentSpec::host_executable("t", None)
+        };
+        assert_eq!(spec_mac.object_format(), "mach-o");
+
+        let spec_win = ComponentSpec {
+            target: "x86_64-pc-windows-msvc".to_string(),
+            ..ComponentSpec::host_executable("t", None)
+        };
+        assert_eq!(spec_win.object_format(), "coff");
+
+        let spec_wasm = ComponentSpec {
+            target: "wasm32-unknown-unknown".to_string(),
+            ..ComponentSpec::host_executable("t", None)
+        };
+        assert_eq!(spec_wasm.object_format(), "wasm");
+    }
+
+    #[test]
+    fn component_spec_is_freestanding() {
+        let spec = ComponentSpec {
+            target: "x86_64-unknown-none".to_string(),
+            ..ComponentSpec::host_executable("t", None)
+        };
+        assert!(spec.is_freestanding());
+
+        let spec2 = ComponentSpec {
+            target: "aarch64-unknown-none-elf".to_string(),
+            ..ComponentSpec::host_executable("t", None)
+        };
+        assert!(spec2.is_freestanding());
+
+        let spec3 = ComponentSpec::host_executable("t", None);
+        // host triple is not freestanding unless it ends in -none
+        if !spec3.target.ends_with("-none") && !spec3.target.ends_with("-none-elf") {
+            assert!(!spec3.is_freestanding());
+        }
+    }
+
+    // ─── ComponentMetadata ──────────────────────────────────────────────
+
+    #[test]
+    fn component_metadata_from_spec() {
+        let spec = ComponentSpec::host_executable("app", Some("main"));
+        let module = IrModule::new("app");
+        let meta = ComponentMetadata::from_spec(&spec, &module);
+        assert_eq!(meta.name, "app");
+        assert_eq!(meta.entry, Some("main".to_string()));
+        assert_eq!(meta.artifact_kind, ArtifactKind::Executable);
+    }
+
+    #[test]
+    fn component_metadata_json_round_trip() {
+        let spec = ComponentSpec::host_executable("app", Some("main"));
+        let module = IrModule::new("app");
+        let meta = ComponentMetadata::from_spec(&spec, &module);
+        let json = meta.to_json().unwrap();
+        let meta2: ComponentMetadata = serde_json::from_str(&json).unwrap();
+        assert_eq!(meta, meta2);
+    }
+
+    #[test]
+    fn component_metadata_to_json_pretty() {
+        let spec = ComponentSpec::host_executable("app", None);
+        let module = IrModule::new("app");
+        let meta = ComponentMetadata::from_spec(&spec, &module);
+        let pretty = meta.to_json_pretty().unwrap();
+        assert!(pretty.contains('\n'));
+    }
+
+    // ─── Diagnostic ────────────────────────────────────────────────────
+
+    #[test]
+    fn diagnostic_error() {
+        let d = Diagnostic::error("E001", "something broke");
+        assert_eq!(d.severity, DiagnosticSeverity::Error);
+        assert_eq!(d.code, "E001");
+        assert_eq!(d.message, "something broke");
+        assert!(d.span.is_none());
+    }
+
+    #[test]
+    fn diagnostic_warning() {
+        let d = Diagnostic::warning("W001", "unused variable");
+        assert_eq!(d.severity, DiagnosticSeverity::Warning);
+    }
+
+    // ─── CompilerConfig ────────────────────────────────────────────────
+
+    #[test]
+    fn compiler_config_new() {
+        let spec = ComponentSpec::host_executable("app", Some("main"));
+        let cfg = CompilerConfig::new(spec.clone());
+        assert_eq!(cfg.optimization, OptimizationLevel::Default);
+        assert!(!cfg.debug);
+        assert_eq!(cfg.codegen_threads, 1);
+        assert!(cfg.enable_all_passes);
+        assert!(!cfg.print_after_pass);
+    }
+
+    // ─── Pipeline types ────────────────────────────────────────────────
+
+    #[test]
+    fn change_event_serde() {
+        let ev = ChangeEvent {
+            path: "/src/main.in".to_string(),
+            module_id: "App".to_string(),
+            hash: "abc123".to_string(),
+            timestamp_ms: 1234567890,
+        };
+        let json = serde_json::to_string(&ev).unwrap();
+        let ev2: ChangeEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(ev, ev2);
+    }
+
+    #[test]
+    fn build_task_serde() {
+        let task = BuildTask {
+            task_kind: TaskKind::AstRefresh,
+            build_id: "b1".to_string(),
+            deps: vec!["d1".to_string()],
+            cancel_token: "ct".to_string(),
+        };
+        let json = serde_json::to_string(&task).unwrap();
+        let task2: BuildTask = serde_json::from_str(&json).unwrap();
+        assert_eq!(task, task2);
+    }
+
+    #[test]
+    fn runtime_metrics_serde() {
+        let m = RuntimeMetrics {
+            p50_ms: 10,
+            p95_ms: 50,
+            patch_success_permille: 990,
+            fallback_count: 2,
+        };
+        let json = serde_json::to_string(&m).unwrap();
+        let m2: RuntimeMetrics = serde_json::from_str(&json).unwrap();
+        assert_eq!(m, m2);
+    }
+}

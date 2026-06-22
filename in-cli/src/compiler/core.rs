@@ -275,3 +275,179 @@ impl IrModule {
         idx
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ─── IrType ────────────────────────────────────────────────────────
+
+    #[test]
+    fn ir_type_size_bytes() {
+        assert_eq!(IrType::I8.size_bytes(), Some(1));
+        assert_eq!(IrType::U8.size_bytes(), Some(1));
+        assert_eq!(IrType::I16.size_bytes(), Some(2));
+        assert_eq!(IrType::U16.size_bytes(), Some(2));
+        assert_eq!(IrType::I32.size_bytes(), Some(4));
+        assert_eq!(IrType::U32.size_bytes(), Some(4));
+        assert_eq!(IrType::F32.size_bytes(), Some(4));
+        assert_eq!(IrType::I64.size_bytes(), Some(8));
+        assert_eq!(IrType::U64.size_bytes(), Some(8));
+        assert_eq!(IrType::F64.size_bytes(), Some(8));
+        assert_eq!(IrType::Bool.size_bytes(), Some(8));
+        assert_eq!(IrType::Ptr(Box::new(IrType::I32)).size_bytes(), Some(8));
+        assert_eq!(IrType::Void.size_bytes(), Some(0));
+        assert_eq!(IrType::Never.size_bytes(), Some(0));
+    }
+
+    #[test]
+    fn ir_type_size_bytes_int_widths() {
+        assert_eq!(IrType::Int(8).size_bytes(), Some(1));
+        assert_eq!(IrType::Int(16).size_bytes(), Some(2));
+        assert_eq!(IrType::Int(32).size_bytes(), Some(4));
+        assert_eq!(IrType::Int(64).size_bytes(), Some(8));
+    }
+
+    #[test]
+    fn ir_type_size_bytes_unknown() {
+        assert_eq!(IrType::Named("Foo".to_string()).size_bytes(), None);
+        assert_eq!(IrType::Array(Box::new(IrType::I32), 10).size_bytes(), None);
+        assert_eq!(IrType::Slice(Box::new(IrType::I32)).size_bytes(), None);
+    }
+
+    #[test]
+    fn ir_type_is_integer() {
+        assert!(IrType::I32.is_integer());
+        assert!(IrType::U64.is_integer());
+        assert!(IrType::Int(32).is_integer());
+        assert!(!IrType::F32.is_float() || !IrType::F32.is_integer());
+        assert!(!IrType::Bool.is_integer());
+        assert!(!IrType::Void.is_integer());
+    }
+
+    #[test]
+    fn ir_type_is_float() {
+        assert!(IrType::F32.is_float());
+        assert!(IrType::F64.is_float());
+        assert!(IrType::Float(32).is_float());
+        assert!(!IrType::I32.is_float());
+        assert!(!IrType::Bool.is_float());
+    }
+
+    // ─── IrValue ───────────────────────────────────────────────────────
+
+    #[test]
+    fn ir_value_zero() {
+        assert!(IrValue::ZERO.is_zero());
+        assert_eq!(IrValue::ZERO.0, 0);
+    }
+
+    #[test]
+    fn ir_value_non_zero() {
+        let v = IrValue(42);
+        assert!(!v.is_zero());
+        assert_eq!(v.0, 42);
+    }
+
+    // ─── IrInstruction ─────────────────────────────────────────────────
+
+    #[test]
+    fn ir_instruction_new() {
+        let inst = IrInstruction::new(IrOpcode::Add, IrType::I64, vec![IrValue(1), IrValue(2)]);
+        assert_eq!(inst.opcode, IrOpcode::Add);
+        assert_eq!(inst.result_type, IrType::I64);
+        assert_eq!(inst.operands.len(), 2);
+        assert!(inst.immediate.is_none());
+        assert!(inst.constant.is_none());
+    }
+
+    #[test]
+    fn ir_instruction_with_imm() {
+        let inst = IrInstruction::new(IrOpcode::Add, IrType::I32, vec![]).with_imm(42);
+        assert_eq!(inst.immediate, Some(42));
+    }
+
+    // ─── IrBasicBlock ──────────────────────────────────────────────────
+
+    #[test]
+    fn ir_basic_block_new() {
+        let bb = IrBasicBlock::new("entry");
+        assert_eq!(bb.label, "entry");
+        assert!(bb.instructions.is_empty());
+        assert!(bb.terminator.is_none());
+    }
+
+    // ─── IrFunction ────────────────────────────────────────────────────
+
+    #[test]
+    fn ir_function_new() {
+        let f = IrFunction::new("main", vec![("x".to_string(), IrType::I32)], IrType::Void);
+        assert_eq!(f.name, "main");
+        assert_eq!(f.params.len(), 1);
+        assert_eq!(f.return_type, IrType::Void);
+        assert!(f.blocks.is_empty());
+        assert_eq!(f.next_value_id, 1);
+    }
+
+    #[test]
+    fn ir_function_fresh_value() {
+        let mut f = IrFunction::new("f", vec![], IrType::Void);
+        let v1 = f.fresh_value();
+        let v2 = f.fresh_value();
+        assert_eq!(v1.0, 1);
+        assert_eq!(v2.0, 2);
+        assert_eq!(f.next_value_id, 3);
+    }
+
+    #[test]
+    fn ir_function_add_block() {
+        let mut f = IrFunction::new("f", vec![], IrType::Void);
+        f.add_block(IrBasicBlock::new("entry"));
+        f.add_block(IrBasicBlock::new("exit"));
+        assert_eq!(f.blocks.len(), 2);
+        assert_eq!(f.blocks[0].label, "entry");
+        assert_eq!(f.blocks[1].label, "exit");
+    }
+
+    // ─── IrModule ──────────────────────────────────────────────────────
+
+    #[test]
+    fn ir_module_new() {
+        let m = IrModule::new("test");
+        assert_eq!(m.name, "test");
+        assert!(m.source_path.is_none());
+        assert!(m.functions.is_empty());
+        assert!(m.struct_types.is_empty());
+        assert!(m.string_literals.is_empty());
+        assert!(m.component.is_none());
+    }
+
+    #[test]
+    fn ir_module_get_function() {
+        let mut m = IrModule::new("test");
+        m.functions.push(IrFunction::new("main", vec![], IrType::Void));
+        m.functions.push(IrFunction::new("helper", vec![], IrType::I32));
+        assert!(m.get_function("main").is_some());
+        assert!(m.get_function("helper").is_some());
+        assert!(m.get_function("missing").is_none());
+    }
+
+    #[test]
+    fn ir_module_get_function_mut() {
+        let mut m = IrModule::new("test");
+        m.functions.push(IrFunction::new("main", vec![], IrType::Void));
+        let f = m.get_function_mut("main").unwrap();
+        f.add_block(IrBasicBlock::new("entry"));
+        assert_eq!(m.get_function("main").unwrap().blocks.len(), 1);
+    }
+
+    #[test]
+    fn ir_module_add_string() {
+        let mut m = IrModule::new("test");
+        let idx0 = m.add_string("hello");
+        let idx1 = m.add_string("world");
+        assert_eq!(idx0, 0);
+        assert_eq!(idx1, 1);
+        assert_eq!(m.string_literals, vec!["hello", "world"]);
+    }
+}

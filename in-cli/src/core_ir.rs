@@ -439,3 +439,312 @@ pub enum Decl {
         mutable: bool,
     },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ─── Span ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn span_new() {
+        let s = Span::new(10, 5, "test.in");
+        assert_eq!(s.line, 10);
+        assert_eq!(s.col, 5);
+        assert_eq!(s.file, "test.in");
+    }
+
+    #[test]
+    fn span_unknown() {
+        let s = Span::unknown();
+        assert_eq!(s.line, 0);
+        assert_eq!(s.col, 0);
+        assert!(s.file.is_empty());
+    }
+
+    #[test]
+    fn span_display_with_file() {
+        let s = Span::new(10, 5, "test.in");
+        assert_eq!(format!("{s}"), "test.in:10:5");
+    }
+
+    #[test]
+    fn span_display_without_file() {
+        let s = Span::new(10, 5, "");
+        assert_eq!(format!("{s}"), "10:5");
+    }
+
+    #[test]
+    fn span_default() {
+        let s = Span::default();
+        assert_eq!(s.line, 0);
+        assert_eq!(s.col, 0);
+        assert!(s.file.is_empty());
+    }
+
+    // ─── FloatVal ──────────────────────────────────────────────────────
+
+    #[test]
+    fn float_val_equality() {
+        assert_eq!(FloatVal(1.0), FloatVal(1.0));
+        assert_ne!(FloatVal(1.0), FloatVal(2.0));
+    }
+
+    #[test]
+    fn float_val_nan_equality() {
+        let nan1 = FloatVal(f64::NAN);
+        let nan2 = FloatVal(f64::NAN);
+        assert_eq!(nan1, nan2);
+    }
+
+    // ─── Typ ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn typ_array_nesting() {
+        let t = Typ::Array(Box::new(Typ::Int));
+        assert_eq!(t, Typ::Array(Box::new(Typ::Int)));
+    }
+
+    #[test]
+    fn typ_named() {
+        let t = Typ::Named("MyStruct".to_string());
+        if let Typ::Named(n) = &t {
+            assert_eq!(n, "MyStruct");
+        } else {
+            panic!("expected Named");
+        }
+    }
+
+    #[test]
+    fn typ_generic() {
+        let t = Typ::Generic("T".to_string());
+        if let Typ::Generic(n) = &t {
+            assert_eq!(n, "T");
+        } else {
+            panic!("expected Generic");
+        }
+    }
+
+    // ─── MatchPattern ──────────────────────────────────────────────────
+
+    #[test]
+    fn match_pattern_wild() {
+        assert_eq!(MatchPattern::parse("_").unwrap(), MatchPattern::WildPat);
+        assert_eq!(MatchPattern::parse("else").unwrap(), MatchPattern::WildPat);
+        assert_eq!(MatchPattern::parse("default").unwrap(), MatchPattern::WildPat);
+    }
+
+    #[test]
+    fn match_pattern_rest() {
+        assert_eq!(MatchPattern::parse("..").unwrap(), MatchPattern::RestPat);
+    }
+
+    #[test]
+    fn match_pattern_bool() {
+        assert_eq!(MatchPattern::parse("true").unwrap(), MatchPattern::BoolPat(true));
+        assert_eq!(MatchPattern::parse("false").unwrap(), MatchPattern::BoolPat(false));
+    }
+
+    #[test]
+    fn match_pattern_int() {
+        assert_eq!(MatchPattern::parse("42").unwrap(), MatchPattern::IntPat(42));
+        assert_eq!(MatchPattern::parse("-1").unwrap(), MatchPattern::IntPat(-1));
+    }
+
+    #[test]
+    fn match_pattern_string() {
+        assert_eq!(
+            MatchPattern::parse("\"hello\"").unwrap(),
+            MatchPattern::StringPat("hello".to_string())
+        );
+    }
+
+    #[test]
+    fn match_pattern_ident() {
+        assert_eq!(
+            MatchPattern::parse("x").unwrap(),
+            MatchPattern::IdentPat("x".to_string())
+        );
+    }
+
+    #[test]
+    fn match_pattern_tuple() {
+        let pat = MatchPattern::parse("(1, 2)").unwrap();
+        assert_eq!(
+            pat,
+            MatchPattern::TuplePat(vec![MatchPattern::IntPat(1), MatchPattern::IntPat(2)])
+        );
+    }
+
+    #[test]
+    fn match_pattern_array() {
+        let pat = MatchPattern::parse("[1, 2]").unwrap();
+        assert_eq!(
+            pat,
+            MatchPattern::ArrayPat(vec![MatchPattern::IntPat(1), MatchPattern::IntPat(2)])
+        );
+    }
+
+    #[test]
+    fn match_pattern_struct() {
+        let pat = MatchPattern::parse("Point{x: 1, y: 2}").unwrap();
+        if let MatchPattern::StructPat { name, fields } = pat {
+            assert_eq!(name, "Point");
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0], ("x".to_string(), MatchPattern::IntPat(1)));
+            assert_eq!(fields[1], ("y".to_string(), MatchPattern::IntPat(2)));
+        } else {
+            panic!("expected StructPat");
+        }
+    }
+
+    #[test]
+    fn match_pattern_struct_shorthand() {
+        let pat = MatchPattern::parse("Point{x, y}").unwrap();
+        if let MatchPattern::StructPat { name, fields } = pat {
+            assert_eq!(name, "Point");
+            assert_eq!(fields[0], ("x".to_string(), MatchPattern::IdentPat("x".to_string())));
+        } else {
+            panic!("expected StructPat");
+        }
+    }
+
+    #[test]
+    fn match_pattern_case_prefix() {
+        assert_eq!(MatchPattern::parse("case 42").unwrap(), MatchPattern::IntPat(42));
+    }
+
+    #[test]
+    fn match_pattern_trailing_colon() {
+        assert_eq!(MatchPattern::parse("42:").unwrap(), MatchPattern::IntPat(42));
+    }
+
+    #[test]
+    fn match_pattern_empty_error() {
+        assert!(MatchPattern::parse("").is_err());
+    }
+
+    // ─── split_match_pat_args ──────────────────────────────────────────
+
+    #[test]
+    fn split_simple_args() {
+        let args = split_match_pat_args("1, 2, 3");
+        assert_eq!(args, vec!["1", "2", "3"]);
+    }
+
+    #[test]
+    fn split_nested_args() {
+        let args = split_match_pat_args("(1, 2), 3");
+        assert_eq!(args, vec!["(1, 2)", "3"]);
+    }
+
+    #[test]
+    fn split_empty() {
+        let args = split_match_pat_args("");
+        assert!(args.is_empty());
+    }
+
+    // ─── UnifiedModule ──────────────────────────────────────────────────
+
+    #[test]
+    fn unified_module_new() {
+        let m = UnifiedModule::new(vec![]);
+        assert!(m.decls.is_empty());
+        assert_eq!(m.identity, CoreModuleIdentity::default());
+    }
+
+    #[test]
+    fn unified_module_with_identity() {
+        let id = CoreModuleIdentity {
+            package: Some("my_pkg".to_string()),
+            module: Some("my_mod".to_string()),
+        };
+        let m = UnifiedModule::with_identity(vec![], id.clone());
+        assert_eq!(m.identity, id);
+    }
+
+    #[test]
+    fn effective_module_id_uses_requested_when_not_app() {
+        let m = UnifiedModule::new(vec![]);
+        assert_eq!(m.effective_module_id("Custom"), "Custom");
+    }
+
+    #[test]
+    fn effective_module_id_falls_back_to_module() {
+        let id = CoreModuleIdentity {
+            package: Some("pkg".to_string()),
+            module: Some("mod_name".to_string()),
+        };
+        let m = UnifiedModule::with_identity(vec![], id);
+        assert_eq!(m.effective_module_id("App"), "mod_name");
+    }
+
+    #[test]
+    fn effective_module_id_falls_back_to_package() {
+        let id = CoreModuleIdentity {
+            package: Some("pkg".to_string()),
+            module: None,
+        };
+        let m = UnifiedModule::with_identity(vec![], id);
+        assert_eq!(m.effective_module_id("App"), "pkg");
+    }
+
+    #[test]
+    fn effective_module_id_falls_back_to_app() {
+        let m = UnifiedModule::new(vec![]);
+        assert_eq!(m.effective_module_id("App"), "App");
+    }
+
+    #[test]
+    fn identity_report() {
+        let id = CoreModuleIdentity {
+            package: Some("pkg".to_string()),
+            module: Some("mod_name".to_string()),
+        };
+        let m = UnifiedModule::with_identity(vec![], id);
+        let report = m.identity_report("App");
+        assert_eq!(report.requested_module_id, "App");
+        assert_eq!(report.effective_module_id, "mod_name");
+        assert_eq!(report.package, Some("pkg".to_string()));
+    }
+
+    // ─── Interrupt FNs ──────────────────────────────────────────────────
+
+    #[test]
+    fn interrupt_fn_registration() {
+        register_interrupt_fn("my_isr");
+        assert!(is_interrupt_fn("my_isr"));
+        assert!(!is_interrupt_fn("not_registered"));
+    }
+
+    // ─── Visibility / Import / MethodSig ───────────────────────────────
+
+    #[test]
+    fn visibility_variants() {
+        let v = Visibility::Pub;
+        assert_eq!(v, Visibility::Pub);
+        assert_ne!(v, Visibility::Private);
+        assert_ne!(v, Visibility::Internal);
+    }
+
+    #[test]
+    fn import_with_alias() {
+        let imp = Import {
+            path: "std.io".to_string(),
+            alias: Some("io".to_string()),
+        };
+        assert_eq!(imp.path, "std.io");
+        assert_eq!(imp.alias.unwrap(), "io");
+    }
+
+    #[test]
+    fn method_sig_round_trip() {
+        let sig = MethodSig {
+            name: "foo".to_string(),
+            params: vec![("x".to_string(), Typ::Int)],
+            ret: Typ::Void,
+        };
+        assert_eq!(sig.name, "foo");
+        assert_eq!(sig.params.len(), 1);
+    }
+}

@@ -1313,3 +1313,505 @@ pub fn peephole_x86_64(code: &mut Vec<u8>) {
         eprintln!("peephole: removed {removed} bytes");
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core_ir::{Decl, Expr, LoopKind, Stmt, Typ};
+
+    fn make_fn(name: &str, body: Vec<Stmt>) -> Decl {
+        Decl::Function {
+            name: name.to_string(),
+            params: vec![],
+            ret: Typ::Void,
+            body,
+            type_params: vec![],
+        }
+    }
+
+    fn make_fn_with_params(name: &str, params: Vec<(&str, Typ)>, ret: Typ, body: Vec<Stmt>) -> Decl {
+        Decl::Function {
+            name: name.to_string(),
+            params: params.into_iter().map(|(n, t)| (n.to_string(), t)).collect(),
+            ret,
+            body,
+            type_params: vec![],
+        }
+    }
+
+    fn bin(op: &str, lhs: Expr, rhs: Expr) -> Expr {
+        Expr::Binary {
+            op: op.to_string(),
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+        }
+    }
+
+    fn unary(op: &str, e: Expr) -> Expr {
+        Expr::Unary {
+            op: op.to_string(),
+            expr: Box::new(e),
+        }
+    }
+
+    fn call(name: &str, args: Vec<Expr>) -> Expr {
+        Expr::Call {
+            callee: Box::new(Expr::Ident(name.to_string())),
+            args,
+        }
+    }
+
+    fn ident(n: &str) -> Expr {
+        Expr::Ident(n.to_string())
+    }
+
+    // ─── Constant Folding ──────────────────────────────────────────────
+
+    #[test]
+    fn fold_add() {
+        let e = fold_expr(bin("add", Expr::IntLit(3), Expr::IntLit(4)));
+        assert_eq!(e, Expr::IntLit(7));
+    }
+
+    #[test]
+    fn fold_sub() {
+        let e = fold_expr(bin("sub", Expr::IntLit(10), Expr::IntLit(3)));
+        assert_eq!(e, Expr::IntLit(7));
+    }
+
+    #[test]
+    fn fold_mul() {
+        let e = fold_expr(bin("mul", Expr::IntLit(6), Expr::IntLit(7)));
+        assert_eq!(e, Expr::IntLit(42));
+    }
+
+    #[test]
+    fn fold_div() {
+        let e = fold_expr(bin("div", Expr::IntLit(20), Expr::IntLit(4)));
+        assert_eq!(e, Expr::IntLit(5));
+    }
+
+    #[test]
+    fn fold_div_by_zero_unchanged() {
+        let orig = bin("div", Expr::IntLit(10), Expr::IntLit(0));
+        let e = fold_expr(orig.clone());
+        assert_eq!(e, orig);
+    }
+
+    #[test]
+    fn fold_mod() {
+        let e = fold_expr(bin("mod", Expr::IntLit(17), Expr::IntLit(5)));
+        assert_eq!(e, Expr::IntLit(2));
+    }
+
+    #[test]
+    fn fold_bitwise_ops() {
+        assert_eq!(fold_expr(bin("band", Expr::IntLit(0xFF), Expr::IntLit(0x0F))), Expr::IntLit(0x0F));
+        assert_eq!(fold_expr(bin("bor", Expr::IntLit(0xF0), Expr::IntLit(0x0F))), Expr::IntLit(0xFF));
+        assert_eq!(fold_expr(bin("xor", Expr::IntLit(0xFF), Expr::IntLit(0xFF))), Expr::IntLit(0));
+    }
+
+    #[test]
+    fn fold_shift() {
+        assert_eq!(fold_expr(bin("shl", Expr::IntLit(1), Expr::IntLit(4))), Expr::IntLit(16));
+        assert_eq!(fold_expr(bin("shr", Expr::IntLit(16), Expr::IntLit(2))), Expr::IntLit(4));
+    }
+
+    #[test]
+    fn fold_comparison() {
+        assert_eq!(fold_expr(bin("eq", Expr::IntLit(5), Expr::IntLit(5))), Expr::IntLit(1));
+        assert_eq!(fold_expr(bin("eq", Expr::IntLit(5), Expr::IntLit(3))), Expr::IntLit(0));
+        assert_eq!(fold_expr(bin("neq", Expr::IntLit(1), Expr::IntLit(2))), Expr::IntLit(1));
+        assert_eq!(fold_expr(bin("lt", Expr::IntLit(3), Expr::IntLit(5))), Expr::IntLit(1));
+        assert_eq!(fold_expr(bin("gt", Expr::IntLit(5), Expr::IntLit(3))), Expr::IntLit(1));
+        assert_eq!(fold_expr(bin("le", Expr::IntLit(5), Expr::IntLit(5))), Expr::IntLit(1));
+        assert_eq!(fold_expr(bin("ge", Expr::IntLit(5), Expr::IntLit(5))), Expr::IntLit(1));
+    }
+
+    #[test]
+    fn fold_logical_ops() {
+        assert_eq!(fold_expr(bin("land", Expr::IntLit(1), Expr::IntLit(1))), Expr::IntLit(1));
+        assert_eq!(fold_expr(bin("land", Expr::IntLit(0), Expr::IntLit(1))), Expr::IntLit(0));
+        assert_eq!(fold_expr(bin("lor", Expr::IntLit(0), Expr::IntLit(1))), Expr::IntLit(1));
+        assert_eq!(fold_expr(bin("lor", Expr::IntLit(0), Expr::IntLit(0))), Expr::IntLit(0));
+    }
+
+    #[test]
+    fn fold_unary_neg() {
+        assert_eq!(fold_expr(unary("neg", Expr::IntLit(5))), Expr::IntLit(-5));
+    }
+
+    #[test]
+    fn fold_unary_not() {
+        assert_eq!(fold_expr(unary("not", Expr::IntLit(0))), Expr::IntLit(1));
+        assert_eq!(fold_expr(unary("not", Expr::IntLit(42))), Expr::IntLit(0));
+    }
+
+    #[test]
+    fn fold_non_literal_unchanged() {
+        let e = bin("add", ident("x"), Expr::IntLit(1));
+        assert_eq!(fold_expr(e.clone()), e);
+    }
+
+    // ─── Algebraic Simplification ──────────────────────────────────────
+
+    #[test]
+    fn simplify_add_zero_identity() {
+        assert_eq!(simplify_expr(bin("add", Expr::IntLit(0), ident("x"))), ident("x"));
+        assert_eq!(simplify_expr(bin("add", ident("x"), Expr::IntLit(0))), ident("x"));
+    }
+
+    #[test]
+    fn simplify_sub_zero() {
+        assert_eq!(simplify_expr(bin("sub", ident("x"), Expr::IntLit(0))), ident("x"));
+    }
+
+    #[test]
+    fn simplify_mul_zero() {
+        assert_eq!(simplify_expr(bin("mul", Expr::IntLit(0), ident("x"))), Expr::IntLit(0));
+        assert_eq!(simplify_expr(bin("mul", ident("x"), Expr::IntLit(0))), Expr::IntLit(0));
+    }
+
+    #[test]
+    fn simplify_mul_one() {
+        assert_eq!(simplify_expr(bin("mul", Expr::IntLit(1), ident("x"))), ident("x"));
+        assert_eq!(simplify_expr(bin("mul", ident("x"), Expr::IntLit(1))), ident("x"));
+    }
+
+    #[test]
+    fn simplify_div_one() {
+        assert_eq!(simplify_expr(bin("div", ident("x"), Expr::IntLit(1))), ident("x"));
+    }
+
+    #[test]
+    fn simplify_band_zero() {
+        assert_eq!(simplify_expr(bin("band", Expr::IntLit(0), ident("x"))), Expr::IntLit(0));
+    }
+
+    #[test]
+    fn simplify_band_neg1() {
+        assert_eq!(simplify_expr(bin("band", Expr::IntLit(-1), ident("x"))), ident("x"));
+        assert_eq!(simplify_expr(bin("band", ident("x"), Expr::IntLit(-1))), ident("x"));
+    }
+
+    #[test]
+    fn simplify_bor_zero() {
+        assert_eq!(simplify_expr(bin("bor", Expr::IntLit(0), ident("x"))), ident("x"));
+        assert_eq!(simplify_expr(bin("bor", ident("x"), Expr::IntLit(0))), ident("x"));
+    }
+
+    #[test]
+    fn simplify_xor_zero() {
+        assert_eq!(simplify_expr(bin("xor", Expr::IntLit(0), ident("x"))), ident("x"));
+        assert_eq!(simplify_expr(bin("xor", ident("x"), Expr::IntLit(0))), ident("x"));
+    }
+
+    #[test]
+    fn simplify_shl_zero() {
+        assert_eq!(simplify_expr(bin("shl", ident("x"), Expr::IntLit(0))), ident("x"));
+    }
+
+    #[test]
+    fn simplify_shr_zero() {
+        assert_eq!(simplify_expr(bin("shr", ident("x"), Expr::IntLit(0))), ident("x"));
+    }
+
+    #[test]
+    fn simplify_land_short_circuit() {
+        assert_eq!(simplify_expr(bin("land", Expr::IntLit(0), ident("x"))), Expr::IntLit(0));
+        assert_eq!(simplify_expr(bin("land", ident("x"), Expr::IntLit(0))), Expr::IntLit(0));
+    }
+
+    #[test]
+    fn simplify_land_identity() {
+        assert_eq!(simplify_expr(bin("land", Expr::IntLit(1), ident("x"))), ident("x"));
+        assert_eq!(simplify_expr(bin("land", ident("x"), Expr::IntLit(1))), ident("x"));
+    }
+
+    #[test]
+    fn simplify_lor_short_circuit() {
+        assert_eq!(simplify_expr(bin("lor", Expr::IntLit(1), ident("x"))), Expr::IntLit(1));
+        assert_eq!(simplify_expr(bin("lor", ident("x"), Expr::IntLit(1))), Expr::IntLit(1));
+    }
+
+    #[test]
+    fn simplify_lor_identity() {
+        assert_eq!(simplify_expr(bin("lor", Expr::IntLit(0), ident("x"))), ident("x"));
+        assert_eq!(simplify_expr(bin("lor", ident("x"), Expr::IntLit(0))), ident("x"));
+    }
+
+    #[test]
+    fn simplify_double_neg() {
+        let e = unary("neg", unary("neg", ident("x")));
+        assert_eq!(simplify_expr(e), ident("x"));
+    }
+
+    #[test]
+    fn simplify_double_not() {
+        let e = unary("not", unary("not", ident("x")));
+        assert_eq!(simplify_expr(e), ident("x"));
+    }
+
+    // ─── Dead Code Elimination ──────────────────────────────────────────
+
+    #[test]
+    fn dce_removes_unused_let() {
+        let mut body = vec![
+            Stmt::Let("unused".into(), Some(Typ::Int), Expr::IntLit(42)),
+            Stmt::Return(Some(Expr::IntLit(0))),
+        ];
+        dce_body(&mut body);
+        assert_eq!(body.len(), 1);
+        assert!(matches!(&body[0], Stmt::Return(Some(Expr::IntLit(0)))));
+    }
+
+    #[test]
+    fn dce_keeps_used_let() {
+        let mut body = vec![
+            Stmt::Let("x".into(), Some(Typ::Int), Expr::IntLit(42)),
+            Stmt::Return(Some(ident("x"))),
+        ];
+        dce_body(&mut body);
+        assert_eq!(body.len(), 2);
+    }
+
+    #[test]
+    fn dce_collapses_duplicate_void_returns() {
+        let mut body = vec![Stmt::Return(None), Stmt::Return(None), Stmt::Return(None)];
+        dce_body(&mut body);
+        assert_eq!(body.len(), 1);
+    }
+
+    // ─── Constant Propagation ──────────────────────────────────────────
+
+    #[test]
+    fn propagate_single_use_constant() {
+        let mut body = vec![
+            Stmt::Let("c".into(), Some(Typ::Int), Expr::IntLit(99)),
+            Stmt::Return(Some(ident("c"))),
+        ];
+        propagate_in_body(&mut body);
+        assert_eq!(body.len(), 1);
+        assert!(matches!(&body[0], Stmt::Return(Some(Expr::IntLit(99)))));
+    }
+
+    #[test]
+    fn propagate_skips_multi_use() {
+        let mut body = vec![
+            Stmt::Let("c".into(), Some(Typ::Int), Expr::IntLit(5)),
+            Stmt::Expr(bin("add", ident("c"), ident("c"))),
+        ];
+        propagate_in_body(&mut body);
+        assert_eq!(body.len(), 2);
+    }
+
+    // ─── Dead Function Elimination ──────────────────────────────────────
+
+    #[test]
+    fn remove_dead_functions_keeps_called() {
+        let mut decls = vec![
+            make_fn("kernel_entry", vec![Stmt::Expr(call("helper", vec![]))]),
+            make_fn("helper", vec![Stmt::Return(None)]),
+            make_fn("unused", vec![Stmt::Return(None)]),
+        ];
+        remove_dead_functions(&mut decls);
+        let names: Vec<&str> = decls
+            .iter()
+            .filter_map(|d| match d { Decl::Function { name, .. } => Some(name.as_str()), _ => None })
+            .collect();
+        assert!(names.contains(&"kernel_entry"));
+        assert!(names.contains(&"helper"));
+        assert!(!names.contains(&"unused"));
+    }
+
+    #[test]
+    fn remove_dead_functions_keeps_entry() {
+        let mut decls = vec![
+            make_fn("kernel_entry", vec![Stmt::Return(None)]),
+            make_fn("dead", vec![Stmt::Return(None)]),
+        ];
+        remove_dead_functions(&mut decls);
+        assert_eq!(decls.len(), 1);
+    }
+
+    // ─── Inlining ──────────────────────────────────────────────────────
+
+    #[test]
+    fn inline_small_return_function() {
+        let mut decls = vec![
+            make_fn_with_params("small", vec![], Typ::Int, vec![
+                Stmt::Return(Some(Expr::IntLit(42))),
+            ]),
+            make_fn("kernel_entry", vec![
+                Stmt::Let("x".into(), Some(Typ::Int), call("small", vec![])),
+                Stmt::Return(Some(ident("x"))),
+            ]),
+        ];
+        inline_small_functions(&mut decls);
+        if let Decl::Function { body, .. } = &decls[1] {
+            if let Stmt::Let(_, _, expr) = &body[0] {
+                assert_eq!(*expr, Expr::IntLit(42));
+            }
+        }
+    }
+
+    #[test]
+    fn inline_skips_large_functions() {
+        let large_body: Vec<Stmt> = (0..10)
+            .map(|i| Stmt::Expr(Expr::IntLit(i)))
+            .collect();
+        let mut decls = vec![
+            make_fn("big", large_body),
+            make_fn("kernel_entry", vec![
+                Stmt::Expr(call("big", vec![])),
+                Stmt::Return(None),
+            ]),
+        ];
+        let before = decls[1].clone();
+        inline_small_functions(&mut decls);
+        assert_eq!(decls[1], before);
+    }
+
+    // ─── Full Optimize Pipeline ────────────────────────────────────────
+
+    #[test]
+    fn optimize_folds_and_propagates() {
+        let mut decls = vec![make_fn("kernel_entry", vec![
+            Stmt::Let("a".into(), Some(Typ::Int), Expr::IntLit(99)),
+            Stmt::Return(Some(ident("a"))),
+        ])];
+        optimize(&mut decls);
+        if let Decl::Function { body, .. } = &decls[0] {
+            assert_eq!(body.len(), 1);
+            assert!(matches!(&body[0], Stmt::Return(Some(Expr::IntLit(99)))));
+        }
+    }
+
+    #[test]
+    fn optimize_removes_dead_code() {
+        let mut decls = vec![make_fn("kernel_entry", vec![
+            Stmt::Let("dead".into(), Some(Typ::Int), Expr::IntLit(0)),
+            Stmt::Return(Some(Expr::IntLit(1))),
+        ])];
+        optimize(&mut decls);
+        if let Decl::Function { body, .. } = &decls[0] {
+            assert_eq!(body.len(), 1);
+        }
+    }
+
+    // ─── has_cf ────────────────────────────────────────────────────────
+
+    #[test]
+    fn has_cf_detects_if() {
+        let stmts = vec![Stmt::If {
+            cond: Expr::BoolLit(true),
+            then_body: vec![],
+            else_body: vec![],
+        }];
+        assert!(has_cf(&stmts));
+    }
+
+    #[test]
+    fn has_cf_detects_loop() {
+        let stmts = vec![Stmt::Loop {
+            kind: LoopKind::While,
+            cond: Some(Expr::BoolLit(true)),
+            body: vec![],
+        }];
+        assert!(has_cf(&stmts));
+    }
+
+    #[test]
+    fn has_cf_false_for_flat_code() {
+        let stmts = vec![Stmt::Return(None)];
+        assert!(!has_cf(&stmts));
+    }
+
+    // ─── x86_64 Peephole ──────────────────────────────────────────────
+
+    #[test]
+    fn peephole_removes_trailing_nop() {
+        let mut code = vec![0xC3, 0x90]; // ret, nop
+        peephole_x86_64(&mut code);
+        assert_eq!(code, vec![0xC3]);
+    }
+
+    #[test]
+    fn peephole_removes_two_byte_nops() {
+        let mut code = vec![0xC3, 0x66, 0x90]; // ret, 2-byte nop
+        peephole_x86_64(&mut code);
+        assert_eq!(code, vec![0xC3]);
+    }
+
+    #[test]
+    fn peephole_empty_code() {
+        let mut code: Vec<u8> = vec![];
+        peephole_x86_64(&mut code);
+        assert!(code.is_empty());
+    }
+
+    #[test]
+    fn peephole_no_change_when_clean() {
+        let mut code = vec![0xC3]; // just ret
+        peephole_x86_64(&mut code);
+        assert_eq!(code, vec![0xC3]);
+    }
+
+    // ─── x86_64 Instruction Length ─────────────────────────────────────
+
+    #[test]
+    fn insn_length_ret() {
+        assert_eq!(x86_64_insn_length(&[0xC3], 0), 1);
+    }
+
+    #[test]
+    fn insn_length_nop() {
+        assert_eq!(x86_64_insn_length(&[0x90], 0), 1);
+    }
+
+    #[test]
+    fn insn_length_push_r64() {
+        assert_eq!(x86_64_insn_length(&[0x50], 0), 1); // push rax
+        assert_eq!(x86_64_insn_length(&[0x55], 0), 1); // push rbp
+    }
+
+    #[test]
+    fn insn_length_pop_r64() {
+        assert_eq!(x86_64_insn_length(&[0x58], 0), 1); // pop rax
+        assert_eq!(x86_64_insn_length(&[0x5D], 0), 1); // pop rbp
+    }
+
+    #[test]
+    fn insn_length_int3() {
+        // CC = int3, single byte
+        assert_eq!(x86_64_insn_length(&[0xCC], 0), 1);
+    }
+
+    #[test]
+    fn insn_length_hlt() {
+        // F4 = hlt, single byte
+        assert_eq!(x86_64_insn_length(&[0xF4], 0), 1);
+    }
+
+    // ─── detect_ptr_refs ──────────────────────────────────────────────
+
+    #[test]
+    fn detect_ptr_refs_finds_invoke_targets() {
+        let decls = vec![make_fn("main", vec![
+            Stmt::Expr(call("invoke", vec![ident("target_fn")])),
+        ])];
+        let mut refs = Vec::new();
+        detect_ptr_refs(&decls, &mut refs);
+        assert!(refs.contains(&"target_fn".to_string()));
+    }
+
+    #[test]
+    fn detect_ptr_refs_finds_arg_idents() {
+        let decls = vec![make_fn("main", vec![
+            Stmt::Expr(call("foo", vec![ident("bar")])),
+        ])];
+        let mut refs = Vec::new();
+        detect_ptr_refs(&decls, &mut refs);
+        assert!(refs.contains(&"bar".to_string()));
+    }
+}
