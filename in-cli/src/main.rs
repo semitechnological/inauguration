@@ -2493,7 +2493,100 @@ fn eval_plans(parser_id: parser_registry::ParserId, code: &str) -> Vec<EvalPlan>
     plans
 }
 
+fn has_polyglot_fences(code: &str) -> bool {
+    code.lines().any(|l| l.starts_with("## ") && l.len() > 3)
+}
+
+fn split_polyglot_blocks(code: &str) -> Vec<(&str, String)> {
+    let mut blocks: Vec<(&str, String)> = Vec::new();
+    let mut current_lang: Option<&str> = None;
+    let mut current_block = String::new();
+
+    for line in code.lines() {
+        if let Some(lang) = line.strip_prefix("## ") {
+            if let Some(lang) = current_lang.take() {
+                if !current_block.trim().is_empty() {
+                    blocks.push((lang, std::mem::take(&mut current_block)));
+                }
+            }
+            // Map polyglot names to parser ids (first word only)
+            let lang_word = lang.trim().split_whitespace().next().unwrap_or("");
+            let lang = match lang_word.to_lowercase().as_str() {
+                "python" | "py" => "python",
+                "rust" | "rs" => "rust",
+                "javascript" | "js" => "javascript",
+                "typescript" | "ts" => "typescript",
+                "zig" => "zig",
+                "go" | "golang" => "go",
+                "java" => "java",
+                "kotlin" | "kt" => "kotlin",
+                "scala" => "scala",
+                "c" => "c",
+                "cpp" | "c++" => "cpp",
+                "ruby" | "rb" => "ruby",
+                "php" => "php",
+                "perl" | "pl" => "perl",
+                "lua" => "lua",
+                "csharp" | "c#" | "cs" => "csharp",
+                "fsharp" | "f#" | "fs" => "fsharp",
+                "swift" => "swift",
+                "dart" => "dart",
+                "haskell" | "hs" => "haskell",
+                "ocaml" | "ml" => "ocaml",
+                "elixir" | "ex" => "elixir",
+                "erlang" | "erl" => "erlang",
+                "julia" | "jl" => "julia",
+                "r" => "r",
+                "nim" => "nim",
+                "d" => "d",
+                "crystal" | "cr" => "crystal",
+                "odin" => "odin",
+                "hare" => "hare",
+                "holyc" => "holyc",
+                "groovy" => "groovy",
+                "clojure" | "clj" => "clojure",
+                "vb" | "vbnet" | "vb.net" => "vb",
+                "in" | "inlang" | ".in" => "in",
+                _ => lang,
+            };
+            current_lang = Some(lang);
+        } else if current_lang.is_some() {
+            current_block.push_str(line);
+            current_block.push('\n');
+        }
+    }
+    if let Some(lang) = current_lang {
+        if !current_block.trim().is_empty() {
+            blocks.push((lang, current_block));
+        }
+    }
+    blocks
+}
+
+fn cmd_polyglot_eval(cwd: &Path, code: &str, verbose: bool) -> Result<()> {
+    let blocks = split_polyglot_blocks(code);
+    if blocks.is_empty() {
+        return cmd_eval(cwd, code, None, verbose);
+    }
+    for (lang, block) in &blocks {
+        let trimmed = block.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        eprint!("[{}] ", lang);
+        match cmd_eval(cwd, trimmed, Some(lang), verbose) {
+            Ok(()) => {},
+            Err(e) => eprintln!("failed: {e}"),
+        }
+    }
+    Ok(())
+}
+
 fn cmd_eval(cwd: &Path, code: &str, parser: Option<&str>, verbose: bool) -> Result<()> {
+    // ponytail: polyglot fence detection — if code has ## markers, split and eval each block
+    if parser.is_none() && has_polyglot_fences(code) {
+        return cmd_polyglot_eval(cwd, code, verbose);
+    }
     let parser_id = parse_eval_parser(parser, code)?;
     let dir = std::env::temp_dir().join(format!(
         "inaug-eval-{}-{}",

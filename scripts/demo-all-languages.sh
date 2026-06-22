@@ -75,3 +75,21 @@ try crystal "Crystal math" '2 + 3 * 4'
 try odin "Odin math"  '2 + 3 * 4'
 echo ""
 echo "$OK OK · $FAIL FAIL · $((OK+FAIL)) total"
+echo ""
+echo "=== polyglot mixed-language eval ==="
+$IN eval "
+## python
+print('hello from python')
+## rust
+println!(\"hello from rust\")
+## javascript
+console.log('hello from js')
+## typescript
+console.log('hello from ts')
+## zig
+std.io.print(\"hello from zig\")
+## go
+print(\"hello from go\")
+## .in
+print('hello from inlang')
+" 2>&1
