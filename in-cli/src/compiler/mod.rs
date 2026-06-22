@@ -12,6 +12,7 @@
 //! 7. **Metadata**: [`ComponentMetadata`] JSON sidecar with imports, exports, capabilities
 
 pub mod backend;
+pub mod boundary_common;
 pub mod clojure_boundary;
 pub mod core;
 pub mod crystal_boundary;
