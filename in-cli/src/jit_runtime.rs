@@ -91,11 +91,6 @@ impl CodePage {
             return None;
         }
 
-        #[cfg(not(target_os = "macos"))]
-        unsafe {
-            libc::mprotect(ptr, size, libc::PROT_READ | libc::PROT_EXEC);
-        }
-
         Some(Self {
             ptr: ptr as *mut u8,
             size,
@@ -107,9 +102,15 @@ impl CodePage {
     fn finalize(&self) {
         #[cfg(target_os = "macos")]
         unsafe {
-            // Flush instruction cache first
             sys_icache_invalidate(self.ptr as *const std::ffi::c_void, self.used);
-            // Then make executable
+            libc::mprotect(
+                self.ptr as *mut std::ffi::c_void,
+                self.size,
+                libc::PROT_READ | libc::PROT_EXEC,
+            );
+        }
+        #[cfg(not(target_os = "macos"))]
+        unsafe {
             libc::mprotect(
                 self.ptr as *mut std::ffi::c_void,
                 self.size,
