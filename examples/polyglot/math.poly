@@ -1,14 +1,7 @@
-#!/usr/bin/env in
-# Polyglot math demo — 10 languages, one file
-# Run: in eval "$(cat apps/polyglot-sample/mixed/math-demo.poly)"
-
 ## python
 2 + 3 * 4
 
 ## javascript
-2 + 3 * 4
-
-## typescript
 2 + 3 * 4
 
 ## rust
