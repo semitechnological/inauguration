@@ -4879,6 +4879,9 @@ fn zig_return_type(src: &[u8], fun: Node<'_>) -> Option<Typ> {
 }
 
 fn zig_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
+    if node_txt(src, body).trim() == "{}" {
+        return Vec::new();
+    }
     if let Some(stmts) = strict_simple_bounded_body(node_txt(src, body), "=") {
         return stmts;
     }
@@ -7016,6 +7019,21 @@ class X {
                 ),
                 "{body:?}"
             ),
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn extract_zig_empty_main_body_stays_empty() {
+        let src = "pub fn main() void {}\n";
+        let m = parse_lang(tree_sitter_zig::LANGUAGE.into(), src, extract_zig).expect("ok");
+        match m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+            .expect("main")
+        {
+            Decl::Function { body, .. } => assert!(body.is_empty(), "{body:?}"),
             _ => panic!("expected function"),
         }
     }

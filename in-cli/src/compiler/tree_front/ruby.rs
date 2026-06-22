@@ -18,14 +18,34 @@ pub(super) fn extract_ruby(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, Stri
             .or_else(|| first_named(n, "body_statement"))
             .map(|b| ruby_body(src, b))
             .unwrap_or_default();
+        let ret = ruby_return_type(&body);
         Some(Decl::Function {
             name,
             params,
-            ret: Typ::Void,
+            ret,
             body,
             type_params: vec![],
         })
     })
+}
+
+fn ruby_return_type(body: &[Stmt]) -> Typ {
+    for stmt in body {
+        if let Stmt::Return(Some(expr)) = stmt {
+            return ruby_expr_type(expr).unwrap_or(Typ::Named("Any".into()));
+        }
+    }
+    Typ::Void
+}
+
+fn ruby_expr_type(expr: &Expr) -> Option<Typ> {
+    match expr {
+        Expr::IntLit(_) => Some(Typ::Int),
+        Expr::StringLit(_) => Some(Typ::String),
+        Expr::BoolLit(_) => Some(Typ::Bool),
+        Expr::Call { .. } | Expr::Ident(_) => Some(Typ::Named("Any".into())),
+        _ => None,
+    }
 }
 
 fn ruby_params<'a>(src: &[u8], params: Node<'a>) -> Vec<(String, Typ)> {
