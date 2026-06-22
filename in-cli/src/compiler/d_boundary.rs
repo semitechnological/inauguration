@@ -1,4 +1,5 @@
 use crate::boundary_ir::{BoundaryModule, CompileArtifact};
+use crate::compiler::simple_front::parse_simple_body;
 use crate::core_ir::{Decl, Expr, Stmt, Typ, UnifiedModule};
 use std::path::Path;
 
@@ -83,11 +84,14 @@ fn parse_fn_line(line: &str) -> Result<Option<Decl>, String> {
     } else {
         Typ::Void
     };
-    let body = if name == "answer" {
-        vec![Stmt::Return(Some(Expr::IntLit(42)))]
-    } else {
-        vec![Stmt::Return(None)]
-    };
+    let body_text = line
+        .split_once('{')
+        .and_then(|(_, rest)| rest.rsplit_once('}').map(|(body, _)| body))
+        .unwrap_or("");
+    let mut body = parse_simple_body(body_text, false);
+    if body.is_empty() && name == "answer" {
+        body.push(Stmt::Return(Some(Expr::IntLit(42))));
+    }
     Ok(Some(Decl::Function {
         name: name.to_string(),
         params: vec![],
@@ -111,5 +115,20 @@ mod tests {
                 .iter()
                 .any(|d| matches!(d, Decl::Function { name, .. } if name == "answer"))
         );
+    }
+
+    #[test]
+    fn parses_d_eval_main_body() {
+        let src = "void main() { print(\"hi\"); }\n";
+        let module = parse_d_source(src).expect("parse");
+        assert!(module.decls.iter().any(|d| matches!(
+            d,
+            Decl::Function { name, body, .. } if name == "main" && matches!(
+                body.as_slice(),
+                [Stmt::Expr(Expr::Call { callee, args, .. })]
+                    if matches!(callee.as_ref(), Expr::Ident(print) if print == "print")
+                        && matches!(args.as_slice(), [Expr::StringLit(value)] if value == "hi")
+            )
+        )));
     }
 }

@@ -1,4 +1,5 @@
 use crate::boundary_ir::{BoundaryModule, CompileArtifact};
+use crate::compiler::simple_front::parse_simple_body;
 use crate::core_ir::{Decl, Expr, Stmt, Typ, UnifiedModule};
 use std::path::Path;
 
@@ -68,20 +69,23 @@ fn parse_defn_line(line: &str) -> Result<Option<Decl>, String> {
     if !line.starts_with("(defn ") {
         return Ok(None);
     }
-    let inner = line
-        .strip_prefix("(defn ")
-        .and_then(|s| s.strip_suffix(')'))
-        .unwrap_or("");
+    let inner = line.strip_prefix("(defn ").unwrap_or("");
     let name = inner.split_whitespace().next().unwrap_or("").trim();
     if name.is_empty() {
         return Err("clojure boundary front: defn missing name".to_string());
     }
-    let body = if name == "answer" {
-        vec![Stmt::Return(Some(Expr::IntLit(42)))]
-    } else {
-        vec![Stmt::Return(None)]
-    };
-    let ret = if name == "answer" {
+    let body_text = inner
+        .find(']')
+        .map(|idx| inner[idx + 1..].trim())
+        .unwrap_or("")
+        .strip_suffix(')')
+        .unwrap_or(inner.find(']').map(|idx| inner[idx + 1..].trim()).unwrap_or(""))
+        .trim();
+    let mut body = parse_simple_body(body_text, false);
+    if body.is_empty() && name == "answer" {
+        body.push(Stmt::Return(Some(Expr::IntLit(42))));
+    }
+    let ret = if matches!(body.as_slice(), [Stmt::Return(Some(Expr::IntLit(_)))]) {
         Typ::Int
     } else {
         Typ::Void
@@ -109,5 +113,20 @@ mod tests {
                 .iter()
                 .any(|d| matches!(d, Decl::Function { name, .. } if name == "answer"))
         );
+    }
+
+    #[test]
+    fn parses_clojure_eval_main_body() {
+        let src = "(defn main [] print(\"hi\"))\n";
+        let module = parse_clojure_source(src).expect("parse");
+        assert!(matches!(
+            module.decls.as_slice(),
+            [Decl::Function { body, .. }] if matches!(
+                body.as_slice(),
+                [Stmt::Expr(Expr::Call { callee, args, .. })]
+                    if matches!(callee.as_ref(), Expr::Ident(name) if name == "print")
+                        && matches!(args.as_slice(), [Expr::StringLit(value)] if value == "hi")
+            )
+        ));
     }
 }

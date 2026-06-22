@@ -1608,17 +1608,23 @@ fn holyc_block_body(src: &[u8], block: Node<'_>) -> Vec<Stmt> {
 
 fn holyc_stmt(src: &[u8], node: Node<'_>) -> Option<Stmt> {
     match node.kind() {
-        "return_statement" => node
-            .child_by_field_name("value")
-            .and_then(|v| holyc_expr(src, v))
-            .map(|e| Stmt::Return(Some(e)))
-            .or(Some(Stmt::Return(None))),
+        "return_statement" => Some(Stmt::Return(holyc_return_expr(src, node))),
         "declaration" => holyc_local_decl(src, node),
         "expression_statement" => holyc_expression_statement(src, node),
         "if_statement" => holyc_if(src, node),
         "while_statement" => holyc_while(src, node),
         _ => None,
     }
+}
+
+fn holyc_return_expr(src: &[u8], ret: Node<'_>) -> Option<Expr> {
+    let mut w = ret.walk();
+    for ch in ret.named_children(&mut w) {
+        if let Some(expr) = holyc_expr(src, ch) {
+            return Some(expr);
+        }
+    }
+    None
 }
 
 fn holyc_local_decl(src: &[u8], decl: Node<'_>) -> Option<Stmt> {
@@ -1784,6 +1790,21 @@ fn holyc_expr(src: &[u8], node: Node<'_>) -> Option<Expr> {
                 op: "=".to_string(),
                 lhs: Box::new(Expr::Ident(name)),
                 rhs: Box::new(rhs),
+            })
+        }
+        "binary_expression" => {
+            let lhs = node.child_by_field_name("left").or_else(|| node.named_child(0))?;
+            let rhs = node
+                .child_by_field_name("right")
+                .or_else(|| node.named_child(node.named_child_count().saturating_sub(1) as u32))?;
+            let op = std::str::from_utf8(src.get(lhs.end_byte()..rhs.start_byte())?)
+                .ok()?
+                .trim()
+                .to_string();
+            Some(Expr::Binary {
+                op,
+                lhs: Box::new(holyc_expr(src, lhs)?),
+                rhs: Box::new(holyc_expr(src, rhs)?),
             })
         }
         "parenthesized_expression" => {
@@ -6872,6 +6893,27 @@ class X {
         let src = "fn main() {}\n";
         let m = parse_lang(tree_sitter_rust::LANGUAGE.into(), src, extract_rust).expect("ok");
         assert!(matches!(m.decls.as_slice(), [Decl::Function { name, .. }] if name == "main"));
+    }
+
+    #[test]
+    fn extract_holyc_eval_return_shape() {
+        let src = "I64 Main()\n{\n  return 1 + 2;\n}\nMain;\n";
+        let m = parse_lang(tree_sitter_holyc::LANGUAGE.into(), src, extract_holyc).expect("ok");
+        let main = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+            .expect("main");
+        match main {
+            Decl::Function { body, .. } => assert!(
+                matches!(
+                    body.as_slice(),
+                    [Stmt::Return(Some(Expr::Binary { op, .. }))] if op == "+"
+                ),
+                "{body:?}"
+            ),
+            _ => panic!("expected function"),
+        }
     }
 
     #[test]

@@ -26,5 +26,6 @@ pub mod odin_boundary;
 pub mod passes;
 pub mod pipeline;
 pub mod rust_front;
+pub mod simple_front;
 pub mod tree_front;
 pub mod vb_boundary;

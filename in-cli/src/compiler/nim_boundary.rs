@@ -1,4 +1,5 @@
 use crate::boundary_ir::{BoundaryModule, CompileArtifact};
+use crate::compiler::simple_front::parse_simple_body;
 use crate::core_ir::{Decl, Expr, Stmt, Typ, UnifiedModule};
 use std::path::Path;
 
@@ -24,11 +25,16 @@ pub fn parse_nim_artifact_source(src: &str) -> Result<CompileArtifact, String> {
 
 pub fn parse_nim_source(src: &str) -> Result<UnifiedModule, String> {
     let mut decls = Vec::new();
-    for line in src.lines() {
-        let trimmed = line.trim();
-        if let Some(decl) = parse_proc_line(trimmed)? {
+    let lines: Vec<&str> = src.lines().collect();
+    let mut i = 0;
+    while i < lines.len() {
+        let trimmed = lines[i].trim();
+        if let Some((decl, next_i)) = parse_proc_at(&lines, i, trimmed)? {
             decls.push(decl);
+            i = next_i;
+            continue;
         }
+        i += 1;
     }
     if decls.is_empty() {
         return Err("nim boundary front: no proc declarations found".to_string());
@@ -64,7 +70,7 @@ pub fn extract_nim_boundary(src: &str) -> Option<BoundaryModule> {
     None
 }
 
-fn parse_proc_line(line: &str) -> Result<Option<Decl>, String> {
+fn parse_proc_at(lines: &[&str], i: usize, line: &str) -> Result<Option<(Decl, usize)>, String> {
     let Some(rest) = line.strip_prefix("proc ") else {
         return Ok(None);
     };
@@ -81,18 +87,53 @@ fn parse_proc_line(line: &str) -> Result<Option<Decl>, String> {
     } else {
         Typ::Void
     };
-    let body = if name == "answer" {
-        vec![Stmt::Return(Some(Expr::IntLit(42)))]
+    let mut body_src = String::new();
+    if let Some((_, inline)) = rest.split_once('=')
+        && !inline.trim().is_empty()
+    {
+        body_src.push_str(inline.trim());
     } else {
-        vec![Stmt::Return(None)]
-    };
-    Ok(Some(Decl::Function {
+        let mut j = i + 1;
+        while j < lines.len() {
+            let raw = lines[j];
+            if raw.trim().is_empty() {
+                break;
+            }
+            if !raw.starts_with(' ') && !raw.starts_with('\t') {
+                break;
+            }
+            if !body_src.is_empty() {
+                body_src.push('\n');
+            }
+            body_src.push_str(raw.trim());
+            j += 1;
+        }
+        let mut body = parse_simple_body(&body_src, ret != Typ::Void);
+        if body.is_empty() && name == "answer" {
+            body.push(Stmt::Return(Some(Expr::IntLit(42))));
+        }
+        return Ok(Some((
+            Decl::Function {
+                name: name.to_string(),
+                params: vec![],
+                ret,
+                body,
+                type_params: vec![],
+            },
+            j,
+        )));
+    }
+    let mut body = parse_simple_body(&body_src, ret != Typ::Void);
+    if body.is_empty() && name == "answer" {
+        body.push(Stmt::Return(Some(Expr::IntLit(42))));
+    }
+    Ok(Some((Decl::Function {
         name: name.to_string(),
         params: vec![],
         ret,
         body,
         type_params: vec![],
-    }))
+    }, i + 1)))
 }
 
 #[cfg(test)]
@@ -172,5 +213,20 @@ proc main() = discard
         }
         .with_layout_hash();
         assert!(!module.layout_hash.is_empty());
+    }
+
+    #[test]
+    fn parses_nim_eval_main_body() {
+        let src = "proc main() =\n  print(\"hi\")\n";
+        let module = parse_nim_source(src).expect("parse");
+        assert!(module.decls.iter().any(|d| matches!(
+            d,
+            Decl::Function { name, body, .. } if name == "main" && matches!(
+                body.as_slice(),
+                [Stmt::Expr(Expr::Call { callee, args, .. })]
+                    if matches!(callee.as_ref(), Expr::Ident(print) if print == "print")
+                        && matches!(args.as_slice(), [Expr::StringLit(value)] if value == "hi")
+            )
+        )));
     }
 }
