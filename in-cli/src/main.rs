@@ -1987,6 +1987,18 @@ fn normalize_in_eval_code(code: &str) -> String {
     code.replace("println(", "print(")
 }
 
+fn normalize_eval_php_code(code: &str) -> String {
+    let code = code.replace("echo ", "print(");
+    let trimmed = code.trim();
+    if trimmed.starts_with("print(") && !trimmed.ends_with(')') && !trimmed.contains(';') {
+        return format!("print({})\");", &code[6..code.len() - 1]);
+    }
+    if trimmed.starts_with("print(") && !trimmed.ends_with(';') {
+        return format!("{code};");
+    }
+    code
+}
+
 fn normalize_eval_code(parser_id: parser_registry::ParserId, code: &str) -> String {
     match parser_id {
         parser_registry::ParserId::In => normalize_in_eval_code(code),
@@ -1995,10 +2007,14 @@ fn normalize_eval_code(parser_id: parser_registry::ParserId, code: &str) -> Stri
             .replace("println(", "print("),
         parser_registry::ParserId::Rust => code.replace("println!(", "print("),
         parser_registry::ParserId::Java => code.replace("System.out.println(", "print("),
-        parser_registry::ParserId::Kotlin | parser_registry::ParserId::Scala => {
+        parser_registry::ParserId::Kotlin
+        | parser_registry::ParserId::Scala
+        | parser_registry::ParserId::Groovy => {
             code.replace("println(", "print(")
         }
-        parser_registry::ParserId::Cpp => normalize_in_eval_code(code),
+        parser_registry::ParserId::Cpp
+        | parser_registry::ParserId::ObjC
+        | parser_registry::ParserId::ObjCpp => normalize_in_eval_code(code),
         parser_registry::ParserId::HolyC => {
             let trimmed = code.trim();
             if let Some(inner) = trimmed
@@ -2010,6 +2026,7 @@ fn normalize_eval_code(parser_id: parser_registry::ParserId, code: &str) -> Stri
                 code.to_string()
             }
         }
+        parser_registry::ParserId::Php => normalize_eval_php_code(code),
         _ => code.to_string(),
     }
 }
@@ -2027,14 +2044,40 @@ fn guess_eval_type(s: &str) -> &'static str {
 
 fn infer_eval_parser(code: &str) -> parser_registry::ParserId {
     let trimmed = code.trim();
+    if trimmed.contains("#import ") || trimmed.contains("@interface") || trimmed.contains("@implementation") || trimmed.contains("@end") {
+        return parser_registry::ParserId::ObjC;
+    }
     if trimmed.contains("std::cout") || trimmed.contains("#include") || trimmed.contains("::") {
         return parser_registry::ParserId::Cpp;
     }
-    if trimmed.contains("println!(")
-        || trimmed.starts_with("fn main")
-        || trimmed.starts_with("fn ")
-        || trimmed.contains("let mut ")
-    {
+    // ponytail: .in also uses fn, so check for Rust-specific patterns first
+    if trimmed.contains("println!(") || trimmed.contains("let mut ") {
+        return parser_registry::ParserId::Rust;
+    }
+    // fn main() -> void is .in, not Rust (Rust uses ())
+    if trimmed.starts_with("fn main() -> void") {
+        return parser_registry::ParserId::In;
+    }
+    if trimmed.starts_with("fn main") || trimmed.starts_with("fn ") {
+        // Check for Rust-specific return types
+        let rest = trimmed.trim_start_matches(|c: char| c.is_alphanumeric() || c == ' ' || c == '!');
+        if let Some(rest) = rest.strip_prefix("(") {
+            if rest.contains("println!") || rest.contains("let mut ") {
+                return parser_registry::ParserId::Rust;
+            }
+        }
+        // .in has print() as builtin; Rust has println!
+        if trimmed.contains("println!(") {
+            return parser_registry::ParserId::Rust;
+        }
+        // Default: route to Rust for fn main pattern (eval convention)
+        if trimmed.starts_with("fn main") {
+            return parser_registry::ParserId::Rust;
+        }
+        // fn with -> void is .in
+        if trimmed.contains("-> void") || trimmed.contains("-> String") || trimmed.contains("-> Int") {
+            return parser_registry::ParserId::In;
+        }
         return parser_registry::ParserId::Rust;
     }
     if trimmed.contains("console.log(") || trimmed.contains("function ") || trimmed.contains("=>") {
@@ -2139,7 +2182,10 @@ fn eval_return_type(parser_id: parser_registry::ParserId, ret: &str) -> String {
             "String" => "U8 *".to_string(),
             _ => "I64".to_string(),
         },
-        parser_registry::ParserId::C | parser_registry::ParserId::Cpp => match ret {
+        parser_registry::ParserId::C
+        | parser_registry::ParserId::Cpp
+        | parser_registry::ParserId::ObjC
+        | parser_registry::ParserId::ObjCpp => match ret {
             "Bool" => "bool".to_string(),
             _ => "int".to_string(),
         },
@@ -2226,7 +2272,10 @@ fn wrap_eval_expression(
         parser_registry::ParserId::HolyC => {
             Some(format!("{ret} Main()\n{{\n  return {code};\n}}\nMain;"))
         }
-        parser_registry::ParserId::C | parser_registry::ParserId::Cpp => {
+        parser_registry::ParserId::C
+        | parser_registry::ParserId::Cpp
+        | parser_registry::ParserId::ObjC
+        | parser_registry::ParserId::ObjCpp => {
             if ret == "int" || ret == "bool" {
                 Some(format!("{ret} main() {{ return {code}; }}"))
             } else {
@@ -2313,8 +2362,10 @@ fn wrap_eval_statement(parser_id: parser_registry::ParserId, code: &str) -> Opti
             Some(format!("export fn main() void = {{\n\t{code};\n}};"))
         }
         parser_registry::ParserId::HolyC => Some(format!("U0 Main()\n{{\n  {code};\n}}\nMain;")),
-        parser_registry::ParserId::C => Some(format!("int main() {{ {code}; return 0; }}")),
-        parser_registry::ParserId::Cpp => Some(format!("int main() {{ {code}; return 0; }}")),
+        parser_registry::ParserId::C
+        | parser_registry::ParserId::ObjC => Some(format!("int main() {{ {code}; return 0; }}")),
+        parser_registry::ParserId::Cpp
+        | parser_registry::ParserId::ObjCpp => Some(format!("int main() {{ {code}; return 0; }}")),
         _ => None,
     }
 }
