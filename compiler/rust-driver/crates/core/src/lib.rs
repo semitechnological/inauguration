@@ -781,7 +781,8 @@ mod tests {
     #[test]
     fn ir_module_get_function() {
         let mut m = IrModule::new("m");
-        m.functions.push(IrFunction::new("main", vec![], IrType::Void));
+        m.functions
+            .push(IrFunction::new("main", vec![], IrType::Void));
         assert!(m.get_function("main").is_some());
         assert!(m.get_function("nope").is_none());
     }

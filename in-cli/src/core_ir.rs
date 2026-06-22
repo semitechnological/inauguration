@@ -531,7 +531,10 @@ mod tests {
     fn match_pattern_wild() {
         assert_eq!(MatchPattern::parse("_").unwrap(), MatchPattern::WildPat);
         assert_eq!(MatchPattern::parse("else").unwrap(), MatchPattern::WildPat);
-        assert_eq!(MatchPattern::parse("default").unwrap(), MatchPattern::WildPat);
+        assert_eq!(
+            MatchPattern::parse("default").unwrap(),
+            MatchPattern::WildPat
+        );
     }
 
     #[test]
@@ -541,8 +544,14 @@ mod tests {
 
     #[test]
     fn match_pattern_bool() {
-        assert_eq!(MatchPattern::parse("true").unwrap(), MatchPattern::BoolPat(true));
-        assert_eq!(MatchPattern::parse("false").unwrap(), MatchPattern::BoolPat(false));
+        assert_eq!(
+            MatchPattern::parse("true").unwrap(),
+            MatchPattern::BoolPat(true)
+        );
+        assert_eq!(
+            MatchPattern::parse("false").unwrap(),
+            MatchPattern::BoolPat(false)
+        );
     }
 
     #[test]
@@ -603,7 +612,10 @@ mod tests {
         let pat = MatchPattern::parse("Point{x, y}").unwrap();
         if let MatchPattern::StructPat { name, fields } = pat {
             assert_eq!(name, "Point");
-            assert_eq!(fields[0], ("x".to_string(), MatchPattern::IdentPat("x".to_string())));
+            assert_eq!(
+                fields[0],
+                ("x".to_string(), MatchPattern::IdentPat("x".to_string()))
+            );
         } else {
             panic!("expected StructPat");
         }
@@ -611,12 +623,18 @@ mod tests {
 
     #[test]
     fn match_pattern_case_prefix() {
-        assert_eq!(MatchPattern::parse("case 42").unwrap(), MatchPattern::IntPat(42));
+        assert_eq!(
+            MatchPattern::parse("case 42").unwrap(),
+            MatchPattern::IntPat(42)
+        );
     }
 
     #[test]
     fn match_pattern_trailing_colon() {
-        assert_eq!(MatchPattern::parse("42:").unwrap(), MatchPattern::IntPat(42));
+        assert_eq!(
+            MatchPattern::parse("42:").unwrap(),
+            MatchPattern::IntPat(42)
+        );
     }
 
     #[test]

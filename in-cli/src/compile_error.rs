@@ -169,7 +169,10 @@ mod tests {
     #[test]
     fn error_categories() {
         assert_eq!(CompileError::parse("").category, ErrorCategory::Parse);
-        assert_eq!(CompileError::type_error("").category, ErrorCategory::TypeError);
+        assert_eq!(
+            CompileError::type_error("").category,
+            ErrorCategory::TypeError
+        );
         assert_eq!(CompileError::verifier("").category, ErrorCategory::Verifier);
         assert_eq!(CompileError::lower("").category, ErrorCategory::Lower);
         assert_eq!(CompileError::io("").category, ErrorCategory::Io);

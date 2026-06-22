@@ -1329,10 +1329,18 @@ mod tests {
         }
     }
 
-    fn make_fn_with_params(name: &str, params: Vec<(&str, Typ)>, ret: Typ, body: Vec<Stmt>) -> Decl {
+    fn make_fn_with_params(
+        name: &str,
+        params: Vec<(&str, Typ)>,
+        ret: Typ,
+        body: Vec<Stmt>,
+    ) -> Decl {
         Decl::Function {
             name: name.to_string(),
-            params: params.into_iter().map(|(n, t)| (n.to_string(), t)).collect(),
+            params: params
+                .into_iter()
+                .map(|(n, t)| (n.to_string(), t))
+                .collect(),
             ret,
             body,
             type_params: vec![],
@@ -1406,34 +1414,82 @@ mod tests {
 
     #[test]
     fn fold_bitwise_ops() {
-        assert_eq!(fold_expr(bin("band", Expr::IntLit(0xFF), Expr::IntLit(0x0F))), Expr::IntLit(0x0F));
-        assert_eq!(fold_expr(bin("bor", Expr::IntLit(0xF0), Expr::IntLit(0x0F))), Expr::IntLit(0xFF));
-        assert_eq!(fold_expr(bin("xor", Expr::IntLit(0xFF), Expr::IntLit(0xFF))), Expr::IntLit(0));
+        assert_eq!(
+            fold_expr(bin("band", Expr::IntLit(0xFF), Expr::IntLit(0x0F))),
+            Expr::IntLit(0x0F)
+        );
+        assert_eq!(
+            fold_expr(bin("bor", Expr::IntLit(0xF0), Expr::IntLit(0x0F))),
+            Expr::IntLit(0xFF)
+        );
+        assert_eq!(
+            fold_expr(bin("xor", Expr::IntLit(0xFF), Expr::IntLit(0xFF))),
+            Expr::IntLit(0)
+        );
     }
 
     #[test]
     fn fold_shift() {
-        assert_eq!(fold_expr(bin("shl", Expr::IntLit(1), Expr::IntLit(4))), Expr::IntLit(16));
-        assert_eq!(fold_expr(bin("shr", Expr::IntLit(16), Expr::IntLit(2))), Expr::IntLit(4));
+        assert_eq!(
+            fold_expr(bin("shl", Expr::IntLit(1), Expr::IntLit(4))),
+            Expr::IntLit(16)
+        );
+        assert_eq!(
+            fold_expr(bin("shr", Expr::IntLit(16), Expr::IntLit(2))),
+            Expr::IntLit(4)
+        );
     }
 
     #[test]
     fn fold_comparison() {
-        assert_eq!(fold_expr(bin("eq", Expr::IntLit(5), Expr::IntLit(5))), Expr::IntLit(1));
-        assert_eq!(fold_expr(bin("eq", Expr::IntLit(5), Expr::IntLit(3))), Expr::IntLit(0));
-        assert_eq!(fold_expr(bin("neq", Expr::IntLit(1), Expr::IntLit(2))), Expr::IntLit(1));
-        assert_eq!(fold_expr(bin("lt", Expr::IntLit(3), Expr::IntLit(5))), Expr::IntLit(1));
-        assert_eq!(fold_expr(bin("gt", Expr::IntLit(5), Expr::IntLit(3))), Expr::IntLit(1));
-        assert_eq!(fold_expr(bin("le", Expr::IntLit(5), Expr::IntLit(5))), Expr::IntLit(1));
-        assert_eq!(fold_expr(bin("ge", Expr::IntLit(5), Expr::IntLit(5))), Expr::IntLit(1));
+        assert_eq!(
+            fold_expr(bin("eq", Expr::IntLit(5), Expr::IntLit(5))),
+            Expr::IntLit(1)
+        );
+        assert_eq!(
+            fold_expr(bin("eq", Expr::IntLit(5), Expr::IntLit(3))),
+            Expr::IntLit(0)
+        );
+        assert_eq!(
+            fold_expr(bin("neq", Expr::IntLit(1), Expr::IntLit(2))),
+            Expr::IntLit(1)
+        );
+        assert_eq!(
+            fold_expr(bin("lt", Expr::IntLit(3), Expr::IntLit(5))),
+            Expr::IntLit(1)
+        );
+        assert_eq!(
+            fold_expr(bin("gt", Expr::IntLit(5), Expr::IntLit(3))),
+            Expr::IntLit(1)
+        );
+        assert_eq!(
+            fold_expr(bin("le", Expr::IntLit(5), Expr::IntLit(5))),
+            Expr::IntLit(1)
+        );
+        assert_eq!(
+            fold_expr(bin("ge", Expr::IntLit(5), Expr::IntLit(5))),
+            Expr::IntLit(1)
+        );
     }
 
     #[test]
     fn fold_logical_ops() {
-        assert_eq!(fold_expr(bin("land", Expr::IntLit(1), Expr::IntLit(1))), Expr::IntLit(1));
-        assert_eq!(fold_expr(bin("land", Expr::IntLit(0), Expr::IntLit(1))), Expr::IntLit(0));
-        assert_eq!(fold_expr(bin("lor", Expr::IntLit(0), Expr::IntLit(1))), Expr::IntLit(1));
-        assert_eq!(fold_expr(bin("lor", Expr::IntLit(0), Expr::IntLit(0))), Expr::IntLit(0));
+        assert_eq!(
+            fold_expr(bin("land", Expr::IntLit(1), Expr::IntLit(1))),
+            Expr::IntLit(1)
+        );
+        assert_eq!(
+            fold_expr(bin("land", Expr::IntLit(0), Expr::IntLit(1))),
+            Expr::IntLit(0)
+        );
+        assert_eq!(
+            fold_expr(bin("lor", Expr::IntLit(0), Expr::IntLit(1))),
+            Expr::IntLit(1)
+        );
+        assert_eq!(
+            fold_expr(bin("lor", Expr::IntLit(0), Expr::IntLit(0))),
+            Expr::IntLit(0)
+        );
     }
 
     #[test]
@@ -1457,87 +1513,162 @@ mod tests {
 
     #[test]
     fn simplify_add_zero_identity() {
-        assert_eq!(simplify_expr(bin("add", Expr::IntLit(0), ident("x"))), ident("x"));
-        assert_eq!(simplify_expr(bin("add", ident("x"), Expr::IntLit(0))), ident("x"));
+        assert_eq!(
+            simplify_expr(bin("add", Expr::IntLit(0), ident("x"))),
+            ident("x")
+        );
+        assert_eq!(
+            simplify_expr(bin("add", ident("x"), Expr::IntLit(0))),
+            ident("x")
+        );
     }
 
     #[test]
     fn simplify_sub_zero() {
-        assert_eq!(simplify_expr(bin("sub", ident("x"), Expr::IntLit(0))), ident("x"));
+        assert_eq!(
+            simplify_expr(bin("sub", ident("x"), Expr::IntLit(0))),
+            ident("x")
+        );
     }
 
     #[test]
     fn simplify_mul_zero() {
-        assert_eq!(simplify_expr(bin("mul", Expr::IntLit(0), ident("x"))), Expr::IntLit(0));
-        assert_eq!(simplify_expr(bin("mul", ident("x"), Expr::IntLit(0))), Expr::IntLit(0));
+        assert_eq!(
+            simplify_expr(bin("mul", Expr::IntLit(0), ident("x"))),
+            Expr::IntLit(0)
+        );
+        assert_eq!(
+            simplify_expr(bin("mul", ident("x"), Expr::IntLit(0))),
+            Expr::IntLit(0)
+        );
     }
 
     #[test]
     fn simplify_mul_one() {
-        assert_eq!(simplify_expr(bin("mul", Expr::IntLit(1), ident("x"))), ident("x"));
-        assert_eq!(simplify_expr(bin("mul", ident("x"), Expr::IntLit(1))), ident("x"));
+        assert_eq!(
+            simplify_expr(bin("mul", Expr::IntLit(1), ident("x"))),
+            ident("x")
+        );
+        assert_eq!(
+            simplify_expr(bin("mul", ident("x"), Expr::IntLit(1))),
+            ident("x")
+        );
     }
 
     #[test]
     fn simplify_div_one() {
-        assert_eq!(simplify_expr(bin("div", ident("x"), Expr::IntLit(1))), ident("x"));
+        assert_eq!(
+            simplify_expr(bin("div", ident("x"), Expr::IntLit(1))),
+            ident("x")
+        );
     }
 
     #[test]
     fn simplify_band_zero() {
-        assert_eq!(simplify_expr(bin("band", Expr::IntLit(0), ident("x"))), Expr::IntLit(0));
+        assert_eq!(
+            simplify_expr(bin("band", Expr::IntLit(0), ident("x"))),
+            Expr::IntLit(0)
+        );
     }
 
     #[test]
     fn simplify_band_neg1() {
-        assert_eq!(simplify_expr(bin("band", Expr::IntLit(-1), ident("x"))), ident("x"));
-        assert_eq!(simplify_expr(bin("band", ident("x"), Expr::IntLit(-1))), ident("x"));
+        assert_eq!(
+            simplify_expr(bin("band", Expr::IntLit(-1), ident("x"))),
+            ident("x")
+        );
+        assert_eq!(
+            simplify_expr(bin("band", ident("x"), Expr::IntLit(-1))),
+            ident("x")
+        );
     }
 
     #[test]
     fn simplify_bor_zero() {
-        assert_eq!(simplify_expr(bin("bor", Expr::IntLit(0), ident("x"))), ident("x"));
-        assert_eq!(simplify_expr(bin("bor", ident("x"), Expr::IntLit(0))), ident("x"));
+        assert_eq!(
+            simplify_expr(bin("bor", Expr::IntLit(0), ident("x"))),
+            ident("x")
+        );
+        assert_eq!(
+            simplify_expr(bin("bor", ident("x"), Expr::IntLit(0))),
+            ident("x")
+        );
     }
 
     #[test]
     fn simplify_xor_zero() {
-        assert_eq!(simplify_expr(bin("xor", Expr::IntLit(0), ident("x"))), ident("x"));
-        assert_eq!(simplify_expr(bin("xor", ident("x"), Expr::IntLit(0))), ident("x"));
+        assert_eq!(
+            simplify_expr(bin("xor", Expr::IntLit(0), ident("x"))),
+            ident("x")
+        );
+        assert_eq!(
+            simplify_expr(bin("xor", ident("x"), Expr::IntLit(0))),
+            ident("x")
+        );
     }
 
     #[test]
     fn simplify_shl_zero() {
-        assert_eq!(simplify_expr(bin("shl", ident("x"), Expr::IntLit(0))), ident("x"));
+        assert_eq!(
+            simplify_expr(bin("shl", ident("x"), Expr::IntLit(0))),
+            ident("x")
+        );
     }
 
     #[test]
     fn simplify_shr_zero() {
-        assert_eq!(simplify_expr(bin("shr", ident("x"), Expr::IntLit(0))), ident("x"));
+        assert_eq!(
+            simplify_expr(bin("shr", ident("x"), Expr::IntLit(0))),
+            ident("x")
+        );
     }
 
     #[test]
     fn simplify_land_short_circuit() {
-        assert_eq!(simplify_expr(bin("land", Expr::IntLit(0), ident("x"))), Expr::IntLit(0));
-        assert_eq!(simplify_expr(bin("land", ident("x"), Expr::IntLit(0))), Expr::IntLit(0));
+        assert_eq!(
+            simplify_expr(bin("land", Expr::IntLit(0), ident("x"))),
+            Expr::IntLit(0)
+        );
+        assert_eq!(
+            simplify_expr(bin("land", ident("x"), Expr::IntLit(0))),
+            Expr::IntLit(0)
+        );
     }
 
     #[test]
     fn simplify_land_identity() {
-        assert_eq!(simplify_expr(bin("land", Expr::IntLit(1), ident("x"))), ident("x"));
-        assert_eq!(simplify_expr(bin("land", ident("x"), Expr::IntLit(1))), ident("x"));
+        assert_eq!(
+            simplify_expr(bin("land", Expr::IntLit(1), ident("x"))),
+            ident("x")
+        );
+        assert_eq!(
+            simplify_expr(bin("land", ident("x"), Expr::IntLit(1))),
+            ident("x")
+        );
     }
 
     #[test]
     fn simplify_lor_short_circuit() {
-        assert_eq!(simplify_expr(bin("lor", Expr::IntLit(1), ident("x"))), Expr::IntLit(1));
-        assert_eq!(simplify_expr(bin("lor", ident("x"), Expr::IntLit(1))), Expr::IntLit(1));
+        assert_eq!(
+            simplify_expr(bin("lor", Expr::IntLit(1), ident("x"))),
+            Expr::IntLit(1)
+        );
+        assert_eq!(
+            simplify_expr(bin("lor", ident("x"), Expr::IntLit(1))),
+            Expr::IntLit(1)
+        );
     }
 
     #[test]
     fn simplify_lor_identity() {
-        assert_eq!(simplify_expr(bin("lor", Expr::IntLit(0), ident("x"))), ident("x"));
-        assert_eq!(simplify_expr(bin("lor", ident("x"), Expr::IntLit(0))), ident("x"));
+        assert_eq!(
+            simplify_expr(bin("lor", Expr::IntLit(0), ident("x"))),
+            ident("x")
+        );
+        assert_eq!(
+            simplify_expr(bin("lor", ident("x"), Expr::IntLit(0))),
+            ident("x")
+        );
     }
 
     #[test]
@@ -1617,7 +1748,10 @@ mod tests {
         remove_dead_functions(&mut decls);
         let names: Vec<&str> = decls
             .iter()
-            .filter_map(|d| match d { Decl::Function { name, .. } => Some(name.as_str()), _ => None })
+            .filter_map(|d| match d {
+                Decl::Function { name, .. } => Some(name.as_str()),
+                _ => None,
+            })
             .collect();
         assert!(names.contains(&"kernel_entry"));
         assert!(names.contains(&"helper"));
@@ -1639,13 +1773,19 @@ mod tests {
     #[test]
     fn inline_small_return_function() {
         let mut decls = vec![
-            make_fn_with_params("small", vec![], Typ::Int, vec![
-                Stmt::Return(Some(Expr::IntLit(42))),
-            ]),
-            make_fn("kernel_entry", vec![
-                Stmt::Let("x".into(), Some(Typ::Int), call("small", vec![])),
-                Stmt::Return(Some(ident("x"))),
-            ]),
+            make_fn_with_params(
+                "small",
+                vec![],
+                Typ::Int,
+                vec![Stmt::Return(Some(Expr::IntLit(42)))],
+            ),
+            make_fn(
+                "kernel_entry",
+                vec![
+                    Stmt::Let("x".into(), Some(Typ::Int), call("small", vec![])),
+                    Stmt::Return(Some(ident("x"))),
+                ],
+            ),
         ];
         inline_small_functions(&mut decls);
         if let Decl::Function { body, .. } = &decls[1] {
@@ -1657,15 +1797,13 @@ mod tests {
 
     #[test]
     fn inline_skips_large_functions() {
-        let large_body: Vec<Stmt> = (0..10)
-            .map(|i| Stmt::Expr(Expr::IntLit(i)))
-            .collect();
+        let large_body: Vec<Stmt> = (0..10).map(|i| Stmt::Expr(Expr::IntLit(i))).collect();
         let mut decls = vec![
             make_fn("big", large_body),
-            make_fn("kernel_entry", vec![
-                Stmt::Expr(call("big", vec![])),
-                Stmt::Return(None),
-            ]),
+            make_fn(
+                "kernel_entry",
+                vec![Stmt::Expr(call("big", vec![])), Stmt::Return(None)],
+            ),
         ];
         let before = decls[1].clone();
         inline_small_functions(&mut decls);
@@ -1676,10 +1814,13 @@ mod tests {
 
     #[test]
     fn optimize_folds_and_propagates() {
-        let mut decls = vec![make_fn("kernel_entry", vec![
-            Stmt::Let("a".into(), Some(Typ::Int), Expr::IntLit(99)),
-            Stmt::Return(Some(ident("a"))),
-        ])];
+        let mut decls = vec![make_fn(
+            "kernel_entry",
+            vec![
+                Stmt::Let("a".into(), Some(Typ::Int), Expr::IntLit(99)),
+                Stmt::Return(Some(ident("a"))),
+            ],
+        )];
         optimize(&mut decls);
         if let Decl::Function { body, .. } = &decls[0] {
             assert_eq!(body.len(), 1);
@@ -1689,10 +1830,13 @@ mod tests {
 
     #[test]
     fn optimize_removes_dead_code() {
-        let mut decls = vec![make_fn("kernel_entry", vec![
-            Stmt::Let("dead".into(), Some(Typ::Int), Expr::IntLit(0)),
-            Stmt::Return(Some(Expr::IntLit(1))),
-        ])];
+        let mut decls = vec![make_fn(
+            "kernel_entry",
+            vec![
+                Stmt::Let("dead".into(), Some(Typ::Int), Expr::IntLit(0)),
+                Stmt::Return(Some(Expr::IntLit(1))),
+            ],
+        )];
         optimize(&mut decls);
         if let Decl::Function { body, .. } = &decls[0] {
             assert_eq!(body.len(), 1);
@@ -1797,9 +1941,10 @@ mod tests {
 
     #[test]
     fn detect_ptr_refs_finds_invoke_targets() {
-        let decls = vec![make_fn("main", vec![
-            Stmt::Expr(call("invoke", vec![ident("target_fn")])),
-        ])];
+        let decls = vec![make_fn(
+            "main",
+            vec![Stmt::Expr(call("invoke", vec![ident("target_fn")]))],
+        )];
         let mut refs = Vec::new();
         detect_ptr_refs(&decls, &mut refs);
         assert!(refs.contains(&"target_fn".to_string()));
@@ -1807,9 +1952,10 @@ mod tests {
 
     #[test]
     fn detect_ptr_refs_finds_arg_idents() {
-        let decls = vec![make_fn("main", vec![
-            Stmt::Expr(call("foo", vec![ident("bar")])),
-        ])];
+        let decls = vec![make_fn(
+            "main",
+            vec![Stmt::Expr(call("foo", vec![ident("bar")]))],
+        )];
         let mut refs = Vec::new();
         detect_ptr_refs(&decls, &mut refs);
         assert!(refs.contains(&"bar".to_string()));

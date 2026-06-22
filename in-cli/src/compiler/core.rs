@@ -425,8 +425,10 @@ mod tests {
     #[test]
     fn ir_module_get_function() {
         let mut m = IrModule::new("test");
-        m.functions.push(IrFunction::new("main", vec![], IrType::Void));
-        m.functions.push(IrFunction::new("helper", vec![], IrType::I32));
+        m.functions
+            .push(IrFunction::new("main", vec![], IrType::Void));
+        m.functions
+            .push(IrFunction::new("helper", vec![], IrType::I32));
         assert!(m.get_function("main").is_some());
         assert!(m.get_function("helper").is_some());
         assert!(m.get_function("missing").is_none());
@@ -435,7 +437,8 @@ mod tests {
     #[test]
     fn ir_module_get_function_mut() {
         let mut m = IrModule::new("test");
-        m.functions.push(IrFunction::new("main", vec![], IrType::Void));
+        m.functions
+            .push(IrFunction::new("main", vec![], IrType::Void));
         let f = m.get_function_mut("main").unwrap();
         f.add_block(IrBasicBlock::new("entry"));
         assert_eq!(m.get_function("main").unwrap().blocks.len(), 1);
