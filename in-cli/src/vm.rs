@@ -24,6 +24,7 @@ pub struct BytecodeVM {
     pub module: BytecodeModule,
     pub globals: HashMap<String, Value>,
     pub error_state: Option<Value>,
+    pub native_runtime: Option<crate::native_runtime::NativeRuntime>,
 }
 
 impl BytecodeVM {
@@ -34,7 +35,13 @@ impl BytecodeVM {
             module,
             globals: HashMap::new(),
             error_state: None,
+            native_runtime: Some(crate::native_runtime::NativeRuntime::standard()),
         }
+    }
+
+    pub fn with_native_runtime(mut self, rt: crate::native_runtime::NativeRuntime) -> Self {
+        self.native_runtime = Some(rt);
+        self
     }
 
     /// Run the bytecode program.
@@ -60,9 +67,17 @@ impl BytecodeVM {
             let short = name.rsplit(" ::").next().unwrap_or(name);
             if let Some(f) = self.module.find_function(short.trim()) {
                 f.clone()
+            } else if let Some(rt) = &self.native_runtime
+                && let Some(result) = rt.call(name, &args) 
+            {
+                return result;
             } else {
                 return Ok(Value::Nil);
             }
+        } else if let Some(rt) = &self.native_runtime
+            && let Some(result) = rt.call(name, &args) 
+        {
+            return result;
         } else {
             // External/unlinked crate function — return Nil and continue
             return Ok(Value::Nil);
