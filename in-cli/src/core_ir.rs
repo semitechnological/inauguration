@@ -78,6 +78,37 @@ pub enum Typ {
     Generic(String),
 }
 
+impl Typ {
+    /// Normalize language-specific named types to canonical Core IR primitives.
+    pub fn canonical(&self) -> Typ {
+        match self {
+            Typ::Named(name) => match name.trim() {
+                "Int" | "int" | "i64" | "i32" | "i16" | "i8" | "u64" | "u32" | "u16" | "u8" => {
+                    Typ::Int
+                }
+                "String" | "string" | "str" => Typ::String,
+                "Bool" | "bool" => Typ::Bool,
+                "Float" | "float" | "Double" | "double" | "f64" | "f32" => Typ::Float,
+                "Void" | "void" | "Unit" | "unit" | "()" => Typ::Void,
+                _ => self.clone(),
+            },
+            Typ::Array(item) => Typ::Array(Box::new(item.canonical())),
+            _ => self.clone(),
+        }
+    }
+
+    pub fn is_any(&self) -> bool {
+        matches!(self, Typ::Named(name) if name == "Any")
+    }
+
+    /// Two types are compatible if canonical forms are equal or either is Any.
+    pub fn compatible_with(&self, other: &Typ) -> bool {
+        let a = self.canonical();
+        let b = other.canonical();
+        a == b || a.is_any() || b.is_any()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expr {
     IntLit(i64),
