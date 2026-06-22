@@ -3,10 +3,13 @@ use crate::boundary_ir::{
     BoundaryTransfer, CompileArtifact, IN_ABI_VERSION,
 };
 use crate::boundary_verify::boundary_ir_verify;
+use crate::compiler::boundary_common::extract_boundary_from_comment;
 use crate::compiler::tree_front;
 use crate::core_ir::{Decl, Typ, UnifiedModule};
 use crate::parser_registry::ParserId;
 use std::path::Path;
+
+const BOUNDARY_PREFIXES: &[&str] = &["//? in_boundary", "// in_boundary"];
 
 pub fn parse_ecmascript_artifact(
     parser_id: ParserId,
@@ -36,19 +39,7 @@ pub fn parse_ecmascript_artifact_source(
 }
 
 pub fn extract_ecmascript_boundary(src: &str) -> Option<BoundaryModule> {
-    if let Some(line) = src.lines().next() {
-        let trimmed = line.trim();
-        let payload = trimmed
-            .strip_prefix("//? in_boundary")
-            .or_else(|| trimmed.strip_prefix("// in_boundary"))?;
-        let module: BoundaryModule = serde_json::from_str(payload.trim()).ok()?;
-        return Some(if module.layout_hash.is_empty() {
-            module.with_layout_hash()
-        } else {
-            module
-        });
-    }
-    None
+    extract_boundary_from_comment(src, BOUNDARY_PREFIXES)
 }
 
 fn boundary_from_semantic(
