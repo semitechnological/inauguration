@@ -5968,6 +5968,10 @@ fn fsharp_params<'a>(src: &[u8], n: Node<'a>) -> Vec<(String, Typ)> {
 }
 
 fn fsharp_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
+    // ponytail: unit literal () = empty body
+    if body.kind() == "unit" {
+        return vec![];
+    }
     let stmts = ast_body(src, body, FSHAST);
     if !stmts.is_empty() {
         return stmts;
