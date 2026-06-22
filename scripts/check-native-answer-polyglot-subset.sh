@@ -62,6 +62,7 @@ check_answer apps/polyglot-sample/sample.ts
 check_answer apps/polyglot-sample/Sample.kt
 check_answer apps/polyglot-sample/Program.cs
 check_answer apps/polyglot-sample/sample.go
+check_answer apps/polyglot-sample/sample.v
 check_answer apps/polyglot-sample/sample.nim
 check_answer apps/polyglot-sample/sample.odin
 check_answer apps/polyglot-sample/sample.ha

@@ -32,6 +32,7 @@ pub fn parse_polyglot_file(id: ParserId, path: &Path) -> Result<UnifiedModule, S
                     let name_n = n.child_by_field_name("name")?;
                     let name = normalize_entry(node_txt(s, name_n).trim());
                     let params = v_params(s, n);
+                    let ret = v_return_type(s, n).unwrap_or(Typ::Void);
                     let body = n
                         .child_by_field_name("body")
                         .map(|b| v_body(s, b))
@@ -39,7 +40,7 @@ pub fn parse_polyglot_file(id: ParserId, path: &Path) -> Result<UnifiedModule, S
                     Some(Decl::Function {
                         name,
                         params,
-                        ret: Typ::Void,
+                        ret,
                         body,
                         type_params: vec![],
                     })
@@ -6571,6 +6572,25 @@ fn v_params(src: &[u8], func: Node<'_>) -> Vec<(String, Typ)> {
     out
 }
 
+fn v_return_type(src: &[u8], func: Node<'_>) -> Option<Typ> {
+    let params = func.child_by_field_name("parameters")?;
+    let mut saw_params = false;
+    let mut w = func.walk();
+    for node in func.named_children(&mut w) {
+        if node == params {
+            saw_params = true;
+            continue;
+        }
+        if saw_params && matches!(node.kind(), "type_identifier" | "type") {
+            return Some(Typ::Named(node_txt(src, node).trim().to_string()));
+        }
+        if node.kind() == "block" {
+            break;
+        }
+    }
+    None
+}
+
 fn v_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
     ast_body(src, body, V_AST)
 }
@@ -9644,6 +9664,40 @@ end
                 let body = n
                     .child_by_field_name("body")
                     .map(|b| go_body(src, b))
+                    .unwrap_or_default();
+                Some(Decl::Function {
+                    name,
+                    params,
+                    ret,
+                    body,
+                    type_params: vec![],
+                })
+            })
+        })
+        .expect("ok");
+        let answer = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "answer"))
+            .expect("answer");
+        match answer {
+            Decl::Function { ret, .. } => assert_eq!(ret, &Typ::Named("int".into())),
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn extract_v_function_return_type() {
+        let src = "module main\n\nfn answer() int {\n\treturn 42\n}\n";
+        let m = parse_lang(tree_sitter_v::LANGUAGE.into(), src, |b, r| {
+            extract_fn_nodes(b, r, &["function_declaration"], |src, n| {
+                let name_n = n.child_by_field_name("name")?;
+                let name = normalize_entry(node_txt(src, name_n).trim());
+                let params = v_params(src, n);
+                let ret = v_return_type(src, n).unwrap_or(Typ::Void);
+                let body = n
+                    .child_by_field_name("body")
+                    .map(|b| v_body(src, b))
                     .unwrap_or_default();
                 Some(Decl::Function {
                     name,
