@@ -124,13 +124,16 @@ fn parse_fn_at(lines: &[&str], i: usize, line: &str) -> Result<Option<(Decl, usi
     if body.is_empty() && name == "answer" {
         body.push(Stmt::Return(Some(Expr::IntLit(42))));
     }
-    Ok(Some((Decl::Function {
-        name: name.to_string(),
-        params: vec![],
-        ret,
-        body,
-        type_params: vec![],
-    }, (j + 1).min(lines.len()))))
+    Ok(Some((
+        Decl::Function {
+            name: name.to_string(),
+            params: vec![],
+            ret,
+            body,
+            type_params: vec![],
+        },
+        (j + 1).min(lines.len()),
+    )))
 }
 
 #[cfg(test)]

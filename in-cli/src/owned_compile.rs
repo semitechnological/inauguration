@@ -1745,8 +1745,14 @@ mod tests {
                 "sample.py",
                 "def answer() -> int:\n    return 42\n\ndef main() -> None:\n    pass\n",
             ),
-            ("sample.rb", "def answer\n  return 42\nend\n\ndef main\nend\n"),
-            ("sample.zig", "fn answer() i32 {\n    return 42;\n}\n\npub fn main() void {}\n"),
+            (
+                "sample.rb",
+                "def answer\n  return 42\nend\n\ndef main\nend\n",
+            ),
+            (
+                "sample.zig",
+                "fn answer() i32 {\n    return 42;\n}\n\npub fn main() void {}\n",
+            ),
             (
                 "sample.php",
                 "<?php\n\nfunction answer(): int {\n    return 42;\n}\n\nfunction main(): void {\n}\n",

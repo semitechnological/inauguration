@@ -378,7 +378,10 @@ enum Commands {
     Eval {
         #[arg(help = "Inline source code to compile and execute")]
         code: String,
-        #[arg(long, help = "Parser/language slug such as in, js, ts, rust, python, cpp")]
+        #[arg(
+            long,
+            help = "Parser/language slug such as in, js, ts, rust, python, cpp"
+        )]
         parser: Option<String>,
         #[arg(long, default_value_t = false, help = "Show detailed output")]
         verbose: bool,
@@ -1893,8 +1896,9 @@ fn compile_and_run_source_path(
     module_id: &str,
     parser: ParserCli,
 ) -> Result<SourceExecution> {
-    let output = inauguration::bytecode_compiler::compile_source_path(source_path, module_id, parser)
-        .map_err(|e| InError::Message(format!("bytecode compile: {e}")))?;
+    let output =
+        inauguration::bytecode_compiler::compile_source_path(source_path, module_id, parser)
+            .map_err(|e| InError::Message(format!("bytecode compile: {e}")))?;
     let result = inauguration::bytecode_compiler::run_bytecode_module(output.module.clone())
         .map_err(|e| InError::Message(format!("bytecode execution: {e}")))?;
     Ok(SourceExecution { output, result })
@@ -1915,7 +1919,10 @@ fn normalize_in_eval_code(code: &str) -> String {
             ('\u{201C}', '\u{201D}'),
         ];
         for (open, close) in smart_quoted {
-            if rest.starts_with(open) && rest.ends_with(close) && rest.len() >= open.len_utf8() + close.len_utf8() {
+            if rest.starts_with(open)
+                && rest.ends_with(close)
+                && rest.len() >= open.len_utf8() + close.len_utf8()
+            {
                 let inner = &rest[open.len_utf8()..rest.len() - close.len_utf8()];
                 return format!("\"{inner}\"");
             }
@@ -2029,15 +2036,11 @@ fn infer_eval_parser(code: &str) -> parser_registry::ParserId {
     parser_registry::ParserId::In
 }
 
-fn parse_eval_parser(
-    parser: Option<&str>,
-    code: &str,
-) -> Result<parser_registry::ParserId> {
+fn parse_eval_parser(parser: Option<&str>, code: &str) -> Result<parser_registry::ParserId> {
     match parser.map(str::trim).filter(|s| !s.is_empty()) {
         Some(value) if value.eq_ignore_ascii_case("auto") => Ok(infer_eval_parser(code)),
-        Some(value) => parser_registry::parser_id_from_cli_token(value).ok_or_else(|| {
-            InError::Message(format!("unknown eval parser `{value}`"))
-        }),
+        Some(value) => parser_registry::parser_id_from_cli_token(value)
+            .ok_or_else(|| InError::Message(format!("unknown eval parser `{value}`"))),
         None => Ok(infer_eval_parser(code)),
     }
 }
@@ -2131,26 +2134,24 @@ fn wrap_eval_expression(
         parser_registry::ParserId::TypeScript => {
             Some(format!("function main(): {ret} {{ return {code}; }}"))
         }
-        parser_registry::ParserId::Rust => {
-            Some(format!("fn main() -> {ret} {{ {code} }}"))
-        }
+        parser_registry::ParserId::Rust => Some(format!("fn main() -> {ret} {{ {code} }}")),
         parser_registry::ParserId::Python => {
             Some(format!("def main() -> {ret}:\n    return {code}"))
         }
         parser_registry::ParserId::Swift => {
             Some(format!("func main() -> {ret} {{\n  return {code}\n}}"))
         }
-        parser_registry::ParserId::Go => Some(format!("package main\n\nfunc main() {ret} {{\n\treturn {code}\n}}")),
-        parser_registry::ParserId::V => Some(format!("module main\n\nfn main() {ret} {{\n\treturn {code}\n}}")),
+        parser_registry::ParserId::Go => Some(format!(
+            "package main\n\nfunc main() {ret} {{\n\treturn {code}\n}}"
+        )),
+        parser_registry::ParserId::V => Some(format!(
+            "module main\n\nfn main() {ret} {{\n\treturn {code}\n}}"
+        )),
         parser_registry::ParserId::Zig => {
             Some(format!("pub fn main() {ret} {{\n    return {code};\n}}"))
         }
-        parser_registry::ParserId::Dart => {
-            Some(format!("{ret} main() {{\n  return {code};\n}}"))
-        }
-        parser_registry::ParserId::Scala => {
-            Some(format!("def main(): {ret} = {{\n  {code}\n}}"))
-        }
+        parser_registry::ParserId::Dart => Some(format!("{ret} main() {{\n  return {code};\n}}")),
+        parser_registry::ParserId::Scala => Some(format!("def main(): {ret} = {{\n  {code}\n}}")),
         parser_registry::ParserId::Haskell => {
             Some(format!("main = {}", render_haskell_eval_expr(code)))
         }
@@ -2162,9 +2163,7 @@ fn wrap_eval_expression(
             "package main\n\nmain :: proc() -> {ret} {{\n\treturn {code}\n}}\n"
         )),
         parser_registry::ParserId::D => Some(format!("{ret} main() {{ return {code}; }}")),
-        parser_registry::ParserId::Crystal => {
-            Some(format!("def main : {ret}\n  {code}\nend"))
-        }
+        parser_registry::ParserId::Crystal => Some(format!("def main : {ret}\n  {code}\nend")),
         parser_registry::ParserId::Julia => Some(format!(
             "function main()\n    value = {code}\n    return value\nend\n"
         )),
@@ -2173,15 +2172,13 @@ fn wrap_eval_expression(
         )),
         parser_registry::ParserId::Ruby => Some(format!("def main\n  {code}\nend")),
         parser_registry::ParserId::Lua => Some(format!("function main()\n  return {code}\nend")),
-        parser_registry::ParserId::Perl => {
-            Some(format!("sub main {{\n    return {code};\n}}\n"))
-        }
-        parser_registry::ParserId::Php => {
-            Some(format!("<?php\nfunction main() {{\n    return {code};\n}}\n"))
-        }
-        parser_registry::ParserId::Elixir => {
-            Some(format!("defmodule App do\n  def main do\n    {code}\n  end\nend\n"))
-        }
+        parser_registry::ParserId::Perl => Some(format!("sub main {{\n    return {code};\n}}\n")),
+        parser_registry::ParserId::Php => Some(format!(
+            "<?php\nfunction main() {{\n    return {code};\n}}\n"
+        )),
+        parser_registry::ParserId::Elixir => Some(format!(
+            "defmodule App do\n  def main do\n    {code}\n  end\nend\n"
+        )),
         parser_registry::ParserId::Erlang => Some(format!(
             "-module(app).\n-export([main/0]).\n\nmain() ->\n    {code}.\n"
         )),
@@ -2191,16 +2188,14 @@ fn wrap_eval_expression(
         parser_registry::ParserId::Kotlin => {
             Some(format!("fun main(): {ret} {{\n    return {code}\n}}"))
         }
-        parser_registry::ParserId::Clojure => {
-            Some(format!("(defn main [] {code})\n"))
-        }
-        parser_registry::ParserId::VbNet => {
-            Some(format!("Function main() As Integer\n    main = {code}\nEnd Function\n"))
-        }
+        parser_registry::ParserId::Clojure => Some(format!("(defn main [] {code})\n")),
+        parser_registry::ParserId::VbNet => Some(format!(
+            "Function main() As Integer\n    main = {code}\nEnd Function\n"
+        )),
         parser_registry::ParserId::OCaml => Some(format!("let main () =\n  {code}")),
-        parser_registry::ParserId::Hare => {
-            Some(format!("export fn main() {ret} = {{\n\treturn {code};\n}};"))
-        }
+        parser_registry::ParserId::Hare => Some(format!(
+            "export fn main() {ret} = {{\n\treturn {code};\n}};"
+        )),
         parser_registry::ParserId::HolyC => {
             Some(format!("{ret} Main()\n{{\n  return {code};\n}}\nMain;"))
         }
@@ -2239,7 +2234,9 @@ fn wrap_eval_statement(parser_id: parser_registry::ParserId, code: &str) -> Opti
         parser_registry::ParserId::Rust => Some(format!("fn main() -> i64 {{ {code};\n0\n}}")),
         parser_registry::ParserId::Python => Some(format!("def main() -> None:\n    {code}")),
         parser_registry::ParserId::Swift => Some(format!("func main() -> Void {{\n  {code}\n}}")),
-        parser_registry::ParserId::Go => Some(format!("package main\n\nfunc main() {{\n\t{code}\n}}")),
+        parser_registry::ParserId::Go => {
+            Some(format!("package main\n\nfunc main() {{\n\t{code}\n}}"))
+        }
         parser_registry::ParserId::V => Some(format!("module main\n\nfn main() {{\n\t{code}\n}}")),
         parser_registry::ParserId::Zig => Some(format!("pub fn main() void {{\n    {code};\n}}")),
         parser_registry::ParserId::Dart => Some(format!("void main() {{\n  {code};\n}}")),
@@ -2256,15 +2253,19 @@ fn wrap_eval_statement(parser_id: parser_registry::ParserId, code: &str) -> Opti
         }
         parser_registry::ParserId::D => Some(format!("void main() {{ {code}; }}")),
         parser_registry::ParserId::Crystal => Some(format!("def main\n  {code}\nend")),
-        parser_registry::ParserId::Julia => Some(format!("function main()\n    return {code}\nend\n")),
+        parser_registry::ParserId::Julia => {
+            Some(format!("function main()\n    return {code}\nend\n"))
+        }
         parser_registry::ParserId::R => Some(format!("main <- function() {{\n    {code}\n}}\n")),
         parser_registry::ParserId::Ruby => Some(format!("def main\n  {code}\nend")),
         parser_registry::ParserId::Lua => Some(format!("function main()\n  {code}\nend")),
         parser_registry::ParserId::Perl => Some(format!("sub main {{\n    {code};\n}}\n")),
-        parser_registry::ParserId::Php => Some(format!("<?php\nfunction main() {{\n    {code};\n}}\n")),
-        parser_registry::ParserId::Elixir => {
-            Some(format!("defmodule App do\n  def main do\n    {code}\n  end\nend\n"))
+        parser_registry::ParserId::Php => {
+            Some(format!("<?php\nfunction main() {{\n    {code};\n}}\n"))
         }
+        parser_registry::ParserId::Elixir => Some(format!(
+            "defmodule App do\n  def main do\n    {code}\n  end\nend\n"
+        )),
         parser_registry::ParserId::Erlang => Some(format!(
             "-module(app).\n-export([main/0]).\n\nmain() ->\n    {code}.\n"
         )),
@@ -2281,7 +2282,9 @@ fn wrap_eval_statement(parser_id: parser_registry::ParserId, code: &str) -> Opti
         parser_registry::ParserId::Clojure => Some(format!("(defn main [] {code})\n")),
         parser_registry::ParserId::VbNet => Some(format!("Sub main()\n    {code}\nEnd Sub\n")),
         parser_registry::ParserId::OCaml => Some(format!("let main () =\n  {code}")),
-        parser_registry::ParserId::Hare => Some(format!("export fn main() void = {{\n\t{code};\n}};")),
+        parser_registry::ParserId::Hare => {
+            Some(format!("export fn main() void = {{\n\t{code};\n}};"))
+        }
         parser_registry::ParserId::HolyC => Some(format!("U0 Main()\n{{\n  {code};\n}}\nMain;")),
         parser_registry::ParserId::C => Some(format!("int main() {{ {code}; return 0; }}")),
         parser_registry::ParserId::Cpp => Some(format!("int main() {{ {code}; return 0; }}")),
@@ -2388,13 +2391,13 @@ fn eval_plans(parser_id: parser_registry::ParserId, code: &str) -> Vec<EvalPlan>
 
     let ret = guess_eval_type(trimmed);
     let mut plans = Vec::new();
-    if prefers_printed_eval_expression(parser_id) {
-        if let Some(wrapped) = wrap_eval_statement(parser_id, &format!("print({trimmed})")) {
-            plans.push(EvalPlan {
-                wrapped,
-                print_result: false,
-            });
-        }
+    if prefers_printed_eval_expression(parser_id)
+        && let Some(wrapped) = wrap_eval_statement(parser_id, &format!("print({trimmed})"))
+    {
+        plans.push(EvalPlan {
+            wrapped,
+            print_result: false,
+        });
     }
     if let Some(wrapped) = wrap_eval_expression(parser_id, &normalized, ret) {
         plans.push(EvalPlan {
@@ -2413,16 +2416,16 @@ fn eval_plans(parser_id: parser_registry::ParserId, code: &str) -> Vec<EvalPlan>
 
 fn cmd_eval(cwd: &Path, code: &str, parser: Option<&str>, verbose: bool) -> Result<()> {
     let parser_id = parse_eval_parser(parser, code)?;
-    let dir = std::env::temp_dir().join("inaug-eval");
-    let _ = std::fs::create_dir_all(&dir);
-    let path = dir.join(format!(
-        "{}.{}",
+    let dir = std::env::temp_dir().join(format!(
+        "inaug-eval-{}-{}",
+        std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
-            .as_nanos(),
-        parser_id.default_extension()
+            .as_nanos()
     ));
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join(format!("eval.{}", parser_id.default_extension()));
     let source_path = resolve_invocation_path(cwd, &path.to_string_lossy());
     let mut last_err = None;
     let mut execution = None;
@@ -2441,7 +2444,7 @@ fn cmd_eval(cwd: &Path, code: &str, parser: Option<&str>, verbose: bool) -> Resu
         }
     }
 
-    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_dir_all(&dir);
     let execution = match execution {
         Some(run) => run,
         None => return Err(last_err.unwrap_or_else(|| InError::Message("eval failed".to_string()))),
@@ -3132,10 +3135,14 @@ fn cmd_update_remote() -> Result<()> {
         let url = format!("https://raw.githubusercontent.com/{repo}/v{version}/install.sh");
         println!("No local inauguration checkout found; running remote install.sh ...");
         println!("Fetching: {url}");
-        let snippet = format!(
-            "set -euo pipefail; tmp=$(mktemp); curl -fsSL \"{url}\" -o \"$tmp\"; bash \"$tmp\"; rm -f \"$tmp\""
-        );
-        run_cmd(Command::new("bash").arg("-c").arg(snippet))
+        let snippet = "set -euo pipefail; tmp=$(mktemp); curl -fsSL \"$1\" -o \"$tmp\"; bash \"$tmp\"; rm -f \"$tmp\"";
+        run_cmd(
+            Command::new("bash")
+                .arg("-c")
+                .arg(snippet)
+                .arg("--")
+                .arg(&url),
+        )
     }
     #[cfg(not(unix))]
     {
@@ -4140,9 +4147,8 @@ mod tests {
 
     #[test]
     fn parse_eval_accepts_parser_flag() {
-        let cli =
-            Cli::try_parse_from(["in", "eval", "--parser", "js", "console.log(\"hi\")"])
-                .expect("cli parse");
+        let cli = Cli::try_parse_from(["in", "eval", "--parser", "js", "console.log(\"hi\")"])
+            .expect("cli parse");
         match cli.command {
             Commands::Eval { parser, .. } => assert_eq!(parser.as_deref(), Some("js")),
             _ => panic!("expected eval command"),
@@ -4169,8 +4175,10 @@ mod tests {
 
     #[test]
     fn eval_print_statement_falls_back_to_void_main() {
-        let plans =
-            super::eval_plans(inauguration::parser_registry::ParserId::In, "print(\"hello world\")");
+        let plans = super::eval_plans(
+            inauguration::parser_registry::ParserId::In,
+            "print(\"hello world\")",
+        );
         assert_eq!(plans.len(), 1);
         assert_eq!(plans[0].wrapped, "main:\n  print(\"hello world\")");
         assert!(!plans[0].print_result);
@@ -4178,8 +4186,10 @@ mod tests {
 
     #[test]
     fn eval_normalizes_println_to_print() {
-        let plans =
-            super::eval_plans(inauguration::parser_registry::ParserId::In, "println(\"hello world\")");
+        let plans = super::eval_plans(
+            inauguration::parser_registry::ParserId::In,
+            "println(\"hello world\")",
+        );
         assert_eq!(plans[0].wrapped, "main:\n  print(\"hello world\")");
     }
 
@@ -4189,7 +4199,10 @@ mod tests {
             inauguration::parser_registry::ParserId::Cpp,
             "std::cout << \"Hello World!\\n\";",
         );
-        assert_eq!(plans[0].wrapped, "int main() { print(\"Hello World!\"); return 0; }");
+        assert_eq!(
+            plans[0].wrapped,
+            "int main() { print(\"Hello World!\"); return 0; }"
+        );
     }
 
     #[test]
@@ -4264,8 +4277,10 @@ mod tests {
 
     #[test]
     fn eval_wraps_rust_statement_in_main() {
-        let plans =
-            super::eval_plans(inauguration::parser_registry::ParserId::Rust, "print(\"hi\")");
+        let plans = super::eval_plans(
+            inauguration::parser_registry::ParserId::Rust,
+            "print(\"hi\")",
+        );
         assert_eq!(plans.len(), 1);
         assert_eq!(plans[0].wrapped, "fn main() -> i64 { print(\"hi\");\n0\n}");
         assert!(!plans[0].print_result);
@@ -4280,10 +4295,15 @@ mod tests {
 
     #[test]
     fn eval_wraps_go_statement_in_main() {
-        let plans =
-            super::eval_plans(inauguration::parser_registry::ParserId::Go, "print(\"hello\")");
+        let plans = super::eval_plans(
+            inauguration::parser_registry::ParserId::Go,
+            "print(\"hello\")",
+        );
         assert_eq!(plans.len(), 1);
-        assert_eq!(plans[0].wrapped, "package main\n\nfunc main() {\n\tprint(\"hello\")\n}");
+        assert_eq!(
+            plans[0].wrapped,
+            "package main\n\nfunc main() {\n\tprint(\"hello\")\n}"
+        );
         assert!(!plans[0].print_result);
     }
 
@@ -4306,8 +4326,10 @@ mod tests {
 
     #[test]
     fn eval_wraps_haskell_statement_in_main() {
-        let plans =
-            super::eval_plans(inauguration::parser_registry::ParserId::Haskell, "print(\"hi\")");
+        let plans = super::eval_plans(
+            inauguration::parser_registry::ParserId::Haskell,
+            "print(\"hi\")",
+        );
         assert_eq!(plans.len(), 1);
         assert_eq!(plans[0].wrapped, "main = print \"hi\"");
         assert!(!plans[0].print_result);
@@ -4315,8 +4337,10 @@ mod tests {
 
     #[test]
     fn eval_wraps_fsharp_statement_in_main() {
-        let plans =
-            super::eval_plans(inauguration::parser_registry::ParserId::FSharp, "print(\"hi\")");
+        let plans = super::eval_plans(
+            inauguration::parser_registry::ParserId::FSharp,
+            "print(\"hi\")",
+        );
         assert_eq!(plans.len(), 1);
         assert_eq!(
             plans[0].wrapped,
@@ -4328,16 +4352,24 @@ mod tests {
     #[test]
     fn eval_prefers_printed_julia_expression() {
         let plans = super::eval_plans(inauguration::parser_registry::ParserId::Julia, "1 + 2");
-        assert_eq!(plans[0].wrapped, "function main()\n    return print(1 + 2)\nend\n");
+        assert_eq!(
+            plans[0].wrapped,
+            "function main()\n    return print(1 + 2)\nend\n"
+        );
         assert!(!plans[0].print_result);
     }
 
     #[test]
     fn eval_wraps_julia_statement_in_main() {
-        let plans =
-            super::eval_plans(inauguration::parser_registry::ParserId::Julia, "print(\"hi\")");
+        let plans = super::eval_plans(
+            inauguration::parser_registry::ParserId::Julia,
+            "print(\"hi\")",
+        );
         assert_eq!(plans.len(), 1);
-        assert_eq!(plans[0].wrapped, "function main()\n    return print(\"hi\")\nend\n");
+        assert_eq!(
+            plans[0].wrapped,
+            "function main()\n    return print(\"hi\")\nend\n"
+        );
         assert!(!plans[0].print_result);
     }
 
@@ -4398,8 +4430,10 @@ mod tests {
 
     #[test]
     fn eval_wraps_odin_statement_in_main() {
-        let plans =
-            super::eval_plans(inauguration::parser_registry::ParserId::Odin, "print(\"hi\")");
+        let plans = super::eval_plans(
+            inauguration::parser_registry::ParserId::Odin,
+            "print(\"hi\")",
+        );
         assert_eq!(plans.len(), 1);
         assert_eq!(
             plans[0].wrapped,
@@ -4444,8 +4478,10 @@ mod tests {
 
     #[test]
     fn eval_wraps_csharp_statement_in_main() {
-        let plans =
-            super::eval_plans(inauguration::parser_registry::ParserId::CSharp, "print(\"hi\")");
+        let plans = super::eval_plans(
+            inauguration::parser_registry::ParserId::CSharp,
+            "print(\"hi\")",
+        );
         assert_eq!(plans.len(), 1);
         assert_eq!(
             plans[0].wrapped,
@@ -4466,8 +4502,10 @@ mod tests {
 
     #[test]
     fn eval_wraps_groovy_statement_in_class_main() {
-        let plans =
-            super::eval_plans(inauguration::parser_registry::ParserId::Groovy, "print(\"hi\")");
+        let plans = super::eval_plans(
+            inauguration::parser_registry::ParserId::Groovy,
+            "print(\"hi\")",
+        );
         assert_eq!(plans.len(), 1);
         assert_eq!(
             plans[0].wrapped,
@@ -4488,8 +4526,10 @@ mod tests {
 
     #[test]
     fn eval_wraps_php_statement_in_main() {
-        let plans =
-            super::eval_plans(inauguration::parser_registry::ParserId::Php, "print(\"hi\")");
+        let plans = super::eval_plans(
+            inauguration::parser_registry::ParserId::Php,
+            "print(\"hi\")",
+        );
         assert_eq!(plans.len(), 1);
         assert_eq!(
             plans[0].wrapped,
@@ -4501,17 +4541,16 @@ mod tests {
     #[test]
     fn eval_prefers_printed_vb_expression() {
         let plans = super::eval_plans(inauguration::parser_registry::ParserId::VbNet, "1 + 2");
-        assert_eq!(
-            plans[0].wrapped,
-            "Sub main()\n    print(1 + 2)\nEnd Sub\n"
-        );
+        assert_eq!(plans[0].wrapped, "Sub main()\n    print(1 + 2)\nEnd Sub\n");
         assert!(!plans[0].print_result);
     }
 
     #[test]
     fn eval_wraps_vb_statement_in_main() {
-        let plans =
-            super::eval_plans(inauguration::parser_registry::ParserId::VbNet, "print(\"hi\")");
+        let plans = super::eval_plans(
+            inauguration::parser_registry::ParserId::VbNet,
+            "print(\"hi\")",
+        );
         assert_eq!(plans.len(), 1);
         assert_eq!(plans[0].wrapped, "Sub main()\n    print(\"hi\")\nEnd Sub\n");
         assert!(!plans[0].print_result);
@@ -4526,8 +4565,10 @@ mod tests {
 
     #[test]
     fn eval_wraps_perl_statement_in_main() {
-        let plans =
-            super::eval_plans(inauguration::parser_registry::ParserId::Perl, "print(\"hi\")");
+        let plans = super::eval_plans(
+            inauguration::parser_registry::ParserId::Perl,
+            "print(\"hi\")",
+        );
         assert_eq!(plans.len(), 1);
         assert_eq!(plans[0].wrapped, "sub main {\n    print(\"hi\");\n}\n");
         assert!(!plans[0].print_result);
@@ -4535,8 +4576,7 @@ mod tests {
 
     #[test]
     fn eval_prefers_printed_clojure_expression() {
-        let plans =
-            super::eval_plans(inauguration::parser_registry::ParserId::Clojure, "1 + 2");
+        let plans = super::eval_plans(inauguration::parser_registry::ParserId::Clojure, "1 + 2");
         assert_eq!(plans[0].wrapped, "(defn main [] print(1 + 2))\n");
         assert!(!plans[0].print_result);
     }
@@ -4564,8 +4604,10 @@ mod tests {
 
     #[test]
     fn eval_wraps_elixir_statement_in_main() {
-        let plans =
-            super::eval_plans(inauguration::parser_registry::ParserId::Elixir, "print(\"hi\")");
+        let plans = super::eval_plans(
+            inauguration::parser_registry::ParserId::Elixir,
+            "print(\"hi\")",
+        );
         assert_eq!(plans.len(), 1);
         assert_eq!(
             plans[0].wrapped,
@@ -4586,8 +4628,10 @@ mod tests {
 
     #[test]
     fn eval_wraps_erlang_statement_in_main() {
-        let plans =
-            super::eval_plans(inauguration::parser_registry::ParserId::Erlang, "print(\"hi\")");
+        let plans = super::eval_plans(
+            inauguration::parser_registry::ParserId::Erlang,
+            "print(\"hi\")",
+        );
         assert_eq!(plans.len(), 1);
         assert_eq!(
             plans[0].wrapped,
@@ -4627,9 +4671,14 @@ mod tests {
 
     #[test]
     fn eval_wraps_holyc_statement_in_main() {
-        let plans =
-            super::eval_plans(inauguration::parser_registry::ParserId::HolyC, "print(\"hi\")");
-        assert_eq!(plans[0].wrapped, "U8 * Main()\n{\n  return \"hi\";\n}\nMain;");
+        let plans = super::eval_plans(
+            inauguration::parser_registry::ParserId::HolyC,
+            "print(\"hi\")",
+        );
+        assert_eq!(
+            plans[0].wrapped,
+            "U8 * Main()\n{\n  return \"hi\";\n}\nMain;"
+        );
         assert!(plans[0].print_result);
     }
 
