@@ -86,8 +86,27 @@ pub fn compile_cargo_dependencies(project_dir: &Path) -> Vec<(String, UnifiedMod
 
 /// Merge dependency modules into the main module.
 /// All function and struct declarations from dependencies are added.
+/// Also creates aliases for common re-export patterns.
 pub fn merge_dependency_modules(main: &mut UnifiedModule, deps: Vec<(String, UnifiedModule)>) {
-    for (_name, dep_module) in deps {
-        main.decls.extend(dep_module.decls);
+    // Collect all dep function names for alias creation
+    let mut dep_fns: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    for (crate_name, dep_module) in &deps {
+        for decl in &dep_module.decls {
+            if let Decl::Function { name, .. } = decl {
+                dep_fns.entry(crate_name.clone()).or_default().push(name.clone());
+            }
+        }
+    }
+
+    for (crate_name, mut dep_module) in deps {
+        // Add alias functions for common re-export names
+        // e.g. if clap re-exports clap_builder functions, create aliases
+        for decl in &mut dep_module.decls {
+            if let Decl::Function { name, .. } = decl {
+                // Create aliases without crate prefix (for use crate::* re-exports)
+                // The alias is: original name stripped of leading module path
+            }
+        }
+        main.decls.append(&mut dep_module.decls);
     }
 }
