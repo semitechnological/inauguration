@@ -1026,15 +1026,16 @@ fn cmd_languages(json: bool) -> Result<()> {
     }
 
     println!(
-        "{:<12} {:<12} {:<5} {:<34} runtime",
-        "language", "parser", "level", "front"
+        "{:<12} {:<12} {:<18} {:<34} runtime",
+        "language", "parser", "capabilities", "front"
     );
     for entry in entries {
+        let caps_str = entry.capabilities.join(", ");
         println!(
-            "{:<12} {:<12} {:<5} {:<34} {}",
+            "{:<12} {:<12} {:<18} {:<34} {}",
             entry.language,
             entry.parser_id.unwrap_or("swift"),
-            entry.level,
+            caps_str,
             entry.front,
             entry.runtime_boundary
         );

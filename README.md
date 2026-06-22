@@ -232,69 +232,56 @@ Use after the tap release is available.
 
 ## Language Support
 
-Each language goes through a maturity pipeline with 6 levels (0–5). Each level
-includes all gates from prior levels.
+40 languages. Capabilities indicate what the compiler can do with each frontend:
 
-| Level | Label | Meaning |
-|-------|-------|---------|
-| **0** | `reported` | Language known to the system. Source recognized by extension/shebang. |
-| **1** | `core-ir-decls` | Tree-sitter parses source → Core IR function declarations. |
-| **2** | `core-ir-bodies` + `textual-sil` | Function bodies extracted → SIL text. Code compiles through pipeline. |
-| **3** | `semantic-typecheck` | Family typechecker validates types across module boundaries. |
-| **4** | `abi-layout-hash` + `abi-emit` | Cross-language FFI boundary extraction and layout hashes work. |
-| **5** | `bytecode-vm` | Bytecode VM executes compiled output. Full self-hosting: compile + run. |
+- **parse** — Tree-sitter AST extraction
+- **lower** — Core IR body emission
+- **typecheck** — Family-aware semantic type checking
+- **boundary** — Cross-language Boundary IR + ABI layout
+- **bytecode** — Bytecode VM compilation
 
-33 languages currently supported:
+| Language | Parser | parse | lower | typecheck | boundary | bytecode |
+|----------|--------|-------|-------|-----------|----------|----------|
+| in | in | ✓ | ✓ | ✓ | ✓ | ✓ |
+| icore | icore | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Swift | swift | ✓ | ✓ | ✓ | — | — |
+| Rust | rust | ✓ | ✓ | ✓ | ✓ | — |
+| Go | go | ✓ | ✓ | ✓ | — | — |
+| V | v | ✓ | ✓ | ✓ | ✓ | ✓ |
+| C | c | ✓ | ✓ | ✓ | — | — |
+| C++ | c | ✓ | ✓ | ✓ | — | — |
+| Objective-C | c | ✓ | ✓ | — | — | — |
+| Objective-C++ | c | ✓ | ✓ | ✓ | — | — |
+| Java | java | ✓ | ✓ | ✓ | — | — |
+| Groovy | groovy | ✓ | ✓ | ✓ | — | — |
+| JavaScript | javascript | ✓ | ✓ | ✓ | ✓ | ✓ |
+| TypeScript | typescript | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Kotlin | kotlin | ✓ | ✓ | ✓ | — | — |
+| Scala | scala | ✓ | ✓ | ✓ | — | — |
+| C# | c | ✓ | ✓ | ✓ | — | — |
+| F# | f | ✓ | ✓ | — | — | — |
+| VB.NET | vbnet | ✓ | ✓ | ✓ | ✓ | — |
+| Python | python | ✓ | ✓ | ✓ | — | — |
+| Ruby | ruby | ✓ | ✓ | ✓ | — | — |
+| PHP | php | ✓ | ✓ | ✓ | — | — |
+| Perl | perl | ✓ | ✓ | — | — | — |
+| Zig | zig | ✓ | ✓ | ✓ | ✓ | — |
+| Dart | dart | ✓ | ✓ | ✓ | — | — |
+| Lua | lua | ✓ | ✓ | ✓ | — | — |
+| Clojure | clojure | ✓ | ✓ | ✓ | ✓ | — |
+| Elixir | elixir | ✓ | ✓ | — | — | — |
+| Erlang | erlang | ✓ | ✓ | — | — | — |
+| Haskell | haskell | ✓ | ✓ | — | — | — |
+| Nim | nim | ✓ | ✓ | ✓ | ✓ | — |
+| OCaml | ocaml | ✓ | ✓ | ✓ | — | — |
+| Julia | julia | ✓ | ✓ | — | — | — |
+| R | r | ✓ | ✓ | — | — | — |
+| D | d | ✓ | ✓ | ✓ | ✓ | — |
+| Crystal | crystal | ✓ | ✓ | ✓ | ✓ | — |
+| Odin | odin | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Hare | hare | ✓ | ✓ | ✓ | ✓ | — |
+| HolyC | holyc | ✓ | ✓ | — | — | — |
 
-| Language | Level | Notes |
-|----------|-------|-------|
-| In | 5 | Native .in language |
-| Icore | 5 | Core IR JSON interchange |
-| Python | 5 | |
-| JavaScript | 5 | |
-| Rust | 5 | |
-| C | 4 | |
-| Cpp | 4 | `std::cout` works in eval |
-| ObjC | 4 | |
-| ObjCpp | 4 | |
-| Java | 4 | |
-| Kotlin | 4 | |
-| Scala | 4 | |
-| CSharp | 4 | |
-| FSharp | 4 | |
-| VbNet | 4 | |
-| Ruby | 4 | |
-| Php | 4 | |
-| TypeScript | 4 | |
-| Go | 4 | |
-| V | 4 | V compiler version mismatch on hash |
-| Swift | 4 | |
-| Zig | 4 | |
-| Dart | 4 | |
-| Lua | 4 | |
-| Clojure | 4 | |
-| Groovy | 4 | |
-| Elixir | 4 | |
-| Erlang | 4 | |
-| Haskell | 4 | |
-| OCaml | 4 | |
-| Julia | 4 | |
-| R | 4 | |
-| Nim | 4 | |
-| D | 4 | |
-| Crystal | 4 | |
-| Odin | 4 | |
-| Hare | 4 | |
-| HolyC | 4 | |
-| Perl | 2 | Tree-sitter grammar node types renamed; needs rewrite |
-
-**4. Build from source**
-
-```bash
-cargo build --release --manifest-path in-cli/Cargo.toml
-```
-
-The local binary is at `in-cli/target/release/in`.
 
 ## Core Commands
 
