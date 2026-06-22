@@ -1,5 +1,5 @@
 use crate::boundary_ir::{BoundaryModule, CompileArtifact};
-use crate::compiler::boundary_common::{self, extract_boundary_from_comment, ensure_main};
+use crate::compiler::boundary_common::{self, ensure_main, extract_boundary_from_comment};
 use crate::compiler::simple_front::parse_simple_body;
 use crate::core_ir::{Decl, Expr, Stmt, Typ, UnifiedModule};
 use std::path::Path;
@@ -51,7 +51,12 @@ fn parse_defn_line(line: &str) -> Result<Option<Decl>, String> {
         .map(|idx| inner[idx + 1..].trim())
         .unwrap_or("")
         .strip_suffix(')')
-        .unwrap_or(inner.find(']').map(|idx| inner[idx + 1..].trim()).unwrap_or(""))
+        .unwrap_or(
+            inner
+                .find(']')
+                .map(|idx| inner[idx + 1..].trim())
+                .unwrap_or(""),
+        )
         .trim();
     let mut body = parse_simple_body(body_text, true);
     if let [Stmt::Return(Some(Expr::Call { callee, args }))] = body.as_slice()

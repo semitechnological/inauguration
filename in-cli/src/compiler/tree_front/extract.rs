@@ -1404,7 +1404,9 @@ fn ast_args(src: &[u8], args: Node<'_>, shape: AstShape) -> Option<Vec<Expr>> {
     }
     if out.is_empty() {
         let text = node_txt(src, args).trim();
-        if let Some(inner) = text.strip_prefix('(').and_then(|rest| rest.strip_suffix(')'))
+        if let Some(inner) = text
+            .strip_prefix('(')
+            .and_then(|rest| rest.strip_suffix(')'))
             && let Some(expr) = simple_bounded_expr(inner.trim())
         {
             out.push(expr);
@@ -1795,7 +1797,9 @@ fn holyc_expr(src: &[u8], node: Node<'_>) -> Option<Expr> {
             })
         }
         "binary_expression" => {
-            let lhs = node.child_by_field_name("left").or_else(|| node.named_child(0))?;
+            let lhs = node
+                .child_by_field_name("left")
+                .or_else(|| node.named_child(0))?;
             let rhs = node
                 .child_by_field_name("right")
                 .or_else(|| node.named_child(node.named_child_count().saturating_sub(1) as u32))?;
@@ -3504,10 +3508,7 @@ fn php_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
             continue;
         }
         line = line.trim_end_matches(';').trim();
-        if let Some(expr) = line
-            .strip_prefix("return ")
-            .and_then(simple_bounded_expr)
-        {
+        if let Some(expr) = line.strip_prefix("return ").and_then(simple_bounded_expr) {
             out.push(Stmt::Return(Some(expr)));
             continue;
         }
@@ -3518,7 +3519,10 @@ fn php_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
         if let Some((lhs, rhs)) = line.split_once(" = ")
             && let Some(expr) = simple_bounded_expr(rhs.trim())
         {
-            out.push(Stmt::Assign(lhs.trim().trim_start_matches('$').to_string(), expr));
+            out.push(Stmt::Assign(
+                lhs.trim().trim_start_matches('$').to_string(),
+                expr,
+            ));
             continue;
         }
         if let Some(expr) = simple_bounded_expr(line.trim_start_matches('$')) {
@@ -5090,9 +5094,9 @@ fn extract_elixir(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
 
     for method in module_methods {
         if let Decl::Function { name, .. } = &method
-            && !decls
-                .iter()
-                .any(|decl| matches!(decl, Decl::Function { name: existing, .. } if existing == name))
+            && !decls.iter().any(
+                |decl| matches!(decl, Decl::Function { name: existing, .. } if existing == name),
+            )
         {
             decls.push(method);
         }
@@ -5951,11 +5955,7 @@ fn simple_bounded_body(text: &str, assign_op: &str) -> Option<Vec<Stmt>> {
         }
         if let Some(rest) = line.strip_prefix("let value ") {
             let expr = rest.trim().strip_prefix(assign_op)?.trim();
-            out.push(Stmt::Let(
-                "value".into(),
-                None,
-                simple_bounded_expr(expr)?,
-            ));
+            out.push(Stmt::Let("value".into(), None, simple_bounded_expr(expr)?));
             continue;
         }
         if let Some(expr) = line
@@ -5969,7 +5969,10 @@ fn simple_bounded_body(text: &str, assign_op: &str) -> Option<Vec<Stmt>> {
             ));
             continue;
         }
-        if let Some(expr) = line.strip_prefix("return(").and_then(|rest| rest.strip_suffix(')')) {
+        if let Some(expr) = line
+            .strip_prefix("return(")
+            .and_then(|rest| rest.strip_suffix(')'))
+        {
             out.push(Stmt::Return(Some(simple_bounded_expr(expr.trim())?)));
             continue;
         }
@@ -5994,11 +5997,7 @@ fn strict_simple_bounded_body(text: &str, assign_op: &str) -> Option<Vec<Stmt>> 
         }
         if let Some(rest) = line.strip_prefix("let value ") {
             let expr = rest.trim().strip_prefix(assign_op)?.trim();
-            out.push(Stmt::Let(
-                "value".into(),
-                None,
-                simple_bounded_expr(expr)?,
-            ));
+            out.push(Stmt::Let("value".into(), None, simple_bounded_expr(expr)?));
             continue;
         }
         if let Some(expr) = line
@@ -6012,7 +6011,10 @@ fn strict_simple_bounded_body(text: &str, assign_op: &str) -> Option<Vec<Stmt>> 
             ));
             continue;
         }
-        if let Some(expr) = line.strip_prefix("return(").and_then(|rest| rest.strip_suffix(')')) {
+        if let Some(expr) = line
+            .strip_prefix("return(")
+            .and_then(|rest| rest.strip_suffix(')'))
+        {
             out.push(Stmt::Return(Some(simple_bounded_expr(expr.trim())?)));
             continue;
         }
@@ -6034,7 +6036,10 @@ fn simple_bounded_expr(text: &str) -> Option<Expr> {
     if text.is_empty() {
         return None;
     }
-    if let Some(inner) = text.strip_prefix("print(").and_then(|rest| rest.strip_suffix(')')) {
+    if let Some(inner) = text
+        .strip_prefix("print(")
+        .and_then(|rest| rest.strip_suffix(')'))
+    {
         return Some(Expr::Call {
             callee: Box::new(Expr::Ident("print".into())),
             args: vec![simple_bounded_expr(inner)?],
@@ -6056,7 +6061,9 @@ fn simple_bounded_expr(text: &str) -> Option<Expr> {
     if let Ok(value) = text.parse::<i64>() {
         return Some(Expr::IntLit(value));
     }
-    if (text.starts_with('"') && text.ends_with('"')) || (text.starts_with('\'') && text.ends_with('\'')) {
+    if (text.starts_with('"') && text.ends_with('"'))
+        || (text.starts_with('\'') && text.ends_with('\''))
+    {
         return Some(Expr::StringLit(text[1..text.len() - 1].to_string()));
     }
     Some(Expr::Ident(text.to_string()))
@@ -6539,7 +6546,9 @@ fn simple_haskell_expr(text: &str) -> Option<Expr> {
     if let Ok(value) = text.parse::<i64>() {
         return Some(Expr::IntLit(value));
     }
-    if (text.starts_with('"') && text.ends_with('"')) || (text.starts_with('\'') && text.ends_with('\'')) {
+    if (text.starts_with('"') && text.ends_with('"'))
+        || (text.starts_with('\'') && text.ends_with('\''))
+    {
         return Some(Expr::StringLit(text[1..text.len() - 1].to_string()));
     }
     Some(Expr::Ident(text.to_string()))
@@ -9323,7 +9332,7 @@ main() ->
                 methods
                     .iter()
                     .any(|m| matches!(m, Decl::Function { name, .. } if name == "answer"))
-        });
+            });
         assert!(found_answer || found_in_class, "answer function not found");
     }
 
@@ -9432,8 +9441,8 @@ end
     #[test]
     fn extract_ocaml_eval_print_shape() {
         let src = "let main () =\n  print \"hi\"\n";
-        let m = parse_lang(tree_sitter_ocaml::LANGUAGE_OCAML.into(), src, extract_ocaml)
-            .expect("ok");
+        let m =
+            parse_lang(tree_sitter_ocaml::LANGUAGE_OCAML.into(), src, extract_ocaml).expect("ok");
         let main = m
             .decls
             .iter()
@@ -9623,22 +9632,27 @@ end
     fn extract_go_eval_main_body() {
         let src = "package main\n\nfunc main() {\n\tprint(\"hi\")\n}\n";
         let m = parse_lang(tree_sitter_go::LANGUAGE.into(), src, |b, r| {
-            extract_fn_nodes(b, r, &["function_declaration", "method_declaration"], |src, n| {
-                let name_n = n.child_by_field_name("name")?;
-                let name = normalize_entry(node_txt(src, name_n).trim());
-                let params = go_params(src, n);
-                let body = n
-                    .child_by_field_name("body")
-                    .map(|b| go_body(src, b))
-                    .unwrap_or_default();
-                Some(Decl::Function {
-                    name,
-                    params,
-                    ret: Typ::Void,
-                    body,
-                    type_params: vec![],
-                })
-            })
+            extract_fn_nodes(
+                b,
+                r,
+                &["function_declaration", "method_declaration"],
+                |src, n| {
+                    let name_n = n.child_by_field_name("name")?;
+                    let name = normalize_entry(node_txt(src, name_n).trim());
+                    let params = go_params(src, n);
+                    let body = n
+                        .child_by_field_name("body")
+                        .map(|b| go_body(src, b))
+                        .unwrap_or_default();
+                    Some(Decl::Function {
+                        name,
+                        params,
+                        ret: Typ::Void,
+                        body,
+                        type_params: vec![],
+                    })
+                },
+            )
         })
         .expect("ok");
         let main = m
@@ -9656,23 +9670,28 @@ end
     fn extract_go_eval_print_shape() {
         let src = "package main\n\nfunc main() {\n\tprint(1 + 2)\n}\n";
         let m = parse_lang(tree_sitter_go::LANGUAGE.into(), src, |b, r| {
-            extract_fn_nodes(b, r, &["function_declaration", "method_declaration"], |src, n| {
-                let name_n = n.child_by_field_name("name")?;
-                let name = normalize_entry(node_txt(src, name_n).trim());
-                let params = go_params(src, n);
-                let ret = go_return_type(src, n).unwrap_or(Typ::Void);
-                let body = n
-                    .child_by_field_name("body")
-                    .map(|b| go_body(src, b))
-                    .unwrap_or_default();
-                Some(Decl::Function {
-                    name,
-                    params,
-                    ret,
-                    body,
-                    type_params: vec![],
-                })
-            })
+            extract_fn_nodes(
+                b,
+                r,
+                &["function_declaration", "method_declaration"],
+                |src, n| {
+                    let name_n = n.child_by_field_name("name")?;
+                    let name = normalize_entry(node_txt(src, name_n).trim());
+                    let params = go_params(src, n);
+                    let ret = go_return_type(src, n).unwrap_or(Typ::Void);
+                    let body = n
+                        .child_by_field_name("body")
+                        .map(|b| go_body(src, b))
+                        .unwrap_or_default();
+                    Some(Decl::Function {
+                        name,
+                        params,
+                        ret,
+                        body,
+                        type_params: vec![],
+                    })
+                },
+            )
         })
         .expect("ok");
         let main = m
@@ -9697,23 +9716,28 @@ end
     fn extract_go_function_return_type() {
         let src = "package main\n\nfunc answer() int {\n\treturn 42\n}\n";
         let m = parse_lang(tree_sitter_go::LANGUAGE.into(), src, |b, r| {
-            extract_fn_nodes(b, r, &["function_declaration", "method_declaration"], |src, n| {
-                let name_n = n.child_by_field_name("name")?;
-                let name = normalize_entry(node_txt(src, name_n).trim());
-                let params = go_params(src, n);
-                let ret = go_return_type(src, n).unwrap_or(Typ::Void);
-                let body = n
-                    .child_by_field_name("body")
-                    .map(|b| go_body(src, b))
-                    .unwrap_or_default();
-                Some(Decl::Function {
-                    name,
-                    params,
-                    ret,
-                    body,
-                    type_params: vec![],
-                })
-            })
+            extract_fn_nodes(
+                b,
+                r,
+                &["function_declaration", "method_declaration"],
+                |src, n| {
+                    let name_n = n.child_by_field_name("name")?;
+                    let name = normalize_entry(node_txt(src, name_n).trim());
+                    let params = go_params(src, n);
+                    let ret = go_return_type(src, n).unwrap_or(Typ::Void);
+                    let body = n
+                        .child_by_field_name("body")
+                        .map(|b| go_body(src, b))
+                        .unwrap_or_default();
+                    Some(Decl::Function {
+                        name,
+                        params,
+                        ret,
+                        body,
+                        type_params: vec![],
+                    })
+                },
+            )
         })
         .expect("ok");
         let answer = m

@@ -1,5 +1,5 @@
 use crate::boundary_ir::{BoundaryModule, CompileArtifact};
-use crate::compiler::boundary_common::{self, extract_boundary_from_comment, ensure_main};
+use crate::compiler::boundary_common::{self, ensure_main, extract_boundary_from_comment};
 use crate::compiler::simple_front::parse_simple_body;
 use crate::core_ir::{Decl, Expr, Stmt, Typ, UnifiedModule};
 use std::path::Path;
@@ -76,13 +76,16 @@ fn parse_def_at(lines: &[&str], i: usize, line: &str) -> Result<Option<(Decl, us
     if body.is_empty() && name == "answer" {
         body.push(Stmt::Return(Some(Expr::IntLit(42))));
     }
-    Ok(Some((Decl::Function {
-        name: name.to_string(),
-        params: vec![],
-        ret,
-        body,
-        type_params: vec![],
-    }, (j + 1).min(lines.len()))))
+    Ok(Some((
+        Decl::Function {
+            name: name.to_string(),
+            params: vec![],
+            ret,
+            body,
+            type_params: vec![],
+        },
+        (j + 1).min(lines.len()),
+    )))
 }
 
 #[cfg(test)]

@@ -1,5 +1,5 @@
 use crate::boundary_ir::{BoundaryModule, CompileArtifact};
-use crate::compiler::boundary_common::{self, extract_boundary_from_comment, ensure_main};
+use crate::compiler::boundary_common::{self, ensure_main, extract_boundary_from_comment};
 use crate::compiler::simple_front::parse_simple_body;
 use crate::core_ir::{Decl, Expr, Stmt, Typ, UnifiedModule};
 use std::path::Path;

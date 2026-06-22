@@ -21,7 +21,11 @@ where
 
 /// Read a source file and produce a `CompileArtifact` using the given parsing
 /// and boundary-extraction functions.
-pub fn parse_artifact_with<P, B>(path: &Path, parse_source: P, extract_boundary: B) -> Result<CompileArtifact, String>
+pub fn parse_artifact_with<P, B>(
+    path: &Path,
+    parse_source: P,
+    extract_boundary: B,
+) -> Result<CompileArtifact, String>
 where
     P: FnOnce(&str) -> Result<UnifiedModule, String>,
     B: FnOnce(&str) -> Option<BoundaryModule>,
@@ -32,7 +36,11 @@ where
 
 /// Combine a parsed `UnifiedModule` with an optional boundary into a
 /// `CompileArtifact`.
-pub fn artifact_from_source<P, B>(src: &str, parse_source: P, extract_boundary: B) -> Result<CompileArtifact, String>
+pub fn artifact_from_source<P, B>(
+    src: &str,
+    parse_source: P,
+    extract_boundary: B,
+) -> Result<CompileArtifact, String>
 where
     P: FnOnce(&str) -> Result<UnifiedModule, String>,
     B: FnOnce(&str) -> Option<BoundaryModule>,

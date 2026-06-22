@@ -339,9 +339,7 @@ fn boundary_typ_name(typ: &Typ) -> String {
 fn canonical_type(typ: &Typ) -> Typ {
     match typ {
         Typ::Named(name) => match name.trim() {
-            "Int" | "int" | "i64" | "i32" | "i16" | "i8" | "u64" | "u32" | "u16" | "u8" => {
-                Typ::Int
-            }
+            "Int" | "int" | "i64" | "i32" | "i16" | "i8" | "u64" | "u32" | "u16" | "u8" => Typ::Int,
             "String" | "string" | "str" => Typ::String,
             "Bool" | "bool" => Typ::Bool,
             "Float" | "float" | "Double" | "double" | "f64" | "f32" => Typ::Float,
