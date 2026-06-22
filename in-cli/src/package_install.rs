@@ -663,8 +663,7 @@ fn verify_archive_checksum(path: &Path, checksum: &ArtifactChecksum) -> Result<(
         ArtifactChecksum::GoModuleSum(expected) => {
             if let Some(encoded) = expected.strip_prefix("h1:") {
                 let actual_hash = sha2::Sha256::digest(&data);
-                let actual_encoded =
-                    base64::engine::general_purpose::STANDARD.encode(actual_hash);
+                let actual_encoded = base64::engine::general_purpose::STANDARD.encode(actual_hash);
                 if actual_encoded == encoded {
                     Ok(())
                 } else {
@@ -815,9 +814,7 @@ const REGISTRY_USER_AGENT: &str = "inauguration/0.2.0 (package-install)";
 
 fn require_https(url: &str) -> Result<(), String> {
     if !url.starts_with("https://") {
-        return Err(format!(
-            "registry URL must use HTTPS, got: {url}"
-        ));
+        return Err(format!("registry URL must use HTTPS, got: {url}"));
     }
     Ok(())
 }
