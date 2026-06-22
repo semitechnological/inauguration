@@ -3809,10 +3809,11 @@ fn js_method_decl<'a>(src: &[u8], m: Node<'a>) -> Option<Decl> {
         .map(|b| js_body(src, b))
         .unwrap_or_default();
     rewrite_this_receiver_in_body(&mut body);
+    let ret = js_return_type(&body);
     Some(Decl::Function {
         name,
         params,
-        ret: Typ::Void,
+        ret,
         body,
         type_params: vec![],
     })
@@ -3855,10 +3856,11 @@ fn js_var_function<'a>(src: &[u8], vd: Node<'a>) -> Option<Decl> {
         .child_by_field_name("body")
         .map(|b| js_body(src, b))
         .unwrap_or_default();
+    let ret = js_return_type(&body);
     Some(Decl::Function {
         name,
         params,
-        ret: Typ::Void,
+        ret,
         body,
         type_params: vec![],
     })
@@ -4125,13 +4127,30 @@ fn js_function_decl<'a>(src: &[u8], n: Node<'a>) -> Option<Decl> {
         .child_by_field_name("body")
         .map(|b| js_body(src, b))
         .unwrap_or_default();
+    let ret = js_return_type(&body);
     Some(Decl::Function {
         name,
         params,
-        ret: Typ::Void,
+        ret,
         body,
         type_params: vec![],
     })
+}
+
+fn js_return_type(body: &[Stmt]) -> Typ {
+    for stmt in body {
+        if let Stmt::Return(Some(expr)) = stmt {
+            return match expr {
+                Expr::IntLit(_) => Typ::Int,
+                Expr::StringLit(_) => Typ::String,
+                Expr::BoolLit(_) => Typ::Bool,
+                Expr::Binary { .. } => Typ::Int,
+                Expr::Field { .. } | Expr::Call { .. } | Expr::Ident(_) => Typ::Named("Any".into()),
+                _ => Typ::Named("Any".into()),
+            };
+        }
+    }
+    Typ::Void
 }
 
 fn js_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {

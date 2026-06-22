@@ -58,6 +58,7 @@ check_answer apps/polyglot-sample/sample.rs
 check_answer apps/polyglot-sample/sample.c
 check_answer apps/polyglot-sample/sample.cpp
 check_answer apps/polyglot-sample/Sample.java
+check_answer apps/polyglot-sample/sample.js
 check_answer apps/polyglot-sample/sample.rb
 check_answer apps/polyglot-sample/sample.ts
 check_answer apps/polyglot-sample/Sample.kt
