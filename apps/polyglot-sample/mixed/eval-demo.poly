@@ -1,0 +1,50 @@
+## python
+print("hello from python")
+
+## javascript  
+console.log("hello from javascript")
+
+## typescript
+console.log("hello from typescript")
+
+## rust
+println!("hello from rust")
+
+## zig
+std.io.print("hello from zig")
+
+## go
+print("hello from go")
+
+## java
+System.out.println("hello from java")
+
+## kotlin
+println("hello from kotlin")
+
+## scala
+print("hello from scala")
+
+## csharp
+print("hello from csharp")
+
+## ruby
+print "hello from ruby"
+
+## php
+print("hello from php");
+
+## perl
+print 42
+
+## lua
+print("hello from lua")
+
+## swift
+print("hello from swift")
+
+## dart
+print("hello from dart")
+
+## .in
+print("hello from inlang")
