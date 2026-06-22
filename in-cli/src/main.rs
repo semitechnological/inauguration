@@ -2391,13 +2391,13 @@ fn eval_plans(parser_id: parser_registry::ParserId, code: &str) -> Vec<EvalPlan>
 
     let ret = guess_eval_type(trimmed);
     let mut plans = Vec::new();
-    if prefers_printed_eval_expression(parser_id) {
-        if let Some(wrapped) = wrap_eval_statement(parser_id, &format!("print({trimmed})")) {
-            plans.push(EvalPlan {
-                wrapped,
-                print_result: false,
-            });
-        }
+    if prefers_printed_eval_expression(parser_id)
+        && let Some(wrapped) = wrap_eval_statement(parser_id, &format!("print({trimmed})"))
+    {
+        plans.push(EvalPlan {
+            wrapped,
+            print_result: false,
+        });
     }
     if let Some(wrapped) = wrap_eval_expression(parser_id, &normalized, ret) {
         plans.push(EvalPlan {

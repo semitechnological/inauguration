@@ -2928,7 +2928,7 @@ fn infer_in_expr_type(
         },
         Expr::Call { callee, .. } => {
             if let Expr::Ident(name) = callee.as_ref() {
-                fn_rets.get(name).cloned().or_else(|| match name.as_str() {
+                fn_rets.get(name).cloned().or(match name.as_str() {
                     "to_string" => Some(Typ::String),
                     _ => None,
                 })
