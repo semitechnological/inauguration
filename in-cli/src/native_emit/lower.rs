@@ -41,6 +41,8 @@ pub struct LoweredModule {
     pub code: Vec<u8>,
     pub entry_offset: Option<u32>,
     pub exports: Vec<ExportSymbol>,
+    /// Function name → byte offset in code (for JIT dispatch)
+    pub function_offsets: std::collections::HashMap<String, u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -246,6 +248,7 @@ pub fn lower_module(
         code: emitter.bytes,
         entry_offset,
         exports,
+        function_offsets,
     })
 }
 

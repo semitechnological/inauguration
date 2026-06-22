@@ -528,20 +528,27 @@ fn compile_jit(
 
     std::fs::write("/tmp/jit_debug.log", format!("code={} entry={:?}\n", lowered.code.len(), lowered.entry_offset)).ok();
 
-    // Build function offset table
-    // ponytail: for now, only the entry function. Multi-function in phase 2.
-    let function_offsets = vec![(
-        entry.to_string(),
-        lowered.entry_offset.unwrap_or(0),
-        lowered.code.len() as u32,
-    )];
+    // Build function offset table for all compiled functions
+    let function_offsets: Vec<(String, u32, u32)> = lowered
+        .function_offsets
+        .iter()
+        .map(|(name, &offset)| {
+            let next = lowered
+                .function_offsets
+                .values()
+                .filter(|&&o| o > offset)
+                .min()
+                .copied()
+                .unwrap_or(lowered.code.len() as u32);
+            (name.clone(), offset, next - offset)
+        })
+        .collect();
 
     let mut rt = crate::jit_runtime::JitRuntime::new();
     rt.load(&lowered.code, &function_offsets)
         .map_err(|e| format!("jit-load-failed: {e}"))?;
 
-    // Invoke the entry function with no arguments
-    std::fs::write("/tmp/jit_debug2.log", format!("invoking entry={entry} off={:?}\n", lowered.entry_offset)).ok();
+    // Invoke entry function via JIT (not trampoline, so we get the return value)
     let exit_code = unsafe {
         rt.invoke(entry, &[])
             .unwrap_or(1)
