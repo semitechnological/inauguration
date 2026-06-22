@@ -82,6 +82,7 @@ enum BackendTargetCli {
 enum CompileTargetCli {
     Bytecode,
     Native,
+    Jit,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -1535,6 +1536,7 @@ fn compile_target_cli_to_owned(target: CompileTargetCli) -> CompileTarget {
     match target {
         CompileTargetCli::Bytecode => CompileTarget::Bytecode,
         CompileTargetCli::Native => CompileTarget::Native,
+        CompileTargetCli::Jit => CompileTarget::Jit,
     }
 }
 
