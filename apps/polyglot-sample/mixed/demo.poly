@@ -1,39 +1,24 @@
-#!/usr/bin/env in
-# Polyglot demo: mixed languages in one file
-# Run: in run apps/polyglot-sample/mixed/demo.poly
-
-## .in (native)
-fn hello_in() -> String { return "hello from .in"; }
-fn main() -> void { print(hello_in()); }
-
 ## python
-def hello_python():
-    return "hello from python"
-
-print(hello_python())
-
-## typescript
-function hello_ts(): string {
-    return "hello from typescript";
-}
-console.log(hello_ts());
-
-## rust
-fn hello_rust() -> String {
-    "hello from rust".to_string()
-}
-fn main() {
-    println!("{}", hello_rust());
-}
-
-## zig
-const std = @import("std");
-pub fn main() void {
-    std.io.print("hello from zig");
-}
+print("hello from python")
+2 + 3 * 4
 
 ## javascript
-function hello_js() {
-    return "hello from javascript";
-}
-console.log(hello_js());
+console.log("hello from javascript")
+2 + 3 * 4
+
+## typescript
+console.log("hello from typescript")
+
+## rust
+println!("hello from rust")
+2 + 3 * 4
+
+## zig
+std.io.print("hello from zig")
+
+## go
+print("hello from go")
+
+## .in
+print("hello from inlang")
+2 + 3 * 4
