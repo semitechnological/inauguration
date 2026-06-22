@@ -245,3 +245,191 @@ pub struct ComponentMetadata {
     pub deterministic: bool,
     pub provenance: Provenance,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ─── BoundaryModule ────────────────────────────────────────────────
+
+    #[test]
+    fn boundary_module_default() {
+        let m = BoundaryModule::default();
+        assert_eq!(m.abi_version, IN_ABI_VERSION);
+        assert!(m.module.is_empty());
+        assert!(m.layouts.is_empty());
+        assert!(m.symbols.is_empty());
+        assert!(m.allocators.is_empty());
+        assert!(m.layout_hash.is_empty());
+    }
+
+    #[test]
+    fn boundary_module_layout_hash_deterministic() {
+        let m = BoundaryModule {
+            layouts: vec![BoundaryLayout {
+                name: "Foo".to_string(),
+                kind: "struct".to_string(),
+                repr: Some(BoundaryRepr::C),
+                size: 16,
+                align: 8,
+                stride: 16,
+                fields: vec![BoundaryField {
+                    name: "x".to_string(),
+                    offset: 0,
+                    typ: "i32".to_string(),
+                    transfer: None,
+                }],
+            }],
+            symbols: vec![BoundarySymbol {
+                name: "foo_create".to_string(),
+                signature_hash: "abc123".to_string(),
+                ownership: BoundaryOwnership::ReturnsOwnedHandle,
+                calling_convention: "c".to_string(),
+            }],
+            ..BoundaryModule::default()
+        };
+        let h1 = m.compute_layout_hash();
+        let h2 = m.compute_layout_hash();
+        assert_eq!(h1, h2);
+        assert!(h1.starts_with("blake3-"));
+    }
+
+    #[test]
+    fn boundary_module_with_layout_hash() {
+        let m = BoundaryModule::default().with_layout_hash();
+        assert!(!m.layout_hash.is_empty());
+        assert!(m.layout_hash.starts_with("blake3-"));
+    }
+
+    #[test]
+    fn boundary_module_different_layouts_different_hash() {
+        let m1 = BoundaryModule::default().with_layout_hash();
+        let m2 = BoundaryModule {
+            symbols: vec![BoundarySymbol {
+                name: "bar".to_string(),
+                signature_hash: "xyz".to_string(),
+                ownership: BoundaryOwnership::Borrowed,
+                calling_convention: "c".to_string(),
+            }],
+            ..BoundaryModule::default()
+        }
+        .with_layout_hash();
+        assert_ne!(m1.layout_hash, m2.layout_hash);
+    }
+
+    // ─── Serde Round-Trip ──────────────────────────────────────────────
+
+    #[test]
+    fn boundary_repr_serde() {
+        let json = serde_json::to_string(&BoundaryRepr::C).unwrap();
+        assert_eq!(json, "\"c\"");
+        let r: BoundaryRepr = serde_json::from_str(&json).unwrap();
+        assert_eq!(r, BoundaryRepr::C);
+    }
+
+    #[test]
+    fn boundary_transfer_serde() {
+        let json = serde_json::to_string(&BoundaryTransfer::Borrow).unwrap();
+        assert_eq!(json, "\"borrow\"");
+        let t: BoundaryTransfer = serde_json::from_str(&json).unwrap();
+        assert_eq!(t, BoundaryTransfer::Borrow);
+    }
+
+    #[test]
+    fn boundary_ownership_serde() {
+        let json = serde_json::to_string(&BoundaryOwnership::OwnedBuffer).unwrap();
+        assert_eq!(json, "\"owned-buffer\"");
+        let o: BoundaryOwnership = serde_json::from_str(&json).unwrap();
+        assert_eq!(o, BoundaryOwnership::OwnedBuffer);
+    }
+
+    #[test]
+    fn boundary_module_json_round_trip() {
+        let m = BoundaryModule {
+            abi_version: 1,
+            module: "test".to_string(),
+            layouts: vec![],
+            symbols: vec![],
+            allocators: vec![BoundaryAllocator {
+                id: 1,
+                kind: "arena".to_string(),
+                free_with: "arena_free".to_string(),
+            }],
+            layout_hash: String::new(),
+        };
+        let json = serde_json::to_string(&m).unwrap();
+        let m2: BoundaryModule = serde_json::from_str(&json).unwrap();
+        assert_eq!(m, m2);
+    }
+
+    // ─── CompileArtifact ───────────────────────────────────────────────
+
+    #[test]
+    fn compile_artifact_from_semantic() {
+        let module = crate::core_ir::UnifiedModule::new(vec![]);
+        let a = CompileArtifact::from_semantic(module.clone());
+        assert!(a.boundary.is_none());
+        assert_eq!(a.semantic, module);
+    }
+
+    #[test]
+    fn compile_artifact_with_boundary() {
+        let module = crate::core_ir::UnifiedModule::new(vec![]);
+        let bm = BoundaryModule::default();
+        let a = CompileArtifact::with_boundary(module.clone(), bm.clone());
+        assert!(a.boundary.is_some());
+        assert_eq!(a.boundary.unwrap(), bm);
+    }
+
+    // ─── default_calling_convention ────────────────────────────────────
+
+    #[test]
+    fn default_calling_convention_is_c() {
+        assert_eq!(default_calling_convention(), "c");
+    }
+
+    // ─── ComponentMetadata ─────────────────────────────────────────────
+
+    #[test]
+    fn component_metadata_serde() {
+        let cm = ComponentMetadata {
+            component: "test".to_string(),
+            target: "x86_64".to_string(),
+            entry: Some("main".to_string()),
+            code_sections: vec![CodeSection {
+                name: ".text".to_string(),
+                offset: 0,
+                size: 100,
+                flags: "rx".to_string(),
+            }],
+            data_sections: vec![],
+            imports: vec![],
+            exports: vec![],
+            capabilities_required: vec![],
+            capabilities_exported: vec![],
+            object_schemas: vec![],
+            memory: Some(MemoryRequirements {
+                stack: 4096,
+                heap: 0,
+                static_data: 0,
+            }),
+            checkpoint: "none".to_string(),
+            deterministic: true,
+            provenance: Provenance {
+                compiler: "in".to_string(),
+                compiler_version: "0.1.0".to_string(),
+                source_hash: "abc".to_string(),
+            },
+        };
+        let json = serde_json::to_string(&cm).unwrap();
+        let cm2: ComponentMetadata = serde_json::from_str(&json).unwrap();
+        assert_eq!(cm, cm2);
+    }
+
+    // ─── IN_ABI_VERSION ────────────────────────────────────────────────
+
+    #[test]
+    fn abi_version_constant() {
+        assert_eq!(IN_ABI_VERSION, 1);
+    }
+}
