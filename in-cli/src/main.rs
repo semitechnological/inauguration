@@ -373,19 +373,13 @@ enum Commands {
     /// Reinstall the `in` CLI from the enclosing inauguration checkout (`cargo install --path in-cli`).
     #[command(visible_alias = "self-update")]
     Update,
-    #[command(about = "Check required tools")]
-    #[command(about = "Evaluate inline .in code (like python -c)")]
+    #[command(about = "Evaluate code or file (auto-detects file path vs inline code)")]
     Eval {
-        #[arg(help = "Inline source code to compile and execute")]
-        code: Option<String>,
+        #[arg(help = "Inline code, or path to .in/.poly/.rs/.py file")]
+        source: Option<String>,
         #[arg(
             long,
-            help = "Path to .poly or source file to evaluate"
-        )]
-        path: Option<String>,
-        #[arg(
-            long,
-            help = "Parser/language slug such as in, js, ts, rust, python, cpp"
+            help = "Parser/language slug (auto-detected from extension or content if omitted)"
         )]
         parser: Option<String>,
         #[arg(long, default_value_t = false, help = "Show detailed output")]
@@ -612,25 +606,39 @@ fn run() -> Result<()> {
             Err(_) => cmd_update_remote(),
         },
         Commands::Eval {
-            code,
-            path,
+            source,
             parser,
             verbose,
         } => {
-            let source = match (code, path) {
-                (Some(c), _) => c,
-                (_, Some(p)) => {
-                    let resolved = resolve_invocation_path(&invocation_cwd, &p);
-                    std::fs::read_to_string(&resolved)
-                        .map_err(|e| InError::Message(format!("read {}: {e}", resolved.display())))?
+            let code = match source {
+                Some(ref s) => {
+                    let resolved = resolve_invocation_path(&invocation_cwd, s);
+                    if resolved.exists() {
+                        let ext = resolved.extension().and_then(|e| e.to_str()).unwrap_or("");
+                        // .in and other source files: compile + execute-bytecode
+                        if ext == "in" || ext == "rs" || ext == "zig" || ext == "go" || ext == "v" || ext == "swift" {
+                            let out = std::env::temp_dir().join(format!(
+                                "in-eval-{}.bin",
+                                resolved.file_stem().unwrap_or_default().to_string_lossy()
+                            ));
+                            let module_id = resolved.file_stem().unwrap_or_default().to_string_lossy().to_string();
+                            cmd_compile(&invocation_cwd, s, CompileTargetCli::Bytecode, &out.to_string_lossy(), &module_id, parser_registry::ParserCli::Auto, None, None, NativeLinkageCli::Executable, 1, false, None, None, None, None)?;
+                            return cmd_execute_bytecode(&invocation_cwd, s, &module_id, verbose);
+                        }
+                        // .poly files: read and eval
+                        std::fs::read_to_string(&resolved)
+                            .map_err(|e| InError::Message(format!("read {}: {e}", resolved.display())))?
+                    } else {
+                        s.clone()
+                    }
                 }
-                (None, None) => {
+                None => {
                     return Err(InError::Message(
-                        "eval requires either CODE or --path".into(),
+                        "eval requires code or file path".into(),
                     ));
                 }
             };
-            cmd_eval_dispatch(&invocation_cwd, &source, parser.as_deref(), verbose)
+            cmd_eval_dispatch(&invocation_cwd, &code, parser.as_deref(), verbose)
         }
         Commands::Doctor => cmd_doctor(),
         Commands::Bench { metrics } => {
