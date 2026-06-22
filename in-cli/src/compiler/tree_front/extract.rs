@@ -6748,6 +6748,18 @@ const GO_AST: AstShape = AstShape {
     strict_args: false,
 };
 
+fn norm_go_type(raw: &str) -> Typ {
+    match raw.trim() {
+        "int" | "int8" | "int16" | "int32" | "int64" | "uint" | "uint8" | "uint16" | "uint32" | "uint64" | "byte" | "rune" => Typ::Int,
+        "string" => Typ::String,
+        "bool" => Typ::Bool,
+        "float32" | "float64" => Typ::Float,
+        other if other.starts_with("[]") => Typ::Named(other.to_string()),
+        other if other.starts_with('*') => Typ::Named(other.to_string()),
+        other => Typ::Named(other.to_string()),
+    }
+}
+
 fn go_params(src: &[u8], func: Node<'_>) -> Vec<(String, Typ)> {
     let mut out = Vec::new();
     if let Some(plist) = func.child_by_field_name("parameters") {
@@ -6762,7 +6774,7 @@ fn go_params(src: &[u8], func: Node<'_>) -> Vec<(String, Typ)> {
             let ty = first_named(ch, "type_identifier")
                 .or_else(|| first_named(ch, "pointer_type"))
                 .or_else(|| first_named(ch, "type"))
-                .map(|t| Typ::Named(node_txt(src, t).trim().to_string()))
+                .map(|t| norm_go_type(node_txt(src, t).trim()))
                 .unwrap_or(Typ::Named("Any".into()));
             out.push((name, ty));
         }
@@ -6779,7 +6791,7 @@ fn go_return_type(src: &[u8], func: Node<'_>) -> Option<Typ> {
     if let Some(node) = func.child_by_field_name("result")
         .or_else(|| func.child_by_field_name("return_type"))
     {
-        return Some(Typ::Named(node_txt(src, node).trim().to_string()));
+        return Some(norm_go_type(node_txt(src, node).trim()));
     }
     let params = func.child_by_field_name("parameters")?;
     let mut saw_params = false;
@@ -6790,7 +6802,7 @@ fn go_return_type(src: &[u8], func: Node<'_>) -> Option<Typ> {
             continue;
         }
         if saw_params && matches!(node.kind(), "type_identifier" | "simple_type" | "qualified_type") {
-            return Some(Typ::Named(node_txt(src, node).trim().to_string()));
+            return Some(norm_go_type(node_txt(src, node).trim()));
         }
         if node.kind() == "block" {
             break;
@@ -10248,7 +10260,7 @@ end
             .find(|d| matches!(d, Decl::Function { name, .. } if name == "answer"))
             .expect("answer");
         match answer {
-            Decl::Function { ret, .. } => assert_eq!(ret, &Typ::Named("int".into())),
+            Decl::Function { ret, .. } => assert_eq!(ret, &Typ::Int),
             _ => panic!("expected function"),
         }
     }
