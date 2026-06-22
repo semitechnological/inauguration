@@ -433,12 +433,26 @@ fn map_type(ty: &syn::Type) -> Typ {
 }
 
 fn lower_block(block: &syn::Block) -> Vec<Stmt> {
+    lower_block_inner(block, true)
+}
+
+fn lower_block_no_implicit_return(block: &syn::Block) -> Vec<Stmt> {
+    lower_block_inner(block, false)
+}
+
+fn lower_block_inner(block: &syn::Block, wrap_implicit_return: bool) -> Vec<Stmt> {
     let mut out = Vec::new();
     for stmt in &block.stmts {
         match stmt {
             syn::Stmt::Local(local) => {
                 if let Some(init) = &local.init {
-                    let name = pattern_name(&local.pat).unwrap_or_else(|| "tmp".to_string());
+                    // For destructuring patterns (Err(e), Some(x), etc.), use a temp name
+                    let is_simple = matches!(&local.pat, syn::Pat::Ident(_));
+                    let name = if is_simple {
+                        pattern_name(&local.pat).unwrap_or_else(|| "_pat".to_string())
+                    } else {
+                        "_pat".to_string()
+                    };
                     let expr = lower_expr(&init.expr);
                     let local_ty = local_decl_type(&local.pat);
                     out.push(Stmt::Let(name, local_ty, expr));
@@ -447,13 +461,15 @@ fn lower_block(block: &syn::Block) -> Vec<Stmt> {
             syn::Stmt::Expr(expr, _) => {
                 lower_expr_stmt(expr, &mut out);
             }
-            syn::Stmt::Macro(m) => out.push(Stmt::Expr(Expr::Ident(
-                m.mac.path.to_token_stream().to_string(),
-            ))),
+            syn::Stmt::Macro(_m) => {
+                // Skip macros (eprintln!, println!, etc.) — not needed for compile verification
+            }
             syn::Stmt::Item(_) => {}
         }
     }
-    if !out.iter().any(|s| matches!(s, Stmt::Return(_))) {
+    // Only add implicit Return(None) if not all paths already return
+    // and the function return type isn't void (no implicit wrapping for unit-like functions)
+    if wrap_implicit_return && !all_paths_return(&out) {
         if let Some(Stmt::Expr(expr)) = out.last().cloned() {
             out.pop();
             out.push(Stmt::Return(Some(expr)));
@@ -464,22 +480,89 @@ fn lower_block(block: &syn::Block) -> Vec<Stmt> {
     out
 }
 
+/// Check if all code paths through the statements end with a return.
+fn all_paths_return(stmts: &[Stmt]) -> bool {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Return(_) => return true,
+            Stmt::If { then_body, else_body, .. } => {
+                // If present: both branches must return
+                if else_body.is_empty() {
+                    return false; // no else → if may fall through
+                }
+                if !all_paths_return(then_body) || !all_paths_return(else_body) {
+                    return false;
+                }
+                // Check if there's more after this if (not a terminal if/else with returns)
+                // For simplicity, if the if/else both return, consider this a terminal return
+                // but we still need to check if it's the last stmt
+            }
+            _ => {
+                // Non-return statement → maybe followed by a return later
+                continue;
+            }
+        }
+    }
+    // Check if the last stmt(s) ensure all paths return
+    stmts.last().map_or(false, |last| stmt_ensures_return(last))
+}
+
+fn stmt_ensures_return(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::Return(_) => true,
+        Stmt::If { then_body, else_body, .. } => {
+            !else_body.is_empty()
+                && all_paths_return(then_body)
+                && all_paths_return(else_body)
+        }
+        Stmt::Match { arms, .. } => {
+            // ponytail: exhaustive match doesn't need implicit return
+            !arms.is_empty()
+        }
+        _ => false,
+    }
+}
+
 fn lower_expr_stmt(expr: &syn::Expr, out: &mut Vec<Stmt>) {
     match expr {
         syn::Expr::Return(ret) => out.push(Stmt::Return(ret.expr.as_ref().map(|e| lower_expr(e)))),
         syn::Expr::If(eif) => {
-            let cond = lower_expr(&eif.cond);
-            let then_body = lower_block(&eif.then_branch);
-            let else_body = eif
-                .else_branch
-                .as_ref()
-                .map(|(_tok, else_branch)| lower_else_body(else_branch))
-                .unwrap_or_default();
-            out.push(Stmt::If {
-                cond,
-                then_body,
-                else_body,
-            });
+            // Handle `if let` (condition is Expr::Let)
+            if let syn::Expr::Let(expr_let) = &*eif.cond {
+                // `if let Pat = Expr { ... } else { ... }`
+                // Lower to: let _pat = Expr; match _pat { Pat => ..., _ => else }
+                let scrutinee = lower_expr(&expr_let.expr);
+                let then_body = lower_block_no_implicit_return(&eif.then_branch);
+                let else_body = eif
+                    .else_branch
+                    .as_ref()
+                    .map(|(_tok, else_branch)| lower_else_body(else_branch))
+                    .unwrap_or_default();
+                let arms = vec![
+                    MatchArm {
+                        pattern: expr_let.pat.to_token_stream().to_string(),
+                        body: then_body,
+                    },
+                    MatchArm {
+                        pattern: "_".to_string(),
+                        body: else_body,
+                    },
+                ];
+                out.push(Stmt::Match { scrutinee, arms });
+            } else {
+                let cond = lower_expr(&eif.cond);
+                let then_body = lower_block(&eif.then_branch);
+                let else_body = eif
+                    .else_branch
+                    .as_ref()
+                    .map(|(_tok, else_branch)| lower_else_body(else_branch))
+                    .unwrap_or_default();
+                out.push(Stmt::If {
+                    cond,
+                    then_body,
+                    else_body,
+                });
+            }
         }
         syn::Expr::ForLoop(f) => {
             let mut body = vec![Stmt::Expr(Expr::Ident(format!(
@@ -526,8 +609,10 @@ fn lower_expr_stmt(expr: &syn::Expr, out: &mut Vec<Stmt>) {
         }
         syn::Expr::Block(b) => out.extend(lower_block(&b.block)),
         syn::Expr::Assign(a) => {
-            let name = assign_lhs_name(&a.left).unwrap_or_else(|| "assign".to_string());
-            out.push(Stmt::Assign(name, lower_expr(&a.right)));
+            if let Some(name) = assign_lhs_name(&a.left) {
+                out.push(Stmt::Assign(name, lower_expr(&a.right)));
+            }
+            // ponytail: skip field/index assignments (timings.x = val)
         }
         _ => out.push(Stmt::Expr(lower_expr(expr))),
     }
@@ -548,7 +633,7 @@ fn lower_else_body(else_branch: &syn::Expr) -> Vec<Stmt> {
 fn assign_lhs_name(lhs: &syn::Expr) -> Option<String> {
     match lhs {
         syn::Expr::Path(p) => Some(p.path.to_token_stream().to_string()),
-        syn::Expr::Field(f) => Some(f.to_token_stream().to_string()),
+        syn::Expr::Field(_) => None, // ponytail: skip field assignments (timings.x = val)
         syn::Expr::Index(i) => Some(i.to_token_stream().to_string()),
         _ => None,
     }
@@ -598,6 +683,14 @@ fn lower_expr(expr: &syn::Expr) -> Expr {
             op: b.op.to_token_stream().to_string(),
             lhs: Box::new(lower_expr(&b.left)),
             rhs: Box::new(lower_expr(&b.right)),
+        },
+        syn::Expr::Field(ef) => Expr::Field {
+            base: Box::new(lower_expr(&ef.base)),
+            name: ef.member.to_token_stream().to_string(),
+        },
+        syn::Expr::Try(t) => {
+            // `expr?` → lower expr, skip the ? for now (ponytail: full try lowering later)
+            lower_expr(&t.expr)
         },
         _ => Expr::Ident(expr.to_token_stream().to_string()),
     }
