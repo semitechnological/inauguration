@@ -1,28 +1,58 @@
 use crate::compiler::rust_front;
 use crate::core_ir::{Decl, UnifiedModule};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
+/// Cached cargo metadata (avoids re-running `cargo metadata` every compile).
+static METADATA_CACHE: std::sync::LazyLock<Mutex<HashMap<PathBuf, (Instant, serde_json::Value)>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+
+const METADATA_CACHE_TTL: Duration = Duration::from_secs(300); // 5 min
+
+fn get_cargo_metadata(project_dir: &Path) -> Option<serde_json::Value> {
+    let key = project_dir.to_path_buf();
+    
+    if let Ok(cache) = METADATA_CACHE.lock() {
+        if let Some((timestamp, value)) = cache.get(&key) {
+            if timestamp.elapsed() < METADATA_CACHE_TTL {
+                return Some(value.clone());
+            }
+        }
+    }
+    
+    let output = Command::new("cargo")
+        .arg("metadata")
+        .arg("--format-version")
+        .arg("1")
+        .current_dir(project_dir)
+        .output()
+        .ok()?;
+    
+    if !output.status.success() {
+        return None;
+    }
+    
+    let metadata: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    
+    if let Ok(mut cache) = METADATA_CACHE.lock() {
+        cache.insert(key, (Instant::now(), metadata.clone()));
+    }
+    
+    Some(metadata)
+}
 
 /// Resolve cargo dependencies for a Rust project and compile their lib.rs files.
 /// Returns a Vec of (crate_name, UnifiedModule) for all successfully-compiled dependencies.
 pub fn compile_cargo_dependencies(project_dir: &Path) -> Vec<(String, UnifiedModule)> {
     let mut modules = Vec::new();
 
-    // Run `cargo metadata` to get dependency info
-    let output = match Command::new("cargo")
-        .arg("metadata")
-        .arg("--format-version")
-        .arg("1")
-        .current_dir(project_dir)
-        .output()
-    {
-        Ok(o) if o.status.success() => o.stdout,
-        _ => return modules,
-    };
-
-    let metadata: serde_json::Value = match serde_json::from_slice(&output) {
-        Ok(v) => v,
-        Err(_) => return modules,
+    // ponytail: cache cargo metadata — avoid re-running `cargo metadata` every compile
+    let metadata = match get_cargo_metadata(project_dir) {
+        Some(m) => m,
+        None => return modules,
     };
 
     let packages = match metadata["packages"].as_array() {
