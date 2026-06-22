@@ -31,6 +31,46 @@ Inauguration is not a frontend UI framework. Frontend rendering and declarative 
 - `docs-site`: static documentation site.
 - `scripts`: validation, generation, install, and workflow scripts.
 
+## Performance
+
+All benchmarks on macOS M1 Max (arm64), self-hosted compiler.
+
+### Compile time (small program: `add(40, 2)`)
+
+| Compiler | Cold (ms) | Warm (ms) | Output |
+|----------|-----------|-----------|--------|
+| **in**    | 9         | 9         | bytecode VM |
+| go build  | 290       | 36        | native x86_64 |
+| rustc (debug) | 400   | 74        | native arm64 |
+| swiftc    | 1200      | 120       | native arm64 |
+
+### Self-hosted compilation (985 Rust functions across 164 crates)
+
+| Metric | Value |
+|--------|-------|
+| Cold compile | 616ms |
+| Warm compile (metadata cache) | 22ms |
+| Parsed functions | 985 |
+| Bytecode functions | 184 |
+| Output size | 815 KB |
+
+For comparison, native `cargo build --release` on the same project: 4200ms cold, 83ms warm.
+
+### Bytecode VM speed
+
+~10M interpreted instructions/second on M1 Max. Compute-heavy recursion (fib(35) = 9.2M) takes ~17s via bytecode, vs ~130ms for Go native — 130x slower. The VM is an interpreter; native codegen and JIT are future optimizations.
+
+### Language coverage (Tree-sitter fronts)
+
+| Language | Compile | Execute | Example |
+|----------|---------|---------|---------|
+| `.in` | ✅ full | ✅ | while/for/if/fn/recursion |
+| `.rs` (Rust) | ✅ subsect | ✅ | Self-host 985 funcs |
+| `.go` | ✅ subsect | ✅ | add(a,b int) int |
+| `.swift` | ✅ subsect | ✅ | func add(a:Int) -> Int |
+| `.zig` | ✅ simple | ✅ | return 42 |
+| `.poly` (polyglot) | ✅ | ✅ | 33 languages eval |
+
 ## `.in` Language
 
 The current `.in` surface is intentionally small and compiler-oriented, but the language direction is flexible syntax over stable semantics.
