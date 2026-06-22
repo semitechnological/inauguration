@@ -5,12 +5,20 @@ pub struct LanguageSupport {
     pub language: &'static str,
     pub parser_id: Option<&'static str>,
     pub extensions: &'static [&'static str],
-    pub level: u8,
-    pub level_label: &'static str,
+    /// Capabilities this frontend supports: parse, lower, typecheck, boundary, bytecode
+    pub capabilities: &'static [&'static str],
     pub front: &'static str,
     pub runtime_boundary: &'static str,
     pub example: &'static str,
     pub next_step: &'static str,
+}
+
+impl LanguageSupport {
+    pub fn can_parse(&self) -> bool { self.capabilities.contains(&"parse") }
+    pub fn can_lower(&self) -> bool { self.capabilities.contains(&"lower") }
+    pub fn can_typecheck(&self) -> bool { self.capabilities.contains(&"typecheck") }
+    pub fn can_boundary(&self) -> bool { self.capabilities.contains(&"boundary") }
+    pub fn can_bytecode(&self) -> bool { self.capabilities.contains(&"bytecode") }
 }
 
 pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
@@ -18,8 +26,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "in",
         parser_id: Some("in"),
         extensions: &["in"],
-        level: 5,
-        level_label: "bounded Core IR body subset with source diagnostics, family typecheck; closures, try/catch, throw",
+        capabilities: &["parse", "lower", "typecheck", "boundary", "bytecode"],
         front: "in_lang_parse",
         runtime_boundary: "self-hosted Core IR to textual SIL and bytecode VM subset",
         example: "apps/polyglot-sample/sample.in",
@@ -29,8 +36,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "icore",
         parser_id: Some("icore"),
         extensions: &["icore"],
-        level: 5,
-        level_label: "versioned Core IR JSON with bounded bodies",
+        capabilities: &["parse", "lower", "typecheck", "boundary", "bytecode"],
         front: "compiler::icore",
         runtime_boundary: "self-hosted Core IR to textual SIL and bytecode VM subset",
         example: "apps/polyglot-sample/sample.icore",
@@ -40,8 +46,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Swift",
         parser_id: Some("swift"),
         extensions: &["swift"],
-        level: 4,
-        level_label: "Tree-sitter bounded body lowering with class/protocol extraction and family typecheck",
+        capabilities: &["parse", "lower", "typecheck"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR, textual SIL, Boundary IR; Swift runtime is not bundled",
         example: "apps/polyglot-sample/sample.swift",
@@ -51,8 +56,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Rust",
         parser_id: Some("rust"),
         extensions: &["rs"],
-        level: 4,
-        level_label: "dedicated bounded class (impl) and body lowering",
+        capabilities: &["parse", "lower", "typecheck", "boundary"],
         front: "compiler::rust_front",
         runtime_boundary: "Core IR and textual SIL; rustc is validation only",
         example: "apps/polyglot-sample/sample_class.rs",
@@ -62,8 +66,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Go",
         parser_id: Some("go"),
         extensions: &["go"],
-        level: 4,
-        level_label: "dedicated bounded body lowering with struct+method class grouping",
+        capabilities: &["parse", "lower", "typecheck"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL",
         example: "apps/polyglot-sample/sample_class.go",
@@ -73,8 +76,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "V",
         parser_id: Some("v"),
         extensions: &["v"],
-        level: 5,
-        level_label: "dedicated bounded body lowering",
+        capabilities: &["parse", "lower", "typecheck", "boundary", "bytecode"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL",
         example: "apps/polyglot-sample/sample.v",
@@ -84,8 +86,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "C",
         parser_id: Some("c"),
         extensions: &["c", "h"],
-        level: 4,
-        level_label: "Tree-sitter bounded scalar body lowering",
+        capabilities: &["parse", "lower", "typecheck"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL; libc/runtime ABI is not bundled",
         example: "apps/polyglot-sample/sample.c",
@@ -95,8 +96,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "C++",
         parser_id: Some("cpp"),
         extensions: &["cc", "cpp", "cxx", "hpp", "hxx", "hh", "h++", "ipp"],
-        level: 4,
-        level_label: "Tree-sitter bounded scalar body lowering (class/struct lowering pending)",
+        capabilities: &["parse", "lower", "typecheck"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL; standard library/runtime ABI is not bundled",
         example: "apps/polyglot-sample/sample_class.cpp",
@@ -106,8 +106,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Objective-C",
         parser_id: Some("objc"),
         extensions: &["m"],
-        level: 4,
-        level_label: "Tree-sitter declaration extraction",
+        capabilities: &["parse", "lower"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR declarations only; Objective-C runtime is not bundled",
         example: "docs/architecture/parser-surface.md",
@@ -117,8 +116,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Objective-C++",
         parser_id: Some("objc++"),
         extensions: &["mm"],
-        level: 4,
-        level_label: "Tree-sitter bounded scalar body lowering",
+        capabilities: &["parse", "lower", "typecheck"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL; Objective-C++ runtime/ABI is not bundled",
         example: "docs/architecture/parser-surface.md",
@@ -128,8 +126,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Java",
         parser_id: Some("java"),
         extensions: &["java"],
-        level: 4,
-        level_label: "Tree-sitter bounded body lowering with class/interface extraction",
+        capabilities: &["parse", "lower", "typecheck"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL; JVM runtime is not bundled",
         example: "apps/polyglot-sample/Sample.java",
@@ -139,8 +136,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Groovy",
         parser_id: Some("groovy"),
         extensions: &["groovy"],
-        level: 4,
-        level_label: "Tree-sitter bounded body lowering",
+        capabilities: &["parse", "lower", "typecheck"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL; JVM runtime is not bundled",
         example: "apps/polyglot-sample/Sample.groovy",
@@ -150,8 +146,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "JavaScript",
         parser_id: Some("javascript"),
         extensions: &["js", "mjs", "cjs", "jsx"],
-        level: 5,
-        level_label: "Tree-sitter bounded entrypoint with Boundary IR and bytecode VM",
+        capabilities: &["parse", "lower", "typecheck", "boundary", "bytecode"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR, Boundary IR, textual SIL, and owned bytecode VM subset; JS runtime is not bundled",
         example: "apps/polyglot-sample/sample.js",
@@ -161,8 +156,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "TypeScript",
         parser_id: Some("typescript"),
         extensions: &["ts", "tsx", "mts", "cts"],
-        level: 5,
-        level_label: "Tree-sitter bounded entrypoint with Boundary IR and bytecode VM",
+        capabilities: &["parse", "lower", "typecheck", "boundary", "bytecode"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR, Boundary IR, textual SIL, and owned bytecode VM subset; TS checker/runtime is not bundled",
         example: "apps/polyglot-sample/sample.ts",
@@ -172,8 +166,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Kotlin",
         parser_id: Some("kotlin"),
         extensions: &["kt", "kts"],
-        level: 4,
-        level_label: "Tree-sitter bounded scalar body lowering",
+        capabilities: &["parse", "lower", "typecheck"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL; JVM runtime is not bundled",
         example: "apps/polyglot-sample/Sample.kt",
@@ -183,8 +176,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Scala",
         parser_id: Some("scala"),
         extensions: &["scala", "sc"],
-        level: 4,
-        level_label: "Tree-sitter bounded body lowering with class/trait extraction",
+        capabilities: &["parse", "lower", "typecheck"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL; JVM runtime is not bundled",
         example: "apps/polyglot-sample/sample.scala",
@@ -194,8 +186,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "C#",
         parser_id: Some("csharp"),
         extensions: &["cs"],
-        level: 4,
-        level_label: "Tree-sitter bounded scalar body lowering",
+        capabilities: &["parse", "lower", "typecheck"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL; CLR runtime is not bundled",
         example: "apps/polyglot-sample/Program.cs",
@@ -205,8 +196,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "F#",
         parser_id: Some("fsharp"),
         extensions: &["fs", "fsx", "fsi"],
-        level: 4,
-        level_label: "Tree-sitter declaration extraction",
+        capabilities: &["parse", "lower"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR declarations only; CLR runtime is not bundled",
         example: "docs/architecture/parser-surface.md",
@@ -216,8 +206,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "VB.NET",
         parser_id: Some("vb"),
         extensions: &["vb"],
-        level: 4,
-        level_label: "bounded Function/Sub lowering with family typecheck and optional inline boundary metadata",
+        capabilities: &["parse", "lower", "typecheck", "boundary"],
         front: "compiler::vb_boundary",
         runtime_boundary: "Core IR and textual SIL; CLR runtime is not bundled",
         example: "apps/polyglot-sample/sample.vb",
@@ -227,8 +216,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Python",
         parser_id: Some("python"),
         extensions: &["py", "pyi", "pyw"],
-        level: 4,
-        level_label: "Tree-sitter bounded scalar body lowering",
+        capabilities: &["parse", "lower", "typecheck"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL; Python runtime is not bundled",
         example: "apps/polyglot-sample/sample.py",
@@ -238,8 +226,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Ruby",
         parser_id: Some("ruby"),
         extensions: &["rb", "rake", "gemspec"],
-        level: 4,
-        level_label: "Tree-sitter bounded scalar body lowering",
+        capabilities: &["parse", "lower", "typecheck"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL; Ruby runtime is not bundled",
         example: "apps/polyglot-sample/sample.rb",
@@ -249,8 +236,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "PHP",
         parser_id: Some("php"),
         extensions: &["php", "phtml"],
-        level: 4,
-        level_label: "Tree-sitter bounded body lowering with family typecheck",
+        capabilities: &["parse", "lower", "typecheck"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL; PHP runtime is not bundled",
         example: "apps/polyglot-sample/sample.php",
@@ -260,8 +246,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Perl",
         parser_id: Some("perl"),
         extensions: &["pl", "pm"],
-        level: 2,
-        level_label: "Tree-sitter bounded body lowering with package/class extraction",
+        capabilities: &["parse", "lower"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL; Perl runtime is not bundled",
         example: "apps/polyglot-sample/sample.pl",
@@ -271,8 +256,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Zig",
         parser_id: Some("zig"),
         extensions: &["zig"],
-        level: 4,
-        level_label: "Tree-sitter bounded body lowering with family typecheck",
+        capabilities: &["parse", "lower", "typecheck", "boundary"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL; Zig runtime/ABI is not bundled",
         example: "apps/polyglot-sample/sample.zig",
@@ -282,8 +266,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Dart",
         parser_id: Some("dart"),
         extensions: &["dart"],
-        level: 4,
-        level_label: "Tree-sitter bounded scalar body lowering",
+        capabilities: &["parse", "lower", "typecheck"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL; Dart runtime is not bundled",
         example: "apps/polyglot-sample/sample.dart",
@@ -293,8 +276,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Lua",
         parser_id: Some("lua"),
         extensions: &["lua"],
-        level: 4,
-        level_label: "Tree-sitter bounded body lowering with family typecheck",
+        capabilities: &["parse", "lower", "typecheck"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL; Lua runtime is not bundled",
         example: "apps/polyglot-sample/sample.lua",
@@ -304,8 +286,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Clojure",
         parser_id: Some("clojure"),
         extensions: &["clj", "cljs", "cljc"],
-        level: 4,
-        level_label: "bounded defn lowering with family typecheck and optional inline boundary metadata",
+        capabilities: &["parse", "lower", "typecheck", "boundary"],
         front: "compiler::clojure_boundary",
         runtime_boundary: "Core IR and textual SIL; JVM runtime is not bundled",
         example: "apps/polyglot-sample/sample.clj",
@@ -315,8 +296,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Elixir",
         parser_id: Some("elixir"),
         extensions: &["ex", "exs"],
-        level: 4,
-        level_label: "Tree-sitter declaration extraction",
+        capabilities: &["parse", "lower"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR declarations only; BEAM runtime is not bundled",
         example: "docs/architecture/parser-surface.md",
@@ -326,8 +306,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Erlang",
         parser_id: Some("erlang"),
         extensions: &["erl", "hrl"],
-        level: 4,
-        level_label: "Tree-sitter declaration extraction",
+        capabilities: &["parse", "lower"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR declarations only; BEAM runtime is not bundled",
         example: "docs/architecture/parser-surface.md",
@@ -337,8 +316,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Haskell",
         parser_id: Some("haskell"),
         extensions: &["hs", "lhs"],
-        level: 4,
-        level_label: "Tree-sitter declaration extraction",
+        capabilities: &["parse", "lower"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR declarations only; Haskell runtime is not bundled",
         example: "docs/architecture/parser-surface.md",
@@ -348,8 +326,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Nim",
         parser_id: Some("nim"),
         extensions: &["nim"],
-        level: 4,
-        level_label: "bounded proc lowering with family typecheck and optional inline boundary metadata",
+        capabilities: &["parse", "lower", "typecheck", "boundary"],
         front: "compiler::nim_boundary",
         runtime_boundary: "Core IR and textual SIL; Nim runtime is not bundled",
         example: "apps/polyglot-sample/sample.nim",
@@ -359,8 +336,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "OCaml",
         parser_id: Some("ocaml"),
         extensions: &["ml", "mli"],
-        level: 4,
-        level_label: "Tree-sitter bounded body lowering with let/function extraction and family typecheck",
+        capabilities: &["parse", "lower", "typecheck"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL; OCaml runtime is not bundled",
         example: "apps/polyglot-sample/sample.ml",
@@ -370,8 +346,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Julia",
         parser_id: Some("julia"),
         extensions: &["jl"],
-        level: 4,
-        level_label: "Tree-sitter declaration extraction",
+        capabilities: &["parse", "lower"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR declarations only; Julia runtime is not bundled",
         example: "docs/architecture/parser-surface.md",
@@ -381,8 +356,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "R",
         parser_id: Some("r"),
         extensions: &["r"],
-        level: 4,
-        level_label: "Tree-sitter declaration extraction",
+        capabilities: &["parse", "lower"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR declarations only; R runtime is not bundled",
         example: "docs/architecture/parser-surface.md",
@@ -392,8 +366,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "D",
         parser_id: Some("d"),
         extensions: &["d"],
-        level: 4,
-        level_label: "bounded function lowering with family typecheck and optional inline boundary metadata",
+        capabilities: &["parse", "lower", "typecheck", "boundary"],
         front: "compiler::d_boundary",
         runtime_boundary: "Core IR and textual SIL; D runtime is not bundled",
         example: "apps/polyglot-sample/sample.d",
@@ -403,8 +376,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Crystal",
         parser_id: Some("crystal"),
         extensions: &["cr"],
-        level: 4,
-        level_label: "bounded def lowering with family typecheck and optional inline boundary metadata",
+        capabilities: &["parse", "lower", "typecheck", "boundary"],
         front: "compiler::crystal_boundary",
         runtime_boundary: "Core IR and textual SIL; Crystal runtime is not bundled",
         example: "apps/polyglot-sample/sample.cr",
@@ -414,8 +386,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Odin",
         parser_id: Some("odin"),
         extensions: &["odin"],
-        level: 5,
-        level_label: "bounded proc lowering with family typecheck and optional inline boundary metadata",
+        capabilities: &["parse", "lower", "typecheck", "boundary", "bytecode"],
         front: "compiler::odin_boundary",
         runtime_boundary: "Core IR and textual SIL; Odin runtime is not bundled",
         example: "apps/polyglot-sample/sample.odin",
@@ -425,8 +396,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Hare",
         parser_id: Some("hare"),
         extensions: &["ha"],
-        level: 4,
-        level_label: "bounded fn lowering with family typecheck and optional inline boundary metadata",
+        capabilities: &["parse", "lower", "typecheck", "boundary"],
         front: "compiler::hare_boundary",
         runtime_boundary: "Core IR and textual SIL; Hare runtime is not bundled",
         example: "apps/polyglot-sample/sample.ha",
@@ -436,8 +406,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "HolyC",
         parser_id: Some("holyc"),
         extensions: &["hc", "HC"],
-        level: 4,
-        level_label: "Tree-sitter function and bare-call extraction with print-as-stmt lowering",
+        capabilities: &["parse", "lower"],
         front: "compiler::tree_front (tree-sitter-holyc)",
         runtime_boundary: "Core IR and textual SIL; TempleOS runtime is not bundled",
         example: "apps/polyglot-sample/sample.hc",
@@ -515,44 +484,43 @@ mod tests {
     }
 
     #[test]
-    fn ruby_reports_bounded_body_lowering() {
+    fn ruby_can_lower_and_typecheck() {
         let entry = language_support_for_parser(ParserId::Ruby.as_str()).expect("ruby");
-        assert_eq!(entry.level, 4);
-        assert!(entry.level_label.contains("body"));
+        assert!(entry.can_parse());
+        assert!(entry.can_lower());
+        assert!(entry.can_typecheck());
         assert!(entry.runtime_boundary.contains("Core IR"));
     }
 
     #[test]
-    fn level_five_fronts_include_dedicated_fronts() {
+    fn dedicated_fronts_have_max_capabilities() {
         for language in ["in", "icore", "V", "JavaScript", "TypeScript", "Odin"] {
             let entry = LANGUAGE_SUPPORT
                 .iter()
                 .find(|entry| entry.language == language)
                 .expect(language);
-            assert_eq!(entry.level, 5, "{}", language);
+            assert!(entry.can_bytecode(), "{} should support bytecode", language);
+            assert!(entry.can_boundary(), "{} should support boundary", language);
         }
     }
 
     #[test]
-    fn all_languages_are_level_four_or_five() {
+    fn all_languages_can_parse_and_lower() {
         for entry in LANGUAGE_SUPPORT.iter() {
-            // ponytail: Perl blocked by tree-sitter grammar mismatch (node types renamed)
-            if entry.language == "Perl" {
-                continue;
-            }
-            assert!(entry.level >= 4, "{} should be level >= 4", entry.language);
+            assert!(entry.can_parse(), "{} should support parse", entry.language);
+            assert!(entry.can_lower(), "{} should support lower", entry.language);
         }
     }
 
     #[test]
-    fn javascript_and_typescript_report_bounded_bytecode_vm_level() {
+    fn javascript_and_typescript_have_full_capabilities() {
         for language in ["JavaScript", "TypeScript"] {
             let entry = LANGUAGE_SUPPORT
                 .iter()
                 .find(|entry| entry.language == language)
                 .expect(language);
-            assert_eq!(entry.level, 5, "{language}");
-            assert!(entry.level_label.contains("bytecode VM"), "{language}");
+            assert!(entry.can_bytecode(), "{language} should support bytecode");
+            assert!(entry.can_boundary(), "{language} should support boundary");
             assert!(entry.runtime_boundary.contains("Boundary IR"), "{language}");
         }
     }
