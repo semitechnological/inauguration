@@ -5,5 +5,3 @@ console.log("hello from javascript")
 println!("hello from rust")
 
 std.io.print("hello from zig")
-
-print("hello from go")
