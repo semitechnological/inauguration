@@ -85,7 +85,7 @@ pub fn invoke_package_export(
     }
 }
 
-const ALLOWED_INVOKE_PROGRAMS: &[&str] = &["echo", "node", "python3", "cargo", "go", "true"];
+const ALLOWED_INVOKE_PROGRAMS: &[&str] = &["echo", "node", "python3", "cargo", "go", "sh", "true"];
 
 pub fn run_invoke(spec: &PackageInvokeSpec, install_path: &Path) -> Result<String, String> {
     if !ALLOWED_INVOKE_PROGRAMS.contains(&spec.program.as_str()) {

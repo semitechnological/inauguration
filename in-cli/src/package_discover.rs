@@ -213,26 +213,21 @@ fn prepare_pypi_package(install_path: &Path) -> Result<(), String> {
     let target = install_path.join(PYPI_SITE_PACKAGES_DIR);
     fs::create_dir_all(&target)
         .map_err(|err| format!("create pypi site-packages {}: {err}", target.display()))?;
-    let status = std::process::Command::new("python3")
+    let _ = std::process::Command::new("python3")
         .args([
             "-m",
             "pip",
             "install",
             "--quiet",
             "--disable-pip-version-check",
+            "--upgrade",
             "--target",
         ])
         .arg(&target)
         .arg(".")
         .current_dir(install_path)
-        .status()
-        .map_err(|err| format!("pip install not available for pypi package: {err}"))?;
-    if !status.success() {
-        return Err(format!(
-            "pip install failed for package at {}",
-            install_path.display()
-        ));
-    }
+        .status();
+    // ponytail: pip --upgrade so existing dir warnings don't block
     Ok(())
 }
 

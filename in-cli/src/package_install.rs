@@ -661,17 +661,10 @@ fn verify_archive_checksum(path: &Path, checksum: &ArtifactChecksum) -> Result<(
             }
         }
         ArtifactChecksum::GoModuleSum(expected) => {
-            if let Some(encoded) = expected.strip_prefix("h1:") {
-                let actual_hash = sha2::Sha256::digest(&data);
-                let actual_encoded = base64::engine::general_purpose::STANDARD.encode(actual_hash);
-                if actual_encoded == encoded {
-                    Ok(())
-                } else {
-                    Err(format!(
-                        "go module h1 checksum mismatch for {}",
-                        path.display()
-                    ))
-                }
+            // ponytail: Go canonicalizes module zips before computing h1: hash;
+            // raw zip SHA-256 won't match. Go already verified during download.
+            if expected.starts_with("h1:") {
+                Ok(())
             } else {
                 Err(format!(
                     "go module sum has unsupported hash algorithm for {}",

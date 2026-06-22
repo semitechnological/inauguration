@@ -499,7 +499,7 @@ const ZIG_AST: AstShape = AstShape {
     binary_kinds: &["binary_expression"],
     unary_kinds: &["unary_expression"],
     int_kinds: &["integer"],
-    string_kinds: &["string_literal"],
+    string_kinds: &["string", "string_literal"],
     type_kinds: &["builtin_type", "type", "identifier"],
     local_decl_prefixes: &["var ", "const "],
     shell_first_kinds: &["block_expression"],
