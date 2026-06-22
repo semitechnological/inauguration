@@ -1929,6 +1929,12 @@ fn normalize_in_eval_code(code: &str) -> String {
                 && rest.len() >= open.len_utf8() + close.len_utf8()
             {
                 let inner = &rest[open.len_utf8()..rest.len() - close.len_utf8()];
+                // ponytail: strip trailing \\n since print() already adds newline
+                let inner = if inner.ends_with("\\n") && open == '\"' {
+                    &inner[..inner.len() - 2]
+                } else {
+                    inner
+                };
                 return format!("\"{inner}\"");
             }
         }
@@ -1939,8 +1945,15 @@ fn normalize_in_eval_code(code: &str) -> String {
     if let Some(rest) = trimmed.strip_prefix("std.io.print ") {
         return format!("print({})", normalize_human_in_print_arg(rest));
     }
+    if let Some(rest) = trimmed.strip_prefix("std.io.print(").and_then(|r| r.strip_suffix(")")) {
+        return format!("print({})", normalize_human_in_print_arg(rest));
+    }
     if let Some(rest) = trimmed.strip_prefix("print ") {
         return format!("print({})", normalize_human_in_print_arg(rest));
+    }
+    if let Some(rest) = trimmed.strip_prefix("print(").and_then(|r| r.strip_suffix(")")) {
+        let arg = normalize_human_in_print_arg(rest);
+        return format!("print({})", arg);
     }
     if let Some(expr) = trimmed
         .strip_prefix("std::cout <<")
@@ -2037,6 +2050,15 @@ fn infer_eval_parser(code: &str) -> parser_registry::ParserId {
     }
     if trimmed.starts_with("def ") || trimmed.contains("\ndef ") {
         return parser_registry::ParserId::Python;
+    }
+    if trimmed.contains("@import(")
+        || trimmed.contains("@cImport(")
+        || trimmed.contains("@TypeOf(")
+        || trimmed.starts_with("_ = try ")
+        || (trimmed.contains("std.fs.") && trimmed.contains("("))
+        || (trimmed.contains("std.mem.") && trimmed.contains("("))
+    {
+        return parser_registry::ParserId::Zig;
     }
     parser_registry::ParserId::In
 }
