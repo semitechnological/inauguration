@@ -5,7 +5,10 @@ pub fn parse_simple_expr(text: &str) -> Option<Expr> {
     if text.is_empty() {
         return None;
     }
-    if let Some(inner) = text.strip_prefix("print(").and_then(|rest| rest.strip_suffix(')')) {
+    if let Some(inner) = text
+        .strip_prefix("print(")
+        .and_then(|rest| rest.strip_suffix(')'))
+    {
         return Some(Expr::Call {
             callee: Box::new(Expr::Ident("print".into())),
             args: vec![parse_simple_expr(inner.trim())?],
@@ -44,10 +47,7 @@ pub fn parse_simple_expr(text: &str) -> Option<Expr> {
 pub fn parse_simple_body(text: &str, implicit_return: bool) -> Vec<Stmt> {
     let mut out = Vec::new();
     for raw in text.lines() {
-        let line = raw
-            .trim()
-            .trim_end_matches([';', '.', ','])
-            .trim();
+        let line = raw.trim().trim_end_matches([';', '.', ',']).trim();
         if line.is_empty() || matches!(line, "{" | "}" | "end" | "->") {
             continue;
         }
@@ -71,9 +71,7 @@ pub fn parse_simple_body(text: &str, implicit_return: bool) -> Vec<Stmt> {
             out.push(Stmt::Expr(expr));
         }
     }
-    if implicit_return
-        && let Some(Stmt::Expr(expr)) = out.pop()
-    {
+    if implicit_return && let Some(Stmt::Expr(expr)) = out.pop() {
         out.push(Stmt::Return(Some(expr)));
     }
     out

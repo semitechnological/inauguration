@@ -111,13 +111,16 @@ fn parse_fn_block(lines: &[&str], start: usize) -> Result<Option<(Decl, usize)>,
     if body.is_empty() {
         body.push(Stmt::Return(None));
     }
-    Ok(Some((Decl::Function {
-        name: name.to_string(),
-        params: vec![],
-        ret,
-        body,
-        type_params: vec![],
-    }, idx.saturating_add(1))))
+    Ok(Some((
+        Decl::Function {
+            name: name.to_string(),
+            params: vec![],
+            ret,
+            body,
+            type_params: vec![],
+        },
+        idx.saturating_add(1),
+    )))
 }
 
 fn parse_vb_stmt(line: &str, fn_name: &str) -> Result<Option<Stmt>, String> {
@@ -144,7 +147,10 @@ fn parse_vb_stmt(line: &str, fn_name: &str) -> Result<Option<Stmt>, String> {
 
 fn parse_vb_expr(text: &str) -> Result<Expr, String> {
     let text = text.trim();
-    if let Some(inner) = text.strip_prefix("print(").and_then(|rest| rest.strip_suffix(')')) {
+    if let Some(inner) = text
+        .strip_prefix("print(")
+        .and_then(|rest| rest.strip_suffix(')'))
+    {
         return Ok(Expr::Call {
             callee: Box::new(Expr::Ident("print".into())),
             args: vec![parse_vb_expr(inner.trim())?],
@@ -160,7 +166,9 @@ fn parse_vb_expr(text: &str) -> Result<Expr, String> {
     if let Ok(value) = text.parse::<i64>() {
         return Ok(Expr::IntLit(value));
     }
-    if (text.starts_with('"') && text.ends_with('"')) || (text.starts_with('\'') && text.ends_with('\'')) {
+    if (text.starts_with('"') && text.ends_with('"'))
+        || (text.starts_with('\'') && text.ends_with('\''))
+    {
         return Ok(Expr::StringLit(text[1..text.len() - 1].to_string()));
     }
     Ok(Expr::Ident(text.to_string()))

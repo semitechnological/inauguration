@@ -240,7 +240,9 @@ fn human_call_stmt(line: &str) -> Option<String> {
     if name.is_empty()
         || rest.is_empty()
         || name.contains('(')
-        || !name.chars().all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+        || !name
+            .chars()
+            .all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
     {
         return None;
     }
@@ -326,7 +328,10 @@ fn normalize_human_in_source(source: &str) -> String {
                 }
                 let header = strip_trailing_colon(line);
                 let fn_header = if header.starts_with("distributed ") {
-                    format!("distributed fn {} -> void {{", trim(&header["distributed ".len()..]))
+                    format!(
+                        "distributed fn {} -> void {{",
+                        trim(&header["distributed ".len()..])
+                    )
                 } else if header.contains('(') {
                     format!("fn {header} -> void {{")
                 } else {
@@ -385,7 +390,10 @@ fn normalize_human_in_source(source: &str) -> String {
             }
             let header = strip_trailing_colon(line);
             let fn_header = if header.starts_with("distributed ") {
-                format!("distributed fn {} -> void {{", trim(&header["distributed ".len()..]))
+                format!(
+                    "distributed fn {} -> void {{",
+                    trim(&header["distributed ".len()..])
+                )
             } else if header.contains('(') {
                 format!("fn {header} -> void {{")
             } else {
@@ -3614,15 +3622,24 @@ main:
   host_log "compiler-visible effect"
 "#;
         let module = parse_in_source(src).expect("parse");
-        assert!(module.decls.iter().any(|decl| {
-            matches!(decl, Decl::Struct { name, .. } if name == "Message")
-        }));
-        assert!(module.decls.iter().any(|decl| {
-            matches!(decl, Decl::Function { name, .. } if name == "main")
-        }));
-        assert!(module.decls.iter().any(|decl| {
-            matches!(decl, Decl::Function { name, .. } if name == "print")
-        }));
+        assert!(
+            module
+                .decls
+                .iter()
+                .any(|decl| { matches!(decl, Decl::Struct { name, .. } if name == "Message") })
+        );
+        assert!(
+            module
+                .decls
+                .iter()
+                .any(|decl| { matches!(decl, Decl::Function { name, .. } if name == "main") })
+        );
+        assert!(
+            module
+                .decls
+                .iter()
+                .any(|decl| { matches!(decl, Decl::Function { name, .. } if name == "print") })
+        );
     }
 
     #[test]
