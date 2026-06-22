@@ -336,6 +336,23 @@ fn boundary_typ_name(typ: &Typ) -> String {
     }
 }
 
+fn canonical_type(typ: &Typ) -> Typ {
+    match typ {
+        Typ::Named(name) => match name.trim() {
+            "Int" | "int" | "i64" | "i32" | "i16" | "i8" | "u64" | "u32" | "u16" | "u8" => {
+                Typ::Int
+            }
+            "String" | "string" | "str" => Typ::String,
+            "Bool" | "bool" => Typ::Bool,
+            "Float" | "float" | "Double" | "double" | "f64" | "f32" => Typ::Float,
+            "Void" | "void" | "Unit" | "unit" | "()" => Typ::Void,
+            _ => typ.clone(),
+        },
+        Typ::Array(item) => Typ::Array(Box::new(canonical_type(item))),
+        _ => typ.clone(),
+    }
+}
+
 fn boundary_field_size(typ: &Typ) -> u64 {
     match typ {
         Typ::Int | Typ::Bool | Typ::Float => 8,
@@ -387,8 +404,11 @@ fn collect_functions(module: &UnifiedModule) -> Result<HashMap<String, FunctionI
                 name.clone(),
                 FunctionInfo {
                     name: name.clone(),
-                    params: params.clone(),
-                    ret: ret.clone(),
+                    params: params
+                        .iter()
+                        .map(|(name, typ)| (name.clone(), canonical_type(typ)))
+                        .collect(),
+                    ret: canonical_type(ret),
                     body: body.clone(),
                 },
             )
@@ -404,7 +424,7 @@ fn collect_functions(module: &UnifiedModule) -> Result<HashMap<String, FunctionI
 }
 
 fn entry_return_kind(ret: &Typ) -> EntryReturn {
-    match ret {
+    match canonical_type(ret) {
         Typ::Int | Typ::Float | Typ::Bool => EntryReturn::IntLike,
         Typ::String | Typ::Void | Typ::Array(_) | Typ::Named(_) | Typ::Generic(_) => {
             EntryReturn::VoidOrReference
@@ -2530,11 +2550,11 @@ fn native_struct_fields<'a>(
 }
 
 fn is_native_scalar_type(typ: &Typ) -> bool {
-    matches!(typ, Typ::Int | Typ::Bool | Typ::String)
+    matches!(canonical_type(typ), Typ::Int | Typ::Bool | Typ::String)
 }
 
 fn ensure_native_array_element(elem: &Typ, fn_name: &str, context: &str) -> Result<(), String> {
-    match elem {
+    match canonical_type(elem) {
         Typ::Int | Typ::Bool | Typ::String => Ok(()),
         Typ::Array(_) => Err(format!(
             "native-lower[native-array-nested-unsupported]: unsupported {context} array element type in `{fn_name}` (nested arrays are not supported)"
@@ -2549,7 +2569,9 @@ fn ensure_native_array_element(elem: &Typ, fn_name: &str, context: &str) -> Resu
 }
 
 fn array_item_matches(expected: &Typ, actual: &Typ) -> bool {
-    expected == actual || matches!((expected, actual), (Typ::Int, Typ::Bool))
+    let expected = canonical_type(expected);
+    let actual = canonical_type(actual);
+    expected == actual || matches!((&expected, &actual), (Typ::Int, Typ::Bool))
 }
 
 fn expr_type(expr: &Expr) -> Option<Typ> {

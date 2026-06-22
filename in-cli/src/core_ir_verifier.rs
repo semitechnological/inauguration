@@ -68,7 +68,7 @@ pub fn verify_module(module: &UnifiedModule, options: &VerifyOptions) -> VerifyR
                 return fail_report(parsed_function_count, call_edges, &code, reason);
             }
 
-            if *ret != Typ::Void && body.is_empty() {
+            if canonical_type(ret) != Typ::Void && body.is_empty() {
                 return fail_report(
                     parsed_function_count,
                     call_edges,
@@ -377,14 +377,14 @@ fn check_stmt(
         Stmt::Break => Ok(()),
         Stmt::Return(Some(expr)) => {
             check_expr(fn_name, expr, facts, env, call_edges)?;
-            if *ret == Typ::Void {
+            if canonical_type(ret) == Typ::Void {
                 return Err((
                     "return-type-mismatch".to_string(),
                     format!("return value in void function `{fn_name}`"),
                 ));
             }
             if let Some(expr_typ) = expr_type(expr, facts, env)
-                && &expr_typ != ret
+                && canonical_type(&expr_typ) != canonical_type(ret)
             {
                 return Err((
                     "return-type-mismatch".to_string(),
@@ -398,7 +398,7 @@ fn check_stmt(
             Ok(())
         }
         Stmt::Return(None) => {
-            if *ret != Typ::Void {
+            if canonical_type(ret) != Typ::Void {
                 return Err((
                     "return-type-mismatch".to_string(),
                     format!("missing return value in `{fn_name}`"),
@@ -816,6 +816,23 @@ fn type_name(typ: &Typ) -> String {
         Typ::Array(item) => format!("[{}]", type_name(item)),
         Typ::Named(name) => name.clone(),
         Typ::Generic(name) => name.clone(),
+    }
+}
+
+fn canonical_type(typ: &Typ) -> Typ {
+    match typ {
+        Typ::Named(name) => match name.trim() {
+            "Int" | "int" | "i64" | "i32" | "i16" | "i8" | "u64" | "u32" | "u16" | "u8" => {
+                Typ::Int
+            }
+            "String" | "string" | "str" => Typ::String,
+            "Bool" | "bool" => Typ::Bool,
+            "Float" | "float" | "Double" | "double" | "f64" | "f32" => Typ::Float,
+            "Void" | "void" | "Unit" | "unit" | "()" => Typ::Void,
+            _ => typ.clone(),
+        },
+        Typ::Array(item) => Typ::Array(Box::new(canonical_type(item))),
+        _ => typ.clone(),
     }
 }
 

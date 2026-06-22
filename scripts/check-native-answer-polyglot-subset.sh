@@ -61,6 +61,7 @@ check_answer apps/polyglot-sample/Sample.java
 check_answer apps/polyglot-sample/sample.ts
 check_answer apps/polyglot-sample/Sample.kt
 check_answer apps/polyglot-sample/Program.cs
+check_answer apps/polyglot-sample/sample.go
 check_answer apps/polyglot-sample/sample.nim
 check_answer apps/polyglot-sample/sample.odin
 check_answer apps/polyglot-sample/sample.ha
@@ -68,3 +69,4 @@ check_answer apps/polyglot-sample/sample.hc
 check_answer apps/polyglot-sample/sample.d
 check_answer apps/polyglot-sample/sample.cr
 check_answer apps/polyglot-sample/sample.clj
+check_answer apps/polyglot-sample/sample.swift

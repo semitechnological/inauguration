@@ -116,6 +116,7 @@ fn dispatch(id: ParserId, path: &Path, src: &str) -> Result<UnifiedModule, Strin
                     let name_n = n.child_by_field_name("name")?;
                     let name = normalize_entry(node_txt(src, name_n).trim());
                     let params = go_params(src, n);
+                    let ret = go_return_type(src, n).unwrap_or(Typ::Void);
                     let body = n
                         .child_by_field_name("body")
                         .map(|b| go_body(src, b))
@@ -123,7 +124,7 @@ fn dispatch(id: ParserId, path: &Path, src: &str) -> Result<UnifiedModule, Strin
                     Some(Decl::Function {
                         name,
                         params,
-                        ret: Typ::Void,
+                        ret,
                         body,
                         type_params: vec![],
                     })
@@ -6270,6 +6271,22 @@ fn go_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
     ast_body(src, body, GO_AST)
 }
 
+fn go_return_type(src: &[u8], func: Node<'_>) -> Option<Typ> {
+    func.child_by_field_name("result")
+        .or_else(|| func.child_by_field_name("return_type"))
+        .or_else(|| named_descendant(func, "type_identifier"))
+        .and_then(|node| {
+            if node.kind() == "identifier"
+                && func
+                    .child_by_field_name("name")
+                    .is_some_and(|name| name == node)
+            {
+                return None;
+            }
+            Some(Typ::Named(node_txt(src, node).trim().to_string()))
+        })
+}
+
 // ─── OCaml ────────────────────────────────────────────────────────────
 
 const OCAML_AST: AstShape = AstShape {
@@ -9582,6 +9599,7 @@ end
                 let name_n = n.child_by_field_name("name")?;
                 let name = normalize_entry(node_txt(src, name_n).trim());
                 let params = go_params(src, n);
+                let ret = go_return_type(src, n).unwrap_or(Typ::Void);
                 let body = n
                     .child_by_field_name("body")
                     .map(|b| go_body(src, b))
@@ -9589,7 +9607,7 @@ end
                 Some(Decl::Function {
                     name,
                     params,
-                    ret: Typ::Void,
+                    ret,
                     body,
                     type_params: vec![],
                 })
@@ -9610,6 +9628,40 @@ end
                 }
                 other => panic!("unexpected body: {other:?}"),
             },
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn extract_go_function_return_type() {
+        let src = "package main\n\nfunc answer() int {\n\treturn 42\n}\n";
+        let m = parse_lang(tree_sitter_go::LANGUAGE.into(), src, |b, r| {
+            extract_fn_nodes(b, r, &["function_declaration", "method_declaration"], |src, n| {
+                let name_n = n.child_by_field_name("name")?;
+                let name = normalize_entry(node_txt(src, name_n).trim());
+                let params = go_params(src, n);
+                let ret = go_return_type(src, n).unwrap_or(Typ::Void);
+                let body = n
+                    .child_by_field_name("body")
+                    .map(|b| go_body(src, b))
+                    .unwrap_or_default();
+                Some(Decl::Function {
+                    name,
+                    params,
+                    ret,
+                    body,
+                    type_params: vec![],
+                })
+            })
+        })
+        .expect("ok");
+        let answer = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "answer"))
+            .expect("answer");
+        match answer {
+            Decl::Function { ret, .. } => assert_eq!(ret, &Typ::Named("int".into())),
             _ => panic!("expected function"),
         }
     }

@@ -261,7 +261,7 @@ fn check_stmt(
         Stmt::Expr(expr) => check_expr(fn_name, expr, facts, env),
         Stmt::Return(Some(expr)) => {
             check_expr(fn_name, expr, facts, env)?;
-            if *fn_ret == Typ::Void {
+            if canonical_type(fn_ret) == Typ::Void {
                 return Err(format!("return value in void function `{fn_name}`"));
             }
             if let Some(expr_typ) = expr_type(expr, facts, env)?
@@ -276,7 +276,7 @@ fn check_stmt(
             Ok(())
         }
         Stmt::Return(None) => {
-            if *fn_ret != Typ::Void {
+            if canonical_type(fn_ret) != Typ::Void {
                 return Err(format!("missing return value in `{fn_name}`"));
             }
             Ok(())
@@ -622,8 +622,27 @@ fn type_name(typ: &Typ) -> String {
     }
 }
 
+fn canonical_type(typ: &Typ) -> Typ {
+    match typ {
+        Typ::Named(name) => match name.trim() {
+            "Int" | "int" | "i64" | "i32" | "i16" | "i8" | "u64" | "u32" | "u16" | "u8" => {
+                Typ::Int
+            }
+            "String" | "string" | "str" => Typ::String,
+            "Bool" | "bool" => Typ::Bool,
+            "Float" | "float" | "Double" | "double" | "f64" | "f32" => Typ::Float,
+            "Void" | "void" | "Unit" | "unit" | "()" => Typ::Void,
+            _ => typ.clone(),
+        },
+        Typ::Array(item) => Typ::Array(Box::new(canonical_type(item))),
+        _ => typ.clone(),
+    }
+}
+
 fn type_compatible(expected: &Typ, actual: &Typ) -> bool {
-    expected == actual || is_any_type(expected) || is_any_type(actual)
+    let expected = canonical_type(expected);
+    let actual = canonical_type(actual);
+    expected == actual || is_any_type(&expected) || is_any_type(&actual)
 }
 
 fn is_any_type(typ: &Typ) -> bool {
@@ -1034,6 +1053,16 @@ mod tests {
             err.contains("return type mismatch in `main`: expected Int, got String"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn accepts_named_primitive_return_aliases() {
+        typecheck_executable(&module(vec![function_with_ret(
+            "main",
+            Typ::Named("Int".into()),
+            vec![Stmt::Return(Some(Expr::IntLit(42)))],
+        )]))
+        .expect("named primitive aliases should typecheck");
     }
 
     #[test]
