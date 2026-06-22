@@ -327,6 +327,16 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         }
     }
 
+    // ponytail: link cargo dependencies for Rust sources
+    let is_rust_source = request.path.extension().is_some_and(|e| e == "rs");
+    if is_rust_source {
+        let project_dir = request.path.parent().unwrap_or(Path::new("."));
+        let deps = crate::cargo_linker::compile_cargo_dependencies(project_dir);
+        if !deps.is_empty() {
+            crate::cargo_linker::merge_dependency_modules(&mut module, deps);
+        }
+    }
+
     // Lower module: desugar classes to structs before typecheck
     crate::lower_core::desugar_module(&mut module);
     if let parser_registry::ResolvedBuildParser::CoreIr(parser_id) = resolved
@@ -343,7 +353,6 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
     // The syn-based Rust frontend lowers complex Rust constructs that the verifier
     // can't fully type-check yet (stdlib imports, generics, Result types).
     let effective_entry = request.entry.clone().or(pkg_entry);
-    let is_rust_source = request.path.extension().is_some_and(|e| e == "rs");
     if !is_rust_source {
         let verify_opts = core_ir_verifier::VerifyOptions {
             entry: effective_entry.clone(),
