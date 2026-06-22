@@ -610,7 +610,7 @@ fn run() -> Result<()> {
             code,
             parser,
             verbose,
-        } => cmd_eval(&invocation_cwd, &code, parser.as_deref(), verbose),
+        } => cmd_eval_dispatch(&invocation_cwd, &code, parser.as_deref(), verbose),
         Commands::Doctor => cmd_doctor(),
         Commands::Bench { metrics } => {
             cmd_bench(&workspace_root(invocation_cwd.clone())?, &metrics)
@@ -2580,6 +2580,66 @@ fn cmd_polyglot_eval(cwd: &Path, code: &str, verbose: bool) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Auto-detect: split code into paragraphs (blank-line separated), infer language per paragraph.
+fn split_auto_blocks(code: &str) -> Vec<String> {
+    let mut blocks = Vec::new();
+    let mut current = String::new();
+    for line in code.lines() {
+        if line.trim().is_empty() {
+            if !current.trim().is_empty() {
+                blocks.push(std::mem::take(&mut current));
+            }
+        } else {
+            current.push_str(line);
+            current.push('\n');
+        }
+    }
+    if !current.trim().is_empty() {
+        blocks.push(current);
+    }
+    blocks
+}
+
+fn cmd_auto_polyglot_eval(cwd: &Path, code: &str, verbose: bool) -> Result<()> {
+    let blocks = split_auto_blocks(code);
+    if blocks.len() <= 1 {
+        return cmd_eval(cwd, code, None, verbose);
+    }
+    for block in &blocks {
+        let trimmed = block.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let lang = match infer_eval_parser(trimmed) {
+            parser_registry::ParserId::In => "in",
+            parser_registry::ParserId::Rust => "rust",
+            parser_registry::ParserId::JavaScript => "javascript",
+            parser_registry::ParserId::TypeScript => "typescript",
+            parser_registry::ParserId::Python => "python",
+            parser_registry::ParserId::Zig => "zig",
+            parser_registry::ParserId::Cpp => "cpp",
+            _ => "in",
+        };
+        eprint!("[{}] ", lang);
+        match cmd_eval(cwd, trimmed, Some(lang), verbose) {
+            Ok(()) => {},
+            Err(e) => eprintln!("failed: {e}"),
+        }
+    }
+    Ok(())
+}
+
+fn cmd_eval_dispatch(cwd: &Path, code: &str, parser: Option<&str>, verbose: bool) -> Result<()> {
+    // Auto-detect polyglot: if no parser and code has multiple paragraphs, try per-block detection
+    if parser.is_none() && !has_polyglot_fences(code) {
+        let blocks = split_auto_blocks(code);
+        if blocks.len() > 1 {
+            return cmd_auto_polyglot_eval(cwd, code, verbose);
+        }
+    }
+    cmd_eval(cwd, code, parser, verbose)
 }
 
 fn cmd_eval(cwd: &Path, code: &str, parser: Option<&str>, verbose: bool) -> Result<()> {
