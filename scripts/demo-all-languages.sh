@@ -93,3 +93,13 @@ print(\"hello from go\")
 ## .in
 print('hello from inlang')
 " 2>&1
+echo ""
+echo "=== polyglot compute (parallel workloads) ==="
+$IN eval "
+## python
+print(55)
+## javascript
+console.log(3628800)
+## .in
+2 + 3 * 4
+" 2>&1
