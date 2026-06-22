@@ -1,0 +1,14 @@
+package even_odd;
+module even_odd.main;
+
+fn is_even(n: Int) -> Bool {
+  if n == 0 { return true; }
+  return is_odd(n - 1);
+}
+
+fn is_odd(n: Int) -> Bool {
+  if n == 0 { return false; }
+  return is_even(n - 1);
+}
+
+fn main() -> Bool { return is_even(42); }
