@@ -1,26 +1,21 @@
 use crate::boundary_ir::{BoundaryModule, CompileArtifact};
+use crate::compiler::boundary_common::{self, extract_boundary_from_comment, ensure_main};
 use crate::compiler::simple_front::parse_simple_body;
 use crate::core_ir::{Decl, Expr, Stmt, Typ, UnifiedModule};
 use std::path::Path;
 
+const BOUNDARY_PREFIXES: &[&str] = &["//? in_boundary", "// in_boundary"];
+
 pub fn parse_hare_file(path: &Path) -> Result<UnifiedModule, String> {
-    let src = std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
-    parse_hare_source(&src)
+    boundary_common::parse_file_with(path, parse_hare_source)
 }
 
 pub fn parse_hare_artifact(path: &Path) -> Result<CompileArtifact, String> {
-    let src = std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
-    parse_hare_artifact_source(&src)
+    boundary_common::parse_artifact_with(path, parse_hare_source, extract_hare_boundary)
 }
 
 pub fn parse_hare_artifact_source(src: &str) -> Result<CompileArtifact, String> {
-    let semantic = parse_hare_source(src)?;
-    let boundary = extract_hare_boundary(src);
-    Ok(if let Some(boundary) = boundary {
-        CompileArtifact::with_boundary(semantic, boundary)
-    } else {
-        CompileArtifact::from_semantic(semantic)
-    })
+    boundary_common::artifact_from_source(src, parse_hare_source, extract_hare_boundary)
 }
 
 pub fn parse_hare_source(src: &str) -> Result<UnifiedModule, String> {
@@ -39,35 +34,12 @@ pub fn parse_hare_source(src: &str) -> Result<UnifiedModule, String> {
     if decls.is_empty() {
         return Err("hare boundary front: no fn declarations found".to_string());
     }
-    if !decls
-        .iter()
-        .any(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
-    {
-        decls.push(Decl::Function {
-            name: "main".to_string(),
-            params: vec![],
-            ret: Typ::Void,
-            body: vec![Stmt::Return(None)],
-            type_params: vec![],
-        });
-    }
+    ensure_main(&mut decls);
     Ok(UnifiedModule::new(decls))
 }
 
 pub fn extract_hare_boundary(src: &str) -> Option<BoundaryModule> {
-    if let Some(line) = src.lines().next() {
-        let trimmed = line.trim();
-        let payload = trimmed
-            .strip_prefix("//? in_boundary")
-            .or_else(|| trimmed.strip_prefix("// in_boundary"))?;
-        let module: BoundaryModule = serde_json::from_str(payload.trim()).ok()?;
-        return Some(if module.layout_hash.is_empty() {
-            module.with_layout_hash()
-        } else {
-            module
-        });
-    }
-    None
+    extract_boundary_from_comment(src, BOUNDARY_PREFIXES)
 }
 
 fn parse_fn_at(lines: &[&str], i: usize, line: &str) -> Result<Option<(Decl, usize)>, String> {
