@@ -676,7 +676,8 @@ enum LocalSlot {
 }
 
 struct LowerCtx<'a> {
-    params: HashMap<String, u8>,
+    /// Parameter name → stack offset (params fully spilled, no register residency)
+    params: HashMap<String, u32>,
     param_stores: Vec<(u8, u32)>,
     locals: HashMap<String, LocalSlot>,
     structs: &'a HashMap<String, Vec<(String, Typ)>>,
@@ -720,7 +721,9 @@ impl<'a> LowerCtx<'a> {
                     if abi_idx >= 8 {
                         return Err(format!("native-lower: too many parameters in `{fn_name}`"));
                     }
-                    ctx.params.insert(name.clone(), abi_idx as u8);
+                    let offset = ctx.alloc_slot();
+                    ctx.param_stores.push((abi_idx as u8, offset));
+                    ctx.params.insert(name.clone(), offset);
                     abi_idx += 1;
                 }
                 Typ::Named(struct_name) => {
@@ -1700,10 +1703,8 @@ fn lower_expr_into(
             Ok(())
         }
         Expr::Ident(name) => {
-            if let Some(reg) = ctx.params.get(name) {
-                if rd != *reg {
-                    emitter.emit_u32(aarch64::mov_reg64(rd, *reg));
-                }
+            if let Some(offset) = ctx.params.get(name) {
+                emitter.emit_u32(aarch64::ldr64(rd, aarch64::REG_SP, *offset));
             } else if let Some(slot) = ctx.locals.get(name) {
                 match slot {
                     LocalSlot::Scalar(offset) => {
@@ -2224,10 +2225,8 @@ fn lower_inrt_call(
                 emitter.emit_insns(&aarch64::load_i64(reg, id));
             }
             Expr::Ident(name) => {
-                if let Some(&param_reg) = ctx.params.get(name) {
-                    if reg != param_reg {
-                        emitter.emit_u32(aarch64::mov_reg64(reg, param_reg));
-                    }
+                if let Some(offset) = ctx.params.get(name) {
+                    emitter.emit_u32(aarch64::ldr64(reg, aarch64::REG_SP, *offset));
                 } else if let Some(LocalSlot::Scalar(offset)) = ctx.locals.get(name) {
                     emitter.emit_u32(aarch64::ldr64(reg, aarch64::REG_SP, *offset));
                 } else {

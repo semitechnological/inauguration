@@ -234,6 +234,20 @@ fn strip_trailing_colon(line: &str) -> &str {
     line.strip_suffix(':').unwrap_or(line).trim()
 }
 
+/// Split on first `:` not inside parentheses (for single-line fn: `fn foo(x: Int) -> Ret: body`).
+fn split_first_colon(line: &str) -> Option<(&str, &str)> {
+    let mut paren_depth = 0u32;
+    for (i, c) in line.char_indices() {
+        match c {
+            '(' => paren_depth += 1,
+            ')' => paren_depth = paren_depth.saturating_sub(1),
+            ':' if paren_depth == 0 => return Some((&line[..i], &line[i + 1..])),
+            _ => {}
+        }
+    }
+    None
+}
+
 fn human_call_stmt(line: &str) -> Option<String> {
     let trimmed = line.trim();
     let (name, rest) = trimmed.split_once(' ')?;
@@ -286,10 +300,20 @@ fn next_nonempty_line<'a>(lines: &'a [&'a str], start: usize) -> Option<&'a str>
         .find(|line| !line.is_empty())
 }
 
-fn normalize_human_in_source(source: &str) -> String {
+/// Transform the "human-friendly" `.in` syntax into normalised brace form.
+pub fn normalize_human_in_source(source: &str) -> String {
+    // If no line ends with `:`, this is brace-form source — return unchanged.
+    let has_human_fn = source.lines().any(|l| l.trim().ends_with(':') && !l.trim().starts_with("//"));
+    if !has_human_fn {
+        return source.to_string();
+    }
     let lines: Vec<&str> = source.lines().collect();
     let mut out = Vec::new();
     let mut stack: Vec<(&str, usize)> = Vec::new();
+
+    eprintln!("=== NORMALIZE INPUT ({}B) ===", source.len());
+    eprintln!("{source}");
+    eprintln!("=== END INPUT ===");
 
     for (idx, raw_line) in lines.iter().enumerate() {
         if raw_line.trim().is_empty() {
@@ -307,14 +331,23 @@ fn normalize_human_in_source(source: &str) -> String {
 
         let line = raw_line.trim();
         let next_line = next_nonempty_line(&lines, idx + 1).unwrap_or("");
+        let next_trimmed = next_line.trim();
         let next_is_field = next_line.contains(':')
             && !next_line.ends_with(':')
             && !next_line.contains('(')
-            && !next_line.starts_with('@');
+            && !next_line.starts_with('@')
+            && !next_trimmed.starts_with("return")
+            && !next_trimmed.starts_with("if ")
+            && !next_trimmed.starts_with("while ")
+            && !next_trimmed.starts_with("for ")
+            && !next_trimmed.starts_with("let ")
+            && !next_trimmed.starts_with("var ")
+            && !next_trimmed.starts_with("print")
+            && !next_trimmed.starts_with("fn ");
 
         if stack.last().map(|(kind, _)| *kind) == Some("struct") {
             if let Some((field, ty)) = line.split_once(':') {
-                out.push(format!("{} {}", trim(ty), trim(field)));
+                out.push(format!("{} {};", trim(ty), trim(field)));
                 continue;
             }
         }
@@ -384,7 +417,12 @@ fn normalize_human_in_source(source: &str) -> String {
                 continue;
             }
             if next_is_field {
-                out.push(format!("struct {} {{", strip_trailing_colon(line)));
+                let header = strip_trailing_colon(line);
+                if header.starts_with("struct ") {
+                    out.push(format!("{header} {{"));
+                } else {
+                    out.push(format!("struct {header} {{"));
+                }
                 stack.push(("struct", indent));
                 continue;
             }
@@ -395,13 +433,43 @@ fn normalize_human_in_source(source: &str) -> String {
                     trim(&header["distributed ".len()..])
                 )
             } else if header.contains('(') {
-                format!("fn {header} -> void {{")
+                if header.contains("->") {
+                    if header.starts_with("fn ") {
+                        format!("{header} {{")
+                    } else {
+                        format!("fn {header} {{")
+                    }
+                } else {
+                    if header.starts_with("fn ") {
+                        format!("{header} -> void {{")
+                    } else {
+                        format!("fn {header} -> void {{")
+                    }
+                }
             } else {
                 format!("fn {header}() -> void {{")
             };
             out.push(fn_header);
             stack.push(("stmt", indent));
             continue;
+        }
+        // Single-line fn with inline body: `fn name() -> Type: body;`
+        if !line.ends_with(':') && line.contains(':') && !line.starts_with("@") {
+            if let Some((header, body)) = split_first_colon(line) {
+                let header = trim(header);
+                let body = trim(body);
+                if header.starts_with("fn ") || header.contains('(') {
+                    let fn_header = if header.contains("->") {
+                        format!("{header} {{")
+                    } else {
+                        format!("{header} -> void {{")
+                    };
+                    out.push(fn_header);
+                    out.push(body.to_string());
+                    out.push("}".to_string());
+                    continue;
+                }
+            }
         }
         out.push(line.to_string());
     }
