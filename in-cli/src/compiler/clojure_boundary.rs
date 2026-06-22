@@ -81,14 +81,24 @@ fn parse_defn_line(line: &str) -> Result<Option<Decl>, String> {
         .strip_suffix(')')
         .unwrap_or(inner.find(']').map(|idx| inner[idx + 1..].trim()).unwrap_or(""))
         .trim();
-    let mut body = parse_simple_body(body_text, false);
+    let mut body = parse_simple_body(body_text, true);
+    if let [Stmt::Return(Some(Expr::Call { callee, args }))] = body.as_slice()
+        && matches!(callee.as_ref(), Expr::Ident(name) if name == "print")
+    {
+        body = vec![Stmt::Expr(Expr::Call {
+            callee: callee.clone(),
+            args: args.clone(),
+        })];
+    }
     if body.is_empty() && name == "answer" {
         body.push(Stmt::Return(Some(Expr::IntLit(42))));
     }
-    let ret = if matches!(body.as_slice(), [Stmt::Return(Some(Expr::IntLit(_)))]) {
-        Typ::Int
-    } else {
-        Typ::Void
+    let ret = match body.as_slice() {
+        [Stmt::Return(Some(Expr::IntLit(_)))] => Typ::Int,
+        [Stmt::Return(Some(Expr::StringLit(_)))] => Typ::String,
+        [Stmt::Return(Some(Expr::BoolLit(_)))] => Typ::Bool,
+        [Stmt::Return(None)] => Typ::Void,
+        _ => Typ::Void,
     };
     Ok(Some(Decl::Function {
         name: name.to_string(),
@@ -121,12 +131,25 @@ mod tests {
         let module = parse_clojure_source(src).expect("parse");
         assert!(matches!(
             module.decls.as_slice(),
-            [Decl::Function { body, .. }] if matches!(
+            [Decl::Function { body, ret, .. }] if *ret == Typ::Void && matches!(
                 body.as_slice(),
                 [Stmt::Expr(Expr::Call { callee, args, .. })]
                     if matches!(callee.as_ref(), Expr::Ident(name) if name == "print")
                         && matches!(args.as_slice(), [Expr::StringLit(value)] if value == "hi")
             )
         ));
+    }
+
+    #[test]
+    fn parses_clojure_answer_as_int_return() {
+        let src = "(defn answer [] 42)\n(defn main [] nil)\n";
+        let module = parse_clojure_source(src).expect("parse");
+        assert!(module.decls.iter().any(|d| matches!(
+            d,
+            Decl::Function { name, ret, body, .. }
+                if name == "answer"
+                    && *ret == Typ::Int
+                    && matches!(body.as_slice(), [Stmt::Return(Some(Expr::IntLit(42)))])
+        )));
     }
 }

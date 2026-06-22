@@ -143,6 +143,23 @@ pub fn fnv1a_hash(data: &[u8]) -> u64 {
     hash
 }
 
+fn compiler_build_fingerprint() -> u64 {
+    let salt = std::env::current_exe()
+        .ok()
+        .and_then(|path| {
+            let meta = fs::metadata(&path).ok()?;
+            let modified = meta
+                .modified()
+                .ok()?
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()?
+                .as_nanos();
+            Some(format!("{}:{}:{modified}", path.display(), meta.len()))
+        })
+        .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
+    fnv1a_hash(salt.as_bytes())
+}
+
 pub fn source_frontend_hash(path: &Path, content: &str) -> String {
     let mut hash: u64 = 0xcbf29ce484222325;
     for &byte in path.to_string_lossy().as_bytes() {
@@ -152,6 +169,7 @@ pub fn source_frontend_hash(path: &Path, content: &str) -> String {
     hash ^= 0xff;
     let content_hash = fnv1a_hash(content.as_bytes());
     hash = hash.wrapping_mul(0x100000001b3) ^ content_hash;
+    hash = hash.wrapping_mul(0x100000001b3) ^ compiler_build_fingerprint();
     format!("{hash:016x}")
 }
 
