@@ -669,25 +669,25 @@ pub fn source_identity_for_path(
 
     let source = match fs::read_to_string(source_path) {
         Ok(source) => source,
-        Err(_) => {
+        Err(e) => {
             return PackageSourceIdentity {
                 package: None,
                 module: None,
                 manifest_name: manifest_name.map(str::to_string),
                 status: "unavailable".to_string(),
-                reason: "source-read-failed".to_string(),
+                reason: format!("source-read-failed: {e}"),
             };
         }
     };
     let surface = match crate::in_lang_parse::parse_in_surface_info(&source) {
         Ok(surface) => surface,
-        Err(_) => {
+        Err(e) => {
             return PackageSourceIdentity {
                 package: None,
                 module: None,
                 manifest_name: manifest_name.map(str::to_string),
                 status: "unavailable".to_string(),
-                reason: "surface-parse-failed".to_string(),
+                reason: format!("surface-parse-failed: {e}"),
             };
         }
     };

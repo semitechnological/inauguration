@@ -320,6 +320,9 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
             }
             Err(e) => {
                 eprintln!("[import] warning: {e}");
+                report.reason_code = Some("import-resolution-failed".to_string());
+                report.reason = Some(e.clone());
+                report.error = Some(e);
             }
         }
     }
@@ -724,7 +727,10 @@ fn emit_component_metadata_sidecar(
     let meta_path = out_path.with_extension("component-metadata.json");
     match std::fs::write(&meta_path, &json) {
         Ok(()) => Some(meta_path.display().to_string()),
-        Err(_) => None,
+        Err(e) => {
+            eprintln!("[metadata] warning: failed to write component metadata {}: {e}", meta_path.display());
+            None
+        }
     }
 }
 
@@ -1063,7 +1069,9 @@ fn finalize_report(
     report.timing_micros = started.elapsed().as_micros();
     report.timing_waves_us = Some(timing_waves_for_jobs(report.jobs, report.timing_micros));
     if !report.cache_hit {
-        let _ = compile_cache::write_cached_report(cwd, frontend_hash, report);
+        if let Err(e) = compile_cache::write_cached_report(cwd, frontend_hash, report) {
+            eprintln!("[cache] warning: failed to write compile cache: {e}");
+        }
     }
     report.clone()
 }

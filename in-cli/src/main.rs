@@ -1800,10 +1800,12 @@ fn cmd_emit_boot(
             "compiler_version": env!("CARGO_PKG_VERSION"),
         }
     });
-    let _ = std::fs::write(
+    if let Err(e) = std::fs::write(
         &meta_path,
         serde_json::to_string_pretty(&meta).unwrap_or_else(|_| "{}".to_string()),
-    );
+    ) {
+        eprintln!("[metadata] warning: failed to write {}: {e}", meta_path.display());
+    }
 
     eprintln!(
         "boot image: {} bytes (trampoline: {} + kernel: {})",
@@ -2414,7 +2416,8 @@ fn eval_plans(parser_id: parser_registry::ParserId, code: &str) -> Vec<EvalPlan>
 fn cmd_eval(cwd: &Path, code: &str, parser: Option<&str>, verbose: bool) -> Result<()> {
     let parser_id = parse_eval_parser(parser, code)?;
     let dir = std::env::temp_dir().join("inaug-eval");
-    let _ = std::fs::create_dir_all(&dir);
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| InError::Message(format!("create eval temp dir {}: {e}", dir.display())))?;
     let path = dir.join(format!(
         "{}.{}",
         std::time::SystemTime::now()

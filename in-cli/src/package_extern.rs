@@ -92,9 +92,17 @@ pub fn package_import_bindings_for_source(source_path: &Path) -> Vec<InExternBin
     };
     let lock = crate::package_lock::discover_package_lock(&root.root)
         .and_then(|lock_root| crate::package_lock::load_package_lock(&lock_root.lock_path).ok());
-    let Ok(surface) = crate::in_lang_parse::parse_in_surface_info(
-        &fs::read_to_string(source_path).unwrap_or_default(),
-    ) else {
+    let source_text = match fs::read_to_string(source_path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!(
+                "[package-extern] warning: cannot read {}: {e}",
+                source_path.display()
+            );
+            return Vec::new();
+        }
+    };
+    let Ok(surface) = crate::in_lang_parse::parse_in_surface_info(&source_text) else {
         return Vec::new();
     };
     let mut bindings = Vec::new();
