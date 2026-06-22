@@ -2826,9 +2826,10 @@ fn owned_native_test_groups(root: &Path) -> Vec<TestGroup> {
         .collect()
 }
 
-fn test_step_names() -> [&'static str; 4] {
+fn test_step_names() -> [&'static str; 5] {
     [
         "polyglot samples (scripts/check-polyglot-sample.sh)",
+        "polyglot eval samples (scripts/check-eval-polyglot-sample.sh)",
         "bytecode compiler (scripts/check-bytecode-compiler.sh)",
         "orchestration compiler (scripts/check-orchestration-compiler.sh)",
         "conformance suite (scripts/run-conformance.sh)",
@@ -2854,7 +2855,11 @@ fn self_host_test_groups(root: &Path) -> Vec<TestGroup> {
         .into_iter()
         .map(|name| {
             let script = if name.contains("polyglot") {
-                "scripts/check-polyglot-sample.sh"
+                if name.contains("eval") {
+                    "scripts/check-eval-polyglot-sample.sh"
+                } else {
+                    "scripts/check-polyglot-sample.sh"
+                }
             } else if name.contains("bytecode") {
                 "scripts/check-bytecode-compiler.sh"
             } else if name.contains("conformance") {
@@ -4011,6 +4016,11 @@ mod tests {
         assert!(
             super::test_step_names()
                 .iter()
+                .any(|step| step.contains("check-eval-polyglot-sample.sh"))
+        );
+        assert!(
+            super::test_step_names()
+                .iter()
                 .any(|step| step.contains("check-bytecode-compiler.sh"))
         );
         assert!(
@@ -4027,6 +4037,11 @@ mod tests {
             steps
                 .iter()
                 .any(|step| step.contains("check-polyglot-sample.sh"))
+        );
+        assert!(
+            steps
+                .iter()
+                .any(|step| step.contains("check-eval-polyglot-sample.sh"))
         );
         assert!(
             steps
