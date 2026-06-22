@@ -6384,6 +6384,10 @@ fn ocaml_params(src: &[u8], binding: Node<'_>) -> Vec<(String, Typ)> {
 }
 
 fn ocaml_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
+    // ponytail: unit literal () = empty body (void return)
+    if body.kind() == "unit" {
+        return vec![];
+    }
     if let Some(stmts) = strict_simple_bounded_body(node_txt(src, body), "=") {
         return stmts;
     }
