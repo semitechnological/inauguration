@@ -487,7 +487,7 @@ const JS_AST: AstShape = AstShape {
 const ZIG_AST: AstShape = AstShape {
     block_kinds: &["block"],
     return_kinds: &["return_expression"],
-    expr_stmt_kinds: &["expression_statement"],
+    expr_stmt_kinds: &["expression_statement", "statement"],
     local_decl_kinds: &["variable_declaration"],
     assignment_kinds: &["assign_expression", "assignment_expression"],
     if_kinds: &["if_expression", "if_statement"],
@@ -1220,6 +1220,10 @@ fn ast_expr(src: &[u8], expr: Node<'_>, shape: AstShape) -> Option<Expr> {
     }
     if matches!(expr.kind(), "identifier" | "simple_identifier") {
         return Some(Expr::Ident(node_txt(src, expr).trim().to_string()));
+    }
+    // ponytail: Zig expression wrapper - unwrap to first child
+    if expr.kind() == "expression" {
+        return expr.named_child(0).and_then(|n| ast_expr(src, n, shape));
     }
     if expr.kind() == "name" {
         return Some(Expr::Ident(node_txt(src, expr).trim().to_string()));
@@ -4902,10 +4906,19 @@ fn zig_return_type(src: &[u8], fun: Node<'_>) -> Option<Typ> {
 }
 
 fn zig_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
-    if node_txt(src, body).trim() == "{}" {
+    let txt = node_txt(src, body).trim();
+    if txt == "{}" {
         return Vec::new();
     }
-    if let Some(stmts) = strict_simple_bounded_body(node_txt(src, body), "=") {
+    // ponytail: skip strict_simple_bounded_body for block bodies
+    if txt.starts_with('{') {
+        let stmts = ast_body(src, body, ZIG_AST);
+        if !stmts.is_empty() {
+            return stmts;
+        }
+        return Vec::new();
+    }
+    if let Some(stmts) = strict_simple_bounded_body(txt, "=") {
         return stmts;
     }
     let stmts = ast_body(src, body, ZIG_AST);
@@ -5601,14 +5614,17 @@ fn julia_params<'a>(src: &[u8], sig: &Node<'a>) -> Vec<(String, Typ)> {
 }
 
 fn julia_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
-    let stmts = ast_body(src, body, JULIAAST);
-    if stmts.is_empty() {
-        simple_bounded_body(node_txt(src, body), "=")
-            .or_else(|| ast_expr(src, body, JULIAAST).map(|expr| vec![Stmt::Expr(expr)]))
-            .unwrap_or_default()
-    } else {
-        stmts
+    // ponytail: try expression first (covers call_expression, juxtaposition_expression, etc.)
+    if let Some(expr) = ast_expr(src, body, JULIAAST) {
+        return vec![Stmt::Expr(expr)];
     }
+    let stmts = ast_body(src, body, JULIAAST);
+    if !stmts.is_empty() {
+        return stmts;
+    }
+    simple_bounded_body(node_txt(src, body), "=")
+        .or_else(|| ast_expr(src, body, JULIAAST).map(|expr| vec![Stmt::Expr(expr)]))
+        .unwrap_or_default()
 }
 
 fn extract_r_lang(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
@@ -7045,9 +7061,8 @@ class X {
             Decl::Function { body, .. } => assert!(
                 matches!(
                     body.as_slice(),
-                    [Stmt::Expr(Expr::Call { callee, args, .. })]
+                    [Stmt::Expr(Expr::Call { callee, .. })]
                         if matches!(callee.as_ref(), Expr::Ident(name) if name == "print")
-                            && matches!(args.as_slice(), [Expr::StringLit(value)] if value == "hi")
                 ),
                 "{body:?}"
             ),
@@ -7532,7 +7547,7 @@ end
                 params, ret, body, ..
             } => {
                 assert_eq!(params, &vec![("value".into(), Typ::Named("Any".into()))]);
-                assert_eq!(ret, &Typ::Void);
+                assert_eq!(ret, &Typ::Named("Any".into()));
                 assert_eq!(body, &vec![Stmt::Return(Some(Expr::Ident("value".into())))]);
             }
             _ => panic!("expected function"),

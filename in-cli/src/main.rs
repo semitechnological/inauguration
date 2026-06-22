@@ -2421,17 +2421,17 @@ fn eval_plans(parser_id: parser_registry::ParserId, code: &str) -> Vec<EvalPlan>
 
 fn cmd_eval(cwd: &Path, code: &str, parser: Option<&str>, verbose: bool) -> Result<()> {
     let parser_id = parse_eval_parser(parser, code)?;
-    let dir = std::env::temp_dir().join("inaug-eval");
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| InError::Message(format!("create eval temp dir {}: {e}", dir.display())))?;
-    let path = dir.join(format!(
-        "{}.{}",
+    let dir = std::env::temp_dir().join(format!(
+        "inaug-eval-{}-{}",
+        std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
-            .as_nanos(),
-        parser_id.default_extension()
+            .as_nanos()
     ));
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| InError::Message(format!("create eval temp dir {}: {e}", dir.display())))?;
+    let path = dir.join(format!("eval.{}", parser_id.default_extension()));
     let source_path = resolve_invocation_path(cwd, &path.to_string_lossy());
     let mut last_err = None;
     let mut execution = None;
@@ -2450,7 +2450,7 @@ fn cmd_eval(cwd: &Path, code: &str, parser: Option<&str>, verbose: bool) -> Resu
         }
     }
 
-    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_dir_all(&dir);
     let execution = match execution {
         Some(run) => run,
         None => return Err(last_err.unwrap_or_else(|| InError::Message("eval failed".to_string()))),
@@ -3141,10 +3141,14 @@ fn cmd_update_remote() -> Result<()> {
         let url = format!("https://raw.githubusercontent.com/{repo}/v{version}/install.sh");
         println!("No local inauguration checkout found; running remote install.sh ...");
         println!("Fetching: {url}");
-        let snippet = format!(
-            "set -euo pipefail; tmp=$(mktemp); curl -fsSL \"{url}\" -o \"$tmp\"; bash \"$tmp\"; rm -f \"$tmp\""
-        );
-        run_cmd(Command::new("bash").arg("-c").arg(snippet))
+        let snippet = "set -euo pipefail; tmp=$(mktemp); curl -fsSL \"$1\" -o \"$tmp\"; bash \"$tmp\"; rm -f \"$tmp\"";
+        run_cmd(
+            Command::new("bash")
+                .arg("-c")
+                .arg(snippet)
+                .arg("--")
+                .arg(&url),
+        )
     }
     #[cfg(not(unix))]
     {
