@@ -1402,7 +1402,15 @@ fn ast_args(src: &[u8], args: Node<'_>, shape: AstShape) -> Option<Vec<Expr>> {
     let mut out = Vec::new();
     let mut w = args.walk();
     for ch in args.named_children(&mut w) {
-        if let Some(expr) = ast_expr(src, ch, shape) {
+        // ponytail: Swift call_suffix children are value_argument wrappers
+        let target = if ch.kind() == "value_argument" {
+            first_named(ch, "simple_identifier")
+                .or_else(|| ch.named_child(0))
+                .unwrap_or(ch)
+        } else {
+            ch
+        };
+        if let Some(expr) = ast_expr(src, target, shape) {
             out.push(expr);
         } else if shape.strict_args {
             return None;
@@ -6630,7 +6638,7 @@ const SWIFT_AST: AstShape = AstShape {
     if_kinds: &["if_statement"],
     while_kinds: &["while_statement"],
     call_kinds: &["call_expression"],
-    arg_container_kinds: &["value_arguments"],
+    arg_container_kinds: &["value_arguments", "call_suffix"],
     arg_wrapper_kinds: &[],
     paren_kinds: &["tuple_expression"],
     binary_kinds: &[
@@ -6674,7 +6682,7 @@ fn extract_swift(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
         let ret = n
             .child_by_field_name("return_type")
             .and_then(|t| first_named(t, "type_annotation").or(Some(t)))
-            .map(|t| Typ::Named(node_txt(src, t).trim().to_string()))
+            .map(|t| norm_swift_type(node_txt(src, t).trim()))
             .unwrap_or(Typ::Void);
         let body = n
             .child_by_field_name("body")
@@ -6690,27 +6698,32 @@ fn extract_swift(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
     })
 }
 
+fn norm_swift_type(raw: &str) -> Typ {
+    match raw.trim() {
+        "Int" | "Int8" | "Int16" | "Int32" | "Int64" | "UInt" | "UInt8" | "UInt16" | "UInt32" | "UInt64" => Typ::Int,
+        "String" => Typ::String,
+        "Bool" => Typ::Bool,
+        "Float" | "Double" | "Float32" | "Float64" | "CGFloat" => Typ::Float,
+        "Void" | "()" => Typ::Void,
+        other => Typ::Named(other.to_string()),
+    }
+}
+
 fn swift_params(src: &[u8], func: Node<'_>) -> Vec<(String, Typ)> {
     let mut out = Vec::new();
-    if let Some(params) = func.child_by_field_name("parameters") {
-        let mut w = params.walk();
-        for ch in params.named_children(&mut w) {
-            if !matches!(ch.kind(), "parameter" | "simple_identifier") {
-                continue;
-            }
-            let name = ch
-                .child_by_field_name("name")
-                .or_else(|| first_named(ch, "simple_identifier"))
-                .or_else(|| first_named(ch, "identifier"))
-                .map(|n| node_txt(src, n).trim().to_string())
-                .unwrap_or_else(|| "_".to_string());
-            let ty = ch
-                .child_by_field_name("type")
-                .and_then(|t| first_named(t, "type_annotation").or(Some(t)))
-                .map(|t| Typ::Named(node_txt(src, t).trim().to_string()))
-                .unwrap_or(Typ::Named("Any".into()));
-            out.push((name, ty));
-        }
+    // ponytail: tree-sitter-swift 0.7.x puts parameter nodes as direct children
+    // of function_declaration, not under a named "parameters" field
+    for i in 0..func.child_count() {
+        let Some(ch) = func.child(i as u32) else { continue };
+        if ch.kind() != "parameter" { continue; }
+        let name = first_named(ch, "simple_identifier")
+            .map(|n| normalize_entry(node_txt(src, n).trim()))
+            .unwrap_or_else(|| "_".to_string());
+        if name == "_" { continue; }
+        let ty = first_named(ch, "user_type")
+            .map(|t| norm_swift_type(node_txt(src, t).trim()))
+            .unwrap_or(Typ::Named("Any".into()));
+        out.push((name, ty));
     }
     out
 }
