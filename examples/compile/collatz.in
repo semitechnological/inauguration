@@ -1,0 +1,18 @@
+package collatz;
+module collatz.main;
+
+fn collatz_steps(n: Int) -> Int {
+  let steps = 0;
+  let x = n;
+  while x != 1 {
+    if x - (x / 2) * 2 == 0 {
+      x = x / 2;
+    } else {
+      x = 3 * x + 1;
+    }
+    steps = steps + 1;
+  }
+  return steps;
+}
+
+fn main() -> Int { return collatz_steps(27); }

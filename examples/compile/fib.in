@@ -3,7 +3,16 @@ module fib.main;
 
 fn fib(n: Int) -> Int {
   if n <= 1 { return n; }
-  return fib(n-1) + fib(n-2);
+  let a = 0;
+  let b = 1;
+  let i = 2;
+  while i <= n {
+    let t = a + b;
+    a = b;
+    b = t;
+    i = i + 1;
+  }
+  return b;
 }
 
-fn main() -> Int { return fib(10); }
+fn main() -> Int { return fib(20); }

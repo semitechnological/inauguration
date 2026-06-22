@@ -1,0 +1,22 @@
+package primes;
+module primes.main;
+
+fn is_prime(n: Int) -> Bool {
+  if n <= 1 { return false; }
+  let i = 2;
+  while i * i <= n {
+    if n - (n / i) * i == 0 { return false; }
+    i = i + 1;
+  }
+  return true;
+}
+
+fn count_primes(limit: Int) -> Int {
+  let count = 0;
+  for n in 2..(limit + 1) {
+    if is_prime(n) { count = count + 1; }
+  }
+  return count;
+}
+
+fn main() -> Int { return count_primes(30); }
