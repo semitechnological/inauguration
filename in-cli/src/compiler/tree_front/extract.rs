@@ -4146,19 +4146,45 @@ fn js_function_decl<'a>(src: &[u8], n: Node<'a>) -> Option<Decl> {
 }
 
 fn js_return_type(body: &[Stmt]) -> Typ {
-    for stmt in body {
-        if let Stmt::Return(Some(expr)) = stmt {
-            return match expr {
-                Expr::IntLit(_) => Typ::Int,
-                Expr::StringLit(_) => Typ::String,
-                Expr::BoolLit(_) => Typ::Bool,
-                Expr::Binary { .. } => Typ::Int,
-                Expr::Field { .. } | Expr::Call { .. } | Expr::Ident(_) => Typ::Named("Any".into()),
-                _ => Typ::Named("Any".into()),
-            };
-        }
+    if let Some(expr) = find_return_expr(body) {
+        return infer_expr_type(expr);
     }
     Typ::Void
+}
+
+pub(super) fn find_return_expr(stmts: &[Stmt]) -> Option<&Expr> {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Return(Some(expr)) => return Some(expr),
+            Stmt::If { then_body, else_body, .. } => {
+                if let Some(e) = find_return_expr(then_body) { return Some(e); }
+                if let Some(e) = find_return_expr(else_body) { return Some(e); }
+            }
+            Stmt::Loop { body, .. } => {
+                if let Some(e) = find_return_expr(body) { return Some(e); }
+            }
+            Stmt::Match { arms, .. } => {
+                for arm in arms {
+                    if let Some(e) = find_return_expr(&arm.body) { return Some(e); }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+pub(super) fn infer_expr_type(expr: &Expr) -> Typ {
+    match expr {
+        Expr::IntLit(_) => Typ::Int,
+        Expr::StringLit(_) => Typ::String,
+        Expr::BoolLit(_) => Typ::Bool,
+        Expr::Binary { op, .. } => match op.as_str() {
+            "==" | "!=" | "<" | ">" | "<=" | ">=" | "&&" | "||" => Typ::Bool,
+            _ => Typ::Int,
+        },
+        _ => Typ::Named("Any".into()),
+    }
 }
 
 fn js_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
@@ -4906,8 +4932,9 @@ fn zig_return_type(src: &[u8], fun: Node<'_>) -> Option<Typ> {
 }
 
 fn zig_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
+    // ponytail: check text stripped of braces; AST child count unreliable for zig blocks
     let txt = node_txt(src, body).trim();
-    if txt == "{}" {
+    if txt == "{}" || txt.strip_prefix('{').and_then(|s| s.strip_suffix('}')).is_some_and(|s| s.trim().is_empty()) {
         return Vec::new();
     }
     // ponytail: skip strict_simple_bounded_body for block bodies
@@ -6318,19 +6345,28 @@ fn go_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
 }
 
 fn go_return_type(src: &[u8], func: Node<'_>) -> Option<Typ> {
-    func.child_by_field_name("result")
+    // ponytail: prefer field name; fallback scans only direct children between params and body
+    if let Some(node) = func.child_by_field_name("result")
         .or_else(|| func.child_by_field_name("return_type"))
-        .or_else(|| named_descendant(func, "type_identifier"))
-        .and_then(|node| {
-            if node.kind() == "identifier"
-                && func
-                    .child_by_field_name("name")
-                    .is_some_and(|name| name == node)
-            {
-                return None;
-            }
-            Some(Typ::Named(node_txt(src, node).trim().to_string()))
-        })
+    {
+        return Some(Typ::Named(node_txt(src, node).trim().to_string()));
+    }
+    let params = func.child_by_field_name("parameters")?;
+    let mut saw_params = false;
+    let mut w = func.walk();
+    for node in func.named_children(&mut w) {
+        if node == params {
+            saw_params = true;
+            continue;
+        }
+        if saw_params && matches!(node.kind(), "type_identifier" | "simple_type" | "qualified_type") {
+            return Some(Typ::Named(node_txt(src, node).trim().to_string()));
+        }
+        if node.kind() == "block" {
+            break;
+        }
+    }
+    None
 }
 
 // ─── OCaml ────────────────────────────────────────────────────────────

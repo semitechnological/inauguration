@@ -623,28 +623,11 @@ fn type_name(typ: &Typ) -> String {
 }
 
 fn canonical_type(typ: &Typ) -> Typ {
-    match typ {
-        Typ::Named(name) => match name.trim() {
-            "Int" | "int" | "i64" | "i32" | "i16" | "i8" | "u64" | "u32" | "u16" | "u8" => Typ::Int,
-            "String" | "string" | "str" => Typ::String,
-            "Bool" | "bool" => Typ::Bool,
-            "Float" | "float" | "Double" | "double" | "f64" | "f32" => Typ::Float,
-            "Void" | "void" | "Unit" | "unit" | "()" => Typ::Void,
-            _ => typ.clone(),
-        },
-        Typ::Array(item) => Typ::Array(Box::new(canonical_type(item))),
-        _ => typ.clone(),
-    }
+    typ.canonical()
 }
 
 fn type_compatible(expected: &Typ, actual: &Typ) -> bool {
-    let expected = canonical_type(expected);
-    let actual = canonical_type(actual);
-    expected == actual || is_any_type(&expected) || is_any_type(&actual)
-}
-
-fn is_any_type(typ: &Typ) -> bool {
-    matches!(typ, Typ::Named(name) if name == "Any")
+    expected.compatible_with(actual)
 }
 
 #[cfg(test)]
