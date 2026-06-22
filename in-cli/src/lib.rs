@@ -38,6 +38,7 @@ pub mod bytecode;
 pub mod bytecode_compiler;
 pub mod cargo_linker;
 pub mod native_runtime;
+pub mod jit_runtime;
 pub mod compile_cache;
 pub mod compile_error;
 pub mod compiler;

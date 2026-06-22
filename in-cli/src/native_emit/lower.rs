@@ -37,10 +37,10 @@ impl From<NativeLinkage> for MachOLinkage {
 }
 
 #[derive(Debug)]
-struct LoweredModule {
-    code: Vec<u8>,
-    entry_offset: Option<u32>,
-    exports: Vec<ExportSymbol>,
+pub struct LoweredModule {
+    pub code: Vec<u8>,
+    pub entry_offset: Option<u32>,
+    pub exports: Vec<ExportSymbol>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -146,7 +146,7 @@ pub fn host_supports_native_subset() -> bool {
     cfg!(all(target_os = "macos", target_arch = "aarch64"))
 }
 
-fn lower_module(
+pub fn lower_module(
     module: &UnifiedModule,
     entry: &str,
     linkage: NativeLinkage,

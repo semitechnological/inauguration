@@ -3,7 +3,7 @@
 pub mod aarch64;
 pub mod coff;
 pub mod elf;
-mod lower;
+pub mod lower;
 mod macho;
 pub mod object;
 pub mod raw;

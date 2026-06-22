@@ -19,6 +19,8 @@ use std::time::Instant;
 pub enum CompileTarget {
     Bytecode,
     Native,
+    /// Native lowering + in-memory JIT execution (no object file on disk)
+    Jit,
 }
 
 #[derive(Debug, Clone)]
@@ -76,6 +78,7 @@ fn target_label(target: CompileTarget) -> &'static str {
     match target {
         CompileTarget::Bytecode => "bytecode",
         CompileTarget::Native => "native",
+        CompileTarget::Jit => "jit",
     }
 }
 
@@ -163,10 +166,12 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
                 backend_level: match request.target {
                     CompileTarget::Bytecode => "bytecode-vm-subset",
                     CompileTarget::Native => "contract-only",
+                    CompileTarget::Jit => "owned-native-subset",
                 },
                 runtime_level: match request.target {
                     CompileTarget::Bytecode => "inrt-bytecode",
                     CompileTarget::Native => "none",
+                    CompileTarget::Jit => "inrt-jit",
                 },
                 external_invocations: Vec::new(),
                 reason_code: Some("frontend-read-failed".to_string()),
@@ -229,10 +234,12 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         backend_level: match request.target {
             CompileTarget::Bytecode => "bytecode-vm-subset",
             CompileTarget::Native => "contract-only",
+            CompileTarget::Jit => "owned-native-subset",
         },
         runtime_level: match request.target {
             CompileTarget::Bytecode => "inrt-bytecode",
             CompileTarget::Native => "none",
+            CompileTarget::Jit => "inrt-jit",
         },
         external_invocations: Vec::new(),
         reason_code: None,
@@ -372,7 +379,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         report.call_edge_count = verify_report.call_edges.len();
     }
 
-    let semantic_module = if request.target == CompileTarget::Native {
+    let semantic_module = if request.target == CompileTarget::Native || request.target == CompileTarget::Jit {
         effective_entry
             .as_deref()
             .map(|entry| native_entry_module(&module, entry))
@@ -381,7 +388,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         module.clone()
     };
 
-    if request.target != CompileTarget::Native
+    if request.target != CompileTarget::Native && request.target != CompileTarget::Jit
         && !is_rust_source
         && let Err(err) = crate::family_typecheck::typecheck_resolved(&resolved, &semantic_module)
     {
@@ -473,9 +480,82 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
                 report.error = Some(err);
             }
         },
+        CompileTarget::Jit => {
+            match compile_jit(&module, &request.module_id, request) {
+                Ok(jit_result) => {
+                    report.backend_level = jit_result.backend_level;
+                    report.runtime_level = jit_result.runtime_level;
+                    report.reason_code = Some(jit_result.reason_code.to_string());
+                    report.reason = Some(jit_result.reason.to_string());
+                    report.success = true;
+                    report.eval_exit_code = jit_result.eval_exit_code;
+                }
+                Err(err) => {
+                    report.backend_level = "owned-native-subset";
+                    report.runtime_level = "inrt-jit";
+                    report.reason_code = Some("jit-failed".to_string());
+                    report.reason = Some(err.clone());
+                    report.error = Some(err);
+                }
+            }
+        }
     }
 
     finalize_report(&mut report, started, &cwd, &frontend_hash)
+}
+
+/// JIT compile: lower to native machine code, load into JitRuntime, invoke entry.
+fn compile_jit(
+    module: &UnifiedModule,
+    _module_id: &str,
+    request: &OwnedCompileRequest,
+) -> Result<NativeCompileResult, String> {
+    use crate::native_emit::lower::{host_supports_native_subset, lower_module};
+    use crate::native_emit::NativeLinkage;
+
+    if !host_supports_native_subset() {
+        return Err("jit-host-unsupported: JIT currently requires macOS AArch64".to_string());
+    }
+
+    let entry = request
+        .entry
+        .as_deref()
+        .filter(|name| !name.is_empty())
+        .unwrap_or("answer");
+
+    let lowered = lower_module(module, entry, NativeLinkage::Executable)
+        .map_err(|e| format!("jit-lowering-failed: {e}"))?;
+
+    std::fs::write("/tmp/jit_debug.log", format!("code={} entry={:?}\n", lowered.code.len(), lowered.entry_offset)).ok();
+
+    // Build function offset table
+    // ponytail: for now, only the entry function. Multi-function in phase 2.
+    let function_offsets = vec![(
+        entry.to_string(),
+        lowered.entry_offset.unwrap_or(0),
+        lowered.code.len() as u32,
+    )];
+
+    let mut rt = crate::jit_runtime::JitRuntime::new();
+    rt.load(&lowered.code, &function_offsets)
+        .map_err(|e| format!("jit-load-failed: {e}"))?;
+
+    // Invoke the entry function with no arguments
+    std::fs::write("/tmp/jit_debug2.log", format!("invoking entry={entry} off={:?}\n", lowered.entry_offset)).ok();
+    let exit_code = unsafe {
+        rt.invoke(entry, &[])
+            .unwrap_or(1)
+    } as u8;
+
+    Ok(NativeCompileResult {
+        artifact_path: String::new(),
+        eval_exit_code: Some(exit_code),
+        abi_path: None,
+        backend_level: "owned-native-jit",
+        runtime_level: "inrt-jit",
+        reason_code: "jit-executed",
+        reason: "JIT-compiled native function executed via in-memory MAP_JIT page",
+    })
 }
 
 fn compile_native(
