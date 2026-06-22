@@ -1,18 +1,19 @@
 # inauguration examples
 
 No language gates. Auto-detect polyglot eval.
+Eval supports: arithmetic, literals, print/console.log/println!.
+For full programs (loops, functions): `in compile --path file.in`.
 
-## Run examples
+## Run
 
 ```bash
-in eval --path examples/polyglot/io.poly       # 4 languages printing
-in eval --path examples/polyglot/math.poly     # 9 languages, same expression
-in eval --path examples/polyglot/compute.poly   # 3 languages, different math
+in eval --path examples/polyglot/io.poly       # 4 languages, auto-detected
+in eval --path examples/polyglot/compute.poly   # 5 languages, different results
 ```
 
 ## Auto-detect (no markers)
 
-Separate code blocks with blank lines. Each block auto-detected:
+Blank-line separated blocks. Each block auto-detected by content:
 
 ```bash
 in eval '
@@ -26,30 +27,27 @@ println!("hello from rust")
 
 ## Explicit fences (`## lang`)
 
-For ambiguous syntax (same expression in many languages):
+For ambiguous syntax (same expression works in many languages):
 
 ```bash
 in eval '
 ## python
 2 + 3 * 4
 ## javascript
-2 + 3 * 4
+42 * 2
 ## rust
-2 + 3 * 4
+100 + 200
 '
 ```
 
-## Capabilities
-
-No levels. Every language lists what it can do:
+## Capabilities (no levels)
 
 ```bash
-in languages             # table: parse/lower/typecheck/boundary/bytecode
-in languages --json      # machine-readable
+in languages             # parse/lower/typecheck/boundary/bytecode
 ```
 
 ## Verify
 
 ```bash
-bash scripts/verify.sh   # 5 checks, all pass
+bash scripts/verify.sh   # 4 checks, all pass
 ```
