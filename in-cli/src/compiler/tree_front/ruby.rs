@@ -1,4 +1,4 @@
-use super::extract::{extract_fn_nodes, first_named, last_named, node_txt, normalize_entry};
+use super::extract::{extract_fn_nodes, find_return_expr, first_named, infer_expr_type, last_named, node_txt, normalize_entry};
 use crate::core_ir::Decl;
 use crate::core_ir::{Expr, Stmt, Typ};
 use std::collections::HashSet;
@@ -30,22 +30,10 @@ pub(super) fn extract_ruby(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, Stri
 }
 
 fn ruby_return_type(body: &[Stmt]) -> Typ {
-    for stmt in body {
-        if let Stmt::Return(Some(expr)) = stmt {
-            return ruby_expr_type(expr).unwrap_or(Typ::Named("Any".into()));
-        }
+    if let Some(expr) = find_return_expr(body) {
+        return infer_expr_type(expr);
     }
     Typ::Void
-}
-
-fn ruby_expr_type(expr: &Expr) -> Option<Typ> {
-    match expr {
-        Expr::IntLit(_) => Some(Typ::Int),
-        Expr::StringLit(_) => Some(Typ::String),
-        Expr::BoolLit(_) => Some(Typ::Bool),
-        Expr::Call { .. } | Expr::Ident(_) => Some(Typ::Named("Any".into())),
-        _ => None,
-    }
 }
 
 fn ruby_params<'a>(src: &[u8], params: Node<'a>) -> Vec<(String, Typ)> {
