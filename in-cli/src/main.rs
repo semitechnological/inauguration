@@ -613,6 +613,21 @@ fn run() -> Result<()> {
             let code = match source {
                 Some(ref s) => {
                     let resolved = resolve_invocation_path(&invocation_cwd, s);
+                    // Auto-detect: if path is a directory with Cargo.toml, compile the binary
+                    if resolved.is_dir() {
+                        let cargo_toml = resolved.join("Cargo.toml");
+                        if cargo_toml.exists() {
+                            let contents = std::fs::read_to_string(&cargo_toml)
+                                .map_err(|e| InError::Message(format!("read Cargo.toml: {e}")))?;
+                            // Extract [[bin]] path
+                            let bin_path = extract_cargo_bin_path(&contents, &resolved)?;
+                            let module_id = bin_path.file_stem().unwrap_or_default().to_string_lossy().to_string();
+                            let out = std::env::temp_dir().join(format!("in-cargo-{}.bin", module_id));
+                            let bin_str = bin_path.to_string_lossy().to_string();
+                            cmd_compile(&invocation_cwd, &bin_str, CompileTargetCli::Bytecode, &out.to_string_lossy(), &module_id, parser_registry::ParserCli::Auto, None, None, NativeLinkageCli::Executable, 1, false, None, None, None, None)?;
+                            return cmd_execute_bytecode(&invocation_cwd, &bin_str, &module_id, verbose);
+                        }
+                    }
                     if resolved.exists() {
                         let ext = resolved.extension().and_then(|e| e.to_str()).unwrap_or("");
                         // .in and other source files: compile + execute-bytecode
@@ -2658,6 +2673,30 @@ fn cmd_auto_polyglot_eval(cwd: &Path, code: &str, verbose: bool) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn extract_cargo_bin_path(contents: &str, dir: &Path) -> Result<PathBuf> {
+    // Simple TOML parser: find [[bin]] section, extract path
+    let mut in_bin = false;
+    for line in contents.lines() {
+        let trimmed = line.trim();
+        if trimmed == "[[bin]]" {
+            in_bin = true;
+        } else if trimmed.starts_with("[[") {
+            in_bin = false;
+        } else if in_bin && trimmed.starts_with("path") {
+            if let Some(val) = trimmed.split('=').nth(1) {
+                let path_str = val.trim().trim_matches('"');
+                return Ok(dir.join(path_str));
+            }
+        }
+    }
+    // Fallback: src/main.rs
+    let main_rs = dir.join("src").join("main.rs");
+    if main_rs.exists() {
+        return Ok(main_rs);
+    }
+    Err(InError::Message("Cargo.toml: no [[bin]] path found".into()))
 }
 
 fn cmd_eval_dispatch(cwd: &Path, code: &str, parser: Option<&str>, verbose: bool) -> Result<()> {

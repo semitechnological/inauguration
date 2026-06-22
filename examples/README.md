@@ -21,6 +21,7 @@ in eval examples/compile/even_odd.in    # is_even(42) = true (mutual recursion)
 
 ```bash
 in eval examples/compile/add_multiply.rs  # (10+20)*2 = 60
+in eval in-cli                           # reads Cargo.toml, compiles main.rs (96 functions)
 ```
 
 ## Polyglot — multiple languages in one file
