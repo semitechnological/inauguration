@@ -52,10 +52,17 @@ impl BytecodeVM {
         if let Some(runtime) = self.module.package_exports.get(name) {
             return crate::package_runtime::invoke_package_export(runtime, &args);
         }
-        // ponytail: unresolved external calls return Nil instead of erroring.
-        // Enables self-hosting execution through crate-level function stubs.
+        // ponytail: try to resolve crate-prefixed names (Cli :: parse → parse)
         let func = if let Some(f) = self.module.find_function(name) {
             f.clone()
+        } else if name.contains(" ::") {
+            // Try the last segment (after final ::)
+            let short = name.rsplit(" ::").next().unwrap_or(name);
+            if let Some(f) = self.module.find_function(short.trim()) {
+                f.clone()
+            } else {
+                return Ok(Value::Nil);
+            }
         } else {
             // External/unlinked crate function — return Nil and continue
             return Ok(Value::Nil);
