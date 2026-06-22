@@ -115,7 +115,8 @@ pub fn evaluate_path(path: &Path, _entry: &LanguageSupport) -> LanguageGateRepor
             blocking.push(GATE_CORE_IR_DECLS);
             return finish(sample_path, passed, blocking);
         }
-        Err(_) => {
+        Err(e) => {
+            eprintln!("[gate] parse failed for {}: {e}", path.display());
             blocking.push(GATE_CORE_IR_DECLS);
             return finish(sample_path, passed, blocking);
         }

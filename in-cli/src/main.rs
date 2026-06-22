@@ -1803,10 +1803,15 @@ fn cmd_emit_boot(
             "compiler_version": env!("CARGO_PKG_VERSION"),
         }
     });
-    let _ = std::fs::write(
+    if let Err(e) = std::fs::write(
         &meta_path,
         serde_json::to_string_pretty(&meta).unwrap_or_else(|_| "{}".to_string()),
-    );
+    ) {
+        eprintln!(
+            "[metadata] warning: failed to write {}: {e}",
+            meta_path.display()
+        );
+    }
 
     eprintln!(
         "boot image: {} bytes (trampoline: {} + kernel: {})",
@@ -2424,7 +2429,8 @@ fn cmd_eval(cwd: &Path, code: &str, parser: Option<&str>, verbose: bool) -> Resu
             .unwrap_or_default()
             .as_nanos()
     ));
-    let _ = std::fs::create_dir_all(&dir);
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| InError::Message(format!("create eval temp dir {}: {e}", dir.display())))?;
     let path = dir.join(format!("eval.{}", parser_id.default_extension()));
     let source_path = resolve_invocation_path(cwd, &path.to_string_lossy());
     let mut last_err = None;

@@ -274,12 +274,12 @@ fn main() {
                     .output
                     .clone()
                     .unwrap_or_else(|| PathBuf::from(format!("{}.component.json", source_name)));
-                match serde_json::to_writer_pretty(
-                    std::fs::File::create(&md_path).unwrap(),
-                    &metadata,
-                ) {
-                    Ok(_) => println!("  Metadata `{}` → {}", source_name, md_path.display()),
-                    Err(e) => eprintln!("Error writing metadata: {e}"),
+                match std::fs::File::create(&md_path) {
+                    Ok(file) => match serde_json::to_writer_pretty(file, &metadata) {
+                        Ok(_) => println!("  Metadata `{}` → {}", source_name, md_path.display()),
+                        Err(e) => eprintln!("Error serializing metadata: {e}"),
+                    },
+                    Err(e) => eprintln!("Error creating metadata file {}: {e}", md_path.display()),
                 }
             }
             Err(e) => {
@@ -317,18 +317,18 @@ fn main() {
             // Emit component metadata sidecar.
             if args.emit_metadata {
                 let md_path = output_path.with_extension("component.json");
-                match serde_json::to_writer_pretty(
-                    std::fs::File::create(&md_path).unwrap(),
-                    &result.metadata,
-                ) {
-                    Ok(_) => println!(
-                        "  Metadata → {} ({} imports, {} exports, {} capabilities)",
-                        md_path.display(),
-                        result.metadata.imports.len(),
-                        result.metadata.exports.len(),
-                        result.metadata.capabilities_required.len(),
-                    ),
-                    Err(e) => eprintln!("Error writing metadata: {e}"),
+                match std::fs::File::create(&md_path) {
+                    Ok(file) => match serde_json::to_writer_pretty(file, &result.metadata) {
+                        Ok(_) => println!(
+                            "  Metadata → {} ({} imports, {} exports, {} capabilities)",
+                            md_path.display(),
+                            result.metadata.imports.len(),
+                            result.metadata.exports.len(),
+                            result.metadata.capabilities_required.len(),
+                        ),
+                        Err(e) => eprintln!("Error serializing metadata: {e}"),
+                    },
+                    Err(e) => eprintln!("Error creating metadata file {}: {e}", md_path.display()),
                 }
             }
 

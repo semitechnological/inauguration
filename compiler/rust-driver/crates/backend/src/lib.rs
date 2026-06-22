@@ -220,16 +220,19 @@ pub fn backend_capabilities(triple: &str) -> BackendCapabilities {
             supports_raw_binary: kind == BackendKind::RawBinary,
             implemented: true,
         },
-        Err(_) => BackendCapabilities {
-            kind: BackendKind::RawBinary,
-            object_format,
-            supports_executable: false,
-            supports_shared_library: false,
-            supports_static_library: false,
-            supports_wasm_module: false,
-            supports_raw_binary: object_format == "raw",
-            implemented: false,
-        },
+        Err(e) => {
+            eprintln!("[backend] unsupported target `{triple}`: {e}");
+            BackendCapabilities {
+                kind: BackendKind::RawBinary,
+                object_format,
+                supports_executable: false,
+                supports_shared_library: false,
+                supports_static_library: false,
+                supports_wasm_module: false,
+                supports_raw_binary: object_format == "raw",
+                implemented: false,
+            }
+        }
     }
 }
 
