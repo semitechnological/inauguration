@@ -79,7 +79,12 @@ fn parse_defn_line(line: &str) -> Result<Option<Decl>, String> {
         .map(|idx| inner[idx + 1..].trim())
         .unwrap_or("")
         .strip_suffix(')')
-        .unwrap_or(inner.find(']').map(|idx| inner[idx + 1..].trim()).unwrap_or(""))
+        .unwrap_or(
+            inner
+                .find(']')
+                .map(|idx| inner[idx + 1..].trim())
+                .unwrap_or(""),
+        )
         .trim();
     let mut body = parse_simple_body(body_text, true);
     if let [Stmt::Return(Some(Expr::Call { callee, args }))] = body.as_slice()

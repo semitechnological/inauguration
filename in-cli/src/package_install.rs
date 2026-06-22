@@ -661,10 +661,22 @@ fn verify_archive_checksum(path: &Path, checksum: &ArtifactChecksum) -> Result<(
             }
         }
         ArtifactChecksum::GoModuleSum(expected) => {
-            if expected.starts_with("h1:") {
-                Ok(())
+            if let Some(encoded) = expected.strip_prefix("h1:") {
+                let actual_hash = sha2::Sha256::digest(&data);
+                let actual_encoded = base64::engine::general_purpose::STANDARD.encode(actual_hash);
+                if actual_encoded == encoded {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "go module h1 checksum mismatch for {}",
+                        path.display()
+                    ))
+                }
             } else {
-                Err(format!("go module sum missing for {}", path.display()))
+                Err(format!(
+                    "go module sum has unsupported hash algorithm for {}",
+                    path.display()
+                ))
             }
         }
     }
@@ -800,7 +812,15 @@ fn flatten_single_install_subdir(install_path: &Path) -> Result<(), String> {
 
 const REGISTRY_USER_AGENT: &str = "inauguration/0.2.0 (package-install)";
 
+fn require_https(url: &str) -> Result<(), String> {
+    if !url.starts_with("https://") {
+        return Err(format!("registry URL must use HTTPS, got: {url}"));
+    }
+    Ok(())
+}
+
 fn curl_get(url: &str) -> Result<String, String> {
+    require_https(url)?;
     let output = Command::new("curl")
         .args(["-fsSL", "-A", REGISTRY_USER_AGENT, url])
         .output()
@@ -815,6 +835,7 @@ fn curl_get(url: &str) -> Result<String, String> {
 }
 
 fn curl_to_file(url: &str, path: &Path) -> Result<(), String> {
+    require_https(url)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|err| {
             format!(

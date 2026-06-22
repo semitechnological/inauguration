@@ -275,7 +275,7 @@ pub fn parser_id_from_cli_token(token: &str) -> Option<ParserId> {
         Some(ParserId::Icore)
     } else {
         let lower = token.to_ascii_lowercase();
-        parser_id_from_magic_token(token).or_else(|| match lower.as_str() {
+        parser_id_from_magic_token(token).or(match lower.as_str() {
             "c" => Some(ParserId::C),
             "cpp" | "c++" => Some(ParserId::Cpp),
             "objc" | "objective-c" => Some(ParserId::ObjC),
