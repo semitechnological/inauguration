@@ -377,7 +377,12 @@ enum Commands {
     #[command(about = "Evaluate inline .in code (like python -c)")]
     Eval {
         #[arg(help = "Inline source code to compile and execute")]
-        code: String,
+        code: Option<String>,
+        #[arg(
+            long,
+            help = "Path to .poly or source file to evaluate"
+        )]
+        path: Option<String>,
         #[arg(
             long,
             help = "Parser/language slug such as in, js, ts, rust, python, cpp"
@@ -608,9 +613,25 @@ fn run() -> Result<()> {
         },
         Commands::Eval {
             code,
+            path,
             parser,
             verbose,
-        } => cmd_eval_dispatch(&invocation_cwd, &code, parser.as_deref(), verbose),
+        } => {
+            let source = match (code, path) {
+                (Some(c), _) => c,
+                (_, Some(p)) => {
+                    let resolved = resolve_invocation_path(&invocation_cwd, &p);
+                    std::fs::read_to_string(&resolved)
+                        .map_err(|e| InError::Message(format!("read {}: {e}", resolved.display())))?
+                }
+                (None, None) => {
+                    return Err(InError::Message(
+                        "eval requires either CODE or --path".into(),
+                    ));
+                }
+            };
+            cmd_eval_dispatch(&invocation_cwd, &source, parser.as_deref(), verbose)
+        }
         Commands::Doctor => cmd_doctor(),
         Commands::Bench { metrics } => {
             cmd_bench(&workspace_root(invocation_cwd.clone())?, &metrics)
