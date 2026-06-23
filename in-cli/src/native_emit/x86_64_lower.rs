@@ -251,7 +251,7 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
         let code_end = emitter.len();
         let mut str_offset = 0u64;
         for s in &all_strings {
-            let rel_addr = code_end as u64 + str_offset;
+            let abs_addr = KERNEL_BASE + code_end as u64 + str_offset;
             for &(site, ref content) in &str_refs {
                 if content == s {
                     let site_u = site as usize;
@@ -824,14 +824,20 @@ fn lower_stmt(
                 emitter.emit_insns(&x86_64::mov_abs_from_rax(addr));
                 return Ok(());
             }
-            // ponytail: bracket name = array index not lowered by frontend, skip
+            // ponytail: bracket name = array index or struct field not lowered by frontend, skip
             if name.contains('[') || name.contains(' ') {
                 lower_expr_into(emitter, ctx, expr, RAX, pending_calls)?;
                 return Ok(());
             }
-            let offset = ctx.slot_offset(name)?;
+            // ponytail: Assign to non-scalar local (struct field) emits expr but skips store
+            let offset = match ctx.locals.get(name) {
+                Some(StackSlot::Scalar(off)) => Some(*off),
+                _ => None,
+            };
             lower_expr_into(emitter, ctx, expr, RAX, pending_calls)?;
-            emitter.emit_insns(&x86_64::str64(RAX, offset as u16));
+            if let Some(off) = offset {
+                emitter.emit_insns(&x86_64::str64(RAX, off as u16));
+            }
             Ok(())
         }
         Stmt::Expr(expr) => {
