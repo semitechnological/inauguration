@@ -26,12 +26,3 @@ pub struct BuildTask {
     pub cancel_token: String,
 }
 
-// Kept in sync with workspace `hybrid-core`; CLI does not emit metrics yet.
-#[allow(dead_code)]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct RuntimeMetrics {
-    pub p50_ms: u64,
-    pub p95_ms: u64,
-    pub patch_success_permille: u16,
-    pub fallback_count: u64,
-}
