@@ -765,6 +765,11 @@ fn lower_stmt(
                 emitter.emit_insns(&x86_64::mov_abs_from_rax(addr));
                 return Ok(());
             }
+            // ponytail: bracket name = array index not lowered by frontend, skip
+            if name.contains('[') || name.contains(' ') {
+                lower_expr_into(emitter, ctx, expr, RAX, pending_calls)?;
+                return Ok(());
+            }
             let offset = ctx.slot_offset(name)?;
             lower_expr_into(emitter, ctx, expr, RAX, pending_calls)?;
             emitter.emit_insns(&x86_64::str64(RAX, offset as u16));
