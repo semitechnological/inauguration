@@ -144,18 +144,8 @@ impl<'a> LowerCtx<'a> {
                 })?;
                 let mut slots = HashMap::new();
                 for (field, field_ty) in fields {
-                    // Only scalar fields for now
-                    match field_ty {
-                        Typ::Int | Typ::Bool | Typ::String => {
-                            slots.insert(field.clone(), self.alloc_slot());
-                        }
-                        _ => {
-                            return Err(format!(
-                                "x86_64-lower: unsupported struct field type in `{}`",
-                                self.fn_name
-                            ));
-                        }
-                    }
+                    // ponytail: all struct fields map to scalar slots
+                    slots.insert(field.clone(), self.alloc_slot());
                 }
                 self.locals
                     .insert(name.to_string(), StackSlot::Struct { fields: slots });
@@ -429,14 +419,37 @@ fn rename_calls_in_expr(expr: &mut Expr, name_map: &HashMap<String, String>) {
 }
 
 fn collect_structs(module: &UnifiedModule) -> HashMap<String, Vec<(String, Typ)>> {
-    module
+    let mut structs: HashMap<String, Vec<(String, Typ)>> = module
         .decls
         .iter()
         .filter_map(|decl| match decl {
             Decl::Struct { name, fields, .. } => Some((name.clone(), fields.clone())),
             _ => None,
         })
-        .collect()
+        .collect();
+    // Add synthetic struct defs for common Rust std types
+    if !structs.contains_key("Vec") {
+        structs.insert("Vec".into(), vec![("ptr".into(), Typ::Int), ("len".into(), Typ::Int), ("cap".into(), Typ::Int)]);
+    }
+    if !structs.contains_key("String") {
+        structs.insert("String".into(), vec![("vec".into(), Typ::Named("Vec".into()))]);
+    }
+    if !structs.contains_key("Box") {
+        structs.insert("Box".into(), vec![("ptr".into(), Typ::Int)]);
+    }
+    if !structs.contains_key("Option") {
+        structs.insert("Option".into(), vec![("tag".into(), Typ::Int), ("value".into(), Typ::Int)]);
+    }
+    if !structs.contains_key("Result") {
+        structs.insert("Result".into(), vec![("tag".into(), Typ::Int), ("ok".into(), Typ::Int), ("err".into(), Typ::Int)]);
+    }
+    if !structs.contains_key("HashMap") {
+        structs.insert("HashMap".into(), vec![("ptr".into(), Typ::Int)]);
+    }
+    if !structs.contains_key("PathBuf") {
+        structs.insert("PathBuf".into(), vec![("vec".into(), Typ::Named("Vec".into()))]);
+    }
+    structs
 }
 
 /// Collect global variable names and assign them fixed absolute addresses.
