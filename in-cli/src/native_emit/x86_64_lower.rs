@@ -1880,10 +1880,9 @@ fn lower_expr_into(
                 // For exit/abort functions, emit real exit syscall
                 if target_name.ends_with("process :: exit") || target_name == "exit" || target_name.ends_with("process :: abort") {
                     // First arg (if any) is the exit code in RDI
-                    // syscall: exit_group(rdi) on x86_64 Linux
-                    // Temporarily disabled — exit via stub return 0
-                    emitter.emit_insns(&x86_64::load_i64(target_reg, 0));
-                    return Ok(());
+                    // syscall: exit(rdi) on x86_64 Linux — rax=60
+                    emitter.emit_bytes(&[0x48, 0xC7, 0xC0, 0x3C, 0x00, 0x00, 0x00]); // mov rax, 60 (SYS_exit)
+                    emitter.emit_bytes(&[0x0F, 0x05]); // syscall
                 }
                 emitter.emit_insns(&x86_64::load_i64(target_reg, 0));
                 return Ok(());
