@@ -415,7 +415,12 @@ fn rename_calls_in_expr(expr: &mut Expr, name_map: &HashMap<String, String>) {
                 rename_calls_in_expr(item, name_map);
             }
         }
-        Expr::IntLit(_) | Expr::FloatLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Ident(_) | Expr::Closure { .. } => {}
+        Expr::IntLit(_)
+        | Expr::FloatLit(_)
+        | Expr::StringLit(_)
+        | Expr::BoolLit(_)
+        | Expr::Ident(_)
+        | Expr::Closure { .. } => {}
     }
 }
 
@@ -430,25 +435,48 @@ fn collect_structs(module: &UnifiedModule) -> HashMap<String, Vec<(String, Typ)>
         .collect();
     // Synthetic struct defs for common Rust std types
     if !structs.contains_key("Vec") {
-        structs.insert("Vec".into(), vec![("ptr".into(), Typ::Int), ("len".into(), Typ::Int), ("cap".into(), Typ::Int)]);
+        structs.insert(
+            "Vec".into(),
+            vec![
+                ("ptr".into(), Typ::Int),
+                ("len".into(), Typ::Int),
+                ("cap".into(), Typ::Int),
+            ],
+        );
     }
     if !structs.contains_key("String") {
-        structs.insert("String".into(), vec![("vec".into(), Typ::Named("Vec".into()))]);
+        structs.insert(
+            "String".into(),
+            vec![("vec".into(), Typ::Named("Vec".into()))],
+        );
     }
     if !structs.contains_key("Box") {
         structs.insert("Box".into(), vec![("ptr".into(), Typ::Int)]);
     }
     if !structs.contains_key("Option") {
-        structs.insert("Option".into(), vec![("tag".into(), Typ::Int), ("value".into(), Typ::Int)]);
+        structs.insert(
+            "Option".into(),
+            vec![("tag".into(), Typ::Int), ("value".into(), Typ::Int)],
+        );
     }
     if !structs.contains_key("Result") {
-        structs.insert("Result".into(), vec![("tag".into(), Typ::Int), ("ok".into(), Typ::Int), ("err".into(), Typ::Int)]);
+        structs.insert(
+            "Result".into(),
+            vec![
+                ("tag".into(), Typ::Int),
+                ("ok".into(), Typ::Int),
+                ("err".into(), Typ::Int),
+            ],
+        );
     }
     if !structs.contains_key("HashMap") {
         structs.insert("HashMap".into(), vec![("ptr".into(), Typ::Int)]);
     }
     if !structs.contains_key("PathBuf") {
-        structs.insert("PathBuf".into(), vec![("vec".into(), Typ::Named("Vec".into()))]);
+        structs.insert(
+            "PathBuf".into(),
+            vec![("vec".into(), Typ::Named("Vec".into()))],
+        );
     }
     structs
 }
@@ -1164,11 +1192,42 @@ fn maybe_push_var(word: &str, vars: &mut Vec<String>) {
     if word.len() == 1 && word.chars().next().map_or(false, |c| c.is_uppercase()) {
         return;
     }
-    if matches!(word, "true" | "false" | "mut" | "ref" | "self" | "Self"
-        | "let" | "fn" | "if" | "else" | "match" | "while" | "for" | "return"
-        | "use" | "mod" | "pub" | "struct" | "enum" | "trait" | "impl" | "where"
-        | "as" | "in" | "move" | "static" | "const" | "type" | "unsafe"
-        | "extern" | "crate" | "super" | "dyn") {
+    if matches!(
+        word,
+        "true"
+            | "false"
+            | "mut"
+            | "ref"
+            | "self"
+            | "Self"
+            | "let"
+            | "fn"
+            | "if"
+            | "else"
+            | "match"
+            | "while"
+            | "for"
+            | "return"
+            | "use"
+            | "mod"
+            | "pub"
+            | "struct"
+            | "enum"
+            | "trait"
+            | "impl"
+            | "where"
+            | "as"
+            | "in"
+            | "move"
+            | "static"
+            | "const"
+            | "type"
+            | "unsafe"
+            | "extern"
+            | "crate"
+            | "super"
+            | "dyn"
+    ) {
         return;
     }
     let w = word.to_string();
@@ -1878,7 +1937,10 @@ fn lower_expr_into(
                     emitter.emit_bytes(&(stack_bytes as u32).to_le_bytes());
                 }
                 // For exit/abort functions, emit real exit syscall
-                if target_name.ends_with("process :: exit") || target_name == "exit" || target_name.ends_with("process :: abort") {
+                if target_name.ends_with("process :: exit")
+                    || target_name == "exit"
+                    || target_name.ends_with("process :: abort")
+                {
                     // First arg (if any) is the exit code in RDI
                     // syscall: exit(rdi) on x86_64 Linux — rax=60
                     emitter.emit_bytes(&[0x48, 0xC7, 0xC0, 0x3C, 0x00, 0x00, 0x00]); // mov rax, 60 (SYS_exit)

@@ -122,7 +122,7 @@ pub fn evaluate_path(path: &Path, _entry: &LanguageSupport) -> LanguageGateRepor
     passed.push(GATE_CORE_IR_DECLS);
     if module_has_bodies(&module) {
         passed.push(GATE_CORE_IR_BODIES);
-        } else {
+    } else {
         blocking.push(GATE_CORE_IR_BODIES);
         return finish(sample_path, passed, blocking);
     }
@@ -137,7 +137,7 @@ pub fn evaluate_path(path: &Path, _entry: &LanguageSupport) -> LanguageGateRepor
 
     if family_typecheck::typecheck_resolved(&resolved, &module).is_ok() {
         passed.push(GATE_SEMANTIC_TYPECHECK);
-        } else {
+    } else {
         blocking.push(GATE_SEMANTIC_TYPECHECK);
         return finish(sample_path, passed, blocking);
     }
@@ -152,7 +152,7 @@ pub fn evaluate_path(path: &Path, _entry: &LanguageSupport) -> LanguageGateRepor
             }
             if !boundary.layout_hash.is_empty() || !boundary.compute_layout_hash().is_empty() {
                 passed.push(GATE_ABI_LAYOUT_HASH);
-                }
+            }
             let manifest = emit_abi_manifest(&boundary);
             if !manifest.is_empty() {
                 passed.push(GATE_ABI_EMIT);
@@ -160,7 +160,7 @@ pub fn evaluate_path(path: &Path, _entry: &LanguageSupport) -> LanguageGateRepor
             if emit_layout_probes(&boundary).is_ok() {
                 if bytecode_gate(path).is_ok() {
                     passed.push(GATE_BYTECODE_VM);
-                    } else {
+                } else {
                     blocking.push(GATE_BYTECODE_VM);
                 }
             }
@@ -244,9 +244,6 @@ fn finish(
     }
 }
 
-
-
-
 fn dedup(gates: Vec<&'static str>) -> Vec<&'static str> {
     let mut out = Vec::new();
     for gate in gates {
@@ -256,8 +253,6 @@ fn dedup(gates: Vec<&'static str>) -> Vec<&'static str> {
     }
     out
 }
-
-
 
 #[must_use]
 pub fn repo_root() -> PathBuf {
@@ -279,7 +274,10 @@ mod tests {
     fn in_sample_reaches_high_gates() {
         let entry = language_support_for_parser("in").expect("in");
         let report = evaluate_language_gates(entry, &repo_root());
-        assert!(report.passed_gates.contains(&GATE_SEMANTIC_TYPECHECK), "{report:?}");
+        assert!(
+            report.passed_gates.contains(&GATE_SEMANTIC_TYPECHECK),
+            "{report:?}"
+        );
         assert!(report.passed_gates.contains(&GATE_SEMANTIC_TYPECHECK));
     }
 
@@ -287,7 +285,10 @@ mod tests {
     fn zig_sample_reaches_family_typecheck() {
         let entry = language_support_for_parser("zig").expect("zig");
         let report = evaluate_language_gates(entry, &repo_root());
-        assert!(report.passed_gates.contains(&GATE_SEMANTIC_TYPECHECK), "{report:?}");
+        assert!(
+            report.passed_gates.contains(&GATE_SEMANTIC_TYPECHECK),
+            "{report:?}"
+        );
         assert!(report.passed_gates.contains(&GATE_SEMANTIC_TYPECHECK));
     }
 
@@ -295,14 +296,20 @@ mod tests {
     fn lua_sample_reaches_family_typecheck() {
         let entry = language_support_for_parser("lua").expect("lua");
         let report = evaluate_language_gates(entry, &repo_root());
-        assert!(report.passed_gates.contains(&GATE_SEMANTIC_TYPECHECK), "{report:?}");
+        assert!(
+            report.passed_gates.contains(&GATE_SEMANTIC_TYPECHECK),
+            "{report:?}"
+        );
     }
 
     #[test]
     fn javascript_sample_reaches_bytecode_vm_gate() {
         let entry = language_support_for_parser("javascript").expect("javascript");
         let report = evaluate_language_gates(entry, &repo_root());
-        assert!(report.passed_gates.contains(&GATE_BYTECODE_VM), "{report:?}");
+        assert!(
+            report.passed_gates.contains(&GATE_BYTECODE_VM),
+            "{report:?}"
+        );
         assert!(report.passed_gates.contains(&GATE_SEMANTIC_TYPECHECK));
         assert!(report.passed_gates.contains(&GATE_BOUNDARY_IR_ATTACH));
         assert!(report.passed_gates.contains(&GATE_BYTECODE_VM));
@@ -312,7 +319,10 @@ mod tests {
     fn typescript_sample_reaches_bytecode_vm_gate() {
         let entry = language_support_for_parser("typescript").expect("typescript");
         let report = evaluate_language_gates(entry, &repo_root());
-        assert!(report.passed_gates.contains(&GATE_BYTECODE_VM), "{report:?}");
+        assert!(
+            report.passed_gates.contains(&GATE_BYTECODE_VM),
+            "{report:?}"
+        );
         assert!(report.passed_gates.contains(&GATE_SEMANTIC_TYPECHECK));
         assert!(report.passed_gates.contains(&GATE_BOUNDARY_IR_ATTACH));
         assert!(report.passed_gates.contains(&GATE_BYTECODE_VM));
@@ -399,7 +409,10 @@ function main() {}
         let entry = language_support_for_parser("javascript").expect("javascript");
         let report = evaluate_path(&path, entry);
         let _ = std::fs::remove_file(&path);
-        assert!(report.passed_gates.contains(&GATE_BOUNDARY_IR_ATTACH), "{report:?}");
+        assert!(
+            report.passed_gates.contains(&GATE_BOUNDARY_IR_ATTACH),
+            "{report:?}"
+        );
         assert!(report.passed_gates.contains(&GATE_BOUNDARY_IR_ATTACH));
         assert!(report.passed_gates.contains(&GATE_BOUNDARY_IR_VERIFY));
         assert!(report.passed_gates.contains(&GATE_ABI_LAYOUT_HASH));

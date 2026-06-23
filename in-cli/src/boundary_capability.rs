@@ -94,8 +94,16 @@ mod tests {
             let entry = language_support_for_parser(parser_id.as_str())
                 .unwrap_or_else(|| panic!("{}", parser_id.as_str()));
             let cap = boundary_capability_for(&entry);
-            assert!(cap.can_boundary, "{} should support boundary", entry.language);
-            assert!(cap.can_typecheck, "{} should support typecheck", entry.language);
+            assert!(
+                cap.can_boundary,
+                "{} should support boundary",
+                entry.language
+            );
+            assert!(
+                cap.can_typecheck,
+                "{} should support typecheck",
+                entry.language
+            );
         }
     }
 
