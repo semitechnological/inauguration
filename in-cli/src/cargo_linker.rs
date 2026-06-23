@@ -1,5 +1,5 @@
 use crate::compiler::rust_front;
-use crate::core_ir::{Decl, UnifiedModule};
+use crate::core_ir::{Decl, Expr, Stmt, UnifiedModule};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -118,25 +118,83 @@ pub fn compile_cargo_dependencies(project_dir: &Path) -> Vec<(String, UnifiedMod
 /// All function and struct declarations from dependencies are added.
 /// Also creates aliases for common re-export patterns.
 pub fn merge_dependency_modules(main: &mut UnifiedModule, deps: Vec<(String, UnifiedModule)>) {
-    // Collect all dep function names for alias creation
-    let mut dep_fns: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
-    for (crate_name, dep_module) in &deps {
-        for decl in &dep_module.decls {
-            if let Decl::Function { name, .. } = decl {
-                dep_fns.entry(crate_name.clone()).or_default().push(name.clone());
+    for (crate_name, mut dep_module) in deps {
+        // Prefix function names with crate name to avoid duplicates across crates
+        // Skip if crate_name starts with "in-" (the main crate) — keep original names
+        if !crate_name.starts_with("in-") {
+            for decl in &mut dep_module.decls {
+                if let Decl::Function { name, .. } = decl {
+                    if !name.contains("::") {
+                        *name = format!("{crate_name}::{name}");
+                    }
+                }
             }
         }
-    }
-
-    for (crate_name, mut dep_module) in deps {
-        // Add alias functions for common re-export names
-        // e.g. if clap re-exports clap_builder functions, create aliases
+        // Update call sites: replace unprefixed calls with prefixed names
         for decl in &mut dep_module.decls {
-            if let Decl::Function { name, .. } = decl {
-                // Create aliases without crate prefix (for use crate::* re-exports)
-                // The alias is: original name stripped of leading module path
+            if let Decl::Function { body, .. } = decl {
+                prefix_calls(body, &crate_name, false);
             }
         }
         main.decls.append(&mut dep_module.decls);
+    }
+}
+
+/// Recursively prefix function call targets in a statement list.
+fn prefix_calls(stmts: &mut [Stmt], crate_name: &str, _in_prefixed: bool) {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Expr(expr) | Stmt::Return(Some(expr)) => prefix_call_expr(expr, crate_name),
+            Stmt::Let(_, _, expr) | Stmt::Assign(_, expr) => prefix_call_expr(expr, crate_name),
+            Stmt::If { then_body, else_body, cond, .. } => {
+                prefix_call_expr(cond, crate_name);
+                prefix_calls(then_body, crate_name, false);
+                prefix_calls(else_body, crate_name, false);
+            }
+            Stmt::Loop { body, cond, .. } => {
+                if let Some(cond_expr) = cond {
+                    prefix_call_expr(cond_expr, crate_name);
+                }
+                prefix_calls(body, crate_name, false);
+            }
+            Stmt::Match { arms, .. } => {
+                for arm in arms {
+                    prefix_calls(&mut arm.body, crate_name, false);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn prefix_call_expr(expr: &mut Expr, crate_name: &str) {
+    match expr {
+        Expr::Call { callee, args, .. } => {
+            if let Expr::Ident(name) = callee.as_mut() {
+                if !name.contains("::") {
+                    *name = format!("{crate_name}::{name}");
+                }
+            }
+            prefix_call_expr(callee.as_mut(), crate_name);
+            for arg in args.iter_mut() {
+                prefix_call_expr(arg, crate_name);
+            }
+        }
+        Expr::Binary { lhs, rhs, .. } => {
+            prefix_call_expr(lhs.as_mut(), crate_name);
+            prefix_call_expr(rhs.as_mut(), crate_name);
+        }
+        Expr::Unary { expr: inner, .. } => prefix_call_expr(inner.as_mut(), crate_name),
+        Expr::Field { base, .. } => prefix_call_expr(base.as_mut(), crate_name),
+        Expr::Index { base, index } => {
+            prefix_call_expr(base.as_mut(), crate_name);
+            prefix_call_expr(index.as_mut(), crate_name);
+        }
+        Expr::StructInit { fields, .. } => {
+            for (_, field_expr) in fields.iter_mut() {
+                prefix_call_expr(field_expr, crate_name);
+            }
+        }
+        _ => {}
     }
 }
