@@ -640,6 +640,21 @@ fn lower_function(
         emitter.emit_insns(&x86_64::sub_rsp_i32(frame_size as i32));
     }
 
+    // Zero-fill the allocated stack frame (Linux doesn't zero stack, macOS does)
+    if frame_size >= 8 {
+        let qwords = frame_size / 8;
+        // xor eax, eax  (31 C0) — zero RAX
+        emitter.emit_bytes(&[0x48, 0x31, 0xC0]);
+        // mov rcx, qwords (48 C7 C1 XX XX XX XX)
+        let mut mov_rcx = vec![0x48, 0xC7, 0xC1];
+        mov_rcx.extend_from_slice(&qwords.to_le_bytes());
+        emitter.emit_insns(&mov_rcx);
+        // lea rdi, [rsp]  (48 8D 3C 24)
+        emitter.emit_bytes(&[0x48, 0x8D, 0x3C, 0x24]);
+        // rep stosq  (F3 48 AB)
+        emitter.emit_bytes(&[0xF3, 0x48, 0xAB]);
+    }
+
     // Store register parameters to stack slots
     let param_regs = [RDI, RSI, RDX, RCX, 8, 9];
     for (i, (name, _)) in func.params.iter().enumerate() {
