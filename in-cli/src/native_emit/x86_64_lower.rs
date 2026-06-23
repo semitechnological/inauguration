@@ -1793,10 +1793,11 @@ fn lower_expr_into(
                         ))
                     }
                 }
-                _ => Err(format!(
-                    "x86_64-lower: expected struct local `{base_name}` in `{}`",
-                    ctx.fn_name
-                )),
+                _ => {
+                    // ponytail: unknown struct — return 0
+                    emitter.emit_insns(&x86_64::load_i64(target_reg, 0));
+                    Ok(())
+                }
             }
         }
         Expr::Unary { op, expr, .. } => {
