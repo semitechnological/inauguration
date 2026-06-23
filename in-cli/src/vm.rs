@@ -68,14 +68,14 @@ impl BytecodeVM {
             if let Some(f) = self.module.find_function(short.trim()) {
                 f.clone()
             } else if let Some(rt) = &self.native_runtime
-                && let Some(result) = rt.call(name, &args) 
+                && let Some(result) = rt.call(name, &args)
             {
                 return result;
             } else {
                 return Ok(Value::Nil);
             }
         } else if let Some(rt) = &self.native_runtime
-            && let Some(result) = rt.call(name, &args) 
+            && let Some(result) = rt.call(name, &args)
         {
             return result;
         } else {

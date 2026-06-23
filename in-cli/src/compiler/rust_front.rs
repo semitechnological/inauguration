@@ -537,7 +537,11 @@ fn all_paths_return(stmts: &[Stmt]) -> bool {
     for stmt in stmts {
         match stmt {
             Stmt::Return(_) => return true,
-            Stmt::If { then_body, else_body, .. } => {
+            Stmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
                 // If present: both branches must return
                 if else_body.is_empty() {
                     return false; // no else → if may fall through
@@ -562,11 +566,11 @@ fn all_paths_return(stmts: &[Stmt]) -> bool {
 fn stmt_ensures_return(stmt: &Stmt) -> bool {
     match stmt {
         Stmt::Return(_) => true,
-        Stmt::If { then_body, else_body, .. } => {
-            !else_body.is_empty()
-                && all_paths_return(then_body)
-                && all_paths_return(else_body)
-        }
+        Stmt::If {
+            then_body,
+            else_body,
+            ..
+        } => !else_body.is_empty() && all_paths_return(then_body) && all_paths_return(else_body),
         Stmt::Match { arms, .. } => {
             // ponytail: exhaustive match doesn't need implicit return
             !arms.is_empty()
@@ -743,7 +747,7 @@ fn lower_expr(expr: &syn::Expr) -> Expr {
         syn::Expr::Try(t) => {
             // `expr?` → lower expr, skip the ? for now (ponytail: full try lowering later)
             lower_expr(&t.expr)
-        },
+        }
         _ => Expr::Ident(expr.to_token_stream().to_string()),
     }
 }

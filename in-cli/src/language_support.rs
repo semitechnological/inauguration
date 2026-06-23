@@ -14,11 +14,21 @@ pub struct LanguageSupport {
 }
 
 impl LanguageSupport {
-    pub fn can_parse(&self) -> bool { self.capabilities.contains(&"parse") }
-    pub fn can_lower(&self) -> bool { self.capabilities.contains(&"lower") }
-    pub fn can_typecheck(&self) -> bool { self.capabilities.contains(&"typecheck") }
-    pub fn can_boundary(&self) -> bool { self.capabilities.contains(&"boundary") }
-    pub fn can_bytecode(&self) -> bool { self.capabilities.contains(&"bytecode") }
+    pub fn can_parse(&self) -> bool {
+        self.capabilities.contains(&"parse")
+    }
+    pub fn can_lower(&self) -> bool {
+        self.capabilities.contains(&"lower")
+    }
+    pub fn can_typecheck(&self) -> bool {
+        self.capabilities.contains(&"typecheck")
+    }
+    pub fn can_boundary(&self) -> bool {
+        self.capabilities.contains(&"boundary")
+    }
+    pub fn can_bytecode(&self) -> bool {
+        self.capabilities.contains(&"bytecode")
+    }
 }
 
 pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[

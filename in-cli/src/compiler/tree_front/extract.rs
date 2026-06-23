@@ -15,32 +15,54 @@ use std::path::Path;
 use tree_sitter::{Language, Node, Parser};
 
 // Optional parser crates (behind "extended" feature)
-#[cfg(feature = "tree-sitter-c-sharp")] use tree_sitter_c_sharp;
-#[cfg(feature = "tree-sitter-dart")] use tree_sitter_dart;
-#[cfg(feature = "tree-sitter-elixir")] use tree_sitter_elixir;
-#[cfg(feature = "tree-sitter-erlang")] use tree_sitter_erlang;
-#[cfg(feature = "tree-sitter-fsharp")] use tree_sitter_fsharp;
-#[cfg(feature = "tree-sitter-groovy")] use tree_sitter_groovy;
-#[cfg(feature = "tree-sitter-haskell")] use tree_sitter_haskell;
-#[cfg(feature = "tree-sitter-holyc")] use tree_sitter_holyc;
-#[cfg(feature = "tree-sitter-julia")] use tree_sitter_julia;
-#[cfg(feature = "tree-sitter-kotlin-ng")] use tree_sitter_kotlin_ng;
-#[cfg(feature = "tree-sitter-lua")] use tree_sitter_lua;
-#[cfg(feature = "tree-sitter-objc")] use tree_sitter_objc;
-#[cfg(feature = "tree-sitter-ocaml")] use tree_sitter_ocaml;
-#[cfg(feature = "tree-sitter-perl")] use tree_sitter_perl;
-#[cfg(feature = "tree-sitter-php")] use tree_sitter_php;
-#[cfg(feature = "tree-sitter-r")] use tree_sitter_r;
-#[cfg(feature = "tree-sitter-ruby")] use tree_sitter_ruby;
-#[cfg(feature = "tree-sitter-scala")] use tree_sitter_scala;
-#[cfg(feature = "tree-sitter-v")] use tree_sitter_v;
+#[cfg(feature = "tree-sitter-c-sharp")]
+use tree_sitter_c_sharp;
+#[cfg(feature = "tree-sitter-dart")]
+use tree_sitter_dart;
+#[cfg(feature = "tree-sitter-elixir")]
+use tree_sitter_elixir;
+#[cfg(feature = "tree-sitter-erlang")]
+use tree_sitter_erlang;
+#[cfg(feature = "tree-sitter-fsharp")]
+use tree_sitter_fsharp;
+#[cfg(feature = "tree-sitter-groovy")]
+use tree_sitter_groovy;
+#[cfg(feature = "tree-sitter-haskell")]
+use tree_sitter_haskell;
+#[cfg(feature = "tree-sitter-holyc")]
+use tree_sitter_holyc;
+#[cfg(feature = "tree-sitter-julia")]
+use tree_sitter_julia;
+#[cfg(feature = "tree-sitter-kotlin-ng")]
+use tree_sitter_kotlin_ng;
+#[cfg(feature = "tree-sitter-lua")]
+use tree_sitter_lua;
+#[cfg(feature = "tree-sitter-objc")]
+use tree_sitter_objc;
+#[cfg(feature = "tree-sitter-ocaml")]
+use tree_sitter_ocaml;
+#[cfg(feature = "tree-sitter-perl")]
+use tree_sitter_perl;
+#[cfg(feature = "tree-sitter-php")]
+use tree_sitter_php;
+#[cfg(feature = "tree-sitter-r")]
+use tree_sitter_r;
+#[cfg(feature = "tree-sitter-ruby")]
+use tree_sitter_ruby;
+#[cfg(feature = "tree-sitter-scala")]
+use tree_sitter_scala;
+#[cfg(feature = "tree-sitter-v")]
+use tree_sitter_v;
 
 /// Resolve a ParserId to a Tree-sitter Language reference.
 /// Core parsers always resolve; optional parsers return Err if feature not enabled.
 /// Resolve a ParserId to a Tree-sitter Language. Panics if parser not compiled in.
 fn lang_for(id: ParserId) -> Language {
     try_lang_for(id).unwrap_or_else(|| {
-        panic!("Parser `{}` not compiled in. Rebuild with --features extended", id.as_str())
+        panic!(
+            "Parser `{}` not compiled in. Rebuild with --features extended",
+            id.as_str()
+        )
     })
 }
 
@@ -57,44 +79,82 @@ fn try_lang_for(id: ParserId) -> Option<Language> {
         ParserId::Go => tree_sitter_go::LANGUAGE.into(),
         ParserId::Swift => tree_sitter_swift::LANGUAGE.into(),
         ParserId::TypeScript => tree_sitter_typescript::LANGUAGE_TSX.into(),
-        #[cfg(feature = "tree-sitter-objc")] ParserId::ObjC => tree_sitter_objc::LANGUAGE.into(),
-        #[cfg(not(feature = "tree-sitter-objc"))] ParserId::ObjC => return None,
-        #[cfg(feature = "tree-sitter-kotlin-ng")] ParserId::Kotlin => tree_sitter_kotlin_ng::LANGUAGE.into(),
-        #[cfg(not(feature = "tree-sitter-kotlin-ng"))] ParserId::Kotlin => return None,
-        #[cfg(feature = "tree-sitter-scala")] ParserId::Scala => tree_sitter_scala::LANGUAGE.into(),
-        #[cfg(not(feature = "tree-sitter-scala"))] ParserId::Scala => return None,
-        #[cfg(feature = "tree-sitter-groovy")] ParserId::Groovy => tree_sitter_groovy::LANGUAGE.into(),
-        #[cfg(not(feature = "tree-sitter-groovy"))] ParserId::Groovy => return None,
-        #[cfg(feature = "tree-sitter-c-sharp")] ParserId::CSharp => tree_sitter_c_sharp::LANGUAGE.into(),
-        #[cfg(not(feature = "tree-sitter-c-sharp"))] ParserId::CSharp => return None,
-        #[cfg(feature = "tree-sitter-fsharp")] ParserId::FSharp => tree_sitter_fsharp::LANGUAGE_FSHARP.into(),
-        #[cfg(not(feature = "tree-sitter-fsharp"))] ParserId::FSharp => return None,
-        #[cfg(feature = "tree-sitter-ruby")] ParserId::Ruby => tree_sitter_ruby::LANGUAGE.into(),
-        #[cfg(not(feature = "tree-sitter-ruby"))] ParserId::Ruby => return None,
-        #[cfg(feature = "tree-sitter-php")] ParserId::Php => tree_sitter_php::LANGUAGE_PHP.into(),
-        #[cfg(not(feature = "tree-sitter-php"))] ParserId::Php => return None,
-        #[cfg(feature = "tree-sitter-perl")] ParserId::Perl => tree_sitter_perl::LANGUAGE.into(),
-        #[cfg(not(feature = "tree-sitter-perl"))] ParserId::Perl => return None,
-        #[cfg(feature = "tree-sitter-dart")] ParserId::Dart => tree_sitter_dart::LANGUAGE.into(),
-        #[cfg(not(feature = "tree-sitter-dart"))] ParserId::Dart => return None,
-        #[cfg(feature = "tree-sitter-lua")] ParserId::Lua => tree_sitter_lua::LANGUAGE.into(),
-        #[cfg(not(feature = "tree-sitter-lua"))] ParserId::Lua => return None,
-        #[cfg(feature = "tree-sitter-elixir")] ParserId::Elixir => tree_sitter_elixir::LANGUAGE.into(),
-        #[cfg(not(feature = "tree-sitter-elixir"))] ParserId::Elixir => return None,
-        #[cfg(feature = "tree-sitter-erlang")] ParserId::Erlang => tree_sitter_erlang::LANGUAGE.into(),
-        #[cfg(not(feature = "tree-sitter-erlang"))] ParserId::Erlang => return None,
-        #[cfg(feature = "tree-sitter-haskell")] ParserId::Haskell => tree_sitter_haskell::LANGUAGE.into(),
-        #[cfg(not(feature = "tree-sitter-haskell"))] ParserId::Haskell => return None,
-        #[cfg(feature = "tree-sitter-julia")] ParserId::Julia => tree_sitter_julia::LANGUAGE.into(),
-        #[cfg(not(feature = "tree-sitter-julia"))] ParserId::Julia => return None,
-        #[cfg(feature = "tree-sitter-ocaml")] ParserId::OCaml => tree_sitter_ocaml::LANGUAGE_OCAML.into(),
-        #[cfg(not(feature = "tree-sitter-ocaml"))] ParserId::OCaml => return None,
-        #[cfg(feature = "tree-sitter-r")] ParserId::R => tree_sitter_r::LANGUAGE.into(),
-        #[cfg(not(feature = "tree-sitter-r"))] ParserId::R => return None,
-        #[cfg(feature = "tree-sitter-holyc")] ParserId::HolyC => tree_sitter_holyc::LANGUAGE.into(),
-        #[cfg(not(feature = "tree-sitter-holyc"))] ParserId::HolyC => return None,
-        #[cfg(feature = "tree-sitter-v")] ParserId::V => tree_sitter_v::LANGUAGE.into(),
-        #[cfg(not(feature = "tree-sitter-v"))] ParserId::V => return None,
+        #[cfg(feature = "tree-sitter-objc")]
+        ParserId::ObjC => tree_sitter_objc::LANGUAGE.into(),
+        #[cfg(not(feature = "tree-sitter-objc"))]
+        ParserId::ObjC => return None,
+        #[cfg(feature = "tree-sitter-kotlin-ng")]
+        ParserId::Kotlin => tree_sitter_kotlin_ng::LANGUAGE.into(),
+        #[cfg(not(feature = "tree-sitter-kotlin-ng"))]
+        ParserId::Kotlin => return None,
+        #[cfg(feature = "tree-sitter-scala")]
+        ParserId::Scala => tree_sitter_scala::LANGUAGE.into(),
+        #[cfg(not(feature = "tree-sitter-scala"))]
+        ParserId::Scala => return None,
+        #[cfg(feature = "tree-sitter-groovy")]
+        ParserId::Groovy => tree_sitter_groovy::LANGUAGE.into(),
+        #[cfg(not(feature = "tree-sitter-groovy"))]
+        ParserId::Groovy => return None,
+        #[cfg(feature = "tree-sitter-c-sharp")]
+        ParserId::CSharp => tree_sitter_c_sharp::LANGUAGE.into(),
+        #[cfg(not(feature = "tree-sitter-c-sharp"))]
+        ParserId::CSharp => return None,
+        #[cfg(feature = "tree-sitter-fsharp")]
+        ParserId::FSharp => tree_sitter_fsharp::LANGUAGE_FSHARP.into(),
+        #[cfg(not(feature = "tree-sitter-fsharp"))]
+        ParserId::FSharp => return None,
+        #[cfg(feature = "tree-sitter-ruby")]
+        ParserId::Ruby => tree_sitter_ruby::LANGUAGE.into(),
+        #[cfg(not(feature = "tree-sitter-ruby"))]
+        ParserId::Ruby => return None,
+        #[cfg(feature = "tree-sitter-php")]
+        ParserId::Php => tree_sitter_php::LANGUAGE_PHP.into(),
+        #[cfg(not(feature = "tree-sitter-php"))]
+        ParserId::Php => return None,
+        #[cfg(feature = "tree-sitter-perl")]
+        ParserId::Perl => tree_sitter_perl::LANGUAGE.into(),
+        #[cfg(not(feature = "tree-sitter-perl"))]
+        ParserId::Perl => return None,
+        #[cfg(feature = "tree-sitter-dart")]
+        ParserId::Dart => tree_sitter_dart::LANGUAGE.into(),
+        #[cfg(not(feature = "tree-sitter-dart"))]
+        ParserId::Dart => return None,
+        #[cfg(feature = "tree-sitter-lua")]
+        ParserId::Lua => tree_sitter_lua::LANGUAGE.into(),
+        #[cfg(not(feature = "tree-sitter-lua"))]
+        ParserId::Lua => return None,
+        #[cfg(feature = "tree-sitter-elixir")]
+        ParserId::Elixir => tree_sitter_elixir::LANGUAGE.into(),
+        #[cfg(not(feature = "tree-sitter-elixir"))]
+        ParserId::Elixir => return None,
+        #[cfg(feature = "tree-sitter-erlang")]
+        ParserId::Erlang => tree_sitter_erlang::LANGUAGE.into(),
+        #[cfg(not(feature = "tree-sitter-erlang"))]
+        ParserId::Erlang => return None,
+        #[cfg(feature = "tree-sitter-haskell")]
+        ParserId::Haskell => tree_sitter_haskell::LANGUAGE.into(),
+        #[cfg(not(feature = "tree-sitter-haskell"))]
+        ParserId::Haskell => return None,
+        #[cfg(feature = "tree-sitter-julia")]
+        ParserId::Julia => tree_sitter_julia::LANGUAGE.into(),
+        #[cfg(not(feature = "tree-sitter-julia"))]
+        ParserId::Julia => return None,
+        #[cfg(feature = "tree-sitter-ocaml")]
+        ParserId::OCaml => tree_sitter_ocaml::LANGUAGE_OCAML.into(),
+        #[cfg(not(feature = "tree-sitter-ocaml"))]
+        ParserId::OCaml => return None,
+        #[cfg(feature = "tree-sitter-r")]
+        ParserId::R => tree_sitter_r::LANGUAGE.into(),
+        #[cfg(not(feature = "tree-sitter-r"))]
+        ParserId::R => return None,
+        #[cfg(feature = "tree-sitter-holyc")]
+        ParserId::HolyC => tree_sitter_holyc::LANGUAGE.into(),
+        #[cfg(not(feature = "tree-sitter-holyc"))]
+        ParserId::HolyC => return None,
+        #[cfg(feature = "tree-sitter-v")]
+        ParserId::V => tree_sitter_v::LANGUAGE.into(),
+        #[cfg(not(feature = "tree-sitter-v"))]
+        ParserId::V => return None,
         _ => return None,
     })
 }
@@ -103,12 +163,13 @@ fn try_lang_for(id: ParserId) -> Option<Language> {
 pub fn available_parsers() -> Vec<ParserId> {
     use ParserId::*;
     let all = [
-        In, Icore, C, Cpp, ObjC, ObjCpp, Java, Kotlin, Scala, Groovy,
-        CSharp, FSharp, VbNet, Python, Ruby, Php, Perl, JavaScript,
-        TypeScript, Go, Rust, Zig, Dart, Lua, Elixir, Erlang, Haskell,
-        Julia, Swift, OCaml, R, HolyC, V,
+        In, Icore, C, Cpp, ObjC, ObjCpp, Java, Kotlin, Scala, Groovy, CSharp, FSharp, VbNet,
+        Python, Ruby, Php, Perl, JavaScript, TypeScript, Go, Rust, Zig, Dart, Lua, Elixir, Erlang,
+        Haskell, Julia, Swift, OCaml, R, HolyC, V,
     ];
-    all.into_iter().filter(|id| try_lang_for(*id).is_some() || matches!(id, In | Icore)).collect()
+    all.into_iter()
+        .filter(|id| try_lang_for(*id).is_some() || matches!(id, In | Icore))
+        .collect()
 }
 
 type ZigLayoutFields = Vec<(String, String)>;
@@ -124,25 +185,34 @@ pub fn parse_polyglot_file(id: ParserId, path: &Path) -> Result<UnifiedModule, S
         ParserId::V => {
             let src = std::fs::read_to_string(path)
                 .map_err(|e| format!("read {}: {e}", path.display()))?;
-            parse_lang(try_lang_for(ParserId::V).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::V.as_str()))?, &src, |b, r| {
-                extract_fn_nodes(b, r, &["function_declaration"], |s, n| {
-                    let name_n = n.child_by_field_name("name")?;
-                    let name = normalize_entry(node_txt(s, name_n).trim());
-                    let params = v_params(s, n);
-                    let ret = v_return_type(s, n).unwrap_or(Typ::Void);
-                    let body = n
-                        .child_by_field_name("body")
-                        .map(|b| v_body(s, b))
-                        .unwrap_or_default();
-                    Some(Decl::Function {
-                        name,
-                        params,
-                        ret,
-                        body,
-                        type_params: vec![],
+            parse_lang(
+                try_lang_for(ParserId::V).ok_or_else(|| {
+                    format!(
+                        "Parser `{}` not included. Rebuild with --features extended",
+                        ParserId::V.as_str()
+                    )
+                })?,
+                &src,
+                |b, r| {
+                    extract_fn_nodes(b, r, &["function_declaration"], |s, n| {
+                        let name_n = n.child_by_field_name("name")?;
+                        let name = normalize_entry(node_txt(s, name_n).trim());
+                        let params = v_params(s, n);
+                        let ret = v_return_type(s, n).unwrap_or(Typ::Void);
+                        let body = n
+                            .child_by_field_name("body")
+                            .map(|b| v_body(s, b))
+                            .unwrap_or_default();
+                        Some(Decl::Function {
+                            name,
+                            params,
+                            ret,
+                            body,
+                            type_params: vec![],
+                        })
                     })
-                })
-            })
+                },
+            )
         }
         _ => {
             let src = std::fs::read_to_string(path)
@@ -154,93 +224,315 @@ pub fn parse_polyglot_file(id: ParserId, path: &Path) -> Result<UnifiedModule, S
 
 fn dispatch(id: ParserId, path: &Path, src: &str) -> Result<UnifiedModule, String> {
     match id {
-        ParserId::C => parse_lang(try_lang_for(ParserId::C).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::C.as_str()))?, src, |b, r| {
-            extract_fn_nodes(b, r, &["function_definition"], c_like_function_decl)
-        }),
+        ParserId::C => parse_lang(
+            try_lang_for(ParserId::C).ok_or_else(|| {
+                format!(
+                    "Parser `{}` not included. Rebuild with --features extended",
+                    ParserId::C.as_str()
+                )
+            })?,
+            src,
+            |b, r| extract_fn_nodes(b, r, &["function_definition"], c_like_function_decl),
+        ),
         ParserId::Cpp | ParserId::ObjCpp => parse_lang(
-            try_lang_for(ParserId::Cpp).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Cpp.as_str()))?,
+            try_lang_for(ParserId::Cpp).ok_or_else(|| {
+                format!(
+                    "Parser `{}` not included. Rebuild with --features extended",
+                    ParserId::Cpp.as_str()
+                )
+            })?,
             src,
             extract_cpp_with_classes,
         ),
-        ParserId::ObjC => parse_lang(try_lang_for(ParserId::ObjC).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::ObjC.as_str()))?, src, |b, r| {
-            extract_fn_nodes(
-                b,
-                r,
-                &["function_definition", "method_definition"],
-                |src, n| objc_like(src, n),
-            )
-        }),
+        ParserId::ObjC => parse_lang(
+            try_lang_for(ParserId::ObjC).ok_or_else(|| {
+                format!(
+                    "Parser `{}` not included. Rebuild with --features extended",
+                    ParserId::ObjC.as_str()
+                )
+            })?,
+            src,
+            |b, r| {
+                extract_fn_nodes(
+                    b,
+                    r,
+                    &["function_definition", "method_definition"],
+                    |src, n| objc_like(src, n),
+                )
+            },
+        ),
         ParserId::Java => parse_lang(
-            try_lang_for(ParserId::Java).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Java.as_str()))?,
+            try_lang_for(ParserId::Java).ok_or_else(|| {
+                format!(
+                    "Parser `{}` not included. Rebuild with --features extended",
+                    ParserId::Java.as_str()
+                )
+            })?,
             src,
             extract_java_with_classes,
         ),
-        ParserId::Kotlin => parse_lang(try_lang_for(ParserId::Kotlin).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Kotlin.as_str()))?, src, extract_kotlin),
-        ParserId::Scala => parse_lang(try_lang_for(ParserId::Scala).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Scala.as_str()))?, src, extract_scala),
+        ParserId::Kotlin => parse_lang(
+            try_lang_for(ParserId::Kotlin).ok_or_else(|| {
+                format!(
+                    "Parser `{}` not included. Rebuild with --features extended",
+                    ParserId::Kotlin.as_str()
+                )
+            })?,
+            src,
+            extract_kotlin,
+        ),
+        ParserId::Scala => parse_lang(
+            try_lang_for(ParserId::Scala).ok_or_else(|| {
+                format!(
+                    "Parser `{}` not included. Rebuild with --features extended",
+                    ParserId::Scala.as_str()
+                )
+            })?,
+            src,
+            extract_scala,
+        ),
         ParserId::Groovy => parse_lang(
-            try_lang_for(ParserId::Groovy).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Groovy.as_str()))?,
+            try_lang_for(ParserId::Groovy).ok_or_else(|| {
+                format!(
+                    "Parser `{}` not included. Rebuild with --features extended",
+                    ParserId::Groovy.as_str()
+                )
+            })?,
             src,
             extract_java_style_methods,
         ),
-        ParserId::CSharp => parse_lang(try_lang_for(ParserId::CSharp).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::CSharp.as_str()))?, src, extract_csharp),
+        ParserId::CSharp => parse_lang(
+            try_lang_for(ParserId::CSharp).ok_or_else(|| {
+                format!(
+                    "Parser `{}` not included. Rebuild with --features extended",
+                    ParserId::CSharp.as_str()
+                )
+            })?,
+            src,
+            extract_csharp,
+        ),
         ParserId::FSharp => parse_lang(
-            try_lang_for(ParserId::FSharp).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::FSharp.as_str()))?,
+            try_lang_for(ParserId::FSharp).ok_or_else(|| {
+                format!(
+                    "Parser `{}` not included. Rebuild with --features extended",
+                    ParserId::FSharp.as_str()
+                )
+            })?,
             src,
             extract_fsharp,
         ),
         ParserId::Python => parse_lang(
-            try_lang_for(ParserId::Python).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Python.as_str()))?,
+            try_lang_for(ParserId::Python).ok_or_else(|| {
+                format!(
+                    "Parser `{}` not included. Rebuild with --features extended",
+                    ParserId::Python.as_str()
+                )
+            })?,
             src,
             extract_python_with_classes,
         ),
-        ParserId::Ruby => parse_lang(try_lang_for(ParserId::Ruby).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Ruby.as_str()))?, src, extract_ruby),
-        ParserId::Php => parse_lang(try_lang_for(ParserId::Php).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Php.as_str()))?, src, extract_php),
-        ParserId::Perl => parse_lang(try_lang_for(ParserId::Perl).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Perl.as_str()))?, src, extract_perl),
+        ParserId::Ruby => parse_lang(
+            try_lang_for(ParserId::Ruby).ok_or_else(|| {
+                format!(
+                    "Parser `{}` not included. Rebuild with --features extended",
+                    ParserId::Ruby.as_str()
+                )
+            })?,
+            src,
+            extract_ruby,
+        ),
+        ParserId::Php => parse_lang(
+            try_lang_for(ParserId::Php).ok_or_else(|| {
+                format!(
+                    "Parser `{}` not included. Rebuild with --features extended",
+                    ParserId::Php.as_str()
+                )
+            })?,
+            src,
+            extract_php,
+        ),
+        ParserId::Perl => parse_lang(
+            try_lang_for(ParserId::Perl).ok_or_else(|| {
+                format!(
+                    "Parser `{}` not included. Rebuild with --features extended",
+                    ParserId::Perl.as_str()
+                )
+            })?,
+            src,
+            extract_perl,
+        ),
         ParserId::JavaScript => parse_lang(
-            try_lang_for(ParserId::JavaScript).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::JavaScript.as_str()))?,
+            try_lang_for(ParserId::JavaScript).ok_or_else(|| {
+                format!(
+                    "Parser `{}` not included. Rebuild with --features extended",
+                    ParserId::JavaScript.as_str()
+                )
+            })?,
             src,
             extract_js_with_classes,
         ),
         ParserId::TypeScript => {
-            let ts_lang = try_lang_for(ParserId::TypeScript).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::TypeScript.as_str()))?;
+            let ts_lang = try_lang_for(ParserId::TypeScript).ok_or_else(|| {
+                format!(
+                    "Parser `{}` not included. Rebuild with --features extended",
+                    ParserId::TypeScript.as_str()
+                )
+            })?;
             parse_lang(ts_lang, src, extract_ts_with_classes)
         }
-        ParserId::Go => parse_lang(try_lang_for(ParserId::Go).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Go.as_str()))?, src, |b, r| {
-            extract_fn_nodes(
-                b,
-                r,
-                &["function_declaration", "method_declaration"],
-                |src, n| {
-                    let name_n = n.child_by_field_name("name")?;
-                    let name = normalize_entry(node_txt(src, name_n).trim());
-                    let params = go_params(src, n);
-                    let ret = go_return_type(src, n).unwrap_or(Typ::Void);
-                    let body = n
-                        .child_by_field_name("body")
-                        .map(|b| go_body(src, b))
-                        .unwrap_or_default();
-                    Some(Decl::Function {
-                        name,
-                        params,
-                        ret,
-                        body,
-                        type_params: vec![],
-                    })
-                },
-            )
-        }),
-        ParserId::Rust => parse_lang(try_lang_for(ParserId::Rust).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Rust.as_str()))?, src, extract_rust),
-        ParserId::Zig => parse_lang(try_lang_for(ParserId::Zig).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Zig.as_str()))?, src, extract_zig),
-        ParserId::Dart => parse_lang(try_lang_for(ParserId::Dart).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Dart.as_str()))?, src, extract_dart),
-        ParserId::Lua => parse_lang(try_lang_for(ParserId::Lua).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Lua.as_str()))?, src, extract_lua),
-        ParserId::Elixir => parse_lang(try_lang_for(ParserId::Elixir).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Elixir.as_str()))?, src, extract_elixir),
-        ParserId::Erlang => parse_lang(try_lang_for(ParserId::Erlang).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Erlang.as_str()))?, src, extract_erlang),
-        ParserId::Haskell => parse_lang(try_lang_for(ParserId::Haskell).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Haskell.as_str()))?, src, extract_haskell),
-        ParserId::Julia => parse_lang(try_lang_for(ParserId::Julia).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Julia.as_str()))?, src, extract_julia),
-        ParserId::Swift => parse_lang(try_lang_for(ParserId::Swift).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Swift.as_str()))?, src, extract_swift),
-        ParserId::OCaml => parse_lang(try_lang_for(ParserId::OCaml).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::OCaml.as_str()))?, src, extract_ocaml),
-        ParserId::R => parse_lang(try_lang_for(ParserId::R).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::R.as_str()))?, src, extract_r_lang),
-        ParserId::HolyC => parse_lang(try_lang_for(ParserId::HolyC).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::HolyC.as_str()))?, src, extract_holyc),
+        ParserId::Go => parse_lang(
+            try_lang_for(ParserId::Go).ok_or_else(|| {
+                format!(
+                    "Parser `{}` not included. Rebuild with --features extended",
+                    ParserId::Go.as_str()
+                )
+            })?,
+            src,
+            |b, r| {
+                extract_fn_nodes(
+                    b,
+                    r,
+                    &["function_declaration", "method_declaration"],
+                    |src, n| {
+                        let name_n = n.child_by_field_name("name")?;
+                        let name = normalize_entry(node_txt(src, name_n).trim());
+                        let params = go_params(src, n);
+                        let ret = go_return_type(src, n).unwrap_or(Typ::Void);
+                        let body = n
+                            .child_by_field_name("body")
+                            .map(|b| go_body(src, b))
+                            .unwrap_or_default();
+                        Some(Decl::Function {
+                            name,
+                            params,
+                            ret,
+                            body,
+                            type_params: vec![],
+                        })
+                    },
+                )
+            },
+        ),
+        ParserId::Rust => parse_lang(
+            try_lang_for(ParserId::Rust).ok_or_else(|| {
+                format!(
+                    "Parser `{}` not included. Rebuild with --features extended",
+                    ParserId::Rust.as_str()
+                )
+            })?,
+            src,
+            extract_rust,
+        ),
+        ParserId::Zig => parse_lang(
+            try_lang_for(ParserId::Zig).ok_or_else(|| {
+                format!(
+                    "Parser `{}` not included. Rebuild with --features extended",
+                    ParserId::Zig.as_str()
+                )
+            })?,
+            src,
+            extract_zig,
+        ),
+        ParserId::Dart => parse_lang(
+            try_lang_for(ParserId::Dart).ok_or_else(|| {
+                format!(
+                    "Parser `{}` not included. Rebuild with --features extended",
+                    ParserId::Dart.as_str()
+                )
+            })?,
+            src,
+            extract_dart,
+        ),
+        ParserId::Lua => parse_lang(
+            try_lang_for(ParserId::Lua).ok_or_else(|| {
+                format!(
+                    "Parser `{}` not included. Rebuild with --features extended",
+                    ParserId::Lua.as_str()
+                )
+            })?,
+            src,
+            extract_lua,
+        ),
+        ParserId::Elixir => parse_lang(
+            try_lang_for(ParserId::Elixir).ok_or_else(|| {
+                format!(
+                    "Parser `{}` not included. Rebuild with --features extended",
+                    ParserId::Elixir.as_str()
+                )
+            })?,
+            src,
+            extract_elixir,
+        ),
+        ParserId::Erlang => parse_lang(
+            try_lang_for(ParserId::Erlang).ok_or_else(|| {
+                format!(
+                    "Parser `{}` not included. Rebuild with --features extended",
+                    ParserId::Erlang.as_str()
+                )
+            })?,
+            src,
+            extract_erlang,
+        ),
+        ParserId::Haskell => parse_lang(
+            try_lang_for(ParserId::Haskell).ok_or_else(|| {
+                format!(
+                    "Parser `{}` not included. Rebuild with --features extended",
+                    ParserId::Haskell.as_str()
+                )
+            })?,
+            src,
+            extract_haskell,
+        ),
+        ParserId::Julia => parse_lang(
+            try_lang_for(ParserId::Julia).ok_or_else(|| {
+                format!(
+                    "Parser `{}` not included. Rebuild with --features extended",
+                    ParserId::Julia.as_str()
+                )
+            })?,
+            src,
+            extract_julia,
+        ),
+        ParserId::Swift => parse_lang(
+            try_lang_for(ParserId::Swift).ok_or_else(|| {
+                format!(
+                    "Parser `{}` not included. Rebuild with --features extended",
+                    ParserId::Swift.as_str()
+                )
+            })?,
+            src,
+            extract_swift,
+        ),
+        ParserId::OCaml => parse_lang(
+            try_lang_for(ParserId::OCaml).ok_or_else(|| {
+                format!(
+                    "Parser `{}` not included. Rebuild with --features extended",
+                    ParserId::OCaml.as_str()
+                )
+            })?,
+            src,
+            extract_ocaml,
+        ),
+        ParserId::R => parse_lang(
+            try_lang_for(ParserId::R).ok_or_else(|| {
+                format!(
+                    "Parser `{}` not included. Rebuild with --features extended",
+                    ParserId::R.as_str()
+                )
+            })?,
+            src,
+            extract_r_lang,
+        ),
+        ParserId::HolyC => parse_lang(
+            try_lang_for(ParserId::HolyC).ok_or_else(|| {
+                format!(
+                    "Parser `{}` not included. Rebuild with --features extended",
+                    ParserId::HolyC.as_str()
+                )
+            })?,
+            src,
+            extract_holyc,
+        ),
         ParserId::In
         | ParserId::Icore
         | ParserId::Clojure
@@ -261,7 +553,8 @@ fn typescript_lang(path: &Path) -> Language {
         .unwrap_or("")
         .to_ascii_lowercase();
     if matches!(ext.as_str(), "tsx" | "jsx") {
-        try_lang_for(ParserId::TypeScript).unwrap_or_else(|| tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())
+        try_lang_for(ParserId::TypeScript)
+            .unwrap_or_else(|| tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())
     } else {
         tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()
     }
@@ -306,7 +599,12 @@ pub fn parse_zig_artifact(path: &Path) -> Result<CompileArtifact, String> {
 pub fn parse_zig_artifact_source(src: &str, module_id: &str) -> Result<CompileArtifact, String> {
     let mut parser = Parser::new();
     parser
-        .set_language(&try_lang_for(ParserId::Zig).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Zig.as_str()))?)
+        .set_language(&try_lang_for(ParserId::Zig).ok_or_else(|| {
+            format!(
+                "Parser `{}` not included. Rebuild with --features extended",
+                ParserId::Zig.as_str()
+            )
+        })?)
         .map_err(|e| format!("Tree-sitter grammar load failed: {e}"))?;
     let tree = parser
         .parse(src, None)
@@ -884,7 +1182,10 @@ const PERLAST: AstShape = AstShape {
     while_kinds: &["while_statement"],
     // ponytail: tree-sitter-perl 1.1.2 merged call/expr into binary_expression;
     // call extraction handled in perl-specific code
-    call_kinds: &["call_expression_with_spaced_args", "call_expression_with_bareword"],
+    call_kinds: &[
+        "call_expression_with_spaced_args",
+        "call_expression_with_bareword",
+    ],
     arg_container_kinds: &["arguments"],
     arg_wrapper_kinds: &[],
     paren_kinds: &[],
@@ -3830,16 +4131,20 @@ fn perl_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
                     .and_then(|a| a.named_child(0))
                     .and_then(|ex| ast_expr(src, ex, PERLAST));
                 let mut cw2 = ch.walk();
-                let blocks: Vec<Node<'_>> =
-                    ch.named_children(&mut cw2).filter(|c| c.kind() == "block").collect();
+                let blocks: Vec<Node<'_>> = ch
+                    .named_children(&mut cw2)
+                    .filter(|c| c.kind() == "block")
+                    .collect();
                 if kind == "if_statement" {
                     if let Some(cond) = cond {
-                        let then_body = blocks.first()
+                        let then_body = blocks
+                            .first()
                             .map(|b| perl_body(src, *b))
                             .unwrap_or_default();
                         let else_body = if blocks.len() > 1 {
                             perl_body(src, blocks[1])
-                        } else if let Some(ec) = ch.named_children(&mut ch.walk())
+                        } else if let Some(ec) = ch
+                            .named_children(&mut ch.walk())
                             .find(|c| c.kind() == "else_clause")
                         {
                             let mut ew = ec.walk();
@@ -3858,7 +4163,8 @@ fn perl_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
                     }
                 } else {
                     if let Some(cond) = cond {
-                        let body = blocks.first()
+                        let body = blocks
+                            .first()
                             .map(|b| perl_body(src, *b))
                             .unwrap_or_default();
                         out.push(Stmt::Loop {
@@ -3881,7 +4187,9 @@ fn perl_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
                             let name = l
                                 .named_children(&mut l.walk())
                                 .find(|c| c.kind() == "scalar_variable")
-                                .map(|v| node_txt(src, v).trim().trim_start_matches('$').to_string());
+                                .map(|v| {
+                                    node_txt(src, v).trim().trim_start_matches('$').to_string()
+                                });
                             if let Some(n) = name {
                                 if let Some(r) = right {
                                     if let Some(e) = ast_expr(src, r, PERLAST) {
@@ -4376,16 +4684,28 @@ pub(super) fn find_return_expr(stmts: &[Stmt]) -> Option<&Expr> {
     for stmt in stmts {
         match stmt {
             Stmt::Return(Some(expr)) => return Some(expr),
-            Stmt::If { then_body, else_body, .. } => {
-                if let Some(e) = find_return_expr(then_body) { return Some(e); }
-                if let Some(e) = find_return_expr(else_body) { return Some(e); }
+            Stmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                if let Some(e) = find_return_expr(then_body) {
+                    return Some(e);
+                }
+                if let Some(e) = find_return_expr(else_body) {
+                    return Some(e);
+                }
             }
             Stmt::Loop { body, .. } => {
-                if let Some(e) = find_return_expr(body) { return Some(e); }
+                if let Some(e) = find_return_expr(body) {
+                    return Some(e);
+                }
             }
             Stmt::Match { arms, .. } => {
                 for arm in arms {
-                    if let Some(e) = find_return_expr(&arm.body) { return Some(e); }
+                    if let Some(e) = find_return_expr(&arm.body) {
+                        return Some(e);
+                    }
                 }
             }
             _ => {}
@@ -4770,7 +5090,9 @@ fn rust_stmt_from_node(src: &[u8], n: Node<'_>) -> Option<Stmt> {
         "let_declaration" => {
             let pat = n.child_by_field_name("pattern")?;
             let name = rust_pattern_name(src, pat)?;
-            let ty = n.child_by_field_name("type").map(|t| Typ::Named(node_txt(src, t).trim().to_string()));
+            let ty = n
+                .child_by_field_name("type")
+                .map(|t| Typ::Named(node_txt(src, t).trim().to_string()));
             let val = n.child_by_field_name("value")?;
             let expr = rust_expr_from_node(src, val)?;
             Some(Stmt::Let(name, ty, expr))
@@ -4789,16 +5111,16 @@ fn rust_stmt_from_node(src: &[u8], n: Node<'_>) -> Option<Stmt> {
                     // tree-sitter-rust: return value is a child with field name "value",
                     // but the expression children may not be direct named children.
                     // Try field access first, then text-based fallback.
-                    let val = expr_node.child_by_field_name("value")
+                    let val = expr_node
+                        .child_by_field_name("value")
                         .and_then(|v| rust_expr_from_node_any(src, v));
                     let expr = val.or_else(|| {
                         // Fallback: extract expression from text after "return"
                         let text = node_txt(src, expr_node);
-                        text.strip_prefix("return")
-                            .and_then(|rest| {
-                                let rest = rest.trim().trim_end_matches(';');
-                                simple_bounded_expr(rest)
-                            })
+                        text.strip_prefix("return").and_then(|rest| {
+                            let rest = rest.trim().trim_end_matches(';');
+                            simple_bounded_expr(rest)
+                        })
                     });
                     Some(Stmt::Return(expr))
                 }
@@ -4810,15 +5132,15 @@ fn rust_stmt_from_node(src: &[u8], n: Node<'_>) -> Option<Stmt> {
         }
         "if_expression" => rust_if_stmt(src, n),
         "return_expression" => {
-            let val = n.child_by_field_name("value")
+            let val = n
+                .child_by_field_name("value")
                 .and_then(|v| rust_expr_from_node_any(src, v));
             let expr = val.or_else(|| {
                 let text = node_txt(src, n);
-                text.strip_prefix("return")
-                    .and_then(|rest| {
-                        let rest = rest.trim().trim_end_matches(';');
-                        simple_bounded_expr(rest)
-                    })
+                text.strip_prefix("return").and_then(|rest| {
+                    let rest = rest.trim().trim_end_matches(';');
+                    simple_bounded_expr(rest)
+                })
             });
             Some(Stmt::Return(expr))
         }
@@ -4857,15 +5179,25 @@ fn rust_if_stmt(src: &[u8], n: Node<'_>) -> Option<Stmt> {
         }
     }
     let cond_expr = cond.and_then(|c| rust_expr_from_node(src, c))?;
-    let then_body = consequence.map(|b| ast_block_to_stmts(src, b)).unwrap_or_default();
-    let else_body = alternative.map(|alt| {
-        if alt.kind() == "if_expression" {
-            rust_stmt_from_node(src, alt).map(|s| vec![s]).unwrap_or_default()
-        } else {
-            ast_block_to_stmts(src, alt)
-        }
-    }).unwrap_or_default();
-    Some(Stmt::If { cond: cond_expr, then_body, else_body })
+    let then_body = consequence
+        .map(|b| ast_block_to_stmts(src, b))
+        .unwrap_or_default();
+    let else_body = alternative
+        .map(|alt| {
+            if alt.kind() == "if_expression" {
+                rust_stmt_from_node(src, alt)
+                    .map(|s| vec![s])
+                    .unwrap_or_default()
+            } else {
+                ast_block_to_stmts(src, alt)
+            }
+        })
+        .unwrap_or_default();
+    Some(Stmt::If {
+        cond: cond_expr,
+        then_body,
+        else_body,
+    })
 }
 
 fn rust_match_stmt(src: &[u8], n: Node<'_>) -> Option<Stmt> {
@@ -4875,7 +5207,8 @@ fn rust_match_stmt(src: &[u8], n: Node<'_>) -> Option<Stmt> {
     let mut w = n.walk();
     for child in n.named_children(&mut w) {
         if child.kind() == "match_arm" {
-            let pat = child.child_by_field_name("pattern")
+            let pat = child
+                .child_by_field_name("pattern")
                 .map(|p| node_txt(src, p).trim().to_string())
                 .unwrap_or_default();
             let body_node = child.child_by_field_name("value")?;
@@ -4890,11 +5223,15 @@ fn rust_match_stmt(src: &[u8], n: Node<'_>) -> Option<Stmt> {
             arms.push(MatchArm { pattern: pat, body });
         }
     }
-    Some(Stmt::Match { scrutinee: scrut_expr, arms })
+    Some(Stmt::Match {
+        scrutinee: scrut_expr,
+        arms,
+    })
 }
 
 fn rust_loop_stmt(src: &[u8], n: Node<'_>, kind: LoopKind) -> Option<Stmt> {
-    let cond = n.child_by_field_name("condition")
+    let cond = n
+        .child_by_field_name("condition")
         .and_then(|c| rust_expr_from_node(src, c));
     let body_node = n.child_by_field_name("body")?;
     let body = ast_block_to_stmts(src, body_node);
@@ -4924,7 +5261,7 @@ fn rust_expr_from_node_any(src: &[u8], n: Node<'_>) -> Option<Expr> {
     } else if n.kind() == "string_literal" {
         let txt = node_txt(src, n).trim();
         if txt.len() >= 2 {
-            Some(Expr::StringLit(txt[1..txt.len()-1].to_string()))
+            Some(Expr::StringLit(txt[1..txt.len() - 1].to_string()))
         } else {
             Some(Expr::StringLit(String::new()))
         }
@@ -4933,8 +5270,12 @@ fn rust_expr_from_node_any(src: &[u8], n: Node<'_>) -> Option<Expr> {
         Some(Expr::BoolLit(txt == "true"))
     } else if n.kind() == "identifier" {
         let txt = node_txt(src, n).trim().to_string();
-        if txt == "true" { return Some(Expr::BoolLit(true)); }
-        if txt == "false" { return Some(Expr::BoolLit(false)); }
+        if txt == "true" {
+            return Some(Expr::BoolLit(true));
+        }
+        if txt == "false" {
+            return Some(Expr::BoolLit(false));
+        }
         Some(Expr::Ident(txt))
     } else if n.is_named() {
         rust_expr_from_node(src, n)
@@ -4947,8 +5288,12 @@ fn rust_expr_from_node(src: &[u8], n: Node<'_>) -> Option<Expr> {
     match n.kind() {
         "identifier" => {
             let txt = node_txt(src, n).trim().to_string();
-            if txt == "true" { return Some(Expr::BoolLit(true)); }
-            if txt == "false" { return Some(Expr::BoolLit(false)); }
+            if txt == "true" {
+                return Some(Expr::BoolLit(true));
+            }
+            if txt == "false" {
+                return Some(Expr::BoolLit(false));
+            }
             Some(Expr::Ident(txt))
         }
         "integer_literal" => {
@@ -4958,7 +5303,7 @@ fn rust_expr_from_node(src: &[u8], n: Node<'_>) -> Option<Expr> {
         }
         "string_literal" => {
             let txt = node_txt(src, n).trim();
-            let inner = &txt[1..txt.len()-1];
+            let inner = &txt[1..txt.len() - 1];
             Some(Expr::StringLit(inner.to_string()))
         }
         "boolean_literal" => {
@@ -4977,7 +5322,10 @@ fn rust_expr_from_node(src: &[u8], n: Node<'_>) -> Option<Expr> {
                     }
                 }
             }
-            Some(Expr::Call { callee: Box::new(callee), args })
+            Some(Expr::Call {
+                callee: Box::new(callee),
+                args,
+            })
         }
         "binary_expression" => {
             let left_n = n.child_by_field_name("left")?;
@@ -4986,21 +5334,31 @@ fn rust_expr_from_node(src: &[u8], n: Node<'_>) -> Option<Expr> {
             let lhs = rust_expr_from_node(src, left_n)?;
             let rhs = rust_expr_from_node(src, right_n)?;
             let op = node_txt(src, op_n).trim().to_string();
-            Some(Expr::Binary { op, lhs: Box::new(lhs), rhs: Box::new(rhs) })
+            Some(Expr::Binary {
+                op,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            })
         }
         "unary_expression" => {
             let op_n = n.child_by_field_name("operator")?;
             let inner_n = n.child_by_field_name("argument")?;
             let expr = rust_expr_from_node(src, inner_n)?;
             let op = node_txt(src, op_n).trim().to_string();
-            Some(Expr::Unary { op, expr: Box::new(expr) })
+            Some(Expr::Unary {
+                op,
+                expr: Box::new(expr),
+            })
         }
         "field_expression" => {
             let base_n = n.child_by_field_name("value")?;
             let field_n = n.child_by_field_name("field")?;
             let base = rust_expr_from_node(src, base_n)?;
             let name = node_txt(src, field_n).trim().to_string();
-            Some(Expr::Field { base: Box::new(base), name })
+            Some(Expr::Field {
+                base: Box::new(base),
+                name,
+            })
         }
         "parenthesized_expression" => {
             first_named(n, "_").and_then(|inner| rust_expr_from_node(src, inner))
@@ -5033,7 +5391,10 @@ fn rust_expr_from_node(src: &[u8], n: Node<'_>) -> Option<Expr> {
                     }
                 }
             }
-            Some(Expr::Call { callee: Box::new(Expr::Ident(name)), args })
+            Some(Expr::Call {
+                callee: Box::new(Expr::Ident(name)),
+                args,
+            })
         }
         "array_expression" => {
             let mut elems = Vec::new();
@@ -5050,10 +5411,13 @@ fn rust_expr_from_node(src: &[u8], n: Node<'_>) -> Option<Expr> {
             let idx_n = n.child_by_field_name("index")?;
             let base = rust_expr_from_node(src, base_n)?;
             let index = rust_expr_from_node(src, idx_n)?;
-            Some(Expr::Index { base: Box::new(base), index: Box::new(index) })
+            Some(Expr::Index {
+                base: Box::new(base),
+                index: Box::new(index),
+            })
         }
         "block" => {
-            // Expression block: `{ stmts; expr }` — extract last expression 
+            // Expression block: `{ stmts; expr }` — extract last expression
             let stmts = ast_block_to_stmts(src, n);
             stmts.last().and_then(|s| match s {
                 Stmt::Expr(e) => Some(e.clone()),
@@ -5465,7 +5829,12 @@ fn zig_return_type(src: &[u8], fun: Node<'_>) -> Option<Typ> {
 fn zig_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
     // ponytail: check text stripped of braces; AST child count unreliable for zig blocks
     let txt = node_txt(src, body).trim();
-    if txt == "{}" || txt.strip_prefix('{').and_then(|s| s.strip_suffix('}')).is_some_and(|s| s.trim().is_empty()) {
+    if txt == "{}"
+        || txt
+            .strip_prefix('{')
+            .and_then(|s| s.strip_suffix('}'))
+            .is_some_and(|s| s.trim().is_empty())
+    {
         return Vec::new();
     }
     // ponytail: skip strict_simple_bounded_body for block bodies
@@ -6797,7 +7166,8 @@ fn extract_swift(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
 
 fn norm_swift_type(raw: &str) -> Typ {
     match raw.trim() {
-        "Int" | "Int8" | "Int16" | "Int32" | "Int64" | "UInt" | "UInt8" | "UInt16" | "UInt32" | "UInt64" => Typ::Int,
+        "Int" | "Int8" | "Int16" | "Int32" | "Int64" | "UInt" | "UInt8" | "UInt16" | "UInt32"
+        | "UInt64" => Typ::Int,
         "String" => Typ::String,
         "Bool" => Typ::Bool,
         "Float" | "Double" | "Float32" | "Float64" | "CGFloat" => Typ::Float,
@@ -6811,12 +7181,18 @@ fn swift_params(src: &[u8], func: Node<'_>) -> Vec<(String, Typ)> {
     // ponytail: tree-sitter-swift 0.7.x puts parameter nodes as direct children
     // of function_declaration, not under a named "parameters" field
     for i in 0..func.child_count() {
-        let Some(ch) = func.child(i as u32) else { continue };
-        if ch.kind() != "parameter" { continue; }
+        let Some(ch) = func.child(i as u32) else {
+            continue;
+        };
+        if ch.kind() != "parameter" {
+            continue;
+        }
         let name = first_named(ch, "simple_identifier")
             .map(|n| normalize_entry(node_txt(src, n).trim()))
             .unwrap_or_else(|| "_".to_string());
-        if name == "_" { continue; }
+        if name == "_" {
+            continue;
+        }
         let ty = first_named(ch, "user_type")
             .map(|t| norm_swift_type(node_txt(src, t).trim()))
             .unwrap_or(Typ::Named("Any".into()));
@@ -6860,7 +7236,8 @@ const GO_AST: AstShape = AstShape {
 
 fn norm_go_type(raw: &str) -> Typ {
     match raw.trim() {
-        "int" | "int8" | "int16" | "int32" | "int64" | "uint" | "uint8" | "uint16" | "uint32" | "uint64" | "byte" | "rune" => Typ::Int,
+        "int" | "int8" | "int16" | "int32" | "int64" | "uint" | "uint8" | "uint16" | "uint32"
+        | "uint64" | "byte" | "rune" => Typ::Int,
         "string" => Typ::String,
         "bool" => Typ::Bool,
         "float32" | "float64" => Typ::Float,
@@ -6898,7 +7275,8 @@ fn go_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
 
 fn go_return_type(src: &[u8], func: Node<'_>) -> Option<Typ> {
     // ponytail: prefer field name; fallback scans only direct children between params and body
-    if let Some(node) = func.child_by_field_name("result")
+    if let Some(node) = func
+        .child_by_field_name("result")
         .or_else(|| func.child_by_field_name("return_type"))
     {
         return Some(norm_go_type(node_txt(src, node).trim()));
@@ -6911,7 +7289,12 @@ fn go_return_type(src: &[u8], func: Node<'_>) -> Option<Typ> {
             saw_params = true;
             continue;
         }
-        if saw_params && matches!(node.kind(), "type_identifier" | "simple_type" | "qualified_type") {
+        if saw_params
+            && matches!(
+                node.kind(),
+                "type_identifier" | "simple_type" | "qualified_type"
+            )
+        {
             return Some(norm_go_type(node_txt(src, node).trim()));
         }
         if node.kind() == "block" {
@@ -7644,7 +8027,11 @@ class X {
                     eprintln!("STMT: {:?}", stmt);
                 }
                 assert!(!body.is_empty(), "body is empty");
-                assert!(matches!(body[0], Stmt::If { .. }), "expected if, got {:?}", &body[0]);
+                assert!(
+                    matches!(body[0], Stmt::If { .. }),
+                    "expected if, got {:?}",
+                    &body[0]
+                );
             }
             _ => panic!("expected function"),
         }
@@ -7924,7 +8311,8 @@ class X {
   void Main() { value = Helper(2); Helper(value); return; }
 }
 "#;
-        let m = parse_lang(try_lang_for(ParserId::CSharp).unwrap(), src, extract_csharp).expect("ok");
+        let m =
+            parse_lang(try_lang_for(ParserId::CSharp).unwrap(), src, extract_csharp).expect("ok");
         let helper = m
             .decls
             .iter()
@@ -7981,7 +8369,8 @@ class X {
   }
 }
 "#;
-        let m = parse_lang(try_lang_for(ParserId::CSharp).unwrap(), src, extract_csharp).expect("ok");
+        let m =
+            parse_lang(try_lang_for(ParserId::CSharp).unwrap(), src, extract_csharp).expect("ok");
         let main = m
             .decls
             .iter()
@@ -9038,7 +9427,8 @@ class Accumulator {
     public void Reset() { total = 0; }
 }
 "#;
-        let m = parse_lang(try_lang_for(ParserId::CSharp).unwrap(), src, extract_csharp).expect("ok");
+        let m =
+            parse_lang(try_lang_for(ParserId::CSharp).unwrap(), src, extract_csharp).expect("ok");
 
         let class = m
             .decls
@@ -9086,7 +9476,8 @@ interface IResettable {
     int GetValue();
 }
 "#;
-        let m = parse_lang(try_lang_for(ParserId::CSharp).unwrap(), src, extract_csharp).expect("ok");
+        let m =
+            parse_lang(try_lang_for(ParserId::CSharp).unwrap(), src, extract_csharp).expect("ok");
 
         let iface = m
             .decls
@@ -9119,7 +9510,7 @@ interface IResettable {
         p.set_language(&try_lang_for(ParserId::C).unwrap()).unwrap();
         let tree = p.parse(src, None).unwrap();
         let mut found = false;
-    #[cfg(feature = "tree-sitter-r")]
+        #[cfg(feature = "tree-sitter-r")]
         fn visit(n: Node<'_>, src: &str, found: &mut bool) {
             if n.kind() == "return_statement" {
                 *found = true;
@@ -9954,12 +10345,8 @@ let main _ =
     let value = answer 1
     ()
 "#;
-        let m = parse_lang(
-            try_lang_for(ParserId::FSharp).unwrap(),
-            src,
-            extract_fsharp,
-        )
-        .expect("ok");
+        let m =
+            parse_lang(try_lang_for(ParserId::FSharp).unwrap(), src, extract_fsharp).expect("ok");
         assert!(
             m.decls
                 .iter()
@@ -9981,12 +10368,8 @@ let main _ =
     let value = print("hi")
     value
 "#;
-        let m = parse_lang(
-            try_lang_for(ParserId::FSharp).unwrap(),
-            src,
-            extract_fsharp,
-        )
-        .expect("ok");
+        let m =
+            parse_lang(try_lang_for(ParserId::FSharp).unwrap(), src, extract_fsharp).expect("ok");
         let main = m
             .decls
             .iter()
@@ -10011,7 +10394,8 @@ main() ->
     X = answer(),
     ok.
 "#;
-        let m = parse_lang(try_lang_for(ParserId::Erlang).unwrap(), src, extract_erlang).expect("ok");
+        let m =
+            parse_lang(try_lang_for(ParserId::Erlang).unwrap(), src, extract_erlang).expect("ok");
         let found_answer = m
             .decls
             .iter()
@@ -10035,7 +10419,8 @@ main() ->
     #[cfg(feature = "tree-sitter-erlang")]
     fn extract_erlang_eval_print_shape() {
         let src = "-module(app).\n-export([main/0]).\n\nmain() ->\n    print(\"hi\").\n";
-        let m = parse_lang(try_lang_for(ParserId::Erlang).unwrap(), src, extract_erlang).expect("ok");
+        let m =
+            parse_lang(try_lang_for(ParserId::Erlang).unwrap(), src, extract_erlang).expect("ok");
         let main = m
             .decls
             .iter()
@@ -10069,7 +10454,8 @@ main() ->
   end
 end
 "#;
-        let m = parse_lang(try_lang_for(ParserId::Elixir).unwrap(), src, extract_elixir).expect("ok");
+        let m =
+            parse_lang(try_lang_for(ParserId::Elixir).unwrap(), src, extract_elixir).expect("ok");
         let found_class = m
             .decls
             .iter()
@@ -10141,8 +10527,7 @@ end
     #[cfg(feature = "tree-sitter-ocaml")]
     fn extract_ocaml_eval_print_shape() {
         let src = "let main () =\n  print \"hi\"\n";
-        let m =
-            parse_lang(try_lang_for(ParserId::OCaml).unwrap(), src, extract_ocaml).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::OCaml).unwrap(), src, extract_ocaml).expect("ok");
         let main = m
             .decls
             .iter()

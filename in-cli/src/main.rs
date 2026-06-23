@@ -622,36 +622,87 @@ fn run() -> Result<()> {
                                 .map_err(|e| InError::Message(format!("read Cargo.toml: {e}")))?;
                             // Extract [[bin]] path
                             let bin_path = extract_cargo_bin_path(&contents, &resolved)?;
-                            let module_id = bin_path.file_stem().unwrap_or_default().to_string_lossy().to_string();
-                            let out = std::env::temp_dir().join(format!("in-cargo-{}.bin", module_id));
+                            let module_id = bin_path
+                                .file_stem()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .to_string();
+                            let out =
+                                std::env::temp_dir().join(format!("in-cargo-{}.bin", module_id));
                             let bin_str = bin_path.to_string_lossy().to_string();
-                            cmd_compile(&invocation_cwd, &bin_str, CompileTargetCli::Bytecode, &out.to_string_lossy(), &module_id, parser_registry::ParserCli::Auto, None, None, NativeLinkageCli::Executable, 1, false, None, None, None, None)?;
-                            return cmd_execute_bytecode(&invocation_cwd, &bin_str, &module_id, verbose);
+                            cmd_compile(
+                                &invocation_cwd,
+                                &bin_str,
+                                CompileTargetCli::Bytecode,
+                                &out.to_string_lossy(),
+                                &module_id,
+                                parser_registry::ParserCli::Auto,
+                                None,
+                                None,
+                                NativeLinkageCli::Executable,
+                                1,
+                                false,
+                                None,
+                                None,
+                                None,
+                                None,
+                            )?;
+                            return cmd_execute_bytecode(
+                                &invocation_cwd,
+                                &bin_str,
+                                &module_id,
+                                verbose,
+                            );
                         }
                     }
                     if resolved.exists() {
                         let ext = resolved.extension().and_then(|e| e.to_str()).unwrap_or("");
                         // .in and other source files: compile + execute-bytecode
-                        if ext == "in" || ext == "rs" || ext == "zig" || ext == "go" || ext == "v" || ext == "swift" {
+                        if ext == "in"
+                            || ext == "rs"
+                            || ext == "zig"
+                            || ext == "go"
+                            || ext == "v"
+                            || ext == "swift"
+                        {
                             let out = std::env::temp_dir().join(format!(
                                 "in-eval-{}.bin",
                                 resolved.file_stem().unwrap_or_default().to_string_lossy()
                             ));
-                            let module_id = resolved.file_stem().unwrap_or_default().to_string_lossy().to_string();
-                            cmd_compile(&invocation_cwd, s, CompileTargetCli::Bytecode, &out.to_string_lossy(), &module_id, parser_registry::ParserCli::Auto, None, None, NativeLinkageCli::Executable, 1, false, None, None, None, None)?;
+                            let module_id = resolved
+                                .file_stem()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .to_string();
+                            cmd_compile(
+                                &invocation_cwd,
+                                s,
+                                CompileTargetCli::Bytecode,
+                                &out.to_string_lossy(),
+                                &module_id,
+                                parser_registry::ParserCli::Auto,
+                                None,
+                                None,
+                                NativeLinkageCli::Executable,
+                                1,
+                                false,
+                                None,
+                                None,
+                                None,
+                                None,
+                            )?;
                             return cmd_execute_bytecode(&invocation_cwd, s, &module_id, verbose);
                         }
                         // .poly files: read and eval
-                        std::fs::read_to_string(&resolved)
-                            .map_err(|e| InError::Message(format!("read {}: {e}", resolved.display())))?
+                        std::fs::read_to_string(&resolved).map_err(|e| {
+                            InError::Message(format!("read {}: {e}", resolved.display()))
+                        })?
                     } else {
                         s.clone()
                     }
                 }
                 None => {
-                    return Err(InError::Message(
-                        "eval requires code or file path".into(),
-                    ));
+                    return Err(InError::Message("eval requires code or file path".into()));
                 }
             };
             cmd_eval_dispatch(&invocation_cwd, &code, parser.as_deref(), verbose)
@@ -2014,13 +2065,19 @@ fn normalize_in_eval_code(code: &str) -> String {
     if let Some(rest) = trimmed.strip_prefix("std.io.print ") {
         return format!("print({})", normalize_human_in_print_arg(rest));
     }
-    if let Some(rest) = trimmed.strip_prefix("std.io.print(").and_then(|r| r.strip_suffix(")")) {
+    if let Some(rest) = trimmed
+        .strip_prefix("std.io.print(")
+        .and_then(|r| r.strip_suffix(")"))
+    {
         return format!("print({})", normalize_human_in_print_arg(rest));
     }
     if let Some(rest) = trimmed.strip_prefix("print ") {
         return format!("print({})", normalize_human_in_print_arg(rest));
     }
-    if let Some(rest) = trimmed.strip_prefix("print(").and_then(|r| r.strip_suffix(")")) {
+    if let Some(rest) = trimmed
+        .strip_prefix("print(")
+        .and_then(|r| r.strip_suffix(")"))
+    {
         let arg = normalize_human_in_print_arg(rest);
         return format!("print({})", arg);
     }
@@ -2078,9 +2135,7 @@ fn normalize_eval_code(parser_id: parser_registry::ParserId, code: &str) -> Stri
         parser_registry::ParserId::Java => code.replace("System.out.println(", "print("),
         parser_registry::ParserId::Kotlin
         | parser_registry::ParserId::Scala
-        | parser_registry::ParserId::Groovy => {
-            code.replace("println(", "print(")
-        }
+        | parser_registry::ParserId::Groovy => code.replace("println(", "print("),
         parser_registry::ParserId::Cpp
         | parser_registry::ParserId::ObjC
         | parser_registry::ParserId::ObjCpp => normalize_in_eval_code(code),
@@ -2113,7 +2168,11 @@ fn guess_eval_type(s: &str) -> &'static str {
 
 fn infer_eval_parser(code: &str) -> parser_registry::ParserId {
     let trimmed = code.trim();
-    if trimmed.contains("#import ") || trimmed.contains("@interface") || trimmed.contains("@implementation") || trimmed.contains("@end") {
+    if trimmed.contains("#import ")
+        || trimmed.contains("@interface")
+        || trimmed.contains("@implementation")
+        || trimmed.contains("@end")
+    {
         return parser_registry::ParserId::ObjC;
     }
     if trimmed.contains("std::cout") || trimmed.contains("#include") || trimmed.contains("::") {
@@ -2129,7 +2188,8 @@ fn infer_eval_parser(code: &str) -> parser_registry::ParserId {
     }
     if trimmed.starts_with("fn main") || trimmed.starts_with("fn ") {
         // Check for Rust-specific return types
-        let rest = trimmed.trim_start_matches(|c: char| c.is_alphanumeric() || c == ' ' || c == '!');
+        let rest =
+            trimmed.trim_start_matches(|c: char| c.is_alphanumeric() || c == ' ' || c == '!');
         if let Some(rest) = rest.strip_prefix("(") {
             if rest.contains("println!") || rest.contains("let mut ") {
                 return parser_registry::ParserId::Rust;
@@ -2144,7 +2204,10 @@ fn infer_eval_parser(code: &str) -> parser_registry::ParserId {
             return parser_registry::ParserId::Rust;
         }
         // fn with -> void is .in
-        if trimmed.contains("-> void") || trimmed.contains("-> String") || trimmed.contains("-> Int") {
+        if trimmed.contains("-> void")
+            || trimmed.contains("-> String")
+            || trimmed.contains("-> Int")
+        {
             return parser_registry::ParserId::In;
         }
         return parser_registry::ParserId::Rust;
@@ -2433,10 +2496,12 @@ fn wrap_eval_statement(parser_id: parser_registry::ParserId, code: &str) -> Opti
             Some(format!("export fn main() void = {{\n\t{code};\n}};"))
         }
         parser_registry::ParserId::HolyC => Some(format!("U0 Main()\n{{\n  {code};\n}}\nMain;")),
-        parser_registry::ParserId::C
-        | parser_registry::ParserId::ObjC => Some(format!("int main() {{ {code}; return 0; }}")),
-        parser_registry::ParserId::Cpp
-        | parser_registry::ParserId::ObjCpp => Some(format!("int main() {{ {code}; return 0; }}")),
+        parser_registry::ParserId::C | parser_registry::ParserId::ObjC => {
+            Some(format!("int main() {{ {code}; return 0; }}"))
+        }
+        parser_registry::ParserId::Cpp | parser_registry::ParserId::ObjCpp => {
+            Some(format!("int main() {{ {code}; return 0; }}"))
+        }
         _ => None,
     }
 }
@@ -2645,7 +2710,7 @@ fn cmd_polyglot_eval(cwd: &Path, code: &str, verbose: bool) -> Result<()> {
         }
         eprint!("[{}] ", lang);
         match cmd_eval(cwd, trimmed, Some(lang), verbose) {
-            Ok(()) => {},
+            Ok(()) => {}
             Err(e) => eprintln!("failed: {e}"),
         }
     }
@@ -2694,7 +2759,7 @@ fn cmd_auto_polyglot_eval(cwd: &Path, code: &str, verbose: bool) -> Result<()> {
         };
         eprint!("[{}] ", lang);
         match cmd_eval(cwd, trimmed, Some(lang), verbose) {
-            Ok(()) => {},
+            Ok(()) => {}
             Err(e) => eprintln!("failed: {e}"),
         }
     }
