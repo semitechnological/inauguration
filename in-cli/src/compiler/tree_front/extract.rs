@@ -14,6 +14,64 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use tree_sitter::{Language, Node, Parser};
 
+// Optional parser crates (behind "extended" feature)
+#[cfg(feature = "tree-sitter-c-sharp")] use tree_sitter_c_sharp;
+#[cfg(feature = "tree-sitter-dart")] use tree_sitter_dart;
+#[cfg(feature = "tree-sitter-elixir")] use tree_sitter_elixir;
+#[cfg(feature = "tree-sitter-erlang")] use tree_sitter_erlang;
+#[cfg(feature = "tree-sitter-fsharp")] use tree_sitter_fsharp;
+#[cfg(feature = "tree-sitter-groovy")] use tree_sitter_groovy;
+#[cfg(feature = "tree-sitter-haskell")] use tree_sitter_haskell;
+#[cfg(feature = "tree-sitter-holyc")] use tree_sitter_holyc;
+#[cfg(feature = "tree-sitter-julia")] use tree_sitter_julia;
+#[cfg(feature = "tree-sitter-kotlin-ng")] use tree_sitter_kotlin_ng;
+#[cfg(feature = "tree-sitter-lua")] use tree_sitter_lua;
+#[cfg(feature = "tree-sitter-objc")] use tree_sitter_objc;
+#[cfg(feature = "tree-sitter-ocaml")] use tree_sitter_ocaml;
+#[cfg(feature = "tree-sitter-perl")] use tree_sitter_perl;
+#[cfg(feature = "tree-sitter-php")] use tree_sitter_php;
+#[cfg(feature = "tree-sitter-r")] use tree_sitter_r;
+#[cfg(feature = "tree-sitter-ruby")] use tree_sitter_ruby;
+#[cfg(feature = "tree-sitter-scala")] use tree_sitter_scala;
+#[cfg(feature = "tree-sitter-v")] use tree_sitter_v;
+
+/// Resolve a ParserId to a Tree-sitter Language reference.
+/// Core parsers always resolve; optional parsers return Err if feature not enabled.
+fn lang_for(id: ParserId) -> Language {
+    match id {
+        ParserId::C => tree_sitter_c::LANGUAGE.into(),
+        ParserId::Cpp | ParserId::ObjCpp => tree_sitter_cpp::LANGUAGE.into(),
+        ParserId::Java => tree_sitter_java::LANGUAGE.into(),
+        ParserId::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
+        ParserId::Python => tree_sitter_python::LANGUAGE.into(),
+        ParserId::Rust => tree_sitter_rust::LANGUAGE.into(),
+        ParserId::Zig => tree_sitter_zig::LANGUAGE.into(),
+        ParserId::Go => tree_sitter_go::LANGUAGE.into(),
+        ParserId::Swift => tree_sitter_swift::LANGUAGE.into(),
+        ParserId::TypeScript => tree_sitter_typescript::LANGUAGE_TSX.into(),
+        #[cfg(feature = "tree-sitter-objc")] ParserId::ObjC => tree_sitter_objc::LANGUAGE.into(),
+        #[cfg(feature = "tree-sitter-kotlin-ng")] ParserId::Kotlin => tree_sitter_kotlin_ng::LANGUAGE.into(),
+        #[cfg(feature = "tree-sitter-scala")] ParserId::Scala => tree_sitter_scala::LANGUAGE.into(),
+        #[cfg(feature = "tree-sitter-groovy")] ParserId::Groovy => tree_sitter_groovy::LANGUAGE.into(),
+        #[cfg(feature = "tree-sitter-c-sharp")] ParserId::CSharp => tree_sitter_c_sharp::LANGUAGE.into(),
+        #[cfg(feature = "tree-sitter-fsharp")] ParserId::FSharp => tree_sitter_fsharp::LANGUAGE_FSHARP.into(),
+        #[cfg(feature = "tree-sitter-ruby")] ParserId::Ruby => tree_sitter_ruby::LANGUAGE.into(),
+        #[cfg(feature = "tree-sitter-php")] ParserId::Php => tree_sitter_php::LANGUAGE_PHP.into(),
+        #[cfg(feature = "tree-sitter-perl")] ParserId::Perl => tree_sitter_perl::LANGUAGE.into(),
+        #[cfg(feature = "tree-sitter-dart")] ParserId::Dart => tree_sitter_dart::LANGUAGE.into(),
+        #[cfg(feature = "tree-sitter-lua")] ParserId::Lua => tree_sitter_lua::LANGUAGE.into(),
+        #[cfg(feature = "tree-sitter-elixir")] ParserId::Elixir => tree_sitter_elixir::LANGUAGE.into(),
+        #[cfg(feature = "tree-sitter-erlang")] ParserId::Erlang => tree_sitter_erlang::LANGUAGE.into(),
+        #[cfg(feature = "tree-sitter-haskell")] ParserId::Haskell => tree_sitter_haskell::LANGUAGE.into(),
+        #[cfg(feature = "tree-sitter-julia")] ParserId::Julia => tree_sitter_julia::LANGUAGE.into(),
+        #[cfg(feature = "tree-sitter-ocaml")] ParserId::OCaml => tree_sitter_ocaml::LANGUAGE_OCAML.into(),
+        #[cfg(feature = "tree-sitter-r")] ParserId::R => tree_sitter_r::LANGUAGE.into(),
+        #[cfg(feature = "tree-sitter-holyc")] ParserId::HolyC => tree_sitter_holyc::LANGUAGE.into(),
+        #[cfg(feature = "tree-sitter-v")] ParserId::V => tree_sitter_v::LANGUAGE.into(),
+        _ => panic!("Parser `{}` not compiled in. Rebuild with --features extended", id.as_str()),
+    }
+}
+
 type ZigLayoutFields = Vec<(String, String)>;
 type ZigLayoutSpec = (BoundaryRepr, ZigLayoutFields);
 type ZigLayoutSpecs = HashMap<String, ZigLayoutSpec>;
@@ -27,7 +85,7 @@ pub fn parse_polyglot_file(id: ParserId, path: &Path) -> Result<UnifiedModule, S
         ParserId::V => {
             let src = std::fs::read_to_string(path)
                 .map_err(|e| format!("read {}: {e}", path.display()))?;
-            parse_lang(tree_sitter_v::LANGUAGE.into(), &src, |b, r| {
+            parse_lang(lang_for(ParserId::V), &src, |b, r| {
                 extract_fn_nodes(b, r, &["function_declaration"], |s, n| {
                     let name_n = n.child_by_field_name("name")?;
                     let name = normalize_entry(node_txt(s, name_n).trim());
@@ -57,15 +115,15 @@ pub fn parse_polyglot_file(id: ParserId, path: &Path) -> Result<UnifiedModule, S
 
 fn dispatch(id: ParserId, path: &Path, src: &str) -> Result<UnifiedModule, String> {
     match id {
-        ParserId::C => parse_lang(tree_sitter_c::LANGUAGE.into(), src, |b, r| {
+        ParserId::C => parse_lang(lang_for(ParserId::C), src, |b, r| {
             extract_fn_nodes(b, r, &["function_definition"], c_like_function_decl)
         }),
         ParserId::Cpp | ParserId::ObjCpp => parse_lang(
-            tree_sitter_cpp::LANGUAGE.into(),
+            lang_for(ParserId::Cpp),
             src,
             extract_cpp_with_classes,
         ),
-        ParserId::ObjC => parse_lang(tree_sitter_objc::LANGUAGE.into(), src, |b, r| {
+        ParserId::ObjC => parse_lang(lang_for(ParserId::ObjC), src, |b, r| {
             extract_fn_nodes(
                 b,
                 r,
@@ -74,41 +132,41 @@ fn dispatch(id: ParserId, path: &Path, src: &str) -> Result<UnifiedModule, Strin
             )
         }),
         ParserId::Java => parse_lang(
-            tree_sitter_java::LANGUAGE.into(),
+            lang_for(ParserId::Java),
             src,
             extract_java_with_classes,
         ),
-        ParserId::Kotlin => parse_lang(tree_sitter_kotlin_ng::LANGUAGE.into(), src, extract_kotlin),
-        ParserId::Scala => parse_lang(tree_sitter_scala::LANGUAGE.into(), src, extract_scala),
+        ParserId::Kotlin => parse_lang(lang_for(ParserId::Kotlin), src, extract_kotlin),
+        ParserId::Scala => parse_lang(lang_for(ParserId::Scala), src, extract_scala),
         ParserId::Groovy => parse_lang(
-            tree_sitter_groovy::LANGUAGE.into(),
+            lang_for(ParserId::Groovy),
             src,
             extract_java_style_methods,
         ),
-        ParserId::CSharp => parse_lang(tree_sitter_c_sharp::LANGUAGE.into(), src, extract_csharp),
+        ParserId::CSharp => parse_lang(lang_for(ParserId::CSharp), src, extract_csharp),
         ParserId::FSharp => parse_lang(
-            tree_sitter_fsharp::LANGUAGE_FSHARP.into(),
+            lang_for(ParserId::FSharp),
             src,
             extract_fsharp,
         ),
         ParserId::Python => parse_lang(
-            tree_sitter_python::LANGUAGE.into(),
+            lang_for(ParserId::Python),
             src,
             extract_python_with_classes,
         ),
-        ParserId::Ruby => parse_lang(tree_sitter_ruby::LANGUAGE.into(), src, extract_ruby),
-        ParserId::Php => parse_lang(tree_sitter_php::LANGUAGE_PHP.into(), src, extract_php),
-        ParserId::Perl => parse_lang(tree_sitter_perl::LANGUAGE.into(), src, extract_perl),
+        ParserId::Ruby => parse_lang(lang_for(ParserId::Ruby), src, extract_ruby),
+        ParserId::Php => parse_lang(lang_for(ParserId::Php), src, extract_php),
+        ParserId::Perl => parse_lang(lang_for(ParserId::Perl), src, extract_perl),
         ParserId::JavaScript => parse_lang(
-            tree_sitter_javascript::LANGUAGE.into(),
+            lang_for(ParserId::JavaScript),
             src,
             extract_js_with_classes,
         ),
         ParserId::TypeScript => {
-            let ts_lang = typescript_lang(path);
+            let ts_lang = lang_for(ParserId::TypeScript);
             parse_lang(ts_lang, src, extract_ts_with_classes)
         }
-        ParserId::Go => parse_lang(tree_sitter_go::LANGUAGE.into(), src, |b, r| {
+        ParserId::Go => parse_lang(lang_for(ParserId::Go), src, |b, r| {
             extract_fn_nodes(
                 b,
                 r,
@@ -132,18 +190,18 @@ fn dispatch(id: ParserId, path: &Path, src: &str) -> Result<UnifiedModule, Strin
                 },
             )
         }),
-        ParserId::Rust => parse_lang(tree_sitter_rust::LANGUAGE.into(), src, extract_rust),
-        ParserId::Zig => parse_lang(tree_sitter_zig::LANGUAGE.into(), src, extract_zig),
-        ParserId::Dart => parse_lang(tree_sitter_dart::LANGUAGE.into(), src, extract_dart),
-        ParserId::Lua => parse_lang(tree_sitter_lua::LANGUAGE.into(), src, extract_lua),
-        ParserId::Elixir => parse_lang(tree_sitter_elixir::LANGUAGE.into(), src, extract_elixir),
-        ParserId::Erlang => parse_lang(tree_sitter_erlang::LANGUAGE.into(), src, extract_erlang),
-        ParserId::Haskell => parse_lang(tree_sitter_haskell::LANGUAGE.into(), src, extract_haskell),
-        ParserId::Julia => parse_lang(tree_sitter_julia::LANGUAGE.into(), src, extract_julia),
-        ParserId::Swift => parse_lang(tree_sitter_swift::LANGUAGE.into(), src, extract_swift),
-        ParserId::OCaml => parse_lang(tree_sitter_ocaml::LANGUAGE_OCAML.into(), src, extract_ocaml),
-        ParserId::R => parse_lang(tree_sitter_r::LANGUAGE.into(), src, extract_r_lang),
-        ParserId::HolyC => parse_lang(tree_sitter_holyc::LANGUAGE.into(), src, extract_holyc),
+        ParserId::Rust => parse_lang(lang_for(ParserId::Rust), src, extract_rust),
+        ParserId::Zig => parse_lang(lang_for(ParserId::Zig), src, extract_zig),
+        ParserId::Dart => parse_lang(lang_for(ParserId::Dart), src, extract_dart),
+        ParserId::Lua => parse_lang(lang_for(ParserId::Lua), src, extract_lua),
+        ParserId::Elixir => parse_lang(lang_for(ParserId::Elixir), src, extract_elixir),
+        ParserId::Erlang => parse_lang(lang_for(ParserId::Erlang), src, extract_erlang),
+        ParserId::Haskell => parse_lang(lang_for(ParserId::Haskell), src, extract_haskell),
+        ParserId::Julia => parse_lang(lang_for(ParserId::Julia), src, extract_julia),
+        ParserId::Swift => parse_lang(lang_for(ParserId::Swift), src, extract_swift),
+        ParserId::OCaml => parse_lang(lang_for(ParserId::OCaml), src, extract_ocaml),
+        ParserId::R => parse_lang(lang_for(ParserId::R), src, extract_r_lang),
+        ParserId::HolyC => parse_lang(lang_for(ParserId::HolyC), src, extract_holyc),
         ParserId::In
         | ParserId::Icore
         | ParserId::Clojure
@@ -164,7 +222,7 @@ fn typescript_lang(path: &Path) -> Language {
         .unwrap_or("")
         .to_ascii_lowercase();
     if matches!(ext.as_str(), "tsx" | "jsx") {
-        tree_sitter_typescript::LANGUAGE_TSX.into()
+        lang_for(ParserId::TypeScript)
     } else {
         tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()
     }
@@ -209,7 +267,7 @@ pub fn parse_zig_artifact(path: &Path) -> Result<CompileArtifact, String> {
 pub fn parse_zig_artifact_source(src: &str, module_id: &str) -> Result<CompileArtifact, String> {
     let mut parser = Parser::new();
     parser
-        .set_language(&tree_sitter_zig::LANGUAGE.into())
+        .set_language(&lang_for(ParserId::Zig))
         .map_err(|e| format!("Tree-sitter grammar load failed: {e}"))?;
     let tree = parser
         .parse(src, None)
@@ -7145,6 +7203,7 @@ mod tests {
     use crate::boundary_ir::{BoundaryRepr, BoundaryTransfer};
     use std::path::PathBuf;
 
+    #[cfg(feature = "tree-sitter-r")]
     fn repo_sample(name: &str) -> String {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent()
@@ -7153,6 +7212,7 @@ mod tests {
         std::fs::read_to_string(root.join("apps/polyglot-sample").join(name)).expect(name)
     }
 
+    #[cfg(feature = "tree-sitter-r")]
     fn main_body(module: &UnifiedModule) -> &[Stmt] {
         module
             .decls
@@ -7164,6 +7224,7 @@ mod tests {
             .expect("main body")
     }
 
+    #[cfg(feature = "tree-sitter-r")]
     fn body_shape(body: &[Stmt]) -> Vec<&'static str> {
         body.iter()
             .map(|stmt| match stmt {
@@ -7190,10 +7251,11 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn java_main_method_extracted() {
         let src = "class X { public static void main(String[] a) { } }\n";
         let m = parse_lang(
-            tree_sitter_java::LANGUAGE.into(),
+            lang_for(ParserId::Java),
             src,
             extract_java_style_methods,
         )
@@ -7207,6 +7269,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-dart")]
     fn generic_ast_examples_converge_with_inlang_control_flow() {
         let expected = vec!["let", "assign", "call", "if", "while", "return-ident"];
 
@@ -7215,7 +7278,7 @@ mod tests {
         assert_eq!(body_shape(main_body(&in_module)), expected);
 
         let c_module = parse_lang(
-            tree_sitter_c::LANGUAGE.into(),
+            lang_for(ParserId::C),
             &repo_sample("control_flow.c"),
             |b, r| extract_fn_nodes(b, r, &["function_definition"], c_like_function_decl),
         )
@@ -7223,7 +7286,7 @@ mod tests {
         assert_eq!(body_shape(main_body(&c_module)), expected);
 
         let java_module = parse_lang(
-            tree_sitter_java::LANGUAGE.into(),
+            lang_for(ParserId::Java),
             &repo_sample("ControlFlow.java"),
             extract_java_style_methods,
         )
@@ -7239,7 +7302,7 @@ mod tests {
         assert_eq!(body_shape(main_body(&ts_module)), expected);
 
         let dart_module = parse_lang(
-            tree_sitter_dart::LANGUAGE.into(),
+            lang_for(ParserId::Dart),
             &repo_sample("control_flow.dart"),
             extract_dart,
         )
@@ -7248,6 +7311,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn java_methods_with_bounded_bodies_extract_declarations() {
         let src = r#"
 class X {
@@ -7259,7 +7323,7 @@ class X {
 }
 "#;
         let m = parse_lang(
-            tree_sitter_java::LANGUAGE.into(),
+            lang_for(ParserId::Java),
             src,
             extract_java_style_methods,
         )
@@ -7366,6 +7430,7 @@ class X {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn java_literal_return_bodies_extract() {
         let src = r#"
 class X {
@@ -7374,7 +7439,7 @@ class X {
 }
 "#;
         let m = parse_lang(
-            tree_sitter_java::LANGUAGE.into(),
+            lang_for(ParserId::Java),
             src,
             extract_java_style_methods,
         )
@@ -7400,6 +7465,7 @@ class X {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn java_lowers_scalar_body_shapes() {
         let src = r#"
 class X {
@@ -7415,7 +7481,7 @@ class X {
 }
 "#;
         let m = parse_lang(
-            tree_sitter_java::LANGUAGE.into(),
+            lang_for(ParserId::Java),
             src,
             extract_java_style_methods,
         )
@@ -7468,16 +7534,18 @@ class X {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn rust_main_extracted() {
         let src = "fn main() {}\n";
-        let m = parse_lang(tree_sitter_rust::LANGUAGE.into(), src, extract_rust).expect("ok");
+        let m = parse_lang(lang_for(ParserId::Rust), src, extract_rust).expect("ok");
         assert!(matches!(m.decls.as_slice(), [Decl::Function { name, .. }] if name == "main"));
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-holyc")]
     fn extract_holyc_eval_return_shape() {
         let src = "I64 Main()\n{\n  return 1 + 2;\n}\nMain;\n";
-        let m = parse_lang(tree_sitter_holyc::LANGUAGE.into(), src, extract_holyc).expect("ok");
+        let m = parse_lang(lang_for(ParserId::HolyC), src, extract_holyc).expect("ok");
         let main = m
             .decls
             .iter()
@@ -7496,9 +7564,10 @@ class X {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn extract_rust_eval_print_shape() {
         let src = "fn main() -> i64 {\nprint(\"hi\");\n0\n}\n";
-        let m = parse_lang(tree_sitter_rust::LANGUAGE.into(), src, extract_rust).expect("ok");
+        let m = parse_lang(lang_for(ParserId::Rust), src, extract_rust).expect("ok");
         let main = m
             .decls
             .iter()
@@ -7521,9 +7590,10 @@ class X {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn extract_rust_if_else() {
         let src = "fn main() -> i64 { if true { return 1; } else { return 0; } }";
-        let m = parse_lang(tree_sitter_rust::LANGUAGE.into(), src, extract_rust).expect("ok");
+        let m = parse_lang(lang_for(ParserId::Rust), src, extract_rust).expect("ok");
         let main = m
             .decls
             .iter()
@@ -7542,10 +7612,11 @@ class X {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn zig_function_declarations_extract() {
         let src =
             "fn helper(value: i32) i32 { return value; }\npub fn main() void { _ = helper(1); }\n";
-        let m = parse_lang(tree_sitter_zig::LANGUAGE.into(), src, extract_zig).expect("ok");
+        let m = parse_lang(lang_for(ParserId::Zig), src, extract_zig).expect("ok");
         assert!(
             m.decls
                 .iter()
@@ -7561,9 +7632,10 @@ class X {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn extract_zig_eval_print_shape() {
         let src = "pub fn main() void {\n    print(\"hi\");\n}\n";
-        let m = parse_lang(tree_sitter_zig::LANGUAGE.into(), src, extract_zig).expect("ok");
+        let m = parse_lang(lang_for(ParserId::Zig), src, extract_zig).expect("ok");
         match m
             .decls
             .iter()
@@ -7583,9 +7655,10 @@ class X {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn extract_zig_empty_main_body_stays_empty() {
         let src = "pub fn main() void {}\n";
-        let m = parse_lang(tree_sitter_zig::LANGUAGE.into(), src, extract_zig).expect("ok");
+        let m = parse_lang(lang_for(ParserId::Zig), src, extract_zig).expect("ok");
         match m
             .decls
             .iter()
@@ -7598,10 +7671,11 @@ class X {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn javascript_function_bodies_extract_calls() {
         let src = "function helper(value) { return value; }\nfunction main() { helper(1); }\n";
         let m = parse_lang(
-            tree_sitter_javascript::LANGUAGE.into(),
+            lang_for(ParserId::JavaScript),
             src,
             extract_js_with_classes,
         )
@@ -7626,6 +7700,7 @@ class X {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn typescript_function_bodies_extract_calls() {
         let src = "function helper(value: number): number { return value; }\nfunction main(): void { helper(1); }\n";
         let m = parse_lang(
@@ -7654,6 +7729,7 @@ class X {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn javascript_lowers_scalar_body_shapes() {
         let src = r#"
 function helper(value) { return value; }
@@ -7667,7 +7743,7 @@ function main() {
 }
 "#;
         let m = parse_lang(
-            tree_sitter_javascript::LANGUAGE.into(),
+            lang_for(ParserId::JavaScript),
             src,
             extract_js_with_classes,
         )
@@ -7716,6 +7792,7 @@ function main() {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn typescript_lowers_scalar_body_shapes() {
         let src = r#"
 function helper(value: number): number { return value; }
@@ -7752,6 +7829,7 @@ function main(): void {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn typescript_functions_extract_params_return_and_body() {
         let src = "function helper(value: number, label: string): number { return value; }\nfunction declared(value: number): boolean;\n";
         let m = parse_lang(
@@ -7799,6 +7877,7 @@ function main(): void {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-c-sharp")]
     fn csharp_methods_extract_bounded_bodies() {
         let src = r#"
 class X {
@@ -7806,7 +7885,7 @@ class X {
   void Main() { value = Helper(2); Helper(value); return; }
 }
 "#;
-        let m = parse_lang(tree_sitter_c_sharp::LANGUAGE.into(), src, extract_csharp).expect("ok");
+        let m = parse_lang(lang_for(ParserId::CSharp), src, extract_csharp).expect("ok");
         let helper = m
             .decls
             .iter()
@@ -7848,6 +7927,7 @@ class X {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-c-sharp")]
     fn csharp_lowers_scalar_body_shapes() {
         let src = r#"
 class X {
@@ -7862,7 +7942,7 @@ class X {
   }
 }
 "#;
-        let m = parse_lang(tree_sitter_c_sharp::LANGUAGE.into(), src, extract_csharp).expect("ok");
+        let m = parse_lang(lang_for(ParserId::CSharp), src, extract_csharp).expect("ok");
         let main = m
             .decls
             .iter()
@@ -7911,6 +7991,7 @@ class X {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn python_functions_extract_bounded_bodies() {
         let src = r#"
 def helper(value: int) -> int:
@@ -7922,7 +8003,7 @@ def main():
     return
 "#;
         let m = parse_lang(
-            tree_sitter_python::LANGUAGE.into(),
+            lang_for(ParserId::Python),
             src,
             extract_python_with_classes,
         )
@@ -7969,6 +8050,7 @@ def main():
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn python_lowers_scalar_body_shapes() {
         let src = r#"
 def helper(value: int) -> int:
@@ -7987,7 +8069,7 @@ def main():
     return value
 "#;
         let m = parse_lang(
-            tree_sitter_python::LANGUAGE.into(),
+            lang_for(ParserId::Python),
             src,
             extract_python_with_classes,
         )
@@ -8036,6 +8118,7 @@ def main():
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn ruby_methods_extract_scalar_bodies() {
         let src = r#"
 def helper(value)
@@ -8048,7 +8131,7 @@ def main
   return helper(3) + 4
 end
 "#;
-        let m = parse_lang(tree_sitter_ruby::LANGUAGE.into(), src, extract_ruby).expect("ok");
+        let m = parse_lang(lang_for(ParserId::Ruby), src, extract_ruby).expect("ok");
         let helper = m
             .decls
             .iter()
@@ -8102,6 +8185,7 @@ end
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn zig_extracts_extern_struct_boundary_module() {
         let src = r#"
 pub const InSliceU8 = extern struct {
@@ -8152,6 +8236,7 @@ pub fn main() void {}
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn zig_artifact_without_boundary_markers_has_no_boundary() {
         let src = "fn helper(value: i32) i32 { return value; }\npub fn main() void { return; }\n";
         let artifact = parse_zig_artifact_source(src, "point").expect("parse zig artifact");
@@ -8159,6 +8244,7 @@ pub fn main() void {}
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn zig_fixture_extracts_extern_struct_boundary() {
         let path =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../conformance/abi/zig-extern-struct.zig");
@@ -8180,9 +8266,10 @@ pub fn main() void {}
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn zig_functions_extract_params_return_and_body() {
         let src = "fn helper(value: i32) i32 { return value; }\npub fn main() void { value = helper(2); helper(value); return; }\n";
-        let m = parse_lang(tree_sitter_zig::LANGUAGE.into(), src, extract_zig).expect("ok");
+        let m = parse_lang(lang_for(ParserId::Zig), src, extract_zig).expect("ok");
         let helper = m
             .decls
             .iter()
@@ -8229,6 +8316,7 @@ pub fn main() void {}
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn zig_lowers_scalar_body_shapes() {
         let src = r#"
 fn helper(value: i32) i32 { return value; }
@@ -8247,7 +8335,7 @@ pub fn main() void {
     return;
 }
 "#;
-        let m = parse_lang(tree_sitter_zig::LANGUAGE.into(), src, extract_zig).expect("ok");
+        let m = parse_lang(lang_for(ParserId::Zig), src, extract_zig).expect("ok");
         let main = m
             .decls
             .iter()
@@ -8296,10 +8384,11 @@ pub fn main() void {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-kotlin-ng")]
     fn kotlin_functions_extract_bounded_bodies() {
         let src = "fun helper(value: Int): Int { return value }\nfun main() { value = helper(2); helper(value); return }\n";
         let m =
-            parse_lang(tree_sitter_kotlin_ng::LANGUAGE.into(), src, extract_kotlin).expect("ok");
+            parse_lang(lang_for(ParserId::Kotlin), src, extract_kotlin).expect("ok");
         let helper = m
             .decls
             .iter()
@@ -8341,6 +8430,7 @@ pub fn main() void {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-kotlin-ng")]
     fn kotlin_lowers_scalar_body_shapes() {
         let src = r#"
 fun helper(value: Int): Int { return value }
@@ -8360,7 +8450,7 @@ fun main() {
 }
 "#;
         let m =
-            parse_lang(tree_sitter_kotlin_ng::LANGUAGE.into(), src, extract_kotlin).expect("ok");
+            parse_lang(lang_for(ParserId::Kotlin), src, extract_kotlin).expect("ok");
         let main = m
             .decls
             .iter()
@@ -8409,9 +8499,10 @@ fun main() {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn c_binary_return_lowers_function_body() {
         let src = "int f(void) { return 1 + 2; }\nint main(void) { return 0; }\n";
-        let m = parse_lang(tree_sitter_c::LANGUAGE.into(), src, |b, r| {
+        let m = parse_lang(lang_for(ParserId::C), src, |b, r| {
             extract_fn_nodes(b, r, &["function_definition"], c_like_function_decl)
         })
         .expect("parse");
@@ -8430,6 +8521,7 @@ fun main() {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn c_lowers_locals_assignments_calls_if_and_while() {
         let src = r#"
 int helper(int value) { return value; }
@@ -8442,7 +8534,7 @@ int main(void) {
   return value;
 }
 "#;
-        let m = parse_lang(tree_sitter_c::LANGUAGE.into(), src, |b, r| {
+        let m = parse_lang(lang_for(ParserId::C), src, |b, r| {
             extract_fn_nodes(b, r, &["function_definition"], c_like_function_decl)
         })
         .expect("parse");
@@ -8490,9 +8582,10 @@ int main(void) {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn cpp_uses_c_like_body_lowering() {
         let src = "int main() { int value = 1; value = value + 1; return value; }\n";
-        let m = parse_lang(tree_sitter_cpp::LANGUAGE.into(), src, |b, r| {
+        let m = parse_lang(lang_for(ParserId::Cpp), src, |b, r| {
             extract_fn_nodes(b, r, &["function_definition"], c_like_function_decl)
         })
         .expect("parse");
@@ -8510,6 +8603,7 @@ int main(void) {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-dart")]
     fn dart_functions_extract_params_return_and_body() {
         let src = r#"
 int helper(int value) { return value; }
@@ -8522,7 +8616,7 @@ int main() {
   return value;
 }
 "#;
-        let m = parse_lang(tree_sitter_dart::LANGUAGE.into(), src, extract_dart).expect("ok");
+        let m = parse_lang(lang_for(ParserId::Dart), src, extract_dart).expect("ok");
         let helper = m
             .decls
             .iter()
@@ -8590,6 +8684,7 @@ int main() {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn java_class_declarations_extract_with_fields_and_methods() {
         let src = r#"
 public class Counter {
@@ -8602,7 +8697,7 @@ public class Counter {
 }
 "#;
         let m = parse_lang(
-            tree_sitter_java::LANGUAGE.into(),
+            lang_for(ParserId::Java),
             src,
             extract_java_with_classes,
         )
@@ -8656,6 +8751,7 @@ public class Counter {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn java_interface_declarations_extract_with_method_sigs() {
         let src = r#"
 interface Printable {
@@ -8664,7 +8760,7 @@ interface Printable {
 }
 "#;
         let m = parse_lang(
-            tree_sitter_java::LANGUAGE.into(),
+            lang_for(ParserId::Java),
             src,
             extract_java_with_classes,
         )
@@ -8694,6 +8790,7 @@ interface Printable {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn java_class_with_extends_and_implements_extracts() {
         let src = r#"
 class Child extends Parent implements Runnable, Serializable {
@@ -8701,7 +8798,7 @@ class Child extends Parent implements Runnable, Serializable {
 }
 "#;
         let m = parse_lang(
-            tree_sitter_java::LANGUAGE.into(),
+            lang_for(ParserId::Java),
             src,
             extract_java_with_classes,
         )
@@ -8729,6 +8826,7 @@ class Child extends Parent implements Runnable, Serializable {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn cpp_class_declarations_extract_with_fields_and_methods() {
         let src = r#"
 class Calculator {
@@ -8739,7 +8837,7 @@ public:
 };
 "#;
         let m = parse_lang(
-            tree_sitter_cpp::LANGUAGE.into(),
+            lang_for(ParserId::Cpp),
             src,
             extract_cpp_with_classes,
         )
@@ -8776,6 +8874,7 @@ public:
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn cpp_class_with_base_class_extracts_extends() {
         let src = r#"
 class Child : public Parent {
@@ -8784,7 +8883,7 @@ public:
 };
 "#;
         let m = parse_lang(
-            tree_sitter_cpp::LANGUAGE.into(),
+            lang_for(ParserId::Cpp),
             src,
             extract_cpp_with_classes,
         )
@@ -8802,6 +8901,7 @@ public:
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn cpp_top_level_functions_still_extracted_with_class_extractor() {
         let src = r#"
 class Helper {
@@ -8814,7 +8914,7 @@ int answer() {
 }
 "#;
         let m = parse_lang(
-            tree_sitter_cpp::LANGUAGE.into(),
+            lang_for(ParserId::Cpp),
             src,
             extract_cpp_with_classes,
         )
@@ -8835,6 +8935,7 @@ int answer() {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn java_constructors_extracted_as_functions() {
         let src = r#"
 class Counter {
@@ -8849,7 +8950,7 @@ class Counter {
 }
 "#;
         let m = parse_lang(
-            tree_sitter_java::LANGUAGE.into(),
+            lang_for(ParserId::Java),
             src,
             extract_java_with_classes,
         )
@@ -8886,6 +8987,7 @@ class Counter {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-c-sharp")]
     fn csharp_class_declarations_extract_with_fields_and_methods() {
         let src = r#"
 class Accumulator {
@@ -8897,7 +8999,7 @@ class Accumulator {
     public void Reset() { total = 0; }
 }
 "#;
-        let m = parse_lang(tree_sitter_c_sharp::LANGUAGE.into(), src, extract_csharp).expect("ok");
+        let m = parse_lang(lang_for(ParserId::CSharp), src, extract_csharp).expect("ok");
 
         let class = m
             .decls
@@ -8937,6 +9039,7 @@ class Accumulator {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-c-sharp")]
     fn csharp_interface_declarations_extract_with_method_sigs() {
         let src = r#"
 interface IResettable {
@@ -8944,7 +9047,7 @@ interface IResettable {
     int GetValue();
 }
 "#;
-        let m = parse_lang(tree_sitter_c_sharp::LANGUAGE.into(), src, extract_csharp).expect("ok");
+        let m = parse_lang(lang_for(ParserId::CSharp), src, extract_csharp).expect("ok");
 
         let iface = m
             .decls
@@ -8970,12 +9073,14 @@ interface IResettable {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn c_return_statement_child_kinds_for_param_return() {
         let src = "int echo(int x) { return x; }\n";
         let mut p = Parser::new();
-        p.set_language(&tree_sitter_c::LANGUAGE.into()).unwrap();
+        p.set_language(&lang_for(ParserId::C)).unwrap();
         let tree = p.parse(src, None).unwrap();
         let mut found = false;
+    #[cfg(feature = "tree-sitter-r")]
         fn visit(n: Node<'_>, src: &str, found: &mut bool) {
             if n.kind() == "return_statement" {
                 *found = true;
@@ -9002,6 +9107,7 @@ interface IResettable {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn js_class_extraction_produces_decl_class() {
         let src = r#"
 class Calculator {
@@ -9015,7 +9121,7 @@ class Calculator {
 }
 "#;
         let m = parse_lang(
-            tree_sitter_javascript::LANGUAGE.into(),
+            lang_for(ParserId::JavaScript),
             src,
             extract_js_with_classes,
         )
@@ -9052,13 +9158,14 @@ class Calculator {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn js_arrow_and_function_expr_extracted_from_vars() {
         let src = r#"
 const add = (a, b) => { return a + b; };
 var multiply = function(a, b) { return a * b; };
 "#;
         let m = parse_lang(
-            tree_sitter_javascript::LANGUAGE.into(),
+            lang_for(ParserId::JavaScript),
             src,
             extract_js_with_classes,
         )
@@ -9081,6 +9188,7 @@ var multiply = function(a, b) { return a * b; };
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn js_member_new_and_method_call_lower_to_core_ir() {
         let src = r#"
 class Counter {
@@ -9099,7 +9207,7 @@ function answer() {
 function main() {}
 "#;
         let m = parse_lang(
-            tree_sitter_javascript::LANGUAGE.into(),
+            lang_for(ParserId::JavaScript),
             src,
             extract_js_with_classes,
         )
@@ -9142,6 +9250,7 @@ function main() {}
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn ts_interface_extraction_produces_decl_interface() {
         let src = r#"
 interface Drawable {
@@ -9180,6 +9289,7 @@ interface Drawable {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn ts_class_extraction_preserves_type_annotations() {
         let src = r#"
 class TypedCounter {
@@ -9232,6 +9342,7 @@ class TypedCounter {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn ts_member_new_and_method_call_lower_to_core_ir() {
         let src = r#"
 class Counter {
@@ -9276,6 +9387,7 @@ function main(): void {}
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn python_class_extraction_produces_decl_class() {
         let src = r#"
 class Counter:
@@ -9286,7 +9398,7 @@ class Counter:
         return 1
 "#;
         let m = parse_lang(
-            tree_sitter_python::LANGUAGE.into(),
+            lang_for(ParserId::Python),
             src,
             extract_python_with_classes,
         )
@@ -9323,12 +9435,13 @@ class Counter:
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn python_lambda_extracted_as_function() {
         let src = r#"
 double = lambda x: x * 2
 "#;
         let m = parse_lang(
-            tree_sitter_python::LANGUAGE.into(),
+            lang_for(ParserId::Python),
             src,
             extract_python_with_classes,
         )
@@ -9350,6 +9463,7 @@ double = lambda x: x * 2
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn python_try_except_lowered_to_stmt_try() {
         let src = r#"
 def risky(x):
@@ -9360,7 +9474,7 @@ def risky(x):
     return value
 "#;
         let m = parse_lang(
-            tree_sitter_python::LANGUAGE.into(),
+            lang_for(ParserId::Python),
             src,
             extract_python_with_classes,
         )
@@ -9388,9 +9502,10 @@ def risky(x):
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-php")]
     fn php_function_with_body_extracts() {
         let src = "<?php\nfunction helper($value) {\n    return $value;\n}\nfunction main() {\n    $value = 1;\n    helper($value);\n    return;\n}\n";
-        let m = parse_lang(tree_sitter_php::LANGUAGE_PHP.into(), src, extract_php).expect("ok");
+        let m = parse_lang(lang_for(ParserId::Php), src, extract_php).expect("ok");
         let helper = m
             .decls
             .iter()
@@ -9427,6 +9542,7 @@ def risky(x):
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-php")]
     fn php_class_with_method_extracts_decl_class() {
         let src = r#"<?php
 class Calculator {
@@ -9440,7 +9556,7 @@ class Calculator {
     }
 }
 "#;
-        let m = parse_lang(tree_sitter_php::LANGUAGE_PHP.into(), src, extract_php).expect("ok");
+        let m = parse_lang(lang_for(ParserId::Php), src, extract_php).expect("ok");
         let class = m
             .decls
             .iter()
@@ -9471,9 +9587,10 @@ class Calculator {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-php")]
     fn php_echo_statement_extracts_as_expression() {
         let src = "<?php\nfunction main() {\n    echo \"hello\";\n}\n";
-        let m = parse_lang(tree_sitter_php::LANGUAGE_PHP.into(), src, extract_php).expect("ok");
+        let m = parse_lang(lang_for(ParserId::Php), src, extract_php).expect("ok");
         let main = m
             .decls
             .iter()
@@ -9486,9 +9603,10 @@ class Calculator {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-php")]
     fn php_eval_main_body_extracts() {
         let src = "<?php\nfunction main() {\n    print(\"hi\");\n}\n";
-        let m = parse_lang(tree_sitter_php::LANGUAGE_PHP.into(), src, extract_php).expect("ok");
+        let m = parse_lang(lang_for(ParserId::Php), src, extract_php).expect("ok");
         let main = m
             .decls
             .iter()
@@ -9501,9 +9619,10 @@ class Calculator {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-php")]
     fn php_eval_print_shape_extracts() {
         let src = "<?php\nfunction main() {\n    print(1 + 2);\n}\n";
-        let m = parse_lang(tree_sitter_php::LANGUAGE_PHP.into(), src, extract_php).expect("ok");
+        let m = parse_lang(lang_for(ParserId::Php), src, extract_php).expect("ok");
         let main = m
             .decls
             .iter()
@@ -9523,9 +9642,10 @@ class Calculator {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-php")]
     fn php_interface_with_method_sigs_extracts() {
         let src = "<?php\ninterface Printable {\n    public function format(): string;\n    public function version(): int;\n}\n";
-        let m = parse_lang(tree_sitter_php::LANGUAGE_PHP.into(), src, extract_php).expect("ok");
+        let m = parse_lang(lang_for(ParserId::Php), src, extract_php).expect("ok");
         let iface = m
             .decls
             .iter()
@@ -9550,6 +9670,7 @@ class Calculator {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-lua")]
     fn lua_function_with_body_extracts() {
         let src = r#"
 function helper(value)
@@ -9561,7 +9682,7 @@ function main()
   return
 end
 "#;
-        let m = parse_lang(tree_sitter_lua::LANGUAGE.into(), src, extract_lua).expect("ok");
+        let m = parse_lang(lang_for(ParserId::Lua), src, extract_lua).expect("ok");
         let helper = m
             .decls
             .iter()
@@ -9604,6 +9725,7 @@ end
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-lua")]
     fn lua_local_function_extracts_as_decl() {
         let src = r#"
 local function helper(value)
@@ -9613,7 +9735,7 @@ function main()
   helper(1)
 end
 "#;
-        let m = parse_lang(tree_sitter_lua::LANGUAGE.into(), src, extract_lua).expect("ok");
+        let m = parse_lang(lang_for(ParserId::Lua), src, extract_lua).expect("ok");
         let helper = m
             .decls
             .iter()
@@ -9626,6 +9748,7 @@ end
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn scala_function_with_body_extracts() {
         let src = r#"
 def helper(value: Int): Int = {
@@ -9637,7 +9760,7 @@ def main(): Unit = {
   return
 }
 "#;
-        let m = parse_lang(tree_sitter_scala::LANGUAGE.into(), src, extract_scala).expect("ok");
+        let m = parse_lang(lang_for(ParserId::Scala), src, extract_scala).expect("ok");
         let helper = m
             .decls
             .iter()
@@ -9665,6 +9788,7 @@ def main(): Unit = {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn scala_class_with_val_field_extracts() {
         let src = r#"
 class Counter(val value: Int) {
@@ -9674,7 +9798,7 @@ class Counter(val value: Int) {
     def get(): Int = value
 }
 "#;
-        let m = parse_lang(tree_sitter_scala::LANGUAGE.into(), src, extract_scala).expect("ok");
+        let m = parse_lang(lang_for(ParserId::Scala), src, extract_scala).expect("ok");
         let class = m
             .decls
             .iter()
@@ -9704,6 +9828,7 @@ class Counter(val value: Int) {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn scala_trait_with_method_sigs_extracts() {
         let src = r#"
 trait Drawable {
@@ -9711,7 +9836,7 @@ trait Drawable {
     def getBounds(): Rect
 }
 "#;
-        let m = parse_lang(tree_sitter_scala::LANGUAGE.into(), src, extract_scala).expect("ok");
+        let m = parse_lang(lang_for(ParserId::Scala), src, extract_scala).expect("ok");
         let iface = m
             .decls
             .iter()
@@ -9728,6 +9853,7 @@ trait Drawable {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-php")]
     fn php_functions_extract_bounded_bodies() {
         let src = r#"<?php
 function helper($value): int {
@@ -9739,7 +9865,7 @@ function main() {
     return;
 }
 "#;
-        let m = parse_lang(tree_sitter_php::LANGUAGE_PHP.into(), src, extract_php).expect("ok");
+        let m = parse_lang(lang_for(ParserId::Php), src, extract_php).expect("ok");
         let helper = m
             .decls
             .iter()
@@ -9781,6 +9907,7 @@ function main() {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-fsharp")]
     fn extract_fsharp_function_with_body() {
         let src = r#"let answer x = x + 42
 
@@ -9789,7 +9916,7 @@ let main _ =
     ()
 "#;
         let m = parse_lang(
-            tree_sitter_fsharp::LANGUAGE_FSHARP.into(),
+            lang_for(ParserId::FSharp),
             src,
             extract_fsharp,
         )
@@ -9809,13 +9936,14 @@ let main _ =
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-fsharp")]
     fn extract_fsharp_eval_main_body() {
         let src = r#"let main _ =
     let value = print("hi")
     value
 "#;
         let m = parse_lang(
-            tree_sitter_fsharp::LANGUAGE_FSHARP.into(),
+            lang_for(ParserId::FSharp),
             src,
             extract_fsharp,
         )
@@ -9832,6 +9960,7 @@ let main _ =
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-erlang")]
     fn extract_erlang_function_clause() {
         let src = r#"-module(calculator).
 -export([answer/0, main/0]).
@@ -9843,7 +9972,7 @@ main() ->
     X = answer(),
     ok.
 "#;
-        let m = parse_lang(tree_sitter_erlang::LANGUAGE.into(), src, extract_erlang).expect("ok");
+        let m = parse_lang(lang_for(ParserId::Erlang), src, extract_erlang).expect("ok");
         let found_answer = m
             .decls
             .iter()
@@ -9864,9 +9993,10 @@ main() ->
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-erlang")]
     fn extract_erlang_eval_print_shape() {
         let src = "-module(app).\n-export([main/0]).\n\nmain() ->\n    print(\"hi\").\n";
-        let m = parse_lang(tree_sitter_erlang::LANGUAGE.into(), src, extract_erlang).expect("ok");
+        let m = parse_lang(lang_for(ParserId::Erlang), src, extract_erlang).expect("ok");
         let main = m
             .decls
             .iter()
@@ -9887,6 +10017,7 @@ main() ->
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-elixir")]
     fn extract_elixir_defmodule() {
         let src = r#"defmodule Calculator do
   def answer do
@@ -9899,7 +10030,7 @@ main() ->
   end
 end
 "#;
-        let m = parse_lang(tree_sitter_elixir::LANGUAGE.into(), src, extract_elixir).expect("ok");
+        let m = parse_lang(lang_for(ParserId::Elixir), src, extract_elixir).expect("ok");
         let found_class = m
             .decls
             .iter()
@@ -9919,6 +10050,7 @@ end
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-julia")]
     fn extract_julia_struct() {
         let src = r#"mutable struct Point
     x::Int
@@ -9934,7 +10066,7 @@ function main()
     return nothing
 end
 "#;
-        let m = parse_lang(tree_sitter_julia::LANGUAGE.into(), src, extract_julia).expect("ok");
+        let m = parse_lang(lang_for(ParserId::Julia), src, extract_julia).expect("ok");
         let found_struct = m
             .decls
             .iter()
@@ -9948,12 +10080,13 @@ end
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-julia")]
     fn extract_julia_eval_main_body() {
         let src = r#"function main()
     print("hi")
 end
 "#;
-        let m = parse_lang(tree_sitter_julia::LANGUAGE.into(), src, extract_julia).expect("ok");
+        let m = parse_lang(lang_for(ParserId::Julia), src, extract_julia).expect("ok");
         let main = m
             .decls
             .iter()
@@ -9966,10 +10099,11 @@ end
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-ocaml")]
     fn extract_ocaml_eval_print_shape() {
         let src = "let main () =\n  print \"hi\"\n";
         let m =
-            parse_lang(tree_sitter_ocaml::LANGUAGE_OCAML.into(), src, extract_ocaml).expect("ok");
+            parse_lang(lang_for(ParserId::OCaml), src, extract_ocaml).expect("ok");
         let main = m
             .decls
             .iter()
@@ -9990,6 +10124,7 @@ end
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn extract_r_function() {
         let src = r#"answer <- function(x) {
     return(x + 42)
@@ -10000,7 +10135,7 @@ main <- function() {
     return(value)
 }
 "#;
-        let m = parse_lang(tree_sitter_r::LANGUAGE.into(), src, extract_r_lang).expect("ok");
+        let m = parse_lang(lang_for(ParserId::R), src, extract_r_lang).expect("ok");
         let answer = m
             .decls
             .iter()
@@ -10022,12 +10157,13 @@ main <- function() {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn extract_r_eval_main_body() {
         let src = r#"main <- function() {
     print("hi")
 }
 "#;
-        let m = parse_lang(tree_sitter_r::LANGUAGE.into(), src, extract_r_lang).expect("ok");
+        let m = parse_lang(lang_for(ParserId::R), src, extract_r_lang).expect("ok");
         let main = m
             .decls
             .iter()
@@ -10040,12 +10176,13 @@ main <- function() {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-julia")]
     fn extract_julia_eval_print_shape() {
         let src = r#"function main()
     print("hi")
 end
 "#;
-        let m = parse_lang(tree_sitter_julia::LANGUAGE.into(), src, extract_julia).expect("ok");
+        let m = parse_lang(lang_for(ParserId::Julia), src, extract_julia).expect("ok");
         let main = m
             .decls
             .iter()
@@ -10064,12 +10201,13 @@ end
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn extract_r_eval_print_shape() {
         let src = r#"main <- function() {
     print("hi")
 }
 "#;
-        let m = parse_lang(tree_sitter_r::LANGUAGE.into(), src, extract_r_lang).expect("ok");
+        let m = parse_lang(lang_for(ParserId::R), src, extract_r_lang).expect("ok");
         let main = m
             .decls
             .iter()
@@ -10088,12 +10226,13 @@ end
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn extract_r_eval_numeric_print_shape() {
         let src = r#"main <- function() {
     print(1 + 2)
 }
 "#;
-        let m = parse_lang(tree_sitter_r::LANGUAGE.into(), src, extract_r_lang).expect("ok");
+        let m = parse_lang(lang_for(ParserId::R), src, extract_r_lang).expect("ok");
         let main = m
             .decls
             .iter()
@@ -10113,12 +10252,13 @@ end
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn extract_swift_eval_main_body() {
         let src = r#"func main() -> Void {
   print("hi")
 }
 "#;
-        let m = parse_lang(tree_sitter_swift::LANGUAGE.into(), src, extract_swift).expect("ok");
+        let m = parse_lang(lang_for(ParserId::Swift), src, extract_swift).expect("ok");
         let main = m
             .decls
             .iter()
@@ -10131,12 +10271,13 @@ end
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn extract_swift_eval_print_shape() {
         let src = r#"func main() -> Void {
   print(1 + 2)
 }
 "#;
-        let m = parse_lang(tree_sitter_swift::LANGUAGE.into(), src, extract_swift).expect("ok");
+        let m = parse_lang(lang_for(ParserId::Swift), src, extract_swift).expect("ok");
         let main = m
             .decls
             .iter()
@@ -10156,9 +10297,10 @@ end
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn extract_go_eval_main_body() {
         let src = "package main\n\nfunc main() {\n\tprint(\"hi\")\n}\n";
-        let m = parse_lang(tree_sitter_go::LANGUAGE.into(), src, |b, r| {
+        let m = parse_lang(lang_for(ParserId::Go), src, |b, r| {
             extract_fn_nodes(
                 b,
                 r,
@@ -10194,9 +10336,10 @@ end
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn extract_go_eval_print_shape() {
         let src = "package main\n\nfunc main() {\n\tprint(1 + 2)\n}\n";
-        let m = parse_lang(tree_sitter_go::LANGUAGE.into(), src, |b, r| {
+        let m = parse_lang(lang_for(ParserId::Go), src, |b, r| {
             extract_fn_nodes(
                 b,
                 r,
@@ -10240,9 +10383,10 @@ end
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn extract_go_function_return_type() {
         let src = "package main\n\nfunc answer() int {\n\treturn 42\n}\n";
-        let m = parse_lang(tree_sitter_go::LANGUAGE.into(), src, |b, r| {
+        let m = parse_lang(lang_for(ParserId::Go), src, |b, r| {
             extract_fn_nodes(
                 b,
                 r,
@@ -10279,9 +10423,10 @@ end
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-r")]
     fn extract_v_function_return_type() {
         let src = "module main\n\nfn answer() int {\n\treturn 42\n}\n";
-        let m = parse_lang(tree_sitter_v::LANGUAGE.into(), src, |b, r| {
+        let m = parse_lang(lang_for(ParserId::V), src, |b, r| {
             extract_fn_nodes(b, r, &["function_declaration"], |src, n| {
                 let name_n = n.child_by_field_name("name")?;
                 let name = normalize_entry(node_txt(src, name_n).trim());
@@ -10313,6 +10458,7 @@ end
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-perl")]
     fn extract_perl_subroutine() {
         let src = r#"sub answer {
     my ($x) = @_;
@@ -10324,7 +10470,7 @@ sub main {
     return;
 }
 "#;
-        let m = parse_lang(tree_sitter_perl::LANGUAGE.into(), src, extract_perl).expect("ok");
+        let m = parse_lang(lang_for(ParserId::Perl), src, extract_perl).expect("ok");
         let answer = m
             .decls
             .iter()
@@ -10343,12 +10489,13 @@ sub main {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-perl")]
     fn extract_perl_eval_main_body() {
         let src = r#"sub main {
     print("hi");
 }
 "#;
-        let m = parse_lang(tree_sitter_perl::LANGUAGE.into(), src, extract_perl).expect("ok");
+        let m = parse_lang(lang_for(ParserId::Perl), src, extract_perl).expect("ok");
         let main = m
             .decls
             .iter()
@@ -10361,12 +10508,13 @@ sub main {
     }
 
     #[test]
+    #[cfg(feature = "tree-sitter-perl")]
     fn extract_perl_eval_print_shape() {
         let src = r#"sub main {
     print(1 + 2);
 }
 "#;
-        let m = parse_lang(tree_sitter_perl::LANGUAGE.into(), src, extract_perl).expect("ok");
+        let m = parse_lang(lang_for(ParserId::Perl), src, extract_perl).expect("ok");
         let main = m
             .decls
             .iter()
