@@ -292,35 +292,134 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
 
 fn collect_functions(module: &UnifiedModule) -> Result<HashMap<String, FunctionInfo>, String> {
     let mut functions = HashMap::new();
+    let mut name_counts: HashMap<String, u32> = HashMap::new();
     for decl in &module.decls {
-        if let Decl::Function {
+        let Decl::Function {
             name,
             params,
             ret,
             body,
             ..
         } = decl
-        {
-            if functions
-                .insert(
-                    name.clone(),
-                    FunctionInfo {
-                        name: name.clone(),
-                        params: params.clone(),
-                        ret: ret.clone(),
-                        body: body.clone(),
-                    },
-                )
-                .is_some()
-            {
-                return Err(format!("x86_64-lower: duplicate function `{name}`"));
-            }
-        }
+        else {
+            continue;
+        };
+        let unique_name = if functions.contains_key(name) {
+            let count = name_counts.entry(name.clone()).or_insert(1);
+            *count += 1;
+            format!("{name}__dup{count}")
+        } else {
+            name_counts.insert(name.clone(), 1);
+            name.clone()
+        };
+        functions.insert(
+            unique_name.clone(),
+            FunctionInfo {
+                name: unique_name,
+                params: params.clone(),
+                ret: ret.clone(),
+                body: body.clone(),
+            },
+        );
+    }
+    // Build disambiguation map and update call targets
+    let mut name_map: HashMap<String, String> = HashMap::new();
+    for (unique, _func) in &functions {
+        let orig = unique.split("__dup").next().unwrap_or(unique).to_string();
+        name_map.insert(orig, unique.clone());
+    }
+    for func in functions.values_mut() {
+        rename_calls(&mut func.body, &name_map);
     }
     if functions.is_empty() {
         return Err("x86_64-lower: module has no functions".to_string());
     }
     Ok(functions)
+}
+
+fn rename_calls(stmts: &mut [Stmt], name_map: &HashMap<String, String>) {
+    for stmt in stmts.iter_mut() {
+        rename_calls_in_stmt(stmt, name_map);
+    }
+}
+
+fn rename_calls_in_stmt(stmt: &mut Stmt, name_map: &HashMap<String, String>) {
+    match stmt {
+        Stmt::Let(_, _, expr)
+        | Stmt::Assign(_, expr)
+        | Stmt::Expr(expr)
+        | Stmt::Return(Some(expr)) => rename_calls_in_expr(expr, name_map),
+        Stmt::Return(None) => {}
+        Stmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            rename_calls_in_expr(cond, name_map);
+            rename_calls(then_body, name_map);
+            rename_calls(else_body, name_map);
+        }
+        Stmt::Loop { body, .. } => {
+            rename_calls(body, name_map);
+        }
+        Stmt::IndexAssign {
+            base, index, value, ..
+        } => {
+            rename_calls_in_expr(base, name_map);
+            rename_calls_in_expr(index, name_map);
+            rename_calls_in_expr(value, name_map);
+        }
+        Stmt::Match { scrutinee, arms } => {
+            rename_calls_in_expr(scrutinee, name_map);
+            for arm in arms {
+                rename_calls(&mut arm.body, name_map);
+            }
+        }
+        Stmt::Throw(expr) => rename_calls_in_expr(expr, name_map),
+        Stmt::Try { body, catches } => {
+            rename_calls(body, name_map);
+            for catch in catches {
+                rename_calls(&mut catch.body, name_map);
+            }
+        }
+        Stmt::Break => {}
+    }
+}
+
+fn rename_calls_in_expr(expr: &mut Expr, name_map: &HashMap<String, String>) {
+    match expr {
+        Expr::Call { callee, args } => {
+            if let Expr::Ident(name) = callee.as_ref() {
+                if let Some(mapped) = name_map.get(name.as_str()) {
+                    *callee = Box::new(Expr::Ident(mapped.clone()));
+                }
+            }
+            for arg in args {
+                rename_calls_in_expr(arg, name_map);
+            }
+        }
+        Expr::Unary { expr: inner, .. } => rename_calls_in_expr(inner, name_map),
+        Expr::Binary { lhs, rhs, .. } => {
+            rename_calls_in_expr(lhs, name_map);
+            rename_calls_in_expr(rhs, name_map);
+        }
+        Expr::StructInit { fields, .. } => {
+            for (_, field_expr) in fields {
+                rename_calls_in_expr(field_expr, name_map);
+            }
+        }
+        Expr::Field { base, .. } => rename_calls_in_expr(base, name_map),
+        Expr::Index { base, index, .. } => {
+            rename_calls_in_expr(base, name_map);
+            rename_calls_in_expr(index, name_map);
+        }
+        Expr::ArrayLit(items) => {
+            for item in items {
+                rename_calls_in_expr(item, name_map);
+            }
+        }
+        Expr::IntLit(_) | Expr::FloatLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::Ident(_) | Expr::Closure { .. } => {}
+    }
 }
 
 fn collect_structs(module: &UnifiedModule) -> HashMap<String, Vec<(String, Typ)>> {
