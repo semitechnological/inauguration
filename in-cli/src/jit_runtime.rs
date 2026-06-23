@@ -61,11 +61,10 @@ unsafe impl Sync for CodePage {}
 
 #[cfg(not(windows))]
 fn alloc_executable_pages(size: usize) -> Option<*mut u8> {
-    let flags = if cfg!(target_os = "macos") {
-        libc::MAP_PRIVATE | libc::MAP_ANON | libc::MAP_JIT
-    } else {
-        libc::MAP_PRIVATE | libc::MAP_ANON
-    };
+    #[cfg(target_os = "macos")]
+    let flags = libc::MAP_PRIVATE | libc::MAP_ANON | libc::MAP_JIT;
+    #[cfg(not(target_os = "macos"))]
+    let flags = libc::MAP_PRIVATE | libc::MAP_ANON;
     let ptr = unsafe {
         libc::mmap(
             std::ptr::null_mut(),
