@@ -295,6 +295,13 @@ mod tests {
     }
 
     #[test]
+    fn constant_folding_runs_successfully() {
+        let mut module = make_test_module();
+        let pass = ConstantFolding;
+        assert!(pass.run(&mut module).is_ok());
+    }
+
+    #[test]
     fn simplify_cfg_removes_unreachable_blocks() {
         let mut module = IrModule::new("test");
         let mut func = IrFunction::new("f", vec![], IrType::Void);
