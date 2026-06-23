@@ -198,7 +198,7 @@ fn inline_in_expr(e: Expr, cand: &[String], fns: &HashMap<String, Decl>, depth: 
                         let mut sub = HashMap::new();
                         for (i, (p, _)) in params.iter().enumerate() {
                             if i < args.len() {
-                                sub.insert(p.clone(), args[i].clone());
+                                sub.insert(p.as_str(), &args[i]);
                             }
                         }
                         return substitute_expr(ret, &sub);
@@ -224,7 +224,7 @@ fn fold_call_ret(e: Expr, cand: &[String], fns: &HashMap<String, Decl>) -> Expr 
                         let mut sub = HashMap::new();
                         for (i, (p, _)) in params.iter().enumerate() {
                             if i < args.len() {
-                                sub.insert(p.clone(), args[i].clone());
+                                sub.insert(p.as_str(), &args[i]);
                             }
                         }
                         return substitute_expr(ret, &sub);
@@ -250,7 +250,7 @@ fn try_inline_void(e: &Expr, cand: &[String], fns: &HashMap<String, Decl>) -> Op
                     let mut sub = HashMap::new();
                     for (i, (p, _)) in params.iter().enumerate() {
                         if i < args.len() {
-                            sub.insert(p.clone(), args[i].clone());
+                            sub.insert(p.as_str(), &args[i]);
                         }
                     }
                     let r: Vec<Stmt> = substitute_params(body, &sub)
@@ -265,10 +265,10 @@ fn try_inline_void(e: &Expr, cand: &[String], fns: &HashMap<String, Decl>) -> Op
     None
 }
 
-fn substitute_params(stmts: &[Stmt], sub: &HashMap<String, Expr>) -> Vec<Stmt> {
+fn substitute_params(stmts: &[Stmt], sub: &HashMap<&str, &Expr>) -> Vec<Stmt> {
     stmts.iter().map(|s| subst_stmt(s, sub)).collect()
 }
-fn subst_stmt(s: &Stmt, sub: &HashMap<String, Expr>) -> Stmt {
+fn subst_stmt(s: &Stmt, sub: &HashMap<&str, &Expr>) -> Stmt {
     match s {
         Stmt::Let(n, t, e) => Stmt::Let(n.clone(), t.clone(), substitute_expr(e, sub)),
         Stmt::Assign(n, e) => Stmt::Assign(n.clone(), substitute_expr(e, sub)),
@@ -302,9 +302,12 @@ fn subst_stmt(s: &Stmt, sub: &HashMap<String, Expr>) -> Stmt {
         o => o.clone(),
     }
 }
-fn substitute_expr(e: &Expr, sub: &HashMap<String, Expr>) -> Expr {
+fn substitute_expr(e: &Expr, sub: &HashMap<&str, &Expr>) -> Expr {
     map_expr(e.clone(), &mut |e| match e {
-        Expr::Ident(n) => sub.get(&n).cloned().unwrap_or(Expr::Ident(n)),
+        Expr::Ident(n) => sub
+            .get(n.as_str())
+            .map(|&expr| expr.clone())
+            .unwrap_or(Expr::Ident(n)),
         other => other,
     })
 }
