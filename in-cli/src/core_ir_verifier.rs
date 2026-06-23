@@ -1274,7 +1274,10 @@ mod tests {
             &default_options(),
         );
 
-        assert!(report.ok, "empty body + non-void return should be allowed: {report:?}");
+        assert!(
+            report.ok,
+            "empty body + non-void return should be allowed: {report:?}"
+        );
     }
 
     #[test]

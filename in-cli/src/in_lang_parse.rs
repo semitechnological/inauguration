@@ -303,7 +303,9 @@ fn next_nonempty_line<'a>(lines: &'a [&'a str], start: usize) -> Option<&'a str>
 /// Transform the "human-friendly" `.in` syntax into normalised brace form.
 pub fn normalize_human_in_source(source: &str) -> String {
     // If no line ends with `:`, this is brace-form source — return unchanged.
-    let has_human_fn = source.lines().any(|l| l.trim().ends_with(':') && !l.trim().starts_with("//"));
+    let has_human_fn = source
+        .lines()
+        .any(|l| l.trim().ends_with(':') && !l.trim().starts_with("//"));
     if !has_human_fn {
         return source.to_string();
     }

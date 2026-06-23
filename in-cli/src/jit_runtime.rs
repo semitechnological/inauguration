@@ -136,11 +136,8 @@ fn make_executable(_ptr: *mut u8, _size: usize) {
 fn free_pages(ptr: *mut u8, _size: usize) {
     const MEM_RELEASE: u32 = 0x8000;
     unsafe extern "system" {
-        fn VirtualFree(
-            lp_address: *mut std::ffi::c_void,
-            dw_size: usize,
-            dw_free_type: u32,
-        ) -> i32;
+        fn VirtualFree(lp_address: *mut std::ffi::c_void, dw_size: usize, dw_free_type: u32)
+        -> i32;
     }
     unsafe {
         VirtualFree(ptr as *mut std::ffi::c_void, 0, MEM_RELEASE);
@@ -221,8 +218,7 @@ impl JitRuntime {
         function_offsets: &[(String, u32, u32)], // (name, offset, size)
     ) -> Result<(), String> {
         // Allocate a code page large enough
-        let page = CodePage::new(code.len())
-            .ok_or_else(|| "jit: mmap failed".to_string())?;
+        let page = CodePage::new(code.len()).ok_or_else(|| "jit: mmap failed".to_string())?;
 
         let dest = page.ptr;
         unsafe {
@@ -265,11 +261,22 @@ impl JitRuntime {
         // Debug: log entry info for crash investigation
         let entry_addr = entry as usize;
         let code_base = self.code_pages.last().map(|p| p.ptr as usize).unwrap_or(0);
-        std::fs::write("/tmp/jit_invoke.log", format!("invoke {name} entry={entry_addr:#x} base={code_base:#x} offset=0x{:x}\n", entry_addr.wrapping_sub(code_base))).ok();
+        std::fs::write(
+            "/tmp/jit_invoke.log",
+            format!(
+                "invoke {name} entry={entry_addr:#x} base={code_base:#x} offset=0x{:x}\n",
+                entry_addr.wrapping_sub(code_base)
+            ),
+        )
+        .ok();
 
         // Verify entry is plausible
         if entry_addr < 0x10000 {
-            std::fs::write("/tmp/jit_bad_addr.log", format!("BAD ADDR: {name} at {entry_addr:#x} base={code_base:#x}\n")).ok();
+            std::fs::write(
+                "/tmp/jit_bad_addr.log",
+                format!("BAD ADDR: {name} at {entry_addr:#x} base={code_base:#x}\n"),
+            )
+            .ok();
             return Some(0);
         }
 
@@ -292,19 +299,19 @@ impl JitRuntime {
                 Some(unsafe { f(_args[0], _args[1], _args[2]) })
             }
             4 => {
-                let f: extern "C" fn(i64, i64, i64, i64) -> i64 = unsafe { std::mem::transmute(entry) };
+                let f: extern "C" fn(i64, i64, i64, i64) -> i64 =
+                    unsafe { std::mem::transmute(entry) };
                 Some(unsafe { f(_args[0], _args[1], _args[2], _args[3]) })
             }
             5 => {
-                let f: extern "C" fn(i64, i64, i64, i64, i64) -> i64 = unsafe { std::mem::transmute(entry) };
+                let f: extern "C" fn(i64, i64, i64, i64, i64) -> i64 =
+                    unsafe { std::mem::transmute(entry) };
                 Some(unsafe { f(_args[0], _args[1], _args[2], _args[3], _args[4]) })
             }
             6 => {
                 let f: extern "C" fn(i64, i64, i64, i64, i64, i64) -> i64 =
                     unsafe { std::mem::transmute(entry) };
-                Some(unsafe {
-                    f(_args[0], _args[1], _args[2], _args[3], _args[4], _args[5])
-                })
+                Some(unsafe { f(_args[0], _args[1], _args[2], _args[3], _args[4], _args[5]) })
             }
             _ => None,
         }

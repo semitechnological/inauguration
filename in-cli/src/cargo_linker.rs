@@ -14,7 +14,7 @@ const METADATA_CACHE_TTL: Duration = Duration::from_secs(300); // 5 min
 
 fn get_cargo_metadata(project_dir: &Path) -> Option<serde_json::Value> {
     let key = project_dir.to_path_buf();
-    
+
     if let Ok(cache) = METADATA_CACHE.lock() {
         if let Some((timestamp, value)) = cache.get(&key) {
             if timestamp.elapsed() < METADATA_CACHE_TTL {
@@ -22,7 +22,7 @@ fn get_cargo_metadata(project_dir: &Path) -> Option<serde_json::Value> {
             }
         }
     }
-    
+
     let output = Command::new("cargo")
         .arg("metadata")
         .arg("--format-version")
@@ -30,17 +30,17 @@ fn get_cargo_metadata(project_dir: &Path) -> Option<serde_json::Value> {
         .current_dir(project_dir)
         .output()
         .ok()?;
-    
+
     if !output.status.success() {
         return None;
     }
-    
+
     let metadata: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
-    
+
     if let Ok(mut cache) = METADATA_CACHE.lock() {
         cache.insert(key, (Instant::now(), metadata.clone()));
     }
-    
+
     Some(metadata)
 }
 
@@ -65,7 +65,8 @@ pub fn compile_cargo_dependencies(project_dir: &Path) -> Vec<(String, UnifiedMod
     let root_id = resolve["root"].as_str().unwrap_or("");
 
     // Build a map of package_id -> manifest_path
-    let mut pkg_manifest: std::collections::HashMap<String, PathBuf> = std::collections::HashMap::new();
+    let mut pkg_manifest: std::collections::HashMap<String, PathBuf> =
+        std::collections::HashMap::new();
     for pkg in packages {
         let id = pkg["id"].as_str().unwrap_or("");
         let manifest = pkg["manifest_path"].as_str().unwrap_or("");
@@ -146,7 +147,12 @@ fn prefix_calls(stmts: &mut [Stmt], crate_name: &str, _in_prefixed: bool) {
         match stmt {
             Stmt::Expr(expr) | Stmt::Return(Some(expr)) => prefix_call_expr(expr, crate_name),
             Stmt::Let(_, _, expr) | Stmt::Assign(_, expr) => prefix_call_expr(expr, crate_name),
-            Stmt::If { then_body, else_body, cond, .. } => {
+            Stmt::If {
+                then_body,
+                else_body,
+                cond,
+                ..
+            } => {
                 prefix_call_expr(cond, crate_name);
                 prefix_calls(then_body, crate_name, false);
                 prefix_calls(else_body, crate_name, false);

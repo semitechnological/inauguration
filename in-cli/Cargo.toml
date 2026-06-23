@@ -97,3 +97,7 @@ criterion = "0.5"
 [[bench]]
 name = "hybrid_sil"
 harness = false
+
+[[bench]]
+name = "core_opt"
+harness = false

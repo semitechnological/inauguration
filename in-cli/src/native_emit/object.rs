@@ -11,8 +11,8 @@ use crate::native_emit::elf::{
     write_x86_64_relocatable_object, x86_64_linux_exit_code, x86_64_return_i32_object_code,
 };
 use crate::native_emit::macho::{ExportSymbol, MachOImage, MachOLinkage, write_image};
-use crate::native_emit::wasm::{WASM32_UNKNOWN_TRIPLE, WasmModule, write_scalar_i32_module};
 use crate::native_emit::target::AARCH64_NONE_TRIPLE;
+use crate::native_emit::wasm::{WASM32_UNKNOWN_TRIPLE, WasmModule, write_scalar_i32_module};
 use crate::native_emit::x86_64_lower::{X86_64_TRIPLE, lower_module};
 
 pub const NATIVE_OBJECT_SUBSET: &str = "native-object-subset";
@@ -58,7 +58,9 @@ pub fn emit_native_object(request: &NativeObjectRequest<'_>) -> Option<NativeObj
         }
         (WASM32_UNKNOWN_TRIPLE, NativeLinkage::StaticLib) => Some(emit_wasm32_module(request)),
         (X86_64_TRIPLE, NativeLinkage::StaticLib) => Some(emit_x86_64_freestanding_object(request)),
-        (AARCH64_NONE_TRIPLE, NativeLinkage::StaticLib) => Some(emit_aarch64_freestanding_object(request)),
+        (AARCH64_NONE_TRIPLE, NativeLinkage::StaticLib) => {
+            Some(emit_aarch64_freestanding_object(request))
+        }
         _ => None,
     }
 }
