@@ -320,6 +320,34 @@ mod tests {
     }
 
     #[test]
+    fn constant_folding_runs_successfully() {
+        let mut module = make_test_module();
+        let pass = ConstantFolding;
+        assert!(pass.run(&mut module).is_ok());
+    }
+
+    #[test]
+    fn dead_code_elimination_runs_successfully() {
+        let mut module = make_test_module();
+        let pass = DeadCodeElimination;
+        assert!(pass.run(&mut module).is_ok());
+    }
+
+    #[test]
+    fn sroa_runs_successfully() {
+        let mut module = make_test_module();
+        let pass = SROA;
+        assert!(pass.run(&mut module).is_ok());
+    }
+
+    #[test]
+    fn inliner_runs_successfully() {
+        let mut module = make_test_module();
+        let pass = Inliner;
+        assert!(pass.run(&mut module).is_ok());
+    }
+
+    #[test]
     fn cleanup_removes_empty_unreachable_blocks() {
         let mut module = IrModule::new("test");
         let mut func = IrFunction::new("f", vec![], IrType::Void);
