@@ -343,4 +343,11 @@ mod tests {
         assert_eq!(module.functions[0].blocks.len(), 1);
         assert_eq!(module.functions[0].blocks[0].label, "live");
     }
+
+    #[test]
+    fn sroa_pass_returns_ok() {
+        let mut module = make_test_module();
+        let pass = SROA;
+        assert!(pass.run(&mut module).is_ok());
+    }
 }
