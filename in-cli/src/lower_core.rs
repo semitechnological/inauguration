@@ -115,11 +115,11 @@ fn desugar_closures_in_body(body: &mut [Stmt], counter: &mut usize, extra_decls:
     }
 }
 
-fn collect_declared_vars_in_body(body: &[Stmt], out: &mut HashSet<String>) {
+fn collect_declared_vars_in_body<'a>(body: &'a [Stmt], out: &mut HashSet<&'a str>) {
     for stmt in body {
         match stmt {
             Stmt::Let(name, _, _) => {
-                out.insert(name.clone());
+                out.insert(name.as_str());
             }
             Stmt::If {
                 then_body,
@@ -151,11 +151,18 @@ fn collect_declared_vars_in_body(body: &[Stmt], out: &mut HashSet<String>) {
 fn collect_free_vars(body: &[Stmt], params: &[(String, Typ)]) -> Vec<String> {
     let mut reads = HashSet::new();
     collect_body_reads(body, &mut reads);
+
+    let mut declared_strs = HashSet::new();
+    collect_declared_vars_in_body(body, &mut declared_strs);
+
     let mut declared = HashSet::new();
     for (pname, _) in params {
         declared.insert(pname.clone());
     }
-    collect_declared_vars_in_body(body, &mut declared);
+    for var in declared_strs {
+        declared.insert(var.to_string());
+    }
+
     let mut captures: Vec<String> = reads.difference(&declared).cloned().collect();
     captures.sort();
     captures
