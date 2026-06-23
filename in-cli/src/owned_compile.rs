@@ -504,6 +504,36 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
     finalize_report(&mut report, started, &cwd, &frontend_hash)
 }
 
+/// Resolve a JIT entry name against `module`'s function declarations.
+/// Tries: exact match, namespaced (`.<entry>`), suffix match, then falls
+/// back to the original name so the lowerer can fail with an actionable error.
+fn resolve_jit_entry(module: &UnifiedModule, entry: &str) -> String {
+    let func_names: Vec<&str> = module
+        .decls
+        .iter()
+        .filter_map(|d| match d {
+            Decl::Function { name, .. } => Some(name.as_str()),
+            _ => None,
+        })
+        .collect();
+
+    if func_names.contains(&entry) {
+        return entry.to_string();
+    }
+    let dot_entry = format!(".{entry}");
+    if let Some(found) = func_names.iter().find(|n| n.ends_with(&dot_entry)) {
+        return found.to_string();
+    }
+    // Suffix match: entry is a suffix of a function name (beyond a dot)
+    if let Some(found) = func_names
+        .iter()
+        .find(|n| n.ends_with(entry) && n.as_bytes().get(n.len() - entry.len().wrapping_sub(1)) == Some(&b'.'))
+    {
+        return found.to_string();
+    }
+    entry.to_string()
+}
+
 /// JIT compile: lower to native machine code, load into JitRuntime, invoke entry.
 fn compile_jit(
     module: &UnifiedModule,
@@ -522,10 +552,11 @@ fn compile_jit(
         .as_deref()
         .filter(|name| !name.is_empty())
         .unwrap_or("answer");
+    let resolved_entry = resolve_jit_entry(module, entry);
 
     // Select lowering based on host architecture
     let lowered = if cfg!(target_arch = "x86_64") {
-        let result = crate::native_emit::x86_64_lower::lower_module(module, entry)
+        let result = crate::native_emit::x86_64_lower::lower_module(module, &resolved_entry)
             .map_err(|e| format!("jit-lowering-failed: {e}"))?;
         // Wrap into LoweredModule-compatible shape
         crate::native_emit::lower::LoweredModule {
@@ -535,7 +566,7 @@ fn compile_jit(
             function_offsets: result.exports.into_iter().collect(),
         }
     } else {
-        lower_module(module, entry, NativeLinkage::Executable)
+        lower_module(module, &resolved_entry, NativeLinkage::Executable)
             .map_err(|e| format!("jit-lowering-failed: {e}"))?
     };
 
@@ -563,7 +594,7 @@ fn compile_jit(
 
     // Invoke entry function via JIT (not trampoline, so we get the return value)
     let exit_code = unsafe {
-        rt.invoke(entry, &[])
+        rt.invoke(&resolved_entry, &[])
             .unwrap_or(1)
     } as u8;
 
@@ -1203,6 +1234,7 @@ pub fn report_to_json(report: &OwnedCompileReport) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
+    use crate::core_ir::Typ;
     use super::*;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -2019,5 +2051,97 @@ mod tests {
         assert!(second.cache_hit);
         assert_eq!(first.success, second.success);
         fs::remove_file(source_path).unwrap();
+    }
+
+    #[test]
+    fn resolve_jit_entry_exact_match() {
+        let module = UnifiedModule::new(vec![
+            Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![],
+                type_params: vec![],
+            },
+        ]);
+        assert_eq!(resolve_jit_entry(&module, "main"), "main");
+    }
+
+    #[test]
+    fn resolve_jit_entry_namespaced() {
+        let module = UnifiedModule::new(vec![
+            Decl::Function {
+                name: "package.main".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![],
+                type_params: vec![],
+            },
+        ]);
+        assert_eq!(resolve_jit_entry(&module, "main"), "package.main");
+    }
+
+    #[test]
+    fn resolve_jit_entry_suffix_dot() {
+        let module = UnifiedModule::new(vec![
+            Decl::Function {
+                name: "foo.bar.main".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![],
+                type_params: vec![],
+            },
+        ]);
+        assert_eq!(resolve_jit_entry(&module, "main"), "foo.bar.main");
+    }
+
+    #[test]
+    fn resolve_jit_entry_no_match_falls_through() {
+        let module = UnifiedModule::new(vec![
+            Decl::Function {
+                name: "other".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![],
+                type_params: vec![],
+            },
+        ]);
+        assert_eq!(resolve_jit_entry(&module, "main"), "main");
+    }
+
+    #[test]
+    fn resolve_jit_entry_prefers_exact_over_namespaced() {
+        let module = UnifiedModule::new(vec![
+            Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![],
+                type_params: vec![],
+            },
+            Decl::Function {
+                name: "package.main".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![],
+                type_params: vec![],
+            },
+        ]);
+        assert_eq!(resolve_jit_entry(&module, "main"), "main");
+    }
+
+    #[test]
+    fn resolve_jit_entry_non_dot_suffix_not_matched() {
+        // "also_main" ends with "main" but char before is '_', not '.'
+        let module = UnifiedModule::new(vec![
+            Decl::Function {
+                name: "also_main".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![],
+                type_params: vec![],
+            },
+        ]);
+        assert_eq!(resolve_jit_entry(&module, "main"), "main");
     }
 }

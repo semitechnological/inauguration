@@ -10,7 +10,7 @@
 //!   - direct function calls
 //!   - struct init/field access (scalar fields only)
 
-use crate::core_ir::{Decl, Expr, Stmt, Typ, UnifiedModule};
+use crate::core_ir::{Decl, Expr, MatchArm, Stmt, Typ, UnifiedModule};
 use crate::native_emit::x86_64::{self, CodeEmitter, RAX, RBP, RBX, RCX, RDI, RDX, REG_SP, RSI};
 use std::collections::HashMap;
 
@@ -51,6 +51,10 @@ struct LowerCtx<'a> {
     globals: HashMap<String, u64>,
     /// String literal content → fixed absolute address
     string_addrs: HashMap<String, u64>,
+    /// Error handling: offset for error flag byte (Throw/Try)
+    error_flag_offset: u32,
+    /// Error handling: offset for error value (Throw/Try)
+    error_value_offset: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -91,6 +95,8 @@ impl<'a> LowerCtx<'a> {
             fn_name: fn_name.to_string(),
             globals,
             string_addrs,
+            error_flag_offset: 0,
+            error_value_offset: 0,
         };
         // Allocate stack slots for parameters
         // On x86_64 (System V), first 6 integer args go in RDI, RSI, RDX, RCX, R8, R9
@@ -255,12 +261,12 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
         let code_end = emitter.len();
         let mut str_offset = 0u64;
         for s in &all_strings {
-            let abs_addr = KERNEL_BASE + code_end as u64 + str_offset;
+            let rel_addr = code_end as u64 + str_offset;
             for &(site, ref content) in &str_refs {
                 if content == s {
                     let site_u = site as usize;
                     if site_u + 8 <= emitter.bytes.len() {
-                        emitter.bytes[site_u..site_u + 8].copy_from_slice(&abs_addr.to_le_bytes());
+                        emitter.bytes[site_u..site_u + 8].copy_from_slice(&rel_addr.to_le_bytes());
                     }
                 }
             }
@@ -596,6 +602,10 @@ fn lower_function(
     // Pre-allocate locals for let bindings
     alloc_declared_locals(&mut ctx, &func.body)?;
 
+    ctx.error_flag_offset = ctx.frame_size;
+    ctx.error_value_offset = ctx.frame_size + 8;
+    ctx.frame_size += 24;
+
     if is_interrupt {
         // Interrupt prologue: save all GPRs, then standard frame.
         // The CPU already pushed SS/RSP/RFLAGS/CS/RIP (+error code for some).
@@ -685,6 +695,14 @@ fn alloc_declared_locals(ctx: &mut LowerCtx<'_>, body: &[Stmt]) -> Result<(), St
             Stmt::Match { arms, .. } => {
                 for arm in arms {
                     alloc_declared_locals(ctx, &arm.body)?;
+                }
+            }
+            Stmt::Throw(_) => {}
+            Stmt::Try { body, catches, .. } => {
+                alloc_declared_locals(ctx, body)?;
+                for catch in catches {
+                    ctx.alloc_local(&catch.pattern, &Typ::Int)?;
+                    alloc_declared_locals(ctx, &catch.body)?;
                 }
             }
             _ => {}
@@ -782,6 +800,125 @@ fn lower_stmt(
             else_body,
         } => lower_if(emitter, ctx, cond, then_body, else_body, pending_calls),
         Stmt::Loop { cond, body, .. } => lower_loop(emitter, ctx, cond, body, pending_calls),
+        Stmt::Match {
+            scrutinee, arms, ..
+        } => lower_match(emitter, ctx, scrutinee, arms, pending_calls),
+        Stmt::Throw(expr) => {
+            lower_expr_into(emitter, ctx, expr, RAX, pending_calls)?;
+            emitter.emit_insns(&x86_64::str64(RAX, ctx.error_value_offset as u16));
+            // Set error flag byte to 1
+            let flag_disp = -(ctx.error_flag_offset as i32 + 8);
+            if flag_disp >= i8::MIN as i32 && flag_disp <= i8::MAX as i32 {
+                emitter.emit_bytes(&[0xC6, 0x45, flag_disp as u8, 0x01]);
+            } else {
+                let mut code = vec![0xC6, 0x85];
+                code.extend_from_slice(&flag_disp.to_le_bytes());
+                code.push(0x01);
+                emitter.emit_insns(&code);
+            }
+            Ok(())
+        }
+        Stmt::Try { body, catches, .. } => {
+            let saved_flag_offset = ctx.error_value_offset + 8;
+            let flag_disp = -(ctx.error_flag_offset as i32 + 8);
+            let saved_disp = -(saved_flag_offset as i32 + 8);
+
+            // Save current error flag: al = byte [rbp+flag_disp]; byte [rbp+saved_disp] = al
+            if flag_disp >= i8::MIN as i32 && flag_disp <= i8::MAX as i32 {
+                emitter.emit_bytes(&[0x8A, 0x45, flag_disp as u8]);
+            } else {
+                let mut code = vec![0x8A, 0x85];
+                code.extend_from_slice(&flag_disp.to_le_bytes());
+                emitter.emit_insns(&code);
+            }
+            if saved_disp >= i8::MIN as i32 && saved_disp <= i8::MAX as i32 {
+                emitter.emit_bytes(&[0x88, 0x45, saved_disp as u8]);
+            } else {
+                let mut code = vec![0x88, 0x85];
+                code.extend_from_slice(&saved_disp.to_le_bytes());
+                emitter.emit_insns(&code);
+            }
+
+            // Clear error flag
+            if flag_disp >= i8::MIN as i32 && flag_disp <= i8::MAX as i32 {
+                emitter.emit_bytes(&[0xC6, 0x45, flag_disp as u8, 0x00]);
+            } else {
+                let mut code = vec![0xC6, 0x85];
+                code.extend_from_slice(&flag_disp.to_le_bytes());
+                code.push(0x00);
+                emitter.emit_insns(&code);
+            }
+
+            // Lower try body
+            for stmt in body {
+                lower_stmt(emitter, ctx, stmt, pending_calls)?;
+            }
+
+            // Check error flag: cmp byte [rbp+flag_disp], 0; jne handler
+            if flag_disp >= i8::MIN as i32 && flag_disp <= i8::MAX as i32 {
+                emitter.emit_bytes(&[0x80, 0x7D, flag_disp as u8, 0x00]);
+            } else {
+                let mut code = vec![0x80, 0xBD];
+                code.extend_from_slice(&flag_disp.to_le_bytes());
+                code.push(0x00);
+                emitter.emit_insns(&code);
+            }
+            let handler_branch = emitter.len();
+            emitter.emit_bytes(&[0x0F, 0x85, 0, 0, 0, 0]); // jne rel32 placeholder
+            let end_branch = emitter.len();
+            emitter.emit_insns(&x86_64::jmp_rel32(0)); // jmp end placeholder
+
+            // Handler
+            let handler_offset = emitter.len();
+            // Clear error flag
+            if flag_disp >= i8::MIN as i32 && flag_disp <= i8::MAX as i32 {
+                emitter.emit_bytes(&[0xC6, 0x45, flag_disp as u8, 0x00]);
+            } else {
+                let mut code = vec![0xC6, 0x85];
+                code.extend_from_slice(&flag_disp.to_le_bytes());
+                code.push(0x00);
+                emitter.emit_insns(&code);
+            }
+
+            if let Some(catch_arm) = catches.first() {
+                // Load error value into RAX
+                emitter.emit_insns(&x86_64::ldr64(RAX, ctx.error_value_offset as u16));
+                // Store to catch pattern local
+                if let Some(StackSlot::Scalar(offset)) = ctx.locals.get(&catch_arm.pattern) {
+                    emitter.emit_insns(&x86_64::str64(RAX, *offset as u16));
+                }
+                for catch_stmt in &catch_arm.body {
+                    lower_stmt(emitter, ctx, catch_stmt, pending_calls)?;
+                }
+            }
+
+            let end_offset = emitter.len();
+
+            // Patch handler branch (jne rel32)
+            let handler_delta = handler_offset as i32 - handler_branch as i32 - 6;
+            emitter.patch_u32(handler_branch + 2, handler_delta as u32);
+            // Patch end branch (jmp rel32)
+            let end_delta = end_offset as i32 - end_branch as i32 - 5;
+            emitter.patch_u32(end_branch + 1, end_delta as u32);
+
+            // Restore saved error flag: al = byte [rbp+saved_disp]; byte [rbp+flag_disp] = al
+            if saved_disp >= i8::MIN as i32 && saved_disp <= i8::MAX as i32 {
+                emitter.emit_bytes(&[0x8A, 0x45, saved_disp as u8]);
+            } else {
+                let mut code = vec![0x8A, 0x85];
+                code.extend_from_slice(&saved_disp.to_le_bytes());
+                emitter.emit_insns(&code);
+            }
+            if flag_disp >= i8::MIN as i32 && flag_disp <= i8::MAX as i32 {
+                emitter.emit_bytes(&[0x88, 0x45, flag_disp as u8]);
+            } else {
+                let mut code = vec![0x88, 0x85];
+                code.extend_from_slice(&flag_disp.to_le_bytes());
+                emitter.emit_insns(&code);
+            }
+
+            Ok(())
+        }
         _ => Err(format!(
             "x86_64-lower: unsupported statement in `{}`",
             ctx.fn_name
@@ -875,6 +1012,127 @@ fn lower_loop(
     }
 
     Ok(())
+}
+
+fn lower_match(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    scrutinee: &Expr,
+    arms: &[MatchArm],
+    pending_calls: &mut Vec<PendingCall>,
+) -> Result<(), String> {
+    lower_expr_into(emitter, ctx, scrutinee, RAX, pending_calls)?;
+
+    let mut end_branches = Vec::new();
+    let mut default_body: Option<&[Stmt]> = None;
+
+    for arm in arms {
+        if is_default_match_pattern(&arm.pattern) {
+            default_body = Some(arm.body.as_slice());
+            continue;
+        }
+
+        if let Some(value) = parse_int_match_pattern(&arm.pattern) {
+            // cmp rax, value
+            emitter.emit_insns(&x86_64::load_i64(RCX, value));
+            emitter.emit_insns(&x86_64::cmp_rr(RAX, RCX));
+            let next_branch = emitter.len();
+            // jne rel32
+            emitter.emit_bytes(&[0x0F, 0x85, 0, 0, 0, 0]);
+
+            for stmt in &arm.body {
+                lower_stmt(emitter, ctx, stmt, pending_calls)?;
+            }
+
+            let end_branch = emitter.len();
+            emitter.emit_insns(&x86_64::jmp_rel32(0));
+
+            // Patch next_branch (jne rel32)
+            let next_offset = emitter.len() as i32 - next_branch as i32 - 6;
+            emitter.patch_u32(next_branch + 2, next_offset as u32);
+            end_branches.push(end_branch);
+        } else {
+            // ponytail: non-int pattern (enum variant, range, etc.) — extract vars, bind to 0
+            let vars = extract_pattern_vars(&arm.pattern);
+            for var in &vars {
+                if !ctx.locals.contains_key(var) {
+                    ctx.alloc_local(var, &Typ::Int)?;
+                }
+            }
+            for stmt in &arm.body {
+                lower_stmt(emitter, ctx, stmt, pending_calls)?;
+            }
+            let end_branch = emitter.len();
+            emitter.emit_insns(&x86_64::jmp_rel32(0));
+            end_branches.push(end_branch);
+        }
+    }
+
+    if let Some(body) = default_body {
+        for stmt in body {
+            lower_stmt(emitter, ctx, stmt, pending_calls)?;
+        }
+    }
+
+    // Patch all end branches to jump here
+    let end_offset = emitter.len();
+    for branch in &end_branches {
+        let delta = end_offset as i32 - *branch as i32 - 5;
+        emitter.patch_u32(*branch + 1, delta as u32);
+    }
+
+    Ok(())
+}
+
+fn is_default_match_pattern(pattern: &str) -> bool {
+    matches!(
+        pattern.trim().trim_end_matches(':'),
+        "_" | "else" | "default" | "case else" | "case default"
+    )
+}
+
+fn parse_int_match_pattern(pattern: &str) -> Option<i64> {
+    let trimmed = pattern.trim().trim_end_matches(':').trim();
+    let trimmed = trimmed.strip_prefix("case ").unwrap_or(trimmed).trim();
+    trimmed.parse::<i64>().ok()
+}
+
+fn maybe_push_var(word: &str, vars: &mut Vec<String>) {
+    if word.len() == 1 && word.chars().next().map_or(false, |c| c.is_uppercase()) {
+        return;
+    }
+    if matches!(word, "true" | "false" | "mut" | "ref" | "self" | "Self"
+        | "let" | "fn" | "if" | "else" | "match" | "while" | "for" | "return"
+        | "use" | "mod" | "pub" | "struct" | "enum" | "trait" | "impl" | "where"
+        | "as" | "in" | "move" | "static" | "const" | "type" | "unsafe"
+        | "extern" | "crate" | "super" | "dyn") {
+        return;
+    }
+    let w = word.to_string();
+    if !vars.contains(&w) {
+        vars.push(w);
+    }
+}
+
+/// Extract variable names from a match pattern string.
+fn extract_pattern_vars(pattern: &str) -> Vec<String> {
+    let mut vars = Vec::new();
+    let s = pattern.trim().trim_end_matches(':');
+    let mut current = String::new();
+    for c in s.chars() {
+        if c.is_alphanumeric() || c == '_' {
+            current.push(c);
+        } else {
+            if !current.is_empty() {
+                maybe_push_var(&current, &mut vars);
+                current.clear();
+            }
+        }
+    }
+    if !current.is_empty() {
+        maybe_push_var(&current, &mut vars);
+    }
+    vars
 }
 
 fn lower_expr_into(
@@ -1822,5 +2080,80 @@ fn main() -> void {}
         }
         assert!(found_backward_jmp, "no backward jump found");
         assert!(found_exit_jmp, "no exit conditional jump found");
+    }
+
+    #[test]
+    fn lower_match_int_arm() {
+        let src = r#"
+fn classify(x: Int) -> Int {
+  match x {
+    1 { return 10 }
+    2 { return 20 }
+    _ { return 99 }
+  }
+  return 0
+}
+
+fn main() -> void {}
+"#;
+        let module = crate::in_lang_parse::parse_in_source(src).expect("parse");
+        let result = lower_module(&module, "classify").expect("lower");
+        assert!(!result.code.is_empty());
+        // Should contain CMP (0x48 0x81 0xF8 or 0x48 0x39) and JNE (0x0F 0x85) and ret (0xC3)
+        assert!(result.code.contains(&0xC3));
+    }
+
+    #[test]
+    fn lower_match_default_only() {
+        let src = r#"
+fn default_match(x: Int) -> Int {
+  match x {
+    _ { return 42 }
+  }
+  return 0
+}
+
+fn main() -> void {}
+"#;
+        let module = crate::in_lang_parse::parse_in_source(src).expect("parse");
+        let result = lower_module(&module, "default_match").expect("lower");
+        assert!(!result.code.is_empty());
+    }
+
+    #[test]
+    fn lower_throw_generates_code() {
+        let src = r#"
+fn thrower() -> Int {
+  throw 42
+  return 0
+}
+
+fn main() -> void {}
+"#;
+        let module = crate::in_lang_parse::parse_in_source(src).expect("parse");
+        let result = lower_module(&module, "thrower").expect("lower");
+        assert!(!result.code.is_empty());
+        // Should contain byte store (0xC6) for error flag
+        assert!(result.code.contains(&0xC6));
+    }
+
+    #[test]
+    fn lower_try_catch_generates_code() {
+        let src = r#"
+fn catcher() -> Int {
+  try {
+    let x = 1
+  } catch e {
+    return e
+  }
+  return 0
+}
+
+fn main() -> void {}
+"#;
+        let module = crate::in_lang_parse::parse_in_source(src).expect("parse");
+        let result = lower_module(&module, "catcher").expect("lower");
+        assert!(!result.code.is_empty());
+        assert!(result.code.contains(&0xC3));
     }
 }
