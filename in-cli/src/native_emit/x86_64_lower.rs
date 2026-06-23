@@ -1911,6 +1911,19 @@ fn lower_expr_into(
                     // movzx rax, al -> 48 0F B6 C0
                     emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]);
                 }
+                "~" => {
+                    // not rax  -> 48 F7 D0
+                    emitter.emit_bytes(&[0x48, 0xF7, 0xD0]);
+                }
+                "*" => {
+                    // *expr: dereference — load from address in rax
+                    // mov rax, [rax]  -> 48 8B 00
+                    emitter.emit_bytes(&[0x48, 0x8B, 0x00]);
+                }
+                "&" => {
+                    // &expr: address of — rax already holds the address (stack slot or global)
+                    // No-op at machine level: the identifier lower already produces the address
+                }
                 _ => {
                     return Err(format!(
                         "x86_64-lower: unsupported unary op `{op}` in `{}`",
