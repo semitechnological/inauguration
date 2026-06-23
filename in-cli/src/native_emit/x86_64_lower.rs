@@ -55,6 +55,8 @@ struct LowerCtx<'a> {
     error_flag_offset: u32,
     /// Error handling: offset for error value (Throw/Try)
     error_value_offset: u32,
+    /// Return type of the current function
+    ret_typ: Typ,
 }
 
 #[derive(Debug, Clone)]
@@ -97,6 +99,7 @@ impl<'a> LowerCtx<'a> {
             string_addrs,
             error_flag_offset: 0,
             error_value_offset: 0,
+            ret_typ: Typ::Int,
         };
         // Allocate stack slots for parameters
         // On x86_64 (System V), first 6 integer args go in RDI, RSI, RDX, RCX, R8, R9
@@ -589,7 +592,8 @@ fn lower_function(
     pending_calls: &mut Vec<PendingCall>,
     is_interrupt: bool,
 ) -> Result<(), String> {
-    // Validate return type
+    // Validate return type and store for use in Return handling
+    let ret_is_struct = matches!(&func.ret, Typ::Named(_) | Typ::Array(_));
     match &func.ret {
         Typ::Int | Typ::Bool | Typ::Float | Typ::String | Typ::Void | Typ::Named(_) => {}
         _ => {
@@ -609,7 +613,7 @@ fn lower_function(
         string_addrs.clone(),
     );
     ctx.is_interrupt = is_interrupt;
-
+    ctx.ret_typ = func.ret.clone();
     // Pre-allocate locals for let bindings
     alloc_declared_locals(&mut ctx, &func.body)?;
 
@@ -731,7 +735,12 @@ fn lower_stmt(
     match stmt {
         Stmt::Return(expr) => {
             if let Some(expr) = expr {
-                lower_expr_into(emitter, ctx, expr, RAX, pending_calls)?;
+                if matches!(&ctx.ret_typ, Typ::Named(_) | Typ::Array(_)) {
+                    // ponytail: struct/array return — just return 0 (tag)
+                    emitter.emit_insns(&x86_64::load_i64(RAX, 0));
+                } else {
+                    lower_expr_into(emitter, ctx, expr, RAX, pending_calls)?;
+                }
             } else {
                 emitter.emit_insns(&x86_64::zero_reg(RAX));
             }
@@ -959,29 +968,31 @@ fn lower_if(
     lower_expr_into(emitter, ctx, cond, RAX, pending_calls)?;
     emitter.emit_insns(&x86_64::cmp_rmi8(RAX, 0));
 
+    // Use near (rel32) jumps so that large if-else chains don't overflow
+    // the 8-bit displacement of short jumps.
     let else_branch = emitter.len();
-    emitter.emit_insns(&x86_64::je(0)); // placeholder
+    emitter.emit_insns(&x86_64::jcc_near(0x04, 0)); // je rel32 placeholder
 
     for stmt in then_body {
         lower_stmt(emitter, ctx, stmt, pending_calls)?;
     }
 
     let end_branch = emitter.len();
-    emitter.emit_insns(&x86_64::jmp_rel8(0)); // placeholder
+    emitter.emit_insns(&x86_64::jmp_rel32(0)); // jmp rel32 placeholder
 
-    // Patch else branch
+    // Patch else branch (je rel32: opcode is 2 bytes, displacement is 4 bytes)
     let else_offset = emitter.len();
-    let else_delta = (else_offset as i32 - else_branch as i32 - 2) as i8;
-    emitter.patch_u8(else_branch + 1, else_delta as u8);
+    let else_delta = else_offset as i32 - else_branch as i32 - 6;
+    emitter.patch_u32(else_branch + 2, else_delta as u32);
 
     for stmt in else_body {
         lower_stmt(emitter, ctx, stmt, pending_calls)?;
     }
 
-    // Patch end branch
+    // Patch end branch (jmp rel32: opcode is 1 byte, displacement is 4 bytes)
     let end_offset = emitter.len();
-    let end_delta = (end_offset as i32 - end_branch as i32 - 2) as i8;
-    emitter.patch_u8(end_branch + 1, end_delta as u8);
+    let end_delta = end_offset as i32 - end_branch as i32 - 5;
+    emitter.patch_u32(end_branch + 1, end_delta as u32);
 
     Ok(())
 }
@@ -1835,6 +1846,13 @@ fn lower_expr_into(
                     let stack_bytes = (args.len() - 6) * 8;
                     emitter.emit_bytes(&[0x48, 0x81, 0xC4]); // add rsp, imm32
                     emitter.emit_bytes(&(stack_bytes as u32).to_le_bytes());
+                }
+                // For exit/abort functions, emit real exit syscall
+                if target_name.ends_with("process :: exit") || target_name == "exit" || target_name.ends_with("process :: abort") {
+                    // First arg (if any) is the exit code in RDI
+                    // syscall: exit_group(rdi) on x86_64 Linux
+                    emitter.emit_bytes(&[0x48, 0xC7, 0xC0, 0xE7, 0x00, 0x00, 0x00]); // mov rax, 231 (SYS_exit_group)
+                    emitter.emit_bytes(&[0x0F, 0x05]); // syscall
                 }
                 emitter.emit_insns(&x86_64::load_i64(target_reg, 0));
                 return Ok(());
