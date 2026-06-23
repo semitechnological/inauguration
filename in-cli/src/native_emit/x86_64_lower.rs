@@ -773,8 +773,23 @@ fn lower_stmt(
                 ctx.alloc_local(name, &resolved)?;
             }
             lower_expr_into(emitter, ctx, expr, RAX, pending_calls)?;
-            if let Some(StackSlot::Scalar(offset)) = ctx.locals.get(name) {
-                emitter.emit_insns(&x86_64::str64(RAX, *offset as u16));
+            match ctx.locals.get(name) {
+                Some(StackSlot::Scalar(offset)) => {
+                    emitter.emit_insns(&x86_64::str64(RAX, *offset as u16));
+                }
+                Some(StackSlot::Struct { fields }) => {
+                    // ponytail: struct let — store RAX to first field, zero the rest
+                    let mut sorted: Vec<&u32> = fields.values().collect();
+                    sorted.sort();
+                    if let Some(first) = sorted.first() {
+                        emitter.emit_insns(&x86_64::str64(RAX, **first as u16));
+                    }
+                    for off in sorted.iter().skip(1) {
+                        emitter.emit_insns(&x86_64::load_i64(RAX, 0));
+                        emitter.emit_insns(&x86_64::str64(RAX, **off as u16));
+                    }
+                }
+                _ => {}
             }
             Ok(())
         }
