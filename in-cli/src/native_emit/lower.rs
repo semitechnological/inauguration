@@ -705,6 +705,13 @@ fn lower_function(
     for (reg, offset) in &ctx.param_stores {
         emitter.emit_u32(aarch64::str64(*reg, aarch64::REG_SP, *offset));
     }
+    // Load stack-based params (>8) from caller's stack area
+    let stack_base = ctx.stack_reserve() + 16;
+    for (arg_idx, local_off) in &ctx.stack_params {
+        let incoming_off = stack_base + 8 * arg_idx;
+        emitter.emit_u32(aarch64::ldr64(15, aarch64::REG_SP, incoming_off));
+        emitter.emit_u32(aarch64::str64(15, aarch64::REG_SP, *local_off));
+    }
     for stmt in &func.body {
         lower_stmt(
             emitter,
@@ -800,6 +807,8 @@ struct LowerCtx<'a> {
     /// Parameter name → stack offset (params fully spilled, no register residency)
     params: HashMap<String, u32>,
     param_stores: Vec<(u8, u32)>,
+    /// Stack-based params: (incoming_stack_offset, local_stack_offset)
+    stack_params: Vec<(u32, u32)>,
     locals: HashMap<String, LocalSlot>,
     structs: &'a HashMap<String, Vec<(String, Typ)>>,
     strings: &'a HashMap<String, i64>,
@@ -828,12 +837,13 @@ fn alloc_nested_struct_slots(
     for (field, field_ty) in fields {
         match field_ty {
             Typ::Int | Typ::Bool | Typ::String | Typ::Float => {
-                if *abi_idx >= 8 {
-                    return Err(format!("native-lower: too many parameters in `{fn_name}`"));
-                }
                 let offset = ctx.alloc_slot();
+                if *abi_idx < 8 {
+                    ctx.param_stores.push((*abi_idx as u8, offset));
+                } else {
+                    ctx.stack_params.push(((*abi_idx - 8) as u32, offset));
+                }
                 slots.insert(field.clone(), offset);
-                ctx.param_stores.push((*abi_idx as u8, offset));
                 *abi_idx += 1;
             }
             Typ::Named(inner_name) => {
@@ -903,6 +913,7 @@ impl<'a> LowerCtx<'a> {
         let mut ctx = Self {
             params: HashMap::new(),
             param_stores: Vec::new(),
+            stack_params: Vec::new(),
             locals: HashMap::new(),
             structs,
             strings,
@@ -918,11 +929,13 @@ impl<'a> LowerCtx<'a> {
         for (name, typ) in params {
             match typ {
                 Typ::Int | Typ::Bool | Typ::String => {
-                    if abi_idx >= 8 {
-                        return Err(format!("native-lower: too many parameters in `{fn_name}`"));
-                    }
                     let offset = ctx.alloc_slot();
-                    ctx.param_stores.push((abi_idx as u8, offset));
+                    if abi_idx < 8 {
+                        ctx.param_stores.push((abi_idx as u8, offset));
+                    } else {
+                        // Stack-based param: load from caller's stack later
+                        ctx.stack_params.push(((abi_idx - 8) as u32, offset));
+                    }
                     ctx.params.insert(name.clone(), offset);
                     abi_idx += 1;
                 }
@@ -952,13 +965,19 @@ impl<'a> LowerCtx<'a> {
                 }
                 Typ::Array(elem) => {
                     ensure_native_array_element(elem, fn_name, "parameter")?;
-                    if abi_idx + 1 >= 8 {
-                        return Err(format!("native-lower: too many parameters in `{fn_name}`"));
-                    }
                     let ptr_offset = ctx.alloc_slot();
                     let len_offset = ctx.alloc_slot();
-                    ctx.param_stores.push((abi_idx as u8, ptr_offset));
-                    ctx.param_stores.push(((abi_idx + 1) as u8, len_offset));
+                    if abi_idx + 1 < 8 {
+                        ctx.param_stores.push((abi_idx as u8, ptr_offset));
+                        ctx.param_stores.push(((abi_idx + 1) as u8, len_offset));
+                    } else if abi_idx >= 8 {
+                        ctx.stack_params.push(((abi_idx - 8) as u32, ptr_offset));
+                        ctx.stack_params.push(((abi_idx + 1 - 8) as u32, len_offset));
+                    } else {
+                        return Err(format!(
+                            "native-lower: array param straddles register/stack boundary in `{fn_name}`"
+                        ));
+                    }
                     ctx.locals.insert(
                         name.clone(),
                         LocalSlot::ArrayParam {
@@ -2187,6 +2206,10 @@ fn lower_unary(
             emitter.emit_u32(aarch64::sub_reg64(rd, aarch64::REG_XZR, rd));
             Ok(())
         }
+        "*" => {
+            emitter.emit_u32(aarch64::ldr64(rd, rd, 0));
+            Ok(())
+        }
         "!" => {
             emitter.emit_u32(aarch64::cmp_reg64(rd, aarch64::REG_XZR));
             emitter.emit_insns(&aarch64::load_i64(rd, 0));
@@ -2282,7 +2305,8 @@ fn lower_binary(
     let insn = match op {
         "+" => aarch64::add_reg64(rd, lhs_reg, rhs_reg),
         "-" => aarch64::sub_reg64(rd, lhs_reg, rhs_reg),
-        "*" => aarch64::mul64(rd, lhs_reg, rhs_reg),
+        "*" | "*=" => aarch64::mul64(rd, lhs_reg, rhs_reg),
+        "+=" => aarch64::add_reg64(rd, lhs_reg, rhs_reg),
         "/" => {
             return lower_checked_div_or_mod(emitter, ctx, rd, lhs_reg, rhs_reg, false);
         }
@@ -2302,6 +2326,11 @@ fn lower_binary(
             emitter.emit_u32(aarch64::cmp_reg64(lhs_reg, rhs_reg));
             return lower_comparison_result(emitter, rd, op);
         }
+        "&" | "&=" => aarch64::and_reg64(rd, lhs_reg, rhs_reg),
+        "|" | "|=" => aarch64::orr_reg64(rd, lhs_reg, rhs_reg),
+        "^" | "^=" => aarch64::eor_reg64(rd, lhs_reg, rhs_reg),
+        "<<" | "<<=" => aarch64::lsl_reg64(rd, lhs_reg, rhs_reg),
+        ">>" | ">>=" => aarch64::lsr_reg64(rd, lhs_reg, rhs_reg),
         _ => {
             return Err(format!(
                 "native-lower: unsupported binary operator `{op}` in `{fn_name}`"
@@ -2719,7 +2748,7 @@ fn reject_unsupported_function(
     func: &FunctionInfo,
     structs: &HashMap<String, Vec<(String, Typ)>>,
 ) -> Result<(), String> {
-    if native_param_abi_slots(&func.params, structs, &func.name)? > 8 {
+    if native_param_abi_slots(&func.params, structs, &func.name)? > 128 {
         return Err(format!(
             "native-lower: too many parameters in `{}`",
             func.name
