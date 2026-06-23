@@ -361,4 +361,25 @@ mod tests {
         let _result = compiler.compile("fn main() {}").unwrap();
         compiler.print_timings(); // smoke test
     }
+
+    #[test]
+    fn compile_timings_stage_time() {
+        let timings = CompileTimings {
+            stages: vec![
+                StageTime {
+                    stage: Stage::Frontend,
+                    elapsed_us: 1500,
+                },
+                StageTime {
+                    stage: Stage::Lower,
+                    elapsed_us: 2500,
+                },
+            ],
+            total_us: 4000,
+        };
+
+        assert_eq!(timings.stage_time(Stage::Frontend), 1500);
+        assert_eq!(timings.stage_time(Stage::Lower), 2500);
+        assert_eq!(timings.stage_time(Stage::Codegen), 0);
+    }
 }
