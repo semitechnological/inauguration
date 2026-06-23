@@ -2406,7 +2406,9 @@ fn wrap_eval_statement(parser_id: parser_registry::ParserId, code: &str) -> Opti
         parser_registry::ParserId::Lua => Some(format!("function main()\n  {code}\nend")),
         parser_registry::ParserId::Perl => Some(format!("sub main {{\n    {code};\n}}\n")),
         parser_registry::ParserId::Php => {
-            Some(format!("<?php\nfunction main() {{\n    {code};\n}}\n"))
+            // ponytail: strip trailing semicolon to avoid double ;; from wrapper
+            let trimmed = code.trim_end().trim_end_matches(';');
+            Some(format!("<?php\nfunction main() {{\n    {trimmed};\n}}\n"))
         }
         parser_registry::ParserId::Elixir => Some(format!(
             "defmodule App do\n  def main do\n    {code}\n  end\nend\n"
