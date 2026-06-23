@@ -668,6 +668,20 @@ fn lower_function(
         emitter.emit_insns(&x86_64::sub_rsp_i32(frame_size as i32));
     }
 
+    // Push register parameters onto the stack to preserve them across the
+    // rep stosq zero-fill, which clobbers rdi, rcx, rax, and overwrites the
+    // entire frame including param slots.
+    let param_regs = [RDI, RSI, RDX, RCX, 8, 9];
+    let mut pushed: u32 = 0;
+    for (i, (name, _)) in func.params.iter().enumerate() {
+        if i < 6 {
+            if ctx.locals.get(name).is_some() {
+                emitter.emit_insns(&x86_64::push_r(param_regs[i]));
+                pushed += 1;
+            }
+        }
+    }
+
     // Zero-fill the allocated stack frame (Linux doesn't zero stack, macOS does)
     if frame_size >= 8 {
         let qwords = frame_size / 8;
@@ -677,17 +691,24 @@ fn lower_function(
         let mut mov_rcx = vec![0x48, 0xC7, 0xC1];
         mov_rcx.extend_from_slice(&qwords.to_le_bytes());
         emitter.emit_insns(&mov_rcx);
-        // lea rdi, [rsp]  (48 8D 3C 24)
-        emitter.emit_bytes(&[0x48, 0x8D, 0x3C, 0x24]);
+        // lea rdi, [rsp + pushed*8]  — skip pushed param registers
+        if pushed > 0 {
+            // lea rdi, [rsp + disp8]  (48 8D 7C 24 XX)
+            emitter.emit_bytes(&[0x48, 0x8D, 0x7C, 0x24]);
+            emitter.emit_bytes(&[(pushed as u8) * 8]);
+        } else {
+            // lea rdi, [rsp]  (48 8D 3C 24)
+            emitter.emit_bytes(&[0x48, 0x8D, 0x3C, 0x24]);
+        }
         // rep stosq  (F3 48 AB)
         emitter.emit_bytes(&[0xF3, 0x48, 0xAB]);
     }
 
-    // Store register parameters to stack slots
-    let param_regs = [RDI, RSI, RDX, RCX, 8, 9];
-    for (i, (name, _)) in func.params.iter().enumerate() {
+    // Pop register parameters and store to their stack slots.
+    for (i, (name, _)) in func.params.iter().enumerate().rev() {
         if i < 6 {
             if let Some(StackSlot::Scalar(offset)) = ctx.locals.get(name) {
+                emitter.emit_insns(&x86_64::pop_r(param_regs[i]));
                 emitter.emit_insns(&x86_64::str64(param_regs[i], *offset as u16));
             }
         }
