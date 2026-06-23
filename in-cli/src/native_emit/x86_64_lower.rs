@@ -672,7 +672,6 @@ fn lower_function(
 
     // If no explicit return, emit default epilogue
     if !ctx.emitted_return {
-    if !ctx.emitted_return {
         if matches!(&func.ret, Typ::Named(_) | Typ::Array(_)) {
             // ponytail: struct/array return — return 0 (tag)
             emitter.emit_insns(&x86_64::load_i64(RAX, 0));
