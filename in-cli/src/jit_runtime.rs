@@ -1,24 +1,25 @@
 //! In-memory JIT execution runtime.
 //!
 //! Skips binary formats (Mach-O, ELF) entirely. Takes lowered AArch64/x86-64
-//! machine code from `native_emit`, maps it into RWX pages via mmap, and
-//! executes directly through function pointers.
+//! machine code from `native_emit`, maps it into executable memory via
+//! mmap (Unix) or VirtualAlloc (Windows), and executes directly through
+//! function pointers.
 //!
 //! Architecture:
-//!   Core IR → Machine IR → raw bytes → mmap(MAP_JIT) → call via fn ptr
+//!   Core IR → Machine IR → raw bytes → mmap/VirtualAlloc → call via fn ptr
 //!
 //! Systems-level: the JIT runtime IS the executable model. No files, no
 //! linker, no dynamic loader. Functions resolve through an in-memory
 //! dispatch table. Designed to eventually compile itself.
 
+use std::collections::HashMap;
+use std::ffi::c_void;
+use std::sync::RwLock;
+
 #[cfg(target_os = "macos")]
 unsafe extern "C" {
     fn sys_icache_invalidate(start: *const std::ffi::c_void, len: usize);
 }
-
-use std::collections::HashMap;
-use std::ffi::c_void;
-use std::sync::RwLock;
 
 /// A compiled function resident in JIT memory.
 struct JitFunction {
@@ -30,9 +31,9 @@ struct JitFunction {
     _frame_size: u32,
 }
 
-// SAFETY: JitFunction pointers reference mmap'd pages that remain valid for
-// the lifetime of the JitRuntime. They are never aliased mutably after
-// compilation.
+// SAFETY: JitFunction pointers reference mmap'd/VirtualAlloc pages that remain
+// valid for the lifetime of the JitRuntime. They are never aliased mutably
+// after compilation.
 unsafe impl Send for JitFunction {}
 unsafe impl Sync for JitFunction {}
 
@@ -58,38 +59,101 @@ struct CodePage {
 unsafe impl Send for CodePage {}
 unsafe impl Sync for CodePage {}
 
+#[cfg(not(windows))]
+fn alloc_executable_pages(size: usize) -> Option<*mut u8> {
+    let flags = if cfg!(target_os = "macos") {
+        libc::MAP_PRIVATE | libc::MAP_ANON | libc::MAP_JIT
+    } else {
+        libc::MAP_PRIVATE | libc::MAP_ANON
+    };
+    let ptr = unsafe {
+        libc::mmap(
+            std::ptr::null_mut(),
+            size,
+            libc::PROT_READ | libc::PROT_WRITE,
+            flags,
+            -1,
+            0,
+        )
+    };
+    if ptr == libc::MAP_FAILED {
+        return None;
+    }
+    Some(ptr as *mut u8)
+}
+
+#[cfg(not(windows))]
+fn make_executable(ptr: *mut u8, size: usize) {
+    unsafe {
+        libc::mprotect(
+            ptr as *mut std::ffi::c_void,
+            size,
+            libc::PROT_READ | libc::PROT_EXEC,
+        );
+    }
+}
+
+#[cfg(not(windows))]
+fn free_pages(ptr: *mut u8, size: usize) {
+    unsafe {
+        libc::munmap(ptr as *mut c_void, size);
+    }
+}
+
+#[cfg(windows)]
+fn alloc_executable_pages(size: usize) -> Option<*mut u8> {
+    const MEM_RESERVE: u32 = 0x2000;
+    const MEM_COMMIT: u32 = 0x1000;
+    const PAGE_EXECUTE_READWRITE: u32 = 0x40;
+    unsafe extern "system" {
+        fn VirtualAlloc(
+            lp_address: *mut std::ffi::c_void,
+            dw_size: usize,
+            fl_allocation_type: u32,
+            fl_protect: u32,
+        ) -> *mut std::ffi::c_void;
+    }
+    let ptr = unsafe {
+        VirtualAlloc(
+            std::ptr::null_mut(),
+            size,
+            MEM_RESERVE | MEM_COMMIT,
+            PAGE_EXECUTE_READWRITE,
+        )
+    };
+    if ptr.is_null() {
+        return None;
+    }
+    Some(ptr as *mut u8)
+}
+
+#[cfg(windows)]
+fn make_executable(_ptr: *mut u8, _size: usize) {
+    // Already RWX from VirtualAlloc. ARM64 Windows needs FlushInstructionCache
+    // but that requires win32_ffi we can add when tested.
+}
+
+#[cfg(windows)]
+fn free_pages(ptr: *mut u8, _size: usize) {
+    const MEM_RELEASE: u32 = 0x8000;
+    unsafe extern "system" {
+        fn VirtualFree(
+            lp_address: *mut std::ffi::c_void,
+            dw_size: usize,
+            dw_free_type: u32,
+        ) -> i32;
+    }
+    unsafe {
+        VirtualFree(ptr as *mut std::ffi::c_void, 0, MEM_RELEASE);
+    }
+}
+
 impl CodePage {
     fn new(min_size: usize) -> Option<Self> {
-        let page_size = 0x4000; // 16KB on Apple ARM64
+        let page_size = 0x4000; // 16KB typical for ARM64, works for x86_64 too
         let size = min_size.max(page_size).next_multiple_of(page_size);
 
-        #[cfg(target_os = "macos")]
-        let ptr = unsafe {
-            libc::mmap(
-                std::ptr::null_mut(),
-                size,
-                libc::PROT_READ | libc::PROT_WRITE,
-                libc::MAP_PRIVATE | libc::MAP_ANON | libc::MAP_JIT,
-                -1,
-                0,
-            )
-        };
-
-        #[cfg(not(target_os = "macos"))]
-        let ptr = unsafe {
-            libc::mmap(
-                std::ptr::null_mut(),
-                size,
-                libc::PROT_READ | libc::PROT_WRITE,
-                libc::MAP_PRIVATE | libc::MAP_ANON,
-                -1,
-                0,
-            )
-        };
-
-        if ptr == libc::MAP_FAILED {
-            return None;
-        }
+        let ptr = alloc_executable_pages(size)?;
 
         Some(Self {
             ptr: ptr as *mut u8,
@@ -103,20 +167,24 @@ impl CodePage {
         #[cfg(target_os = "macos")]
         unsafe {
             sys_icache_invalidate(self.ptr as *const std::ffi::c_void, self.used);
-            libc::mprotect(
-                self.ptr as *mut std::ffi::c_void,
-                self.size,
-                libc::PROT_READ | libc::PROT_EXEC,
-            );
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(any(target_os = "linux", target_os = "android"))]
         unsafe {
-            libc::mprotect(
-                self.ptr as *mut std::ffi::c_void,
-                self.size,
-                libc::PROT_READ | libc::PROT_EXEC,
-            );
+            // Linux ARM64: explicit cache flush via system call
+            // x86_64: hardware manages icache coherency, no flush needed
+            #[cfg(target_arch = "aarch64")]
+            libc::sysconf(libc::_SC_PAGE_SIZE); // touch libc
+            // Use C library's __clear_cache if available on ARM64
+            #[cfg(target_arch = "aarch64")]
+            extern "C" {
+                fn __clear_cache(start: *const u8, end: *const u8);
+            }
+            #[cfg(target_arch = "aarch64")]
+            unsafe {
+                __clear_cache(self.ptr, self.ptr.add(self.used));
+            }
         }
+        make_executable(self.ptr, self.size);
     }
 
     fn allocate(&mut self, len: usize) -> Option<*mut u8> {
@@ -131,9 +199,7 @@ impl CodePage {
 
 impl Drop for CodePage {
     fn drop(&mut self) {
-        unsafe {
-            libc::munmap(self.ptr as *mut c_void, self.size);
-        }
+        free_pages(self.ptr, self.size);
     }
 }
 

@@ -514,7 +514,7 @@ fn compile_jit(
     use crate::native_emit::NativeLinkage;
 
     if !host_supports_native_subset() {
-        return Err("jit-host-unsupported: JIT currently requires macOS AArch64".to_string());
+        return Err("jit-host-unsupported: JIT currently requires macOS AArch64 or Linux x86_64".to_string());
     }
 
     let entry = request
@@ -523,8 +523,21 @@ fn compile_jit(
         .filter(|name| !name.is_empty())
         .unwrap_or("answer");
 
-    let lowered = lower_module(module, entry, NativeLinkage::Executable)
-        .map_err(|e| format!("jit-lowering-failed: {e}"))?;
+    // Select lowering based on host architecture
+    let lowered = if cfg!(target_arch = "x86_64") {
+        let result = crate::native_emit::x86_64_lower::lower_module(module, entry)
+            .map_err(|e| format!("jit-lowering-failed: {e}"))?;
+        // Wrap into LoweredModule-compatible shape
+        crate::native_emit::lower::LoweredModule {
+            code: result.code,
+            entry_offset: Some(result.entry_offset),
+            exports: vec![],
+            function_offsets: result.exports.into_iter().collect(),
+        }
+    } else {
+        lower_module(module, entry, NativeLinkage::Executable)
+            .map_err(|e| format!("jit-lowering-failed: {e}"))?
+    };
 
     std::fs::write("/tmp/jit_debug.log", format!("code={} entry={:?}\n", lowered.code.len(), lowered.entry_offset)).ok();
 
