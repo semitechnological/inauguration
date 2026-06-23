@@ -18,32 +18,8 @@ pub enum PipelineError {
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FrontendArtifactSummary {
-    pub structs: usize,
-    pub functions: usize,
-    pub diagnostics: usize,
-    pub success: bool,
-    pub core_ir_decls: usize,
-    pub parser_id: Option<String>,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedFrontendArtifact {
-    pub summary: FrontendArtifactSummary,
     pub textual_sil: Option<String>,
-}
-
-fn parser_id_from_value(value: &Value) -> Option<String> {
-    ["parser", "frontend"]
-        .into_iter()
-        .find_map(|key| value.get(key).and_then(Value::as_str).map(str::to_string))
-        .or_else(|| {
-            value
-                .pointer("/pipeline/parser")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-        })
 }
 
 fn textual_sil_from_value(value: &Value) -> Option<String> {
@@ -59,84 +35,13 @@ fn textual_sil_from_value(value: &Value) -> Option<String> {
     }
 }
 
-fn icore_or_core_ir_decls(value: &Value) -> Option<&Vec<Value>> {
-    value
-        .pointer("/core_ir/decls")
-        .and_then(Value::as_array)
-        .or_else(|| {
-            if value.get("icoreVersion").is_some() {
-                value.get("decls").and_then(Value::as_array)
-            } else {
-                None
-            }
-        })
-}
-
-fn symbol_counts_swift_style(value: &Value) -> Option<(usize, usize)> {
-    let symbols = value.get("symbols")?;
-    if !symbols.is_object() {
-        return None;
-    }
-    let structs = value
-        .pointer("/symbols/structs")
-        .and_then(Value::as_array)
-        .map_or(0, Vec::len);
-    let functions = value
-        .pointer("/symbols/functions")
-        .and_then(Value::as_array)
-        .map_or(0, Vec::len);
-    Some((structs, functions))
-}
-
-fn decl_kind_counts(decls: &[Value]) -> (usize, usize, usize) {
-    let mut structs = 0usize;
-    let mut functions = 0usize;
-    for d in decls {
-        match d.get("kind").and_then(Value::as_str) {
-            Some("struct") => structs += 1,
-            Some("function") => functions += 1,
-            _ => {}
-        }
-    }
-    let total = decls.len();
-    (structs, functions, total)
-}
-
 #[allow(dead_code)]
 pub fn parse_frontend_artifact(json: &str) -> Result<ParsedFrontendArtifact, PipelineError> {
     let value: Value = serde_json::from_str(json)?;
 
-    let diagnostics = value
-        .get("diagnostics")
-        .and_then(Value::as_array)
-        .map_or(0, Vec::len);
-    let success = value
-        .get("success")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let parser_id = parser_id_from_value(&value);
     let textual_sil = textual_sil_from_value(&value);
 
-    let (structs, functions, core_ir_decls) =
-        if let Some((s, f)) = symbol_counts_swift_style(&value) {
-            let core_ir_decls = icore_or_core_ir_decls(&value).map_or(0, Vec::len);
-            (s, f, core_ir_decls)
-        } else if let Some(decls) = icore_or_core_ir_decls(&value) {
-            let (s, f, total) = decl_kind_counts(decls);
-            (s, f, total)
-        } else {
-            (0, 0, 0)
-        };
-
     Ok(ParsedFrontendArtifact {
-        summary: FrontendArtifactSummary {
-            structs,
-            functions,
-            diagnostics,
-            success,
-            core_ir_decls,
-            parser_id,
-        },
         textual_sil,
     })
 }
@@ -148,11 +53,6 @@ pub struct StageTimings {
     pub sil_analysis_us: u64,
     pub wave_us: u64,
     pub pipeline_us: u64,
-}
-
-#[allow(dead_code)]
-pub fn summarize_frontend_artifact(json: &str) -> Result<FrontendArtifactSummary, PipelineError> {
-    Ok(parse_frontend_artifact(json)?.summary)
 }
 
 #[allow(dead_code)]
@@ -244,31 +144,6 @@ mod tests {
     }
 
     #[test]
-    fn summarizes_frontend_artifact_json() {
-        let summary = summarize_frontend_artifact(
-            r#"{
-  "format_version": 1,
-  "module": "App",
-  "source_path": "App.swift",
-  "symbols": {
-    "structs": [{ "name": "User" }],
-    "functions": [{ "name": "main" }, { "name": "helper" }]
-  },
-  "typed_decls": [],
-  "diagnostics": [],
-  "success": true
-}"#,
-        )
-        .expect("artifact parses");
-        assert_eq!(summary.structs, 1);
-        assert_eq!(summary.functions, 2);
-        assert_eq!(summary.diagnostics, 0);
-        assert!(summary.success);
-        assert_eq!(summary.core_ir_decls, 0);
-        assert_eq!(summary.parser_id, None);
-    }
-
-    #[test]
     fn parses_icore_bundle_with_embedded_sil() {
         let parsed = parse_frontend_artifact(
             r#"{
@@ -283,10 +158,6 @@ mod tests {
 }"#,
         )
         .expect("icore artifact parses");
-        assert_eq!(parsed.summary.core_ir_decls, 2);
-        assert_eq!(parsed.summary.structs, 1);
-        assert_eq!(parsed.summary.functions, 1);
-        assert_eq!(parsed.summary.parser_id.as_deref(), Some("icore"));
         let sil = parsed.textual_sil.expect("embedded sil");
         assert!(sil.contains("sil @main"));
         assert!(sil.contains("bb0:"));
@@ -301,7 +172,6 @@ mod tests {
 }"#,
         )
         .expect("bundle parses");
-        assert_eq!(parsed.summary.parser_id.as_deref(), Some("bundle"));
         assert!(parsed.textual_sil.unwrap().contains("function_ref @foo"));
     }
 
