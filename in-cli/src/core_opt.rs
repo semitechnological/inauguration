@@ -411,7 +411,7 @@ fn simplify_expr(e: Expr) -> Expr {
             let is_one = |e: &Expr| matches!(e, Expr::IntLit(1));
             let is_neg1 = |e: &Expr| matches!(e, Expr::IntLit(-1));
             match op.as_str() {
-                "add" | "bor" | "xor" => {
+                "add" | "+" | "bor" | "|" | "xor" | "^" => {
                     if is_zero(&lhs) {
                         return *rhs;
                     }
@@ -419,7 +419,7 @@ fn simplify_expr(e: Expr) -> Expr {
                         return *lhs;
                     }
                 }
-                "land" => {
+                "land" | "&&" => {
                     if is_zero(&lhs) || is_zero(&rhs) {
                         return Expr::IntLit(0);
                     }
@@ -430,7 +430,7 @@ fn simplify_expr(e: Expr) -> Expr {
                         return *lhs;
                     }
                 }
-                "lor" => {
+                "lor" | "||" => {
                     if is_one(&lhs) || is_one(&rhs) {
                         return Expr::IntLit(1);
                     }
@@ -441,12 +441,12 @@ fn simplify_expr(e: Expr) -> Expr {
                         return *lhs;
                     }
                 }
-                "sub" => {
+                "sub" | "-" => {
                     if is_zero(&rhs) {
                         return *lhs;
                     }
                 }
-                "mul" => {
+                "mul" | "*" => {
                     if is_zero(&lhs) || is_zero(&rhs) {
                         return Expr::IntLit(0);
                     }
@@ -457,12 +457,12 @@ fn simplify_expr(e: Expr) -> Expr {
                         return *lhs;
                     }
                 }
-                "div" => {
+                "div" | "/" => {
                     if is_one(&rhs) {
                         return *lhs;
                     }
                 }
-                "band" => {
+                "band" | "&" => {
                     if is_zero(&lhs) || is_zero(&rhs) {
                         return Expr::IntLit(0);
                     }
@@ -473,7 +473,7 @@ fn simplify_expr(e: Expr) -> Expr {
                         return *lhs;
                     }
                 }
-                "shl" | "shr" if is_zero(&rhs) => {
+                "shl" | "<<" | "shr" | ">>" if is_zero(&rhs) => {
                     return *lhs;
                 }
                 _ => {}
@@ -607,24 +607,24 @@ fn fold_expr(e: Expr) -> Expr {
             if let (Expr::IntLit(a), Expr::IntLit(b)) = (lhs.as_ref(), rhs.as_ref()) {
                 // ponytail: skip div-by-zero (would change runtime behavior)
                 let result = match op.as_str() {
-                    "add" => a.checked_add(*b),
-                    "sub" => a.checked_sub(*b),
-                    "mul" => a.checked_mul(*b),
-                    "div" if *b != 0 => a.checked_div(*b),
-                    "mod" if *b != 0 => a.checked_rem(*b),
-                    "band" => Some(a & b),
-                    "bor" => Some(a | b),
-                    "xor" => Some(a ^ b),
-                    "shl" if *b >= 0 && *b < 64 => a.checked_shl(*b as u32),
-                    "shr" if *b >= 0 && *b < 64 => a.checked_shr(*b as u32),
-                    "eq" => Some(if a == b { 1 } else { 0 }),
-                    "neq" => Some(if a != b { 1 } else { 0 }),
-                    "lt" => Some(if a < b { 1 } else { 0 }),
-                    "gt" => Some(if a > b { 1 } else { 0 }),
-                    "le" => Some(if a <= b { 1 } else { 0 }),
-                    "ge" => Some(if a >= b { 1 } else { 0 }),
-                    "land" => Some(if *a != 0 && *b != 0 { 1 } else { 0 }),
-                    "lor" => Some(if *a != 0 || *b != 0 { 1 } else { 0 }),
+                    "add" | "+" => a.checked_add(*b),
+                    "sub" | "-" => a.checked_sub(*b),
+                    "mul" | "*" => a.checked_mul(*b),
+                    "div" | "/" if *b != 0 => a.checked_div(*b),
+                    "mod" | "%" if *b != 0 => a.checked_rem(*b),
+                    "band" | "&" => Some(a & b),
+                    "bor" | "|" => Some(a | b),
+                    "xor" | "^" => Some(a ^ b),
+                    "shl" | "<<" if *b >= 0 && *b < 64 => a.checked_shl(*b as u32),
+                    "shr" | ">>" if *b >= 0 && *b < 64 => a.checked_shr(*b as u32),
+                    "eq" | "==" => Some(if a == b { 1 } else { 0 }),
+                    "neq" | "!=" => Some(if a != b { 1 } else { 0 }),
+                    "lt" | "<" => Some(if a < b { 1 } else { 0 }),
+                    "gt" | ">" => Some(if a > b { 1 } else { 0 }),
+                    "le" | "<=" => Some(if a <= b { 1 } else { 0 }),
+                    "ge" | ">=" => Some(if a >= b { 1 } else { 0 }),
+                    "land" | "&&" => Some(if *a != 0 && *b != 0 { 1 } else { 0 }),
+                    "lor" | "||" => Some(if *a != 0 || *b != 0 { 1 } else { 0 }),
                     _ => None,
                 };
                 if let Some(v) = result {

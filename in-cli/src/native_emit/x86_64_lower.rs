@@ -1669,6 +1669,37 @@ fn lower_expr_into(
                     }
                     return Ok(());
                 }
+                "outw" => {
+                    // outw(port: Int, val: Int)  → mov dx, port; mov ax, val; out dx, ax
+                    if args.len() >= 2 {
+                        lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
+                        lower_expr_into(emitter, ctx, &args[1], RAX, pending_calls)?;
+                        emitter.emit_bytes(&[0x66, 0x89, 0xFA]); // mov dx, di
+                        emitter.emit_bytes(&[0x66, 0xEF]); // out dx, ax (16-bit)
+                    } else {
+                        return Err(format!(
+                            "x86_64-lower: `outw` requires 2 arguments in `{}`",
+                            ctx.fn_name
+                        ));
+                    }
+                    return Ok(());
+                }
+                "inw" => {
+                    // inw(port: Int) -> Int  → mov dx, port; in ax, dx
+                    if args.len() >= 1 {
+                        lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
+                        emitter.emit_bytes(&[0x66, 0x89, 0xFA]); // mov dx, di
+                        emitter.emit_bytes(&[0x66, 0xED]); // in ax, dx (16-bit)
+                        // movzx rax, ax  → 48 0F B7 C0
+                        emitter.emit_bytes(&[0x48, 0x0F, 0xB7, 0xC0]);
+                    } else {
+                        return Err(format!(
+                            "x86_64-lower: `inw` requires 1 argument in `{}`",
+                            ctx.fn_name
+                        ));
+                    }
+                    return Ok(());
+                }
                 "load8" => {
                     // load8(addr: Int) -> Int  → movzx rax, byte [addr]
                     if args.len() >= 1 {
