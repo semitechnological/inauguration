@@ -268,7 +268,7 @@ impl JitRuntime {
         std::fs::write("/tmp/jit_invoke.log", format!("invoke {name} entry={entry_addr:#x} base={code_base:#x} offset=0x{:x}\n", entry_addr.wrapping_sub(code_base))).ok();
 
         // Verify entry is plausible
-        if entry_addr < 0x10000 || entry_addr == code_base {
+        if entry_addr < 0x10000 {
             std::fs::write("/tmp/jit_bad_addr.log", format!("BAD ADDR: {name} at {entry_addr:#x} base={code_base:#x}\n")).ok();
             return Some(0);
         }
