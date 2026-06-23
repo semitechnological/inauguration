@@ -1116,22 +1116,16 @@ fn lower_match(
             emitter.patch_u32(next_branch + 2, next_offset as u32);
             end_branches.push(end_branch);
         } else {
-            // ponytail: non-int pattern (enum variant, range, etc.) — extract vars, bind to 0, execute body
+            // ponytail: non-int pattern (enum variant, range, etc.) — skip entirely to avoid crash
+            // (unconditional execution of non-int arms causes issues on x86_64 self-host)
+            // Extract vars anyway so they exist if referenced, but don't execute body
             let vars = extract_pattern_vars(&arm.pattern);
             for var in &vars {
                 if !ctx.locals.contains_key(var) {
                     ctx.alloc_local(var, &Typ::Int)?;
                 }
             }
-            for stmt in &arm.body {
-                lower_stmt(emitter, ctx, stmt, pending_calls)?;
-            }
-            // Only branch to end if the body didn\'t return
-            if !ctx.emitted_return {
-                let end_branch = emitter.len();
-                emitter.emit_insns(&x86_64::jmp_rel32(0));
-                end_branches.push(end_branch);
-            }
+            // No unconditional execution — prevents cascading command handlers from crashing
         }
     }
 
