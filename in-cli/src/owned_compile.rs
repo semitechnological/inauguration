@@ -379,16 +379,18 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         report.call_edge_count = verify_report.call_edges.len();
     }
 
-    let semantic_module = if request.target == CompileTarget::Native || request.target == CompileTarget::Jit {
-        effective_entry
-            .as_deref()
-            .map(|entry| native_entry_module(&module, entry))
-            .unwrap_or_else(|| module.clone())
-    } else {
-        module.clone()
-    };
+    let semantic_module =
+        if request.target == CompileTarget::Native || request.target == CompileTarget::Jit {
+            effective_entry
+                .as_deref()
+                .map(|entry| native_entry_module(&module, entry))
+                .unwrap_or_else(|| module.clone())
+        } else {
+            module.clone()
+        };
 
-    if request.target != CompileTarget::Native && request.target != CompileTarget::Jit
+    if request.target != CompileTarget::Native
+        && request.target != CompileTarget::Jit
         && !is_rust_source
         && let Err(err) = crate::family_typecheck::typecheck_resolved(&resolved, &semantic_module)
     {
@@ -480,25 +482,23 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
                 report.error = Some(err);
             }
         },
-        CompileTarget::Jit => {
-            match compile_jit(&module, &request.module_id, request) {
-                Ok(jit_result) => {
-                    report.backend_level = jit_result.backend_level;
-                    report.runtime_level = jit_result.runtime_level;
-                    report.reason_code = Some(jit_result.reason_code.to_string());
-                    report.reason = Some(jit_result.reason.to_string());
-                    report.success = true;
-                    report.eval_exit_code = jit_result.eval_exit_code;
-                }
-                Err(err) => {
-                    report.backend_level = "owned-native-subset";
-                    report.runtime_level = "inrt-jit";
-                    report.reason_code = Some("jit-failed".to_string());
-                    report.reason = Some(err.clone());
-                    report.error = Some(err);
-                }
+        CompileTarget::Jit => match compile_jit(&module, &request.module_id, request) {
+            Ok(jit_result) => {
+                report.backend_level = jit_result.backend_level;
+                report.runtime_level = jit_result.runtime_level;
+                report.reason_code = Some(jit_result.reason_code.to_string());
+                report.reason = Some(jit_result.reason.to_string());
+                report.success = true;
+                report.eval_exit_code = jit_result.eval_exit_code;
             }
-        }
+            Err(err) => {
+                report.backend_level = "owned-native-subset";
+                report.runtime_level = "inrt-jit";
+                report.reason_code = Some("jit-failed".to_string());
+                report.reason = Some(err.clone());
+                report.error = Some(err);
+            }
+        },
     }
 
     finalize_report(&mut report, started, &cwd, &frontend_hash)
@@ -525,10 +525,9 @@ fn resolve_jit_entry(module: &UnifiedModule, entry: &str) -> String {
         return found.to_string();
     }
     // Suffix match: entry is a suffix of a function name (beyond a dot)
-    if let Some(found) = func_names
-        .iter()
-        .find(|n| n.ends_with(entry) && n.as_bytes().get(n.len() - entry.len().wrapping_sub(1)) == Some(&b'.'))
-    {
+    if let Some(found) = func_names.iter().find(|n| {
+        n.ends_with(entry) && n.as_bytes().get(n.len() - entry.len().wrapping_sub(1)) == Some(&b'.')
+    }) {
         return found.to_string();
     }
     entry.to_string()
@@ -540,11 +539,14 @@ fn compile_jit(
     _module_id: &str,
     request: &OwnedCompileRequest,
 ) -> Result<NativeCompileResult, String> {
-    use crate::native_emit::lower::{host_supports_native_subset, lower_module};
     use crate::native_emit::NativeLinkage;
+    use crate::native_emit::lower::{host_supports_native_subset, lower_module};
 
     if !host_supports_native_subset() {
-        return Err("jit-host-unsupported: JIT currently requires macOS AArch64 or Linux x86_64".to_string());
+        return Err(
+            "jit-host-unsupported: JIT currently requires macOS AArch64 or Linux x86_64"
+                .to_string(),
+        );
     }
 
     let entry = request
@@ -570,7 +572,15 @@ fn compile_jit(
             .map_err(|e| format!("jit-lowering-failed: {e}"))?
     };
 
-    std::fs::write("/tmp/jit_debug.log", format!("code={} entry={:?}\n", lowered.code.len(), lowered.entry_offset)).ok();
+    std::fs::write(
+        "/tmp/jit_debug.log",
+        format!(
+            "code={} entry={:?}\n",
+            lowered.code.len(),
+            lowered.entry_offset
+        ),
+    )
+    .ok();
 
     // Build function offset table for all compiled functions
     let function_offsets: Vec<(String, u32, u32)> = lowered
@@ -589,21 +599,35 @@ fn compile_jit(
         .collect();
 
     // Debug: log function count and code size before invoke
-    std::fs::write("/tmp/jit_pre_invoke.log", format!("fns={} code={} entry={}\n", function_offsets.len(), lowered.code.len(), &resolved_entry)).ok();
+    std::fs::write(
+        "/tmp/jit_pre_invoke.log",
+        format!(
+            "fns={} code={} entry={}\n",
+            function_offsets.len(),
+            lowered.code.len(),
+            &resolved_entry
+        ),
+    )
+    .ok();
 
     let mut rt = crate::jit_runtime::JitRuntime::new();
     rt.load(&lowered.code, &function_offsets)
         .map_err(|e| format!("jit-load-failed: {e}"))?;
 
-    std::fs::write("/tmp/jit_loaded.log", format!("loaded {} functions\n", rt.function_count())).ok();
+    std::fs::write(
+        "/tmp/jit_loaded.log",
+        format!("loaded {} functions\n", rt.function_count()),
+    )
+    .ok();
 
     // Invoke entry function via JIT
     std::fs::write("/tmp/jit_before_invoke.log", "before invoke\n").ok();
-    let exit_code = unsafe {
-        rt.invoke(&resolved_entry, &[])
-            .unwrap_or(1)
-    } as u8;
-    std::fs::write("/tmp/jit_after_invoke.log", format!("exit_code={}\n", exit_code)).ok();
+    let exit_code = unsafe { rt.invoke(&resolved_entry, &[]).unwrap_or(1) } as u8;
+    std::fs::write(
+        "/tmp/jit_after_invoke.log",
+        format!("exit_code={}\n", exit_code),
+    )
+    .ok();
 
     Ok(NativeCompileResult {
         artifact_path: String::new(),
@@ -1241,8 +1265,8 @@ pub fn report_to_json(report: &OwnedCompileReport) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use crate::core_ir::Typ;
     use super::*;
+    use crate::core_ir::Typ;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -2062,57 +2086,49 @@ mod tests {
 
     #[test]
     fn resolve_jit_entry_exact_match() {
-        let module = UnifiedModule::new(vec![
-            Decl::Function {
-                name: "main".into(),
-                params: vec![],
-                ret: Typ::Int,
-                body: vec![],
-                type_params: vec![],
-            },
-        ]);
+        let module = UnifiedModule::new(vec![Decl::Function {
+            name: "main".into(),
+            params: vec![],
+            ret: Typ::Int,
+            body: vec![],
+            type_params: vec![],
+        }]);
         assert_eq!(resolve_jit_entry(&module, "main"), "main");
     }
 
     #[test]
     fn resolve_jit_entry_namespaced() {
-        let module = UnifiedModule::new(vec![
-            Decl::Function {
-                name: "package.main".into(),
-                params: vec![],
-                ret: Typ::Int,
-                body: vec![],
-                type_params: vec![],
-            },
-        ]);
+        let module = UnifiedModule::new(vec![Decl::Function {
+            name: "package.main".into(),
+            params: vec![],
+            ret: Typ::Int,
+            body: vec![],
+            type_params: vec![],
+        }]);
         assert_eq!(resolve_jit_entry(&module, "main"), "package.main");
     }
 
     #[test]
     fn resolve_jit_entry_suffix_dot() {
-        let module = UnifiedModule::new(vec![
-            Decl::Function {
-                name: "foo.bar.main".into(),
-                params: vec![],
-                ret: Typ::Int,
-                body: vec![],
-                type_params: vec![],
-            },
-        ]);
+        let module = UnifiedModule::new(vec![Decl::Function {
+            name: "foo.bar.main".into(),
+            params: vec![],
+            ret: Typ::Int,
+            body: vec![],
+            type_params: vec![],
+        }]);
         assert_eq!(resolve_jit_entry(&module, "main"), "foo.bar.main");
     }
 
     #[test]
     fn resolve_jit_entry_no_match_falls_through() {
-        let module = UnifiedModule::new(vec![
-            Decl::Function {
-                name: "other".into(),
-                params: vec![],
-                ret: Typ::Int,
-                body: vec![],
-                type_params: vec![],
-            },
-        ]);
+        let module = UnifiedModule::new(vec![Decl::Function {
+            name: "other".into(),
+            params: vec![],
+            ret: Typ::Int,
+            body: vec![],
+            type_params: vec![],
+        }]);
         assert_eq!(resolve_jit_entry(&module, "main"), "main");
     }
 
@@ -2140,15 +2156,13 @@ mod tests {
     #[test]
     fn resolve_jit_entry_non_dot_suffix_not_matched() {
         // "also_main" ends with "main" but char before is '_', not '.'
-        let module = UnifiedModule::new(vec![
-            Decl::Function {
-                name: "also_main".into(),
-                params: vec![],
-                ret: Typ::Int,
-                body: vec![],
-                type_params: vec![],
-            },
-        ]);
+        let module = UnifiedModule::new(vec![Decl::Function {
+            name: "also_main".into(),
+            params: vec![],
+            ret: Typ::Int,
+            body: vec![],
+            type_params: vec![],
+        }]);
         assert_eq!(resolve_jit_entry(&module, "main"), "main");
     }
 }

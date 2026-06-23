@@ -165,7 +165,10 @@ pub fn lower_module(
         entry.to_string()
     } else {
         // Try any function ending with .<entry> (namespaced)
-        functions.keys().find(|k| k.ends_with(&format!(".{entry}"))).cloned()
+        functions
+            .keys()
+            .find(|k| k.ends_with(&format!(".{entry}")))
+            .cloned()
             .or_else(|| functions.keys().find(|k| k.as_str() == entry).cloned())
             .ok_or_else(|| format!("native-lower: missing entry function `{entry}`"))?
     };
@@ -451,7 +454,12 @@ fn rename_calls(stmts: &mut [Stmt], name_map: &HashMap<String, String>) {
         match stmt {
             Stmt::Expr(expr) | Stmt::Return(Some(expr)) => rename_call_expr(expr, name_map),
             Stmt::Let(_, _, expr) | Stmt::Assign(_, expr) => rename_call_expr(expr, name_map),
-            Stmt::If { then_body, else_body, cond, .. } => {
+            Stmt::If {
+                then_body,
+                else_body,
+                cond,
+                ..
+            } => {
                 rename_call_expr(cond, name_map);
                 rename_calls(then_body, name_map);
                 rename_calls(else_body, name_map);
@@ -535,25 +543,48 @@ fn collect_structs(module: &UnifiedModule) -> HashMap<String, Vec<(String, Typ)>
         .collect();
     // Add synthetic struct defs for common Rust std types and tuples
     if !structs.contains_key("Vec") {
-        structs.insert("Vec".into(), vec![("ptr".into(), Typ::Int), ("len".into(), Typ::Int), ("cap".into(), Typ::Int)]);
+        structs.insert(
+            "Vec".into(),
+            vec![
+                ("ptr".into(), Typ::Int),
+                ("len".into(), Typ::Int),
+                ("cap".into(), Typ::Int),
+            ],
+        );
     }
     if !structs.contains_key("String") {
-        structs.insert("String".into(), vec![("vec".into(), Typ::Named("Vec".into()))]);
+        structs.insert(
+            "String".into(),
+            vec![("vec".into(), Typ::Named("Vec".into()))],
+        );
     }
     if !structs.contains_key("Box") {
         structs.insert("Box".into(), vec![("ptr".into(), Typ::Int)]);
     }
     if !structs.contains_key("Option") {
-        structs.insert("Option".into(), vec![("tag".into(), Typ::Int), ("value".into(), Typ::Int)]);
+        structs.insert(
+            "Option".into(),
+            vec![("tag".into(), Typ::Int), ("value".into(), Typ::Int)],
+        );
     }
     if !structs.contains_key("Result") {
-        structs.insert("Result".into(), vec![("tag".into(), Typ::Int), ("ok".into(), Typ::Int), ("err".into(), Typ::Int)]);
+        structs.insert(
+            "Result".into(),
+            vec![
+                ("tag".into(), Typ::Int),
+                ("ok".into(), Typ::Int),
+                ("err".into(), Typ::Int),
+            ],
+        );
     }
     if !structs.contains_key("HashMap") {
         structs.insert("HashMap".into(), vec![("ptr".into(), Typ::Int)]);
     }
     if !structs.contains_key("PathBuf") {
-        structs.insert("PathBuf".into(), vec![("vec".into(), Typ::Named("Vec".into()))]);
+        structs.insert(
+            "PathBuf".into(),
+            vec![("vec".into(), Typ::Named("Vec".into()))],
+        );
     }
     structs
 }
@@ -855,7 +886,12 @@ fn alloc_nested_struct_slots(
                     format!("native-lower: unknown nested struct `{inner_name}` in `{struct_name}`")
                 })?;
                 let inner_slots = alloc_nested_struct_slots(
-                    ctx, inner_name, inner_fields, structs, abi_idx, fn_name,
+                    ctx,
+                    inner_name,
+                    inner_fields,
+                    structs,
+                    abi_idx,
+                    fn_name,
                 )?;
                 // Flatten: nested struct fields go into parent's slot map with <field>.<subfield> keys
                 for (sub_field, sub_offset) in inner_slots {
@@ -890,7 +926,14 @@ fn alloc_local_struct_fields(
                     format!("native-lower: unknown nested struct `{inner_name}` in `{struct_name}`")
                 })?;
                 let mut inner_slots = HashMap::new();
-                alloc_local_struct_fields(&mut inner_slots, inner_name, inner_fields, all_structs, ctx, fn_name)?;
+                alloc_local_struct_fields(
+                    &mut inner_slots,
+                    inner_name,
+                    inner_fields,
+                    all_structs,
+                    ctx,
+                    fn_name,
+                )?;
                 for (sub_field, sub_offset) in inner_slots {
                     slots.insert(format!("{field}.{sub_field}"), sub_offset);
                 }
@@ -976,7 +1019,8 @@ impl<'a> LowerCtx<'a> {
                         ctx.param_stores.push(((abi_idx + 1) as u8, len_offset));
                     } else if abi_idx >= 8 {
                         ctx.stack_params.push(((abi_idx - 8) as u32, ptr_offset));
-                        ctx.stack_params.push(((abi_idx + 1 - 8) as u32, len_offset));
+                        ctx.stack_params
+                            .push(((abi_idx + 1 - 8) as u32, len_offset));
                     } else {
                         return Err(format!(
                             "native-lower: array param straddles register/stack boundary in `{fn_name}`"
@@ -1025,7 +1069,14 @@ impl<'a> LowerCtx<'a> {
             Some(Typ::Named(struct_name)) => {
                 if let Some(fields) = self.structs.get(struct_name) {
                     let mut slots = HashMap::new();
-                    alloc_local_struct_fields(&mut slots, struct_name, fields, self.structs, self, fn_name)?;
+                    alloc_local_struct_fields(
+                        &mut slots,
+                        struct_name,
+                        fields,
+                        self.structs,
+                        self,
+                        fn_name,
+                    )?;
                     self.locals.insert(
                         name.to_string(),
                         LocalSlot::Struct {
@@ -1312,7 +1363,8 @@ fn lower_store_local(
         ctx.locals.get(name).cloned().unwrap()
     } else {
         let offset = ctx.alloc_slot();
-        ctx.locals.insert(name.to_string(), LocalSlot::Scalar(offset));
+        ctx.locals
+            .insert(name.to_string(), LocalSlot::Scalar(offset));
         LocalSlot::Scalar(offset)
     };
     match slot {
@@ -1843,11 +1895,42 @@ fn maybe_push_var(word: &str, vars: &mut Vec<String>) {
     if word.len() == 1 && word.chars().next().map_or(false, |c| c.is_uppercase()) {
         return;
     }
-    if matches!(word, "true" | "false" | "mut" | "ref" | "self" | "Self"
-        | "let" | "fn" | "if" | "else" | "match" | "while" | "for" | "return"
-        | "use" | "mod" | "pub" | "struct" | "enum" | "trait" | "impl" | "where"
-        | "as" | "in" | "move" | "static" | "const" | "type" | "unsafe"
-        | "extern" | "crate" | "super" | "dyn") {
+    if matches!(
+        word,
+        "true"
+            | "false"
+            | "mut"
+            | "ref"
+            | "self"
+            | "Self"
+            | "let"
+            | "fn"
+            | "if"
+            | "else"
+            | "match"
+            | "while"
+            | "for"
+            | "return"
+            | "use"
+            | "mod"
+            | "pub"
+            | "struct"
+            | "enum"
+            | "trait"
+            | "impl"
+            | "where"
+            | "as"
+            | "in"
+            | "move"
+            | "static"
+            | "const"
+            | "type"
+            | "unsafe"
+            | "extern"
+            | "crate"
+            | "super"
+            | "dyn"
+    ) {
         return;
     }
     let w = word.to_string();
@@ -1888,7 +1971,15 @@ fn lower_match(
             emitter.emit_u32(aarch64::cmp_reg64(2, 1));
             let next_branch = emitter.emit_insn(aarch64::b_cond(1, 0));
             for stmt in &arm.body {
-                lower_stmt(emitter, ctx, stmt, functions, pending_calls, fn_name, ret_typ)?;
+                lower_stmt(
+                    emitter,
+                    ctx,
+                    stmt,
+                    functions,
+                    pending_calls,
+                    fn_name,
+                    ret_typ,
+                )?;
             }
             end_branches.push(emitter.emit_insn(aarch64::b(0)));
             let next_offset = emitter.len() as i32 - next_branch as i32;
@@ -1903,7 +1994,15 @@ fn lower_match(
                 }
             }
             for stmt in &arm.body {
-                lower_stmt(emitter, ctx, stmt, functions, pending_calls, fn_name, ret_typ)?;
+                lower_stmt(
+                    emitter,
+                    ctx,
+                    stmt,
+                    functions,
+                    pending_calls,
+                    fn_name,
+                    ret_typ,
+                )?;
             }
             end_branches.push(emitter.emit_insn(aarch64::b(0)));
         }
@@ -1990,7 +2089,8 @@ fn lower_expr_into(
             } else {
                 // ponytail: auto-create local for unknown identifier
                 let offset = ctx.alloc_slot();
-                ctx.locals.insert(name.to_string(), LocalSlot::Scalar(offset));
+                ctx.locals
+                    .insert(name.to_string(), LocalSlot::Scalar(offset));
                 emitter.emit_insns(&aarch64::load_i64(rd, 0));
             }
             Ok(())
@@ -2162,7 +2262,11 @@ fn lower_field(
 ) -> Result<(), String> {
     match base {
         Expr::Ident(local) => {
-            let Some(LocalSlot::Struct { typ: struct_typ, fields }) = ctx.locals.get(local) else {
+            let Some(LocalSlot::Struct {
+                typ: struct_typ,
+                fields,
+            }) = ctx.locals.get(local)
+            else {
                 emitter.emit_insns(&aarch64::load_i64(rd, 0));
                 return Ok(());
             };
@@ -2173,9 +2277,21 @@ fn lower_field(
             Ok(())
         }
         // Nested field: bar.baz where bar is Field { base: Ident("foo"), name: "bar" }
-        Expr::Field { base: inner_base, name: inner_name } => {
+        Expr::Field {
+            base: inner_base,
+            name: inner_name,
+        } => {
             let full_name = format!("{inner_name}.{name}");
-            lower_field(emitter, ctx, inner_base, &full_name, rd, functions, pending_calls, fn_name)
+            lower_field(
+                emitter,
+                ctx,
+                inner_base,
+                &full_name,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )
         }
         Expr::StructInit { fields, .. } => {
             let value = fields.iter().find_map(
@@ -2778,7 +2894,9 @@ fn native_param_abi_slots(
         depth: u32,
     ) -> Result<usize, String> {
         if depth > 10 {
-            return Err(format!("native-lower: recursive struct too deep in `{fn_name}`"));
+            return Err(format!(
+                "native-lower: recursive struct too deep in `{fn_name}`"
+            ));
         }
         match typ {
             Typ::Int | Typ::Bool | Typ::String | Typ::Float => Ok(1),
@@ -4666,7 +4784,9 @@ fn main() -> Int {
         );
         let lowered = lower_module(&m, "main", NativeLinkage::Executable).expect("stub created");
         // Stub generated because inrt call has wrong arity
-        assert!(lowered.function_offsets.len() == 1 || lowered.function_offsets.contains_key("main"));
+        assert!(
+            lowered.function_offsets.len() == 1 || lowered.function_offsets.contains_key("main")
+        );
     }
 
     #[test]
