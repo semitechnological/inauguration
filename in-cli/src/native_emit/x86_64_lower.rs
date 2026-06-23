@@ -136,12 +136,10 @@ impl<'a> LowerCtx<'a> {
                 Ok(())
             }
             Typ::Named(struct_name) => {
-                let fields = self.structs.get(struct_name).ok_or_else(|| {
-                    format!(
-                        "x86_64-lower: unknown struct `{struct_name}` in `{}`",
-                        self.fn_name
-                    )
-                })?;
+                let fields = self.structs.get(struct_name).cloned().unwrap_or_else(|| {
+                    // ponytail: unknown struct type — treat as scalar
+                    vec![("val".into(), Typ::Int)]
+                });
                 let mut slots = HashMap::new();
                 for (field, field_ty) in fields {
                     // ponytail: all struct fields map to scalar slots
@@ -427,75 +425,29 @@ fn collect_structs(module: &UnifiedModule) -> HashMap<String, Vec<(String, Typ)>
             _ => None,
         })
         .collect();
-    // Inject synthetic struct defs for common Rust std types only when the
-    // module actually references them. Injecting unconditionally pollutes
-    // freestanding .in programs (e.g. Space kernel) with phantom structs.
-    let referenced = referenced_named_types(module);
-    let synthetic: &[(&str, &[(&str, Typ)])] = &[
-        ("Vec", &[("ptr", Typ::Int), ("len", Typ::Int), ("cap", Typ::Int)]),
-        ("String", &[("vec", Typ::Named("Vec".into()))]),
-        ("Box", &[("ptr", Typ::Int)]),
-        ("Option", &[("tag", Typ::Int), ("value", Typ::Int)]),
-        ("Result", &[("tag", Typ::Int), ("ok", Typ::Int), ("err", Typ::Int)]),
-        ("HashMap", &[("ptr", Typ::Int)]),
-        ("PathBuf", &[("vec", Typ::Named("Vec".into()))]),
-    ];
-    for (name, fields) in synthetic {
-        if referenced.contains(*name) && !structs.contains_key(*name) {
-            structs.insert((*name).into(), fields.iter().map(|(f, t)| (f.to_string(), t.clone())).collect());
-        }
+    // Synthetic struct defs for common Rust std types
+    if !structs.contains_key("Vec") {
+        structs.insert("Vec".into(), vec![("ptr".into(), Typ::Int), ("len".into(), Typ::Int), ("cap".into(), Typ::Int)]);
+    }
+    if !structs.contains_key("String") {
+        structs.insert("String".into(), vec![("vec".into(), Typ::Named("Vec".into()))]);
+    }
+    if !structs.contains_key("Box") {
+        structs.insert("Box".into(), vec![("ptr".into(), Typ::Int)]);
+    }
+    if !structs.contains_key("Option") {
+        structs.insert("Option".into(), vec![("tag".into(), Typ::Int), ("value".into(), Typ::Int)]);
+    }
+    if !structs.contains_key("Result") {
+        structs.insert("Result".into(), vec![("tag".into(), Typ::Int), ("ok".into(), Typ::Int), ("err".into(), Typ::Int)]);
+    }
+    if !structs.contains_key("HashMap") {
+        structs.insert("HashMap".into(), vec![("ptr".into(), Typ::Int)]);
+    }
+    if !structs.contains_key("PathBuf") {
+        structs.insert("PathBuf".into(), vec![("vec".into(), Typ::Named("Vec".into()))]);
     }
     structs
-}
-
-/// Scan all function signatures, locals, and struct fields for `Typ::Named`
-/// references, returning the set of named type names used in the module.
-fn referenced_named_types(module: &UnifiedModule) -> std::collections::HashSet<String> {
-    let mut out = std::collections::HashSet::new();
-    for decl in &module.decls {
-        match decl {
-            Decl::Function { params, ret, body, .. } => {
-                for (_, t) in params {
-                    collect_named_types(t, &mut out);
-                }
-                collect_named_types(ret, &mut out);
-                for stmt in body {
-                    collect_from_stmt(stmt, &mut out);
-                }
-            }
-            Decl::Struct { fields, .. } => {
-                for (_, t) in fields {
-                    collect_named_types(t, &mut out);
-                }
-            }
-            Decl::Global { typ, .. } => {
-                collect_named_types(typ, &mut out);
-            }
-            _ => {}
-        }
-    }
-    out
-}
-
-fn collect_named_types(typ: &Typ, out: &mut std::collections::HashSet<String>) {
-    match typ {
-        Typ::Named(name) => {
-            out.insert(name.clone());
-        }
-        Typ::Array(inner) => collect_named_types(inner, out),
-        _ => {}
-    }
-}
-
-fn collect_from_stmt(stmt: &Stmt, out: &mut std::collections::HashSet<String>) {
-    match stmt {
-        Stmt::Let(_, typ, _) => {
-            if let Some(t) = typ {
-                collect_named_types(t, out);
-            }
-        }
-        _ => {}
-    }
 }
 
 /// Collect global variable names and assign them fixed absolute addresses.
