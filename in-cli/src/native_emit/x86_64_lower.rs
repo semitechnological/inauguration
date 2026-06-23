@@ -256,7 +256,7 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
                 if content == s {
                     let site_u = site as usize;
                     if site_u + 8 <= emitter.bytes.len() {
-                        emitter.bytes[site_u..site_u + 8].copy_from_slice(&rel_addr.to_le_bytes());
+                        emitter.bytes[site_u..site_u + 8].copy_from_slice(&abs_addr.to_le_bytes());
                     }
                 }
             }
