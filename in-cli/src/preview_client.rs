@@ -23,8 +23,6 @@ struct WirePatch {
 struct PatchEnvelope {
     protocol_version: u8,
     patch_id: String,
-    #[allow(dead_code)]
-    timestamp_ms: u64,
     patch: WirePatch,
     reason: String,
 }
