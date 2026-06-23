@@ -3070,7 +3070,7 @@ fn parse_in_module_without_validation(
 
 /// Replace all `Expr::Ident` references to constant globals with their init expressions.
 /// This avoids type-checking and lowering complexity for compile-time constants.
-fn inline_const_values(module: &mut UnifiedModule) {
+pub fn inline_const_values(module: &mut UnifiedModule) {
     // Collect const init values: name -> cloned init expression
     let consts: std::collections::HashMap<String, Expr> = module
         .decls
@@ -3336,7 +3336,11 @@ fn parse_in_file_inner(path: &Path, seen: &mut HashSet<PathBuf>) -> Result<Unifi
     let module = parse_in_module_without_validation(&source, Some(path))?;
     let identity = module.identity.clone();
     decls.extend(module.decls);
-    Ok(UnifiedModule::with_identity(decls, identity))
+    let mut merged = UnifiedModule::with_identity(decls, identity);
+    // Re-inline constants after merging imported modules so that constants
+    // from imported files are available to functions in the current file.
+    inline_const_values(&mut merged);
+    Ok(merged)
 }
 
 /// Read a `.in` file and parse to core IR.

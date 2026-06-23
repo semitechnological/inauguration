@@ -324,6 +324,15 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
                 for imp in imported {
                     module.decls.extend(imp.decls);
                 }
+                // Re-inline constants after merging imported modules.
+                // Constants from imported files (e.g. FB_COLOR_WHITE in fb.in)
+                // are not inlined into functions in the importing file (e.g.
+                // compositor.in) during per-file parsing, because the constant
+                // decls are only merged here. Without this re-inline pass, those
+                // Expr::Ident references are treated as uninitialized global
+                // variables by the native lowering, producing 0 instead of the
+                // constant value.
+                crate::in_lang_parse::inline_const_values(&mut module);
             }
             Err(e) => {
                 eprintln!("[import] warning: {e}");
