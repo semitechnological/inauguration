@@ -156,11 +156,20 @@ pub fn lower_module(
     let functions = collect_functions(module)?;
     let structs = collect_structs(module);
     let strings = collect_strings(module);
+    // Try exact match first, then namespaced variants
+    let resolved_entry = if functions.contains_key(entry) {
+        entry.to_string()
+    } else {
+        // Try any function ending with .<entry> (namespaced)
+        functions.keys().find(|k| k.ends_with(&format!(".{entry}"))).cloned()
+            .or_else(|| functions.keys().find(|k| k.as_str() == entry).cloned())
+            .ok_or_else(|| format!("native-lower: missing entry function `{entry}`"))?
+    };
     let entry_return = functions
-        .get(entry)
+        .get(&resolved_entry)
         .map(|func| entry_return_kind(&func.ret))
         .ok_or_else(|| format!("native-lower: missing entry function `{entry}`"))?;
-    if !functions.contains_key(entry) {
+    if !functions.contains_key(&resolved_entry) {
         return Err(format!("native-lower: missing entry function `{entry}`"));
     }
 
@@ -178,7 +187,8 @@ pub fn lower_module(
     for name in &names {
         let func = &functions[name];
         let offset = emitter.len();
-        match lower_function(
+        function_offsets.insert(name.clone(), offset);
+        lower_function(
             &mut emitter,
             func,
             &functions,
@@ -187,24 +197,15 @@ pub fn lower_module(
             &mut pending_calls,
             &mut pending_inrt_calls,
             &mut pending_static_arrays,
-        ) {
-            Ok(()) => {
-                function_offsets.insert(name.clone(), offset);
-            }
-            Err(e) => {
-                eprintln!("JIT skip `{name}`: {e}");
-            }
-        }
+        )?;
     }
 
     for call in pending_calls {
-        if let Some(target_offset) = function_offsets.get(&call.target) {
-            let offset = *target_offset as i32 - call.site as i32;
-            emitter.patch_u32(call.site, aarch64::bl(offset));
-        } else {
-            // ponytail: unresolved call — patch with NOP (skip the call)
-            emitter.patch_u32(call.site, aarch64::nop());
-        }
+        let target_offset = *function_offsets
+            .get(&call.target)
+            .ok_or_else(|| format!("native-lower: unresolved call target `{}`", call.target))?;
+        let offset = target_offset as i32 - call.site as i32;
+        emitter.patch_u32(call.site, aarch64::bl(offset));
     }
 
     append_static_arrays(&mut emitter, pending_static_arrays);
@@ -228,8 +229,8 @@ pub fn lower_module(
 
     let entry_offset = if linkage == NativeLinkage::Executable {
         let entry_fn_offset = *function_offsets
-            .get(entry)
-            .ok_or_else(|| format!("native-lower: missing entry function `{entry}`"))?;
+            .get(&resolved_entry)
+            .ok_or_else(|| format!("native-lower: missing entry function `{resolved_entry}`"))?;
         let stub = match entry_return {
             EntryReturn::IntLike => inrt::build_entry_stub(entry_fn_offset),
             EntryReturn::VoidOrReference => {
