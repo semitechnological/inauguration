@@ -1350,12 +1350,70 @@ fn lower_expr_into(
                     // and rax, rcx  → 48 21 C8
                     emitter.emit_bytes(&[0x48, 0x21, 0xC8]);
                 }
+                "+=" => {
+                    // lhs += rhs: add
+                    emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
+                    emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
+                    emitter.emit_insns(&x86_64::add_rr(RAX, RCX));
+                }
+                "-=" => {
+                    // lhs -= rhs: sub
+                    emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
+                    emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
+                    emitter.emit_insns(&x86_64::sub_rr(RAX, RCX));
+                }
                 "|" => {
                     // lhs | rhs: OR
                     emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
                     emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
                     // or rax, rcx  → 48 09 C8
                     emitter.emit_bytes(&[0x48, 0x09, 0xC8]);
+                }
+                "*=" => {
+                    // lhs *= rhs: imul
+                    emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
+                    emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
+                    emitter.emit_insns(&x86_64::imul_rr(RAX, RCX));
+                }
+                "/=" => {
+                    // lhs /= rhs: div
+                    emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
+                    emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
+                    emitter.emit_bytes(&[0x48, 0x31, 0xD2]); // xor rdx, rdx
+                    emitter.emit_bytes(&[0x48, 0xF7, 0xF1]); // div rcx
+                }
+                "%=" => {
+                    // lhs %= rhs: mod
+                    emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
+                    emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
+                    emitter.emit_bytes(&[0x48, 0x31, 0xD2]); // xor rdx, rdx
+                    emitter.emit_bytes(&[0x48, 0xF7, 0xF1]); // div rcx
+                    emitter.emit_bytes(&[0x48, 0x89, 0xD0]); // mov rax, rdx
+                }
+                "&=" => {
+                    emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
+                    emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
+                    emitter.emit_bytes(&[0x48, 0x21, 0xC8]); // and rax, rcx
+                }
+                "|=" => {
+                    emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
+                    emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
+                    emitter.emit_bytes(&[0x48, 0x09, 0xC8]); // or rax, rcx
+                }
+                "^=" => {
+                    emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
+                    emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
+                    emitter.emit_bytes(&[0x48, 0x31, 0xC8]); // xor rax, rcx
+                }
+                "<<=" => {
+                    emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
+                    emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
+                    emitter.emit_bytes(&[0x48, 0xD3, 0xE0]); // shl rax, cl
+                }
+                ">>=" => {
+                    emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
+                    emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
+                    emitter.emit_bytes(&[0x48, 0xD3, 0xE8]); // shr rax, cl
                 }
                 "%" => {
                     // lhs %% rhs: modulo. mov RCX, RAX (rhs); mov RAX, RBX (lhs);
