@@ -37,8 +37,16 @@ use tree_sitter::{Language, Node, Parser};
 
 /// Resolve a ParserId to a Tree-sitter Language reference.
 /// Core parsers always resolve; optional parsers return Err if feature not enabled.
+/// Resolve a ParserId to a Tree-sitter Language. Panics if parser not compiled in.
 fn lang_for(id: ParserId) -> Language {
-    match id {
+    try_lang_for(id).unwrap_or_else(|| {
+        panic!("Parser `{}` not compiled in. Rebuild with --features extended", id.as_str())
+    })
+}
+
+/// Try to resolve a ParserId. Returns None if the parser feature is not enabled.
+fn try_lang_for(id: ParserId) -> Option<Language> {
+    Some(match id {
         ParserId::C => tree_sitter_c::LANGUAGE.into(),
         ParserId::Cpp | ParserId::ObjCpp => tree_sitter_cpp::LANGUAGE.into(),
         ParserId::Java => tree_sitter_java::LANGUAGE.into(),
@@ -50,26 +58,57 @@ fn lang_for(id: ParserId) -> Language {
         ParserId::Swift => tree_sitter_swift::LANGUAGE.into(),
         ParserId::TypeScript => tree_sitter_typescript::LANGUAGE_TSX.into(),
         #[cfg(feature = "tree-sitter-objc")] ParserId::ObjC => tree_sitter_objc::LANGUAGE.into(),
+        #[cfg(not(feature = "tree-sitter-objc"))] ParserId::ObjC => return None,
         #[cfg(feature = "tree-sitter-kotlin-ng")] ParserId::Kotlin => tree_sitter_kotlin_ng::LANGUAGE.into(),
+        #[cfg(not(feature = "tree-sitter-kotlin-ng"))] ParserId::Kotlin => return None,
         #[cfg(feature = "tree-sitter-scala")] ParserId::Scala => tree_sitter_scala::LANGUAGE.into(),
+        #[cfg(not(feature = "tree-sitter-scala"))] ParserId::Scala => return None,
         #[cfg(feature = "tree-sitter-groovy")] ParserId::Groovy => tree_sitter_groovy::LANGUAGE.into(),
+        #[cfg(not(feature = "tree-sitter-groovy"))] ParserId::Groovy => return None,
         #[cfg(feature = "tree-sitter-c-sharp")] ParserId::CSharp => tree_sitter_c_sharp::LANGUAGE.into(),
+        #[cfg(not(feature = "tree-sitter-c-sharp"))] ParserId::CSharp => return None,
         #[cfg(feature = "tree-sitter-fsharp")] ParserId::FSharp => tree_sitter_fsharp::LANGUAGE_FSHARP.into(),
+        #[cfg(not(feature = "tree-sitter-fsharp"))] ParserId::FSharp => return None,
         #[cfg(feature = "tree-sitter-ruby")] ParserId::Ruby => tree_sitter_ruby::LANGUAGE.into(),
+        #[cfg(not(feature = "tree-sitter-ruby"))] ParserId::Ruby => return None,
         #[cfg(feature = "tree-sitter-php")] ParserId::Php => tree_sitter_php::LANGUAGE_PHP.into(),
+        #[cfg(not(feature = "tree-sitter-php"))] ParserId::Php => return None,
         #[cfg(feature = "tree-sitter-perl")] ParserId::Perl => tree_sitter_perl::LANGUAGE.into(),
+        #[cfg(not(feature = "tree-sitter-perl"))] ParserId::Perl => return None,
         #[cfg(feature = "tree-sitter-dart")] ParserId::Dart => tree_sitter_dart::LANGUAGE.into(),
+        #[cfg(not(feature = "tree-sitter-dart"))] ParserId::Dart => return None,
         #[cfg(feature = "tree-sitter-lua")] ParserId::Lua => tree_sitter_lua::LANGUAGE.into(),
+        #[cfg(not(feature = "tree-sitter-lua"))] ParserId::Lua => return None,
         #[cfg(feature = "tree-sitter-elixir")] ParserId::Elixir => tree_sitter_elixir::LANGUAGE.into(),
+        #[cfg(not(feature = "tree-sitter-elixir"))] ParserId::Elixir => return None,
         #[cfg(feature = "tree-sitter-erlang")] ParserId::Erlang => tree_sitter_erlang::LANGUAGE.into(),
+        #[cfg(not(feature = "tree-sitter-erlang"))] ParserId::Erlang => return None,
         #[cfg(feature = "tree-sitter-haskell")] ParserId::Haskell => tree_sitter_haskell::LANGUAGE.into(),
+        #[cfg(not(feature = "tree-sitter-haskell"))] ParserId::Haskell => return None,
         #[cfg(feature = "tree-sitter-julia")] ParserId::Julia => tree_sitter_julia::LANGUAGE.into(),
+        #[cfg(not(feature = "tree-sitter-julia"))] ParserId::Julia => return None,
         #[cfg(feature = "tree-sitter-ocaml")] ParserId::OCaml => tree_sitter_ocaml::LANGUAGE_OCAML.into(),
+        #[cfg(not(feature = "tree-sitter-ocaml"))] ParserId::OCaml => return None,
         #[cfg(feature = "tree-sitter-r")] ParserId::R => tree_sitter_r::LANGUAGE.into(),
+        #[cfg(not(feature = "tree-sitter-r"))] ParserId::R => return None,
         #[cfg(feature = "tree-sitter-holyc")] ParserId::HolyC => tree_sitter_holyc::LANGUAGE.into(),
+        #[cfg(not(feature = "tree-sitter-holyc"))] ParserId::HolyC => return None,
         #[cfg(feature = "tree-sitter-v")] ParserId::V => tree_sitter_v::LANGUAGE.into(),
-        _ => panic!("Parser `{}` not compiled in. Rebuild with --features extended", id.as_str()),
-    }
+        #[cfg(not(feature = "tree-sitter-v"))] ParserId::V => return None,
+        _ => return None,
+    })
+}
+
+/// List all parser IDs that are compiled into this binary.
+pub fn available_parsers() -> Vec<ParserId> {
+    use ParserId::*;
+    let all = [
+        In, Icore, C, Cpp, ObjC, ObjCpp, Java, Kotlin, Scala, Groovy,
+        CSharp, FSharp, VbNet, Python, Ruby, Php, Perl, JavaScript,
+        TypeScript, Go, Rust, Zig, Dart, Lua, Elixir, Erlang, Haskell,
+        Julia, Swift, OCaml, R, HolyC, V,
+    ];
+    all.into_iter().filter(|id| try_lang_for(*id).is_some() || matches!(id, In | Icore)).collect()
 }
 
 type ZigLayoutFields = Vec<(String, String)>;
@@ -85,7 +124,7 @@ pub fn parse_polyglot_file(id: ParserId, path: &Path) -> Result<UnifiedModule, S
         ParserId::V => {
             let src = std::fs::read_to_string(path)
                 .map_err(|e| format!("read {}: {e}", path.display()))?;
-            parse_lang(lang_for(ParserId::V), &src, |b, r| {
+            parse_lang(try_lang_for(ParserId::V).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::V.as_str()))?, &src, |b, r| {
                 extract_fn_nodes(b, r, &["function_declaration"], |s, n| {
                     let name_n = n.child_by_field_name("name")?;
                     let name = normalize_entry(node_txt(s, name_n).trim());
@@ -115,15 +154,15 @@ pub fn parse_polyglot_file(id: ParserId, path: &Path) -> Result<UnifiedModule, S
 
 fn dispatch(id: ParserId, path: &Path, src: &str) -> Result<UnifiedModule, String> {
     match id {
-        ParserId::C => parse_lang(lang_for(ParserId::C), src, |b, r| {
+        ParserId::C => parse_lang(try_lang_for(ParserId::C).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::C.as_str()))?, src, |b, r| {
             extract_fn_nodes(b, r, &["function_definition"], c_like_function_decl)
         }),
         ParserId::Cpp | ParserId::ObjCpp => parse_lang(
-            lang_for(ParserId::Cpp),
+            try_lang_for(ParserId::Cpp).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Cpp.as_str()))?,
             src,
             extract_cpp_with_classes,
         ),
-        ParserId::ObjC => parse_lang(lang_for(ParserId::ObjC), src, |b, r| {
+        ParserId::ObjC => parse_lang(try_lang_for(ParserId::ObjC).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::ObjC.as_str()))?, src, |b, r| {
             extract_fn_nodes(
                 b,
                 r,
@@ -132,41 +171,41 @@ fn dispatch(id: ParserId, path: &Path, src: &str) -> Result<UnifiedModule, Strin
             )
         }),
         ParserId::Java => parse_lang(
-            lang_for(ParserId::Java),
+            try_lang_for(ParserId::Java).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Java.as_str()))?,
             src,
             extract_java_with_classes,
         ),
-        ParserId::Kotlin => parse_lang(lang_for(ParserId::Kotlin), src, extract_kotlin),
-        ParserId::Scala => parse_lang(lang_for(ParserId::Scala), src, extract_scala),
+        ParserId::Kotlin => parse_lang(try_lang_for(ParserId::Kotlin).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Kotlin.as_str()))?, src, extract_kotlin),
+        ParserId::Scala => parse_lang(try_lang_for(ParserId::Scala).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Scala.as_str()))?, src, extract_scala),
         ParserId::Groovy => parse_lang(
-            lang_for(ParserId::Groovy),
+            try_lang_for(ParserId::Groovy).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Groovy.as_str()))?,
             src,
             extract_java_style_methods,
         ),
-        ParserId::CSharp => parse_lang(lang_for(ParserId::CSharp), src, extract_csharp),
+        ParserId::CSharp => parse_lang(try_lang_for(ParserId::CSharp).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::CSharp.as_str()))?, src, extract_csharp),
         ParserId::FSharp => parse_lang(
-            lang_for(ParserId::FSharp),
+            try_lang_for(ParserId::FSharp).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::FSharp.as_str()))?,
             src,
             extract_fsharp,
         ),
         ParserId::Python => parse_lang(
-            lang_for(ParserId::Python),
+            try_lang_for(ParserId::Python).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Python.as_str()))?,
             src,
             extract_python_with_classes,
         ),
-        ParserId::Ruby => parse_lang(lang_for(ParserId::Ruby), src, extract_ruby),
-        ParserId::Php => parse_lang(lang_for(ParserId::Php), src, extract_php),
-        ParserId::Perl => parse_lang(lang_for(ParserId::Perl), src, extract_perl),
+        ParserId::Ruby => parse_lang(try_lang_for(ParserId::Ruby).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Ruby.as_str()))?, src, extract_ruby),
+        ParserId::Php => parse_lang(try_lang_for(ParserId::Php).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Php.as_str()))?, src, extract_php),
+        ParserId::Perl => parse_lang(try_lang_for(ParserId::Perl).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Perl.as_str()))?, src, extract_perl),
         ParserId::JavaScript => parse_lang(
-            lang_for(ParserId::JavaScript),
+            try_lang_for(ParserId::JavaScript).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::JavaScript.as_str()))?,
             src,
             extract_js_with_classes,
         ),
         ParserId::TypeScript => {
-            let ts_lang = lang_for(ParserId::TypeScript);
+            let ts_lang = try_lang_for(ParserId::TypeScript).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::TypeScript.as_str()))?;
             parse_lang(ts_lang, src, extract_ts_with_classes)
         }
-        ParserId::Go => parse_lang(lang_for(ParserId::Go), src, |b, r| {
+        ParserId::Go => parse_lang(try_lang_for(ParserId::Go).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Go.as_str()))?, src, |b, r| {
             extract_fn_nodes(
                 b,
                 r,
@@ -190,18 +229,18 @@ fn dispatch(id: ParserId, path: &Path, src: &str) -> Result<UnifiedModule, Strin
                 },
             )
         }),
-        ParserId::Rust => parse_lang(lang_for(ParserId::Rust), src, extract_rust),
-        ParserId::Zig => parse_lang(lang_for(ParserId::Zig), src, extract_zig),
-        ParserId::Dart => parse_lang(lang_for(ParserId::Dart), src, extract_dart),
-        ParserId::Lua => parse_lang(lang_for(ParserId::Lua), src, extract_lua),
-        ParserId::Elixir => parse_lang(lang_for(ParserId::Elixir), src, extract_elixir),
-        ParserId::Erlang => parse_lang(lang_for(ParserId::Erlang), src, extract_erlang),
-        ParserId::Haskell => parse_lang(lang_for(ParserId::Haskell), src, extract_haskell),
-        ParserId::Julia => parse_lang(lang_for(ParserId::Julia), src, extract_julia),
-        ParserId::Swift => parse_lang(lang_for(ParserId::Swift), src, extract_swift),
-        ParserId::OCaml => parse_lang(lang_for(ParserId::OCaml), src, extract_ocaml),
-        ParserId::R => parse_lang(lang_for(ParserId::R), src, extract_r_lang),
-        ParserId::HolyC => parse_lang(lang_for(ParserId::HolyC), src, extract_holyc),
+        ParserId::Rust => parse_lang(try_lang_for(ParserId::Rust).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Rust.as_str()))?, src, extract_rust),
+        ParserId::Zig => parse_lang(try_lang_for(ParserId::Zig).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Zig.as_str()))?, src, extract_zig),
+        ParserId::Dart => parse_lang(try_lang_for(ParserId::Dart).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Dart.as_str()))?, src, extract_dart),
+        ParserId::Lua => parse_lang(try_lang_for(ParserId::Lua).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Lua.as_str()))?, src, extract_lua),
+        ParserId::Elixir => parse_lang(try_lang_for(ParserId::Elixir).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Elixir.as_str()))?, src, extract_elixir),
+        ParserId::Erlang => parse_lang(try_lang_for(ParserId::Erlang).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Erlang.as_str()))?, src, extract_erlang),
+        ParserId::Haskell => parse_lang(try_lang_for(ParserId::Haskell).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Haskell.as_str()))?, src, extract_haskell),
+        ParserId::Julia => parse_lang(try_lang_for(ParserId::Julia).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Julia.as_str()))?, src, extract_julia),
+        ParserId::Swift => parse_lang(try_lang_for(ParserId::Swift).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Swift.as_str()))?, src, extract_swift),
+        ParserId::OCaml => parse_lang(try_lang_for(ParserId::OCaml).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::OCaml.as_str()))?, src, extract_ocaml),
+        ParserId::R => parse_lang(try_lang_for(ParserId::R).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::R.as_str()))?, src, extract_r_lang),
+        ParserId::HolyC => parse_lang(try_lang_for(ParserId::HolyC).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::HolyC.as_str()))?, src, extract_holyc),
         ParserId::In
         | ParserId::Icore
         | ParserId::Clojure
@@ -222,7 +261,7 @@ fn typescript_lang(path: &Path) -> Language {
         .unwrap_or("")
         .to_ascii_lowercase();
     if matches!(ext.as_str(), "tsx" | "jsx") {
-        lang_for(ParserId::TypeScript)
+        try_lang_for(ParserId::TypeScript).unwrap_or_else(|| tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())
     } else {
         tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()
     }
@@ -267,7 +306,7 @@ pub fn parse_zig_artifact(path: &Path) -> Result<CompileArtifact, String> {
 pub fn parse_zig_artifact_source(src: &str, module_id: &str) -> Result<CompileArtifact, String> {
     let mut parser = Parser::new();
     parser
-        .set_language(&lang_for(ParserId::Zig))
+        .set_language(&try_lang_for(ParserId::Zig).ok_or_else(|| format!("Parser `{}` not included. Rebuild with --features extended", ParserId::Zig.as_str()))?)
         .map_err(|e| format!("Tree-sitter grammar load failed: {e}"))?;
     let tree = parser
         .parse(src, None)
@@ -7255,7 +7294,7 @@ mod tests {
     fn java_main_method_extracted() {
         let src = "class X { public static void main(String[] a) { } }\n";
         let m = parse_lang(
-            lang_for(ParserId::Java),
+            try_lang_for(ParserId::Java).unwrap(),
             src,
             extract_java_style_methods,
         )
@@ -7278,7 +7317,7 @@ mod tests {
         assert_eq!(body_shape(main_body(&in_module)), expected);
 
         let c_module = parse_lang(
-            lang_for(ParserId::C),
+            try_lang_for(ParserId::C).unwrap(),
             &repo_sample("control_flow.c"),
             |b, r| extract_fn_nodes(b, r, &["function_definition"], c_like_function_decl),
         )
@@ -7286,7 +7325,7 @@ mod tests {
         assert_eq!(body_shape(main_body(&c_module)), expected);
 
         let java_module = parse_lang(
-            lang_for(ParserId::Java),
+            try_lang_for(ParserId::Java).unwrap(),
             &repo_sample("ControlFlow.java"),
             extract_java_style_methods,
         )
@@ -7302,7 +7341,7 @@ mod tests {
         assert_eq!(body_shape(main_body(&ts_module)), expected);
 
         let dart_module = parse_lang(
-            lang_for(ParserId::Dart),
+            try_lang_for(ParserId::Dart).unwrap(),
             &repo_sample("control_flow.dart"),
             extract_dart,
         )
@@ -7323,7 +7362,7 @@ class X {
 }
 "#;
         let m = parse_lang(
-            lang_for(ParserId::Java),
+            try_lang_for(ParserId::Java).unwrap(),
             src,
             extract_java_style_methods,
         )
@@ -7439,7 +7478,7 @@ class X {
 }
 "#;
         let m = parse_lang(
-            lang_for(ParserId::Java),
+            try_lang_for(ParserId::Java).unwrap(),
             src,
             extract_java_style_methods,
         )
@@ -7481,7 +7520,7 @@ class X {
 }
 "#;
         let m = parse_lang(
-            lang_for(ParserId::Java),
+            try_lang_for(ParserId::Java).unwrap(),
             src,
             extract_java_style_methods,
         )
@@ -7537,7 +7576,7 @@ class X {
     #[cfg(feature = "tree-sitter-r")]
     fn rust_main_extracted() {
         let src = "fn main() {}\n";
-        let m = parse_lang(lang_for(ParserId::Rust), src, extract_rust).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::Rust).unwrap(), src, extract_rust).expect("ok");
         assert!(matches!(m.decls.as_slice(), [Decl::Function { name, .. }] if name == "main"));
     }
 
@@ -7545,7 +7584,7 @@ class X {
     #[cfg(feature = "tree-sitter-holyc")]
     fn extract_holyc_eval_return_shape() {
         let src = "I64 Main()\n{\n  return 1 + 2;\n}\nMain;\n";
-        let m = parse_lang(lang_for(ParserId::HolyC), src, extract_holyc).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::HolyC).unwrap(), src, extract_holyc).expect("ok");
         let main = m
             .decls
             .iter()
@@ -7567,7 +7606,7 @@ class X {
     #[cfg(feature = "tree-sitter-r")]
     fn extract_rust_eval_print_shape() {
         let src = "fn main() -> i64 {\nprint(\"hi\");\n0\n}\n";
-        let m = parse_lang(lang_for(ParserId::Rust), src, extract_rust).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::Rust).unwrap(), src, extract_rust).expect("ok");
         let main = m
             .decls
             .iter()
@@ -7593,7 +7632,7 @@ class X {
     #[cfg(feature = "tree-sitter-r")]
     fn extract_rust_if_else() {
         let src = "fn main() -> i64 { if true { return 1; } else { return 0; } }";
-        let m = parse_lang(lang_for(ParserId::Rust), src, extract_rust).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::Rust).unwrap(), src, extract_rust).expect("ok");
         let main = m
             .decls
             .iter()
@@ -7616,7 +7655,7 @@ class X {
     fn zig_function_declarations_extract() {
         let src =
             "fn helper(value: i32) i32 { return value; }\npub fn main() void { _ = helper(1); }\n";
-        let m = parse_lang(lang_for(ParserId::Zig), src, extract_zig).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::Zig).unwrap(), src, extract_zig).expect("ok");
         assert!(
             m.decls
                 .iter()
@@ -7635,7 +7674,7 @@ class X {
     #[cfg(feature = "tree-sitter-r")]
     fn extract_zig_eval_print_shape() {
         let src = "pub fn main() void {\n    print(\"hi\");\n}\n";
-        let m = parse_lang(lang_for(ParserId::Zig), src, extract_zig).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::Zig).unwrap(), src, extract_zig).expect("ok");
         match m
             .decls
             .iter()
@@ -7658,7 +7697,7 @@ class X {
     #[cfg(feature = "tree-sitter-r")]
     fn extract_zig_empty_main_body_stays_empty() {
         let src = "pub fn main() void {}\n";
-        let m = parse_lang(lang_for(ParserId::Zig), src, extract_zig).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::Zig).unwrap(), src, extract_zig).expect("ok");
         match m
             .decls
             .iter()
@@ -7675,7 +7714,7 @@ class X {
     fn javascript_function_bodies_extract_calls() {
         let src = "function helper(value) { return value; }\nfunction main() { helper(1); }\n";
         let m = parse_lang(
-            lang_for(ParserId::JavaScript),
+            try_lang_for(ParserId::JavaScript).unwrap(),
             src,
             extract_js_with_classes,
         )
@@ -7743,7 +7782,7 @@ function main() {
 }
 "#;
         let m = parse_lang(
-            lang_for(ParserId::JavaScript),
+            try_lang_for(ParserId::JavaScript).unwrap(),
             src,
             extract_js_with_classes,
         )
@@ -7885,7 +7924,7 @@ class X {
   void Main() { value = Helper(2); Helper(value); return; }
 }
 "#;
-        let m = parse_lang(lang_for(ParserId::CSharp), src, extract_csharp).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::CSharp).unwrap(), src, extract_csharp).expect("ok");
         let helper = m
             .decls
             .iter()
@@ -7942,7 +7981,7 @@ class X {
   }
 }
 "#;
-        let m = parse_lang(lang_for(ParserId::CSharp), src, extract_csharp).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::CSharp).unwrap(), src, extract_csharp).expect("ok");
         let main = m
             .decls
             .iter()
@@ -8003,7 +8042,7 @@ def main():
     return
 "#;
         let m = parse_lang(
-            lang_for(ParserId::Python),
+            try_lang_for(ParserId::Python).unwrap(),
             src,
             extract_python_with_classes,
         )
@@ -8069,7 +8108,7 @@ def main():
     return value
 "#;
         let m = parse_lang(
-            lang_for(ParserId::Python),
+            try_lang_for(ParserId::Python).unwrap(),
             src,
             extract_python_with_classes,
         )
@@ -8131,7 +8170,7 @@ def main
   return helper(3) + 4
 end
 "#;
-        let m = parse_lang(lang_for(ParserId::Ruby), src, extract_ruby).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::Ruby).unwrap(), src, extract_ruby).expect("ok");
         let helper = m
             .decls
             .iter()
@@ -8269,7 +8308,7 @@ pub fn main() void {}
     #[cfg(feature = "tree-sitter-r")]
     fn zig_functions_extract_params_return_and_body() {
         let src = "fn helper(value: i32) i32 { return value; }\npub fn main() void { value = helper(2); helper(value); return; }\n";
-        let m = parse_lang(lang_for(ParserId::Zig), src, extract_zig).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::Zig).unwrap(), src, extract_zig).expect("ok");
         let helper = m
             .decls
             .iter()
@@ -8335,7 +8374,7 @@ pub fn main() void {
     return;
 }
 "#;
-        let m = parse_lang(lang_for(ParserId::Zig), src, extract_zig).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::Zig).unwrap(), src, extract_zig).expect("ok");
         let main = m
             .decls
             .iter()
@@ -8388,7 +8427,7 @@ pub fn main() void {
     fn kotlin_functions_extract_bounded_bodies() {
         let src = "fun helper(value: Int): Int { return value }\nfun main() { value = helper(2); helper(value); return }\n";
         let m =
-            parse_lang(lang_for(ParserId::Kotlin), src, extract_kotlin).expect("ok");
+            parse_lang(try_lang_for(ParserId::Kotlin).unwrap(), src, extract_kotlin).expect("ok");
         let helper = m
             .decls
             .iter()
@@ -8450,7 +8489,7 @@ fun main() {
 }
 "#;
         let m =
-            parse_lang(lang_for(ParserId::Kotlin), src, extract_kotlin).expect("ok");
+            parse_lang(try_lang_for(ParserId::Kotlin).unwrap(), src, extract_kotlin).expect("ok");
         let main = m
             .decls
             .iter()
@@ -8502,7 +8541,7 @@ fun main() {
     #[cfg(feature = "tree-sitter-r")]
     fn c_binary_return_lowers_function_body() {
         let src = "int f(void) { return 1 + 2; }\nint main(void) { return 0; }\n";
-        let m = parse_lang(lang_for(ParserId::C), src, |b, r| {
+        let m = parse_lang(try_lang_for(ParserId::C).unwrap(), src, |b, r| {
             extract_fn_nodes(b, r, &["function_definition"], c_like_function_decl)
         })
         .expect("parse");
@@ -8534,7 +8573,7 @@ int main(void) {
   return value;
 }
 "#;
-        let m = parse_lang(lang_for(ParserId::C), src, |b, r| {
+        let m = parse_lang(try_lang_for(ParserId::C).unwrap(), src, |b, r| {
             extract_fn_nodes(b, r, &["function_definition"], c_like_function_decl)
         })
         .expect("parse");
@@ -8585,7 +8624,7 @@ int main(void) {
     #[cfg(feature = "tree-sitter-r")]
     fn cpp_uses_c_like_body_lowering() {
         let src = "int main() { int value = 1; value = value + 1; return value; }\n";
-        let m = parse_lang(lang_for(ParserId::Cpp), src, |b, r| {
+        let m = parse_lang(try_lang_for(ParserId::Cpp).unwrap(), src, |b, r| {
             extract_fn_nodes(b, r, &["function_definition"], c_like_function_decl)
         })
         .expect("parse");
@@ -8616,7 +8655,7 @@ int main() {
   return value;
 }
 "#;
-        let m = parse_lang(lang_for(ParserId::Dart), src, extract_dart).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::Dart).unwrap(), src, extract_dart).expect("ok");
         let helper = m
             .decls
             .iter()
@@ -8697,7 +8736,7 @@ public class Counter {
 }
 "#;
         let m = parse_lang(
-            lang_for(ParserId::Java),
+            try_lang_for(ParserId::Java).unwrap(),
             src,
             extract_java_with_classes,
         )
@@ -8760,7 +8799,7 @@ interface Printable {
 }
 "#;
         let m = parse_lang(
-            lang_for(ParserId::Java),
+            try_lang_for(ParserId::Java).unwrap(),
             src,
             extract_java_with_classes,
         )
@@ -8798,7 +8837,7 @@ class Child extends Parent implements Runnable, Serializable {
 }
 "#;
         let m = parse_lang(
-            lang_for(ParserId::Java),
+            try_lang_for(ParserId::Java).unwrap(),
             src,
             extract_java_with_classes,
         )
@@ -8837,7 +8876,7 @@ public:
 };
 "#;
         let m = parse_lang(
-            lang_for(ParserId::Cpp),
+            try_lang_for(ParserId::Cpp).unwrap(),
             src,
             extract_cpp_with_classes,
         )
@@ -8883,7 +8922,7 @@ public:
 };
 "#;
         let m = parse_lang(
-            lang_for(ParserId::Cpp),
+            try_lang_for(ParserId::Cpp).unwrap(),
             src,
             extract_cpp_with_classes,
         )
@@ -8914,7 +8953,7 @@ int answer() {
 }
 "#;
         let m = parse_lang(
-            lang_for(ParserId::Cpp),
+            try_lang_for(ParserId::Cpp).unwrap(),
             src,
             extract_cpp_with_classes,
         )
@@ -8950,7 +8989,7 @@ class Counter {
 }
 "#;
         let m = parse_lang(
-            lang_for(ParserId::Java),
+            try_lang_for(ParserId::Java).unwrap(),
             src,
             extract_java_with_classes,
         )
@@ -8999,7 +9038,7 @@ class Accumulator {
     public void Reset() { total = 0; }
 }
 "#;
-        let m = parse_lang(lang_for(ParserId::CSharp), src, extract_csharp).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::CSharp).unwrap(), src, extract_csharp).expect("ok");
 
         let class = m
             .decls
@@ -9047,7 +9086,7 @@ interface IResettable {
     int GetValue();
 }
 "#;
-        let m = parse_lang(lang_for(ParserId::CSharp), src, extract_csharp).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::CSharp).unwrap(), src, extract_csharp).expect("ok");
 
         let iface = m
             .decls
@@ -9077,7 +9116,7 @@ interface IResettable {
     fn c_return_statement_child_kinds_for_param_return() {
         let src = "int echo(int x) { return x; }\n";
         let mut p = Parser::new();
-        p.set_language(&lang_for(ParserId::C)).unwrap();
+        p.set_language(&try_lang_for(ParserId::C).unwrap()).unwrap();
         let tree = p.parse(src, None).unwrap();
         let mut found = false;
     #[cfg(feature = "tree-sitter-r")]
@@ -9121,7 +9160,7 @@ class Calculator {
 }
 "#;
         let m = parse_lang(
-            lang_for(ParserId::JavaScript),
+            try_lang_for(ParserId::JavaScript).unwrap(),
             src,
             extract_js_with_classes,
         )
@@ -9165,7 +9204,7 @@ const add = (a, b) => { return a + b; };
 var multiply = function(a, b) { return a * b; };
 "#;
         let m = parse_lang(
-            lang_for(ParserId::JavaScript),
+            try_lang_for(ParserId::JavaScript).unwrap(),
             src,
             extract_js_with_classes,
         )
@@ -9207,7 +9246,7 @@ function answer() {
 function main() {}
 "#;
         let m = parse_lang(
-            lang_for(ParserId::JavaScript),
+            try_lang_for(ParserId::JavaScript).unwrap(),
             src,
             extract_js_with_classes,
         )
@@ -9398,7 +9437,7 @@ class Counter:
         return 1
 "#;
         let m = parse_lang(
-            lang_for(ParserId::Python),
+            try_lang_for(ParserId::Python).unwrap(),
             src,
             extract_python_with_classes,
         )
@@ -9441,7 +9480,7 @@ class Counter:
 double = lambda x: x * 2
 "#;
         let m = parse_lang(
-            lang_for(ParserId::Python),
+            try_lang_for(ParserId::Python).unwrap(),
             src,
             extract_python_with_classes,
         )
@@ -9474,7 +9513,7 @@ def risky(x):
     return value
 "#;
         let m = parse_lang(
-            lang_for(ParserId::Python),
+            try_lang_for(ParserId::Python).unwrap(),
             src,
             extract_python_with_classes,
         )
@@ -9505,7 +9544,7 @@ def risky(x):
     #[cfg(feature = "tree-sitter-php")]
     fn php_function_with_body_extracts() {
         let src = "<?php\nfunction helper($value) {\n    return $value;\n}\nfunction main() {\n    $value = 1;\n    helper($value);\n    return;\n}\n";
-        let m = parse_lang(lang_for(ParserId::Php), src, extract_php).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::Php).unwrap(), src, extract_php).expect("ok");
         let helper = m
             .decls
             .iter()
@@ -9556,7 +9595,7 @@ class Calculator {
     }
 }
 "#;
-        let m = parse_lang(lang_for(ParserId::Php), src, extract_php).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::Php).unwrap(), src, extract_php).expect("ok");
         let class = m
             .decls
             .iter()
@@ -9590,7 +9629,7 @@ class Calculator {
     #[cfg(feature = "tree-sitter-php")]
     fn php_echo_statement_extracts_as_expression() {
         let src = "<?php\nfunction main() {\n    echo \"hello\";\n}\n";
-        let m = parse_lang(lang_for(ParserId::Php), src, extract_php).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::Php).unwrap(), src, extract_php).expect("ok");
         let main = m
             .decls
             .iter()
@@ -9606,7 +9645,7 @@ class Calculator {
     #[cfg(feature = "tree-sitter-php")]
     fn php_eval_main_body_extracts() {
         let src = "<?php\nfunction main() {\n    print(\"hi\");\n}\n";
-        let m = parse_lang(lang_for(ParserId::Php), src, extract_php).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::Php).unwrap(), src, extract_php).expect("ok");
         let main = m
             .decls
             .iter()
@@ -9622,7 +9661,7 @@ class Calculator {
     #[cfg(feature = "tree-sitter-php")]
     fn php_eval_print_shape_extracts() {
         let src = "<?php\nfunction main() {\n    print(1 + 2);\n}\n";
-        let m = parse_lang(lang_for(ParserId::Php), src, extract_php).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::Php).unwrap(), src, extract_php).expect("ok");
         let main = m
             .decls
             .iter()
@@ -9645,7 +9684,7 @@ class Calculator {
     #[cfg(feature = "tree-sitter-php")]
     fn php_interface_with_method_sigs_extracts() {
         let src = "<?php\ninterface Printable {\n    public function format(): string;\n    public function version(): int;\n}\n";
-        let m = parse_lang(lang_for(ParserId::Php), src, extract_php).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::Php).unwrap(), src, extract_php).expect("ok");
         let iface = m
             .decls
             .iter()
@@ -9682,7 +9721,7 @@ function main()
   return
 end
 "#;
-        let m = parse_lang(lang_for(ParserId::Lua), src, extract_lua).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::Lua).unwrap(), src, extract_lua).expect("ok");
         let helper = m
             .decls
             .iter()
@@ -9735,7 +9774,7 @@ function main()
   helper(1)
 end
 "#;
-        let m = parse_lang(lang_for(ParserId::Lua), src, extract_lua).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::Lua).unwrap(), src, extract_lua).expect("ok");
         let helper = m
             .decls
             .iter()
@@ -9760,7 +9799,7 @@ def main(): Unit = {
   return
 }
 "#;
-        let m = parse_lang(lang_for(ParserId::Scala), src, extract_scala).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::Scala).unwrap(), src, extract_scala).expect("ok");
         let helper = m
             .decls
             .iter()
@@ -9798,7 +9837,7 @@ class Counter(val value: Int) {
     def get(): Int = value
 }
 "#;
-        let m = parse_lang(lang_for(ParserId::Scala), src, extract_scala).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::Scala).unwrap(), src, extract_scala).expect("ok");
         let class = m
             .decls
             .iter()
@@ -9836,7 +9875,7 @@ trait Drawable {
     def getBounds(): Rect
 }
 "#;
-        let m = parse_lang(lang_for(ParserId::Scala), src, extract_scala).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::Scala).unwrap(), src, extract_scala).expect("ok");
         let iface = m
             .decls
             .iter()
@@ -9865,7 +9904,7 @@ function main() {
     return;
 }
 "#;
-        let m = parse_lang(lang_for(ParserId::Php), src, extract_php).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::Php).unwrap(), src, extract_php).expect("ok");
         let helper = m
             .decls
             .iter()
@@ -9916,7 +9955,7 @@ let main _ =
     ()
 "#;
         let m = parse_lang(
-            lang_for(ParserId::FSharp),
+            try_lang_for(ParserId::FSharp).unwrap(),
             src,
             extract_fsharp,
         )
@@ -9943,7 +9982,7 @@ let main _ =
     value
 "#;
         let m = parse_lang(
-            lang_for(ParserId::FSharp),
+            try_lang_for(ParserId::FSharp).unwrap(),
             src,
             extract_fsharp,
         )
@@ -9972,7 +10011,7 @@ main() ->
     X = answer(),
     ok.
 "#;
-        let m = parse_lang(lang_for(ParserId::Erlang), src, extract_erlang).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::Erlang).unwrap(), src, extract_erlang).expect("ok");
         let found_answer = m
             .decls
             .iter()
@@ -9996,7 +10035,7 @@ main() ->
     #[cfg(feature = "tree-sitter-erlang")]
     fn extract_erlang_eval_print_shape() {
         let src = "-module(app).\n-export([main/0]).\n\nmain() ->\n    print(\"hi\").\n";
-        let m = parse_lang(lang_for(ParserId::Erlang), src, extract_erlang).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::Erlang).unwrap(), src, extract_erlang).expect("ok");
         let main = m
             .decls
             .iter()
@@ -10030,7 +10069,7 @@ main() ->
   end
 end
 "#;
-        let m = parse_lang(lang_for(ParserId::Elixir), src, extract_elixir).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::Elixir).unwrap(), src, extract_elixir).expect("ok");
         let found_class = m
             .decls
             .iter()
@@ -10066,7 +10105,7 @@ function main()
     return nothing
 end
 "#;
-        let m = parse_lang(lang_for(ParserId::Julia), src, extract_julia).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::Julia).unwrap(), src, extract_julia).expect("ok");
         let found_struct = m
             .decls
             .iter()
@@ -10086,7 +10125,7 @@ end
     print("hi")
 end
 "#;
-        let m = parse_lang(lang_for(ParserId::Julia), src, extract_julia).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::Julia).unwrap(), src, extract_julia).expect("ok");
         let main = m
             .decls
             .iter()
@@ -10103,7 +10142,7 @@ end
     fn extract_ocaml_eval_print_shape() {
         let src = "let main () =\n  print \"hi\"\n";
         let m =
-            parse_lang(lang_for(ParserId::OCaml), src, extract_ocaml).expect("ok");
+            parse_lang(try_lang_for(ParserId::OCaml).unwrap(), src, extract_ocaml).expect("ok");
         let main = m
             .decls
             .iter()
@@ -10135,7 +10174,7 @@ main <- function() {
     return(value)
 }
 "#;
-        let m = parse_lang(lang_for(ParserId::R), src, extract_r_lang).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::R).unwrap(), src, extract_r_lang).expect("ok");
         let answer = m
             .decls
             .iter()
@@ -10163,7 +10202,7 @@ main <- function() {
     print("hi")
 }
 "#;
-        let m = parse_lang(lang_for(ParserId::R), src, extract_r_lang).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::R).unwrap(), src, extract_r_lang).expect("ok");
         let main = m
             .decls
             .iter()
@@ -10182,7 +10221,7 @@ main <- function() {
     print("hi")
 end
 "#;
-        let m = parse_lang(lang_for(ParserId::Julia), src, extract_julia).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::Julia).unwrap(), src, extract_julia).expect("ok");
         let main = m
             .decls
             .iter()
@@ -10207,7 +10246,7 @@ end
     print("hi")
 }
 "#;
-        let m = parse_lang(lang_for(ParserId::R), src, extract_r_lang).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::R).unwrap(), src, extract_r_lang).expect("ok");
         let main = m
             .decls
             .iter()
@@ -10232,7 +10271,7 @@ end
     print(1 + 2)
 }
 "#;
-        let m = parse_lang(lang_for(ParserId::R), src, extract_r_lang).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::R).unwrap(), src, extract_r_lang).expect("ok");
         let main = m
             .decls
             .iter()
@@ -10258,7 +10297,7 @@ end
   print("hi")
 }
 "#;
-        let m = parse_lang(lang_for(ParserId::Swift), src, extract_swift).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::Swift).unwrap(), src, extract_swift).expect("ok");
         let main = m
             .decls
             .iter()
@@ -10277,7 +10316,7 @@ end
   print(1 + 2)
 }
 "#;
-        let m = parse_lang(lang_for(ParserId::Swift), src, extract_swift).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::Swift).unwrap(), src, extract_swift).expect("ok");
         let main = m
             .decls
             .iter()
@@ -10300,7 +10339,7 @@ end
     #[cfg(feature = "tree-sitter-r")]
     fn extract_go_eval_main_body() {
         let src = "package main\n\nfunc main() {\n\tprint(\"hi\")\n}\n";
-        let m = parse_lang(lang_for(ParserId::Go), src, |b, r| {
+        let m = parse_lang(try_lang_for(ParserId::Go).unwrap(), src, |b, r| {
             extract_fn_nodes(
                 b,
                 r,
@@ -10339,7 +10378,7 @@ end
     #[cfg(feature = "tree-sitter-r")]
     fn extract_go_eval_print_shape() {
         let src = "package main\n\nfunc main() {\n\tprint(1 + 2)\n}\n";
-        let m = parse_lang(lang_for(ParserId::Go), src, |b, r| {
+        let m = parse_lang(try_lang_for(ParserId::Go).unwrap(), src, |b, r| {
             extract_fn_nodes(
                 b,
                 r,
@@ -10386,7 +10425,7 @@ end
     #[cfg(feature = "tree-sitter-r")]
     fn extract_go_function_return_type() {
         let src = "package main\n\nfunc answer() int {\n\treturn 42\n}\n";
-        let m = parse_lang(lang_for(ParserId::Go), src, |b, r| {
+        let m = parse_lang(try_lang_for(ParserId::Go).unwrap(), src, |b, r| {
             extract_fn_nodes(
                 b,
                 r,
@@ -10426,7 +10465,7 @@ end
     #[cfg(feature = "tree-sitter-r")]
     fn extract_v_function_return_type() {
         let src = "module main\n\nfn answer() int {\n\treturn 42\n}\n";
-        let m = parse_lang(lang_for(ParserId::V), src, |b, r| {
+        let m = parse_lang(try_lang_for(ParserId::V).unwrap(), src, |b, r| {
             extract_fn_nodes(b, r, &["function_declaration"], |src, n| {
                 let name_n = n.child_by_field_name("name")?;
                 let name = normalize_entry(node_txt(src, name_n).trim());
@@ -10470,7 +10509,7 @@ sub main {
     return;
 }
 "#;
-        let m = parse_lang(lang_for(ParserId::Perl), src, extract_perl).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::Perl).unwrap(), src, extract_perl).expect("ok");
         let answer = m
             .decls
             .iter()
@@ -10495,7 +10534,7 @@ sub main {
     print("hi");
 }
 "#;
-        let m = parse_lang(lang_for(ParserId::Perl), src, extract_perl).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::Perl).unwrap(), src, extract_perl).expect("ok");
         let main = m
             .decls
             .iter()
@@ -10514,7 +10553,7 @@ sub main {
     print(1 + 2);
 }
 "#;
-        let m = parse_lang(lang_for(ParserId::Perl), src, extract_perl).expect("ok");
+        let m = parse_lang(try_lang_for(ParserId::Perl).unwrap(), src, extract_perl).expect("ok");
         let main = m
             .decls
             .iter()

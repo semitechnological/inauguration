@@ -34,7 +34,7 @@ install_from_repo() {
     die "cargo not in PATH — install Rust from https://rustup.rs/ or set IN_USE_RELEASE=1 to download a binary."
   fi
   info "Building \`in\` from local checkout (${root})…"
-  (cd "${root}/in-cli" && cargo build --release)
+  (cd "${root}/in-cli" && cargo build --release --features extended)
   mkdir -p "$INSTALL_DIR"
   cp "${root}/in-cli/target/release/in" "${INSTALL_DIR}/in"
   chmod +x "${INSTALL_DIR}/in"
