@@ -257,14 +257,22 @@ impl JitRuntime {
     /// # Safety
     /// The function must have been loaded via `load()`. The caller is
     /// responsible for ensuring the function signature matches the arguments.
-    pub unsafe fn invoke(&self, _name: &str, _args: &[i64]) -> Option<i64> {
+    pub unsafe fn invoke(&self, name: &str, _args: &[i64]) -> Option<i64> {
         let funcs = self.functions.read().unwrap();
-        let func = funcs.get(_name)?;
+        let func = funcs.get(name)?;
         let entry = func.entry as *const ();
 
+        // Debug: log entry info for crash investigation
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            let entry_addr = entry as usize;
+            if entry_addr < 0x10000 {
+                // Write to a known memory location to detect which path crashed
+                std::ptr::write_volatile(&mut 0 as *mut u8, 0);
+            }
+        }
+
         // Call the function through a raw function pointer.
-        // AArch64 ABI: first 8 integer args in x0-x7, return in x0.
-        // For now, we support up to 6 args + return i64.
         match _args.len() {
             0 => {
                 let f: extern "C" fn() -> i64 = unsafe { std::mem::transmute(entry) };

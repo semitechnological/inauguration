@@ -588,15 +588,22 @@ fn compile_jit(
         })
         .collect();
 
+    // Debug: log function count and code size before invoke
+    std::fs::write("/tmp/jit_pre_invoke.log", format!("fns={} code={} entry={}\n", function_offsets.len(), lowered.code.len(), &resolved_entry)).ok();
+
     let mut rt = crate::jit_runtime::JitRuntime::new();
     rt.load(&lowered.code, &function_offsets)
         .map_err(|e| format!("jit-load-failed: {e}"))?;
 
-    // Invoke entry function via JIT (not trampoline, so we get the return value)
+    std::fs::write("/tmp/jit_loaded.log", format!("loaded {} functions\n", rt.function_count())).ok();
+
+    // Invoke entry function via JIT
+    std::fs::write("/tmp/jit_before_invoke.log", "before invoke\n").ok();
     let exit_code = unsafe {
         rt.invoke(&resolved_entry, &[])
             .unwrap_or(1)
     } as u8;
+    std::fs::write("/tmp/jit_after_invoke.log", format!("exit_code={}\n", exit_code)).ok();
 
     Ok(NativeCompileResult {
         artifact_path: String::new(),
