@@ -1837,6 +1837,18 @@ fn lower_expr_into(
                 emitter.emit_bytes(&(stack_bytes as u32).to_le_bytes());
             }
 
+            // For unknown external functions, skip call and return 0
+            if !ctx.functions.contains_key(&target_name) {
+                // ponytail: unknown external function — return 0 as stub
+                emitter.emit_insns(&x86_64::load_i64(target_reg, 0));
+                if args.len() > 6 {
+                    let stack_bytes = (args.len() - 6) * 8;
+                    emitter.emit_bytes(&[0x48, 0x81, 0xC4]); // add rsp, imm32
+                    emitter.emit_bytes(&(stack_bytes as u32).to_le_bytes());
+                }
+                return Ok(());
+            }
+
             // Emit call (placeholder, patched later)
             let site = emitter.len();
             emitter.emit_insns(&x86_64::call_rel32(0));
