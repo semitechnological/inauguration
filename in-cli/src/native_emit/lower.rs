@@ -1019,18 +1019,22 @@ impl<'a> LowerCtx<'a> {
                 "native-lower: unsupported let binding type in `{fn_name}` (array locals require literal initializers)"
             )),
             Some(Typ::Named(struct_name)) => {
-                let fields = self.structs.get(struct_name).ok_or_else(|| {
-                    format!("native-lower: unsupported let binding type in `{fn_name}`")
-                })?;
-                let mut slots = HashMap::new();
-                alloc_local_struct_fields(&mut slots, struct_name, fields, self.structs, self, fn_name)?;
-                self.locals.insert(
-                    name.to_string(),
-                    LocalSlot::Struct {
-                        typ: struct_name.clone(),
-                        fields: slots,
-                    },
-                );
+                if let Some(fields) = self.structs.get(struct_name) {
+                    let mut slots = HashMap::new();
+                    alloc_local_struct_fields(&mut slots, struct_name, fields, self.structs, self, fn_name)?;
+                    self.locals.insert(
+                        name.to_string(),
+                        LocalSlot::Struct {
+                            typ: struct_name.clone(),
+                            fields: slots,
+                        },
+                    );
+                } else {
+                    // ponytail: unknown struct type — treat as scalar
+                    let offset = self.alloc_slot();
+                    self.locals
+                        .insert(name.to_string(), LocalSlot::Scalar(offset));
+                }
                 Ok(())
             }
             _ => Err(format!(
