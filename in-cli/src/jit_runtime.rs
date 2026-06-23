@@ -264,11 +264,10 @@ impl JitRuntime {
 
         // Debug: log entry info for crash investigation
         #[cfg(target_arch = "x86_64")]
-        unsafe {
+        {
             let entry_addr = entry as usize;
             if entry_addr < 0x10000 {
-                // Write to a known memory location to detect which path crashed
-                std::ptr::write_volatile(&mut 0 as *mut u8, 0);
+                eprintln!("JIT BUG: entry {name} at invalid addr {entry_addr:#x}");
             }
         }
 
