@@ -338,8 +338,8 @@ pub enum ResolvedBuildParser {
 }
 
 /// `IN_PARSER=in` or `IN_PARSER=icore` forces the matching Core IR front (any file path).
-fn env_core_ir_parser_override() -> Option<ParserId> {
-    let s = std::env::var("IN_PARSER").ok()?;
+fn env_core_ir_parser_override(in_parser_env: Option<&str>) -> Option<ParserId> {
+    let s = in_parser_env?;
     if s.eq_ignore_ascii_case("in") {
         Some(ParserId::In)
     } else if s.eq_ignore_ascii_case("icore") {
@@ -388,6 +388,15 @@ fn parse_magic_parser_first_line(line: &str) -> Option<MagicParserDirective> {
 }
 
 pub fn resolve_parser_id(path: &Path, cli: ParserCli) -> ResolvedBuildParser {
+    let env_val = std::env::var("IN_PARSER").ok();
+    resolve_parser_id_with_env(path, cli, env_val.as_deref())
+}
+
+pub fn resolve_parser_id_with_env(
+    path: &Path,
+    cli: ParserCli,
+    in_parser_env: Option<&str>,
+) -> ResolvedBuildParser {
     match cli {
         ParserCli::In => ResolvedBuildParser::CoreIr(ParserId::In),
         ParserCli::Icore => ResolvedBuildParser::CoreIr(ParserId::Icore),
@@ -406,7 +415,7 @@ pub fn resolve_parser_id(path: &Path, cli: ParserCli) -> ResolvedBuildParser {
                     MagicParserDirective::DeferAuto => {}
                 }
             }
-            if let Some(id) = env_core_ir_parser_override() {
+            if let Some(id) = env_core_ir_parser_override(in_parser_env) {
                 return ResolvedBuildParser::CoreIr(id);
             }
             if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
@@ -515,9 +524,7 @@ pub fn parse_with_resolved(
 mod tests {
     use super::*;
     use std::path::Path;
-    use std::sync::Mutex;
 
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn temp_file_path(suffix: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
@@ -673,17 +680,9 @@ mod tests {
 
     #[test]
     fn magic_parser_auto_defers_to_in_parser_env() {
-        let _lock = ENV_LOCK.lock().expect("env lock");
         let path = temp_file_path("defer.swift");
         std::fs::write(&path, "#!in parser=auto\nfn main() -> void\n").expect("write temp");
-        // Rust 2024: mutating process environment is `unsafe` (see `set_var` docs).
-        unsafe {
-            std::env::set_var("IN_PARSER", "in");
-        }
-        let resolved = resolve_parser_id(&path, ParserCli::Auto);
-        unsafe {
-            std::env::remove_var("IN_PARSER");
-        }
+        let resolved = resolve_parser_id_with_env(&path, ParserCli::Auto, Some("in"));
         let _ = std::fs::remove_file(&path);
         assert!(matches!(
             resolved,
@@ -704,14 +703,10 @@ mod tests {
 
     #[test]
     fn unknown_magic_parser_value_falls_through_to_extension() {
-        let _lock = ENV_LOCK.lock().expect("env lock");
-        unsafe {
-            std::env::remove_var("IN_PARSER");
-        }
         let path = temp_file_path("unknown.xyz");
         std::fs::write(&path, "#!in parser=nope\n").expect("write temp");
         assert!(matches!(
-            resolve_parser_id(&path, ParserCli::Auto),
+            resolve_parser_id_with_env(&path, ParserCli::Auto, None),
             ResolvedBuildParser::CoreIr(ParserId::Icore)
         ));
         let _ = std::fs::remove_file(&path);
