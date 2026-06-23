@@ -202,35 +202,35 @@ impl JitRuntime {
         // For now, we support up to 6 args + return i64.
         match _args.len() {
             0 => {
-                let f: extern "C" fn() -> i64 = std::mem::transmute(entry);
-                Some(f())
+                let f: extern "C" fn() -> i64 = unsafe { std::mem::transmute(entry) };
+                Some(unsafe { f() })
             }
             1 => {
-                let f: extern "C" fn(i64) -> i64 = std::mem::transmute(entry);
-                Some(f(_args[0]))
+                let f: extern "C" fn(i64) -> i64 = unsafe { std::mem::transmute(entry) };
+                Some(unsafe { f(_args[0]) })
             }
             2 => {
-                let f: extern "C" fn(i64, i64) -> i64 = std::mem::transmute(entry);
-                Some(f(_args[0], _args[1]))
+                let f: extern "C" fn(i64, i64) -> i64 = unsafe { std::mem::transmute(entry) };
+                Some(unsafe { f(_args[0], _args[1]) })
             }
             3 => {
-                let f: extern "C" fn(i64, i64, i64) -> i64 = std::mem::transmute(entry);
-                Some(f(_args[0], _args[1], _args[2]))
+                let f: extern "C" fn(i64, i64, i64) -> i64 = unsafe { std::mem::transmute(entry) };
+                Some(unsafe { f(_args[0], _args[1], _args[2]) })
             }
             4 => {
-                let f: extern "C" fn(i64, i64, i64, i64) -> i64 = std::mem::transmute(entry);
-                Some(f(_args[0], _args[1], _args[2], _args[3]))
+                let f: extern "C" fn(i64, i64, i64, i64) -> i64 = unsafe { std::mem::transmute(entry) };
+                Some(unsafe { f(_args[0], _args[1], _args[2], _args[3]) })
             }
             5 => {
-                let f: extern "C" fn(i64, i64, i64, i64, i64) -> i64 = std::mem::transmute(entry);
-                Some(f(_args[0], _args[1], _args[2], _args[3], _args[4]))
+                let f: extern "C" fn(i64, i64, i64, i64, i64) -> i64 = unsafe { std::mem::transmute(entry) };
+                Some(unsafe { f(_args[0], _args[1], _args[2], _args[3], _args[4]) })
             }
             6 => {
                 let f: extern "C" fn(i64, i64, i64, i64, i64, i64) -> i64 =
-                    std::mem::transmute(entry);
-                Some(f(
-                    _args[0], _args[1], _args[2], _args[3], _args[4], _args[5],
-                ))
+                    unsafe { std::mem::transmute(entry) };
+                Some(unsafe {
+                    f(_args[0], _args[1], _args[2], _args[3], _args[4], _args[5])
+                })
             }
             _ => None,
         }

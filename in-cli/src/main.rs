@@ -1567,6 +1567,28 @@ fn cmd_compile(
 ) -> Result<()> {
     let source_path = resolve_invocation_path(cwd, path);
     let out_path = resolve_invocation_path(cwd, out);
+    // Auto-detect: if path is a directory with Cargo.toml, use the bin path
+    let source_path = if source_path.is_dir() {
+        let cargo_toml = source_path.join("Cargo.toml");
+        if cargo_toml.exists() {
+            let contents = std::fs::read_to_string(&cargo_toml)
+                .map_err(|e| InError::Message(format!("read Cargo.toml: {e}")))?;
+            extract_cargo_bin_path(&contents, &source_path)?
+        } else {
+            source_path
+        }
+    } else {
+        source_path
+    };
+    let auto_module_id = if module_id == "App" {
+        source_path
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string()
+    } else {
+        module_id.to_string()
+    };
     if !source_path.exists() {
         return Err(InError::Message(format!(
             "file not found: {}",
@@ -1580,7 +1602,7 @@ fn cmd_compile(
     }
     let request = OwnedCompileRequest {
         path: source_path,
-        module_id: module_id.to_string(),
+        module_id: auto_module_id,
         parser,
         target: compile_target_cli_to_owned(target),
         entry: entry.map(str::to_string),
