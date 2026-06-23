@@ -62,26 +62,30 @@ For comparison, native `cargo build --release` on the same project: 4200ms cold,
 
 ### JIT (MAP_JIT native execution)
 
-Added `--target jit` for in-memory native AArch64 execution. No object files, no linker — Core IR lowers directly to machine code in `mmap(MAP_JIT)` pages.
+Added `--target jit` for in-memory native AArch64 execution. No object files, no linker — Core IR lowers directly to machine code in `mmap(MAP_JIT)` pages. Linux support via `mprotect` path.
 
 | Benchmark | Bytecode | JIT | Go native | Speedup |
 |-----------|----------|-----|-----------|--------|
 | fib(35) compile+run | 16,500ms | 0.4ms | 130ms | **41,000x** vs bytecode, 325x vs Go |
 | add(40,2) compile+run | 9ms | 2.9ms | 36ms | 3x vs bytecode, 12x vs Go |
-| prime count(100) compile | 0.2ms | 0.2ms | — | parity |
+| fib(20) compile+run | 0.37ms | 0.75ms | — | 2x slower (overhead dominates small programs) |
+| Go add.go compile | — | 0.54ms | 290ms | **537x** faster than go build |
 
-JIT currently supports the scalar Core IR subset (integers, booleans, binary/return/if/while/call). Full IR coverage in progress.
+All `.in` examples (fib, factorial, sum, primes, collatz, gcd, even_odd), `.go`, `.swift`, `.rs` examples compile and execute via JIT with `--entry main`.
+
+Self-host JIT: 992 functions parsed, lowering in progress (struct/return/pattern coverage expanding). Bytecode self-host works (616ms cold, 22ms warm).
 
 ### Language coverage (Tree-sitter fronts)
 
-| Language | Compile | Execute | Example |
-|----------|---------|---------|---------|
-| `.in` | ✅ full | ✅ | while/for/if/fn/recursion |
-| `.rs` (Rust) | ✅ subsect | ✅ | Self-host 985 funcs |
-| `.go` | ✅ subsect | ✅ | add(a,b int) int |
-| `.swift` | ✅ subsect | ✅ | func add(a:Int) -> Int |
-| `.zig` | ✅ simple | ✅ | return 42 |
-| `.poly` (polyglot) | ✅ | ✅ | 33 languages eval |
+| Language | Compile | JIT | Execute | Example |
+|----------|---------|-----|---------|---------|
+| `.in` | ✅ full | ✅ | ✅ | while/for/if/fn/recursion/structs |
+| `.rs` (Rust) | ✅ subset | ✅ simple | ✅ | Self-host 992 funcs (bytecode), add_multiply (JIT) |
+| `.go` | ✅ subset | ✅ | ✅ | add(a,b int) int, Go types mapped to Core IR |
+| `.swift` | ✅ subset | ✅ | ✅ | func add(a:Int) -> Int, Swift call args handled |
+| `.zig` | ✅ simple | ✅ | ✅ | return 42 |
+| `.poly` (polyglot) | ✅ | — | ✅ | 33 languages eval |
+| C / C++ / ObjC / ObjC++ | ✅ | ✅ | ✅ | Tree-sitter fronts, scalar subset |
 
 ### Supported Languages (Tree-sitter parsers)
 
