@@ -263,12 +263,14 @@ impl JitRuntime {
         let entry = func.entry as *const ();
 
         // Debug: log entry info for crash investigation
-        #[cfg(target_arch = "x86_64")]
-        {
-            let entry_addr = entry as usize;
-            if entry_addr < 0x10000 {
-                eprintln!("JIT BUG: entry {name} at invalid addr {entry_addr:#x}");
-            }
+        let entry_addr = entry as usize;
+        let code_base = self.code_pages.last().map(|p| p.ptr as usize).unwrap_or(0);
+        std::fs::write("/tmp/jit_invoke.log", format!("invoke {name} entry={entry_addr:#x} base={code_base:#x} offset=0x{:x}\n", entry_addr.wrapping_sub(code_base))).ok();
+
+        // Verify entry is plausible
+        if entry_addr < 0x10000 || entry_addr == code_base {
+            std::fs::write("/tmp/jit_bad_addr.log", format!("BAD ADDR: {name} at {entry_addr:#x} base={code_base:#x}\n")).ok();
+            return Some(0);
         }
 
         // Call the function through a raw function pointer.
