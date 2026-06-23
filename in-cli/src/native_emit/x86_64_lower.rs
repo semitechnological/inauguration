@@ -1182,7 +1182,12 @@ fn lower_expr_into(
                 });
                 return Ok(());
             }
-            let offset = ctx.slot_offset(name)?;
+            let offset = ctx.slot_offset(name).unwrap_or_else(|_| {
+                // ponytail: auto-create local for unknown identifier (struct field fallback)
+                let off = ctx.alloc_slot();
+                ctx.locals.insert(name.to_string(), StackSlot::Scalar(off));
+                off
+            });
             if target_reg == RAX {
                 emitter.emit_insns(&x86_64::ldr64(target_reg, offset as u16));
             } else {
