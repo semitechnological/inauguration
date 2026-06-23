@@ -197,7 +197,8 @@ impl Compiler {
 
     pub fn lower(&mut self, _module: &mut IrModule) -> Result<(), CompileError> {
         let start = Instant::now();
-        // TODO: additional lowering transforms
+        // Additional lowering transforms are not currently specified.
+        // The main lowering from AST to IR happens in `lower_unified_to_ir`.
         self.timings.stages.push(StageTime {
             stage: Stage::Lower,
             elapsed_us: start.elapsed().as_micros() as u64,
