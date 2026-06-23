@@ -670,7 +670,8 @@ fn lower_function(
         lower_stmt(emitter, &mut ctx, stmt, pending_calls)?;
     }
 
-    // If no explicit return, emit default
+    // If no explicit return, emit default epilogue
+    if !ctx.emitted_return {
     if !ctx.emitted_return {
         if func.ret == Typ::Void {
             emitter.emit_insns(&x86_64::zero_reg(RAX));
@@ -1115,7 +1116,7 @@ fn lower_match(
             emitter.patch_u32(next_branch + 2, next_offset as u32);
             end_branches.push(end_branch);
         } else {
-            // ponytail: non-int pattern (enum variant, range, etc.) — extract vars, bind to 0
+            // ponytail: non-int pattern (enum variant, range, etc.) — extract vars, bind to 0, execute body
             let vars = extract_pattern_vars(&arm.pattern);
             for var in &vars {
                 if !ctx.locals.contains_key(var) {
@@ -1125,9 +1126,12 @@ fn lower_match(
             for stmt in &arm.body {
                 lower_stmt(emitter, ctx, stmt, pending_calls)?;
             }
-            let end_branch = emitter.len();
-            emitter.emit_insns(&x86_64::jmp_rel32(0));
-            end_branches.push(end_branch);
+            // Only branch to end if the body didn\'t return
+            if !ctx.emitted_return {
+                let end_branch = emitter.len();
+                emitter.emit_insns(&x86_64::jmp_rel32(0));
+                end_branches.push(end_branch);
+            }
         }
     }
 
