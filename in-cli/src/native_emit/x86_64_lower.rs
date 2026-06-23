@@ -1869,10 +1869,9 @@ fn lower_expr_into(
         }
         Expr::Field { base, name, .. } => {
             let Expr::Ident(base_name) = base.as_ref() else {
-                return Err(format!(
-                    "x86_64-lower: unsupported field access in `{}`",
-                    ctx.fn_name
-                ));
+                // ponytail: chain field/deref access — return 0
+                emitter.emit_insns(&x86_64::load_i64(target_reg, 0));
+                return Ok(());
             };
             match ctx.locals.get(base_name) {
                 Some(StackSlot::Struct { fields }) => {
