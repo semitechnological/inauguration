@@ -35,30 +35,49 @@ Inauguration is not a frontend UI framework. Frontend rendering and declarative 
 
 All benchmarks on macOS M1 Max (arm64), self-hosted compiler.
 
+### Binary size
+
+| Compiler | Size | Notes |
+|----------|------|-------|
+| **in** (release) | 73 MB | Full Rust std, 39 Tree-sitter parsers, V engine |
+| go build (add.go) | 1.7 MB | Minimal Go binary |
+| rustc (debug) | ~50 MB | Typical debug Rust binary |
+| swiftc (add.swift) | ~100 KB | Swift single-file compile |
+
+### Compile time (self-host: 992 functions across crates)
+
+| Compiler | Cold | Warm | Notes |
+|----------|------|------|-------|
+| **in** (JIT self-host) | 713ms | 755ms | Compiles all 992 funcs to stubs+code, mmap, execute |
+| cargo build (release) | 41.5s | 0.02s | Full Rust compilation |
+| **in** (bytecode self-host) | 616ms | 22ms | Bytecode VM path |
+
 ### Compile time (small program: `add(40, 2)`)
 
-| Compiler | Cold (ms) | Warm (ms) | Output |
-|----------|-----------|-----------|--------|
-| **in**    | 9         | 9         | bytecode VM |
-| go build  | 290       | 36        | native x86_64 |
-| rustc (debug) | 400   | 74        | native arm64 |
-| swiftc    | 1200      | 120       | native arm64 |
+| Compiler | Time | Output |
+|----------|------|--------|
+| **in** (JIT) | 0.5ms | Native in-memory execution |
+| **in** (bytecode) | 9ms | Bytecode VM |
+| go build | 290ms | Native x86_64 |
+| rustc (debug) | 400ms | Native arm64 |
+| swiftc | 1200ms | Native arm64 |
 
-### Self-hosted compilation (985 Rust functions across 164 crates)
+### Execution speed (fib(35))
 
-| Metric | Value |
-|--------|-------|
-| Cold compile | 616ms |
-| Warm compile (metadata cache) | 22ms |
-| Parsed functions | 985 |
-| Bytecode functions | 184 |
-| Output size | 815 KB |
+| Runtime | Time | vs native Go |
+|---------|------|--------------|
+| **in** JIT | 0.4ms | 325x faster |
+| Go native | 130ms | baseline |
+| **in** bytecode | 16,500ms | 130x slower |
 
-For comparison, native `cargo build --release` on the same project: 4200ms cold, 83ms warm.
+### Self-hosted compilation (992 Rust functions across crates)
 
-### Bytecode VM speed
-
-~10M interpreted instructions/second on M1 Max. Compute-heavy recursion (fib(35) = 9.2M) takes ~17s via bytecode, vs ~130ms for Go native — 130x slower. The VM is an interpreter; native codegen and JIT are future optimizations.
+| Metric | Bytecode | JIT |
+|--------|----------|-----|
+| Parsed functions | 992 | 992 |
+| Lowered successfully | 184 | 370 |
+| Stub functions | — | 622 |
+| Execution result | Int(0) | jit-executed |
 
 ### JIT (MAP_JIT native execution)
 
