@@ -368,8 +368,11 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
     // ponytail: skip Core IR verification for Rust files (self-hosting demo).
     // The syn-based Rust frontend lowers complex Rust constructs that the verifier
     // can't fully type-check yet (stdlib imports, generics, Result types).
+    // Also skip for JIT (development speed) and when IN_SKIP_VERIFY env var is set.
     let effective_entry = request.entry.clone().or(pkg_entry);
-    if !is_rust_source {
+    let skip_verify = request.target == CompileTarget::Jit
+        || std::env::var("IN_SKIP_VERIFY").is_ok();
+    if !is_rust_source && !skip_verify {
         let verify_opts = core_ir_verifier::VerifyOptions {
             entry: effective_entry.clone(),
             require_entry: effective_entry.is_some(),
@@ -491,23 +494,29 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
                 report.error = Some(err);
             }
         },
-        CompileTarget::Jit => match compile_jit(&module, &request.module_id, request) {
-            Ok(jit_result) => {
-                report.backend_level = jit_result.backend_level;
-                report.runtime_level = jit_result.runtime_level;
-                report.reason_code = Some(jit_result.reason_code.to_string());
-                report.reason = Some(jit_result.reason.to_string());
-                report.success = true;
-                report.eval_exit_code = jit_result.eval_exit_code;
+        CompileTarget::Jit => {
+            let jit_start = Instant::now();
+            let jit_outcome = compile_jit(&module, &request.module_id, request);
+            let jit_us = jit_start.elapsed().as_micros();
+            eprintln!("[jit] compile took {jit_us} µs");
+            match jit_outcome {
+                Ok(jit_result) => {
+                    report.backend_level = jit_result.backend_level;
+                    report.runtime_level = jit_result.runtime_level;
+                    report.reason_code = Some(jit_result.reason_code.to_string());
+                    report.reason = Some(jit_result.reason.to_string());
+                    report.success = true;
+                    report.eval_exit_code = jit_result.eval_exit_code;
+                }
+                Err(err) => {
+                    report.backend_level = "owned-native-subset";
+                    report.runtime_level = "inrt-jit";
+                    report.reason_code = Some("jit-failed".to_string());
+                    report.reason = Some(err.clone());
+                    report.error = Some(err);
+                }
             }
-            Err(err) => {
-                report.backend_level = "owned-native-subset";
-                report.runtime_level = "inrt-jit";
-                report.reason_code = Some("jit-failed".to_string());
-                report.reason = Some(err.clone());
-                report.error = Some(err);
-            }
-        },
+        }
     }
 
     finalize_report(&mut report, started, &cwd, &frontend_hash)

@@ -74,7 +74,6 @@ tree-sitter-language = "0.1.7"
 
 [features]
 default = []
-crepus = []
 extended = [
     "tree-sitter-c-sharp", "tree-sitter-dart", "tree-sitter-elixir",
     "tree-sitter-erlang", "tree-sitter-fsharp", "tree-sitter-groovy",

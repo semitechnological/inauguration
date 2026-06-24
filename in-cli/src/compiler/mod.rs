@@ -29,12 +29,6 @@ pub mod pipeline;
 pub mod rust_front;
 pub mod simple_front;
 pub mod tree_front;
-#[cfg(feature = "crepus")]
-pub mod crepus_emit;
-#[cfg(feature = "crepus")]
-pub mod crepus_front;
-#[cfg(feature = "crepus")]
-pub mod crepus_ir;
 pub mod mir;
 pub mod mir_emit;
 pub mod vb_boundary;

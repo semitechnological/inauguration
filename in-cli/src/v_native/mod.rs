@@ -1,3 +1,7 @@
+// SAFETY: All unsafe blocks call trivial FFI wrappers generated from V source.
+// The V-compiled functions accept/return plain integers or pointers to
+// Rust-owned buffers. No aliasing or lifetime invariants to maintain beyond
+// what Rust's type system already guarantees.
 #[cfg(has_v_native)]
 mod ffi {
     unsafe extern "C" {
