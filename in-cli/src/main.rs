@@ -1667,17 +1667,23 @@ fn cmd_emit_boot(
     // Optimize Core IR (inlining, constant folding)
     inauguration::core_opt::optimize(&mut module.decls);
 
-    // Lower to x86_64 machine code
-    let result = inauguration::native_emit::x86_64_lower::lower_module(&module, entry_name)
+    // Lower to x86_64 machine code via MIR bridge
+    // MIR provides offset-deferred representation for future optimization passes.
+    let (_mir, code) = inauguration::compiler::mir_lower::lower_boot_image(&module, entry_name)
         .map_err(|e| InError::Message(format!("lower: {e}")))?;
+    let result = inauguration::native_emit::x86_64_lower::X86_64CompileResult {
+        code,
+        entry_offset: 0,
+        exports: vec![],
+    };
 
     // Build the flat boot image: trampoline + kernel code
-    // The trampoline must be exactly 0x2000 bytes for the Multiboot1 layout
-    // (padded by `times 0x2000 - ($ - $$) db 0` in the asm source)
+    // The trampoline must be exactly 0x1000 bytes for the boot layout
+    // (padded by `times 0x1000 - ($ - $$) db 0` in the asm source)
     let tramp_size = trampoline_bytes.len();
-    if tramp_size != 0x2000 {
+    if tramp_size != 0x1000 {
         return Err(InError::Message(format!(
-            "trampoline size {tramp_size} != expected 8192 (0x2000)"
+            "trampoline size {tramp_size} != expected 4096 (0x1000)"
         )));
     }
 
