@@ -636,18 +636,22 @@ fn fetch_and_extract(
     Ok(())
 }
 
+fn hex_encode(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
 fn verify_archive_checksum(path: &Path, checksum: &ArtifactChecksum) -> Result<(), String> {
     let data = fs::read(path).map_err(|err| format!("read {}: {err}", path.display()))?;
     match checksum {
         ArtifactChecksum::Sha1Hex(expected) => verify_hex_digest(
             expected,
-            &format!("{:x}", sha1::Sha1::digest(&data)),
+            &hex_encode(&sha1::Sha1::digest(&data)),
             path,
             "sha1",
         ),
         ArtifactChecksum::Sha256Hex(expected) => verify_hex_digest(
             expected,
-            &format!("{:x}", sha2::Sha256::digest(&data)),
+            &hex_encode(&sha2::Sha256::digest(&data)),
             path,
             "sha256",
         ),
