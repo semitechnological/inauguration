@@ -242,6 +242,7 @@ pub fn parser_id_from_extension(ext: &str) -> Option<ParserId> {
         "cr" => Some(ParserId::Crystal),
         "odin" => Some(ParserId::Odin),
         "ha" => Some(ParserId::Hare),
+        #[cfg(feature = "crepus")]
         "crepus" => Some(ParserId::Crepus),
         "hc" => Some(ParserId::HolyC),
         _ => None,
