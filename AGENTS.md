@@ -6,9 +6,9 @@ Contributor guide for humans and coding agents working in `inauguration`.
 
 Ship an **ultrafast** compiler for **general object-oriented and C-type** languages: one **Core IR** and SIL pipeline, many fronts (C family via Tree-sitter, **`.in` / `.icore`**, Rust/Go/V lowers, Swift via **`swiftc`** and the in-tree **subset**). Improve these layers together:
 
-1. **`in-cli`**: **`lower_core`**, **`core_ir`**, **`compiler::tree_front`** (Tree-sitter + trivial C/C++/ObjC++ bodies where wired), **`parser_registry`**, **`swift_subset`** + **`native_swift_sil`**, **`sil_emit`**, embedded **`hybrid_*`** crates, **`in`** CLI, hotreload daemon, **`protocol-gen`**
+1. **`in-cli`**: **`lower_core`**, **`core_ir`**, **`compiler::tree_front`** (Tree-sitter + trivial C/C++/ObjC++ bodies where wired), **`compiler::crepus_front`** (Crepuscularity template plugin), **`parser_registry`**, **`swift_subset`** + **`native_swift_sil`**, **`sil_emit`**, embedded **`hybrid_*`** crates, **`in`** CLI, hotreload daemon, **`protocol-gen`**
 2. **`compiler/rust-driver`**: pipeline, orchestration, **`hybrid-sil`** and related crates, batch path performance
-3. **`runtime/*`**: SwiftUI reload latency, preview host apply semantics, thin daemon wrappers and tests
+3. **`compiler::crepus_*`**: Crepuscularity View IR plugin pipeline (native codegen, template compilation)
 
 ## Working rules
 
@@ -27,8 +27,6 @@ in test
 ```
 
 Use an `in` binary built from this repo. From a checkout, run **`in update`** (alias **`in self-update`**) to reinstall via `cargo install --path in-cli --locked` (honours **`IN_INSTALL_DIR`** like `./install.sh`). Outside a checkout, `in update` falls back to remote `install.sh` from `https://raw.githubusercontent.com/${IN_REPO:-semitechnological/inauguration}/master/install.sh` on Unix hosts. You can still use `./install.sh` or `cargo install --path in-cli --force` manually. A stale globally installed `in` (older than `in-cli` in your tree) can fail mid-suite with `No such file or directory` because `in test` must match the workspace layout.
-
-Set **`IN_TEST_SKIP_SWIFT=1`** (or **`true`**, case-insensitive) to skip the `runtime/swift-preview-host` `swift package clean` and `swift test` steps during `in test` when Swift is unavailable; all other test steps still run.
 
 If touching benchmarks or runtime timing, also run:
 
@@ -52,8 +50,8 @@ in bench
 - `in-cli/src/compiler/*`: multi-front driver, **icore** JSON → Core IR, **tree_front** (Tree-sitter polyglot + dedicated fronts)
 - `compiler/rust-driver/crates/pipeline`: stage model + artifact ingestion
 - `compiler/rust-driver/crates/sil`: SIL analysis/transforms
-- `runtime/hotreload-daemon`: watch/decision/metrics loop (implementation lives in `in-cli`; crate is wrapper + tests)
-- `runtime/swift-preview-host`: Swift package; patch apply semantics against generated protocol models
+- `in-cli/src/hotreload/`: watch/decision/metrics loop daemon (runs as `in daemon`)
+- `in-cli/src/compiler/crepus_*`: Crepuscularity template compilation through Core IR pipeline
 - `in-cli` (remainder): **`main`**, plugins, **`in test`**, preview clients, hybrid embedding
 
 ## Plugin policy

@@ -35,3 +35,6 @@ pub mod crepus_ir;
 pub mod mir;
 pub mod mir_emit;
 pub mod vb_boundary;
+pub mod crepus_emit;
+pub mod crepus_front;
+pub mod crepus_ir;
