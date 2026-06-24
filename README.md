@@ -5,13 +5,11 @@
 - **`.in` language**: capability-aware systems and orchestration language with canonical and human-friendly forms.
 - **General compiler pipeline**: Tree-sitter polyglot frontends → Core IR → MIR → native_emit/JIT. No LLVM, no bytecode VM.
 - **`in` CLI**: build, inspect, graph, package, test, run, and developer workflow.
-- **`in` CLI**: build, inspect, graph, package, test, run, and developer workflow.
 - **Agent-readable facts**: JSON reports for parser decisions, imports, capabilities, effects, call graphs, diagnostics, and timing.
-- **Crepuscularity plugin** (optional, `--features crepus`): compile `.crepus` templates through Core IR → native codegen (SwiftUI/Compose/HTML)
-- **MIR layer**: Zig-inspired Machine IR between Core IR and native emit for relocatable JIT code
+- **MIR layer**: Machine IR between Core IR and native emit for relocatable JIT code
 - **Hot reload daemon**: in-process file watcher + patch planner via `in daemon`
 
-Inauguration owns the language, compiler infrastructure, Core IR, backend contracts, orchestration facts, and runtime-boundary tooling. Frontend rendering belongs in sibling projects such as Crepuscularity.
+Inauguration owns the language, compiler infrastructure, Core IR, backend contracts, orchestration facts, and runtime-boundary tooling. UI rendering belongs in sibling projects such as Crepuscularity.
 
 ## Install
 
@@ -27,11 +25,7 @@ cd inauguration
 ./install.sh
 ```
 
-With crepuscularity template plugin:
 
-```bash
-cargo install inauguration --features crepus
-```
 
 ## Adding Packages
 
@@ -71,9 +65,9 @@ Supported ecosystems: `cargo:` (crates.io), `npm:` (npm registry), `pypi:` (PyPI
 
 | Directory | What |
 |-----------|------|
-| `in-cli` | CLI, `.in` parser, Core IR, MIR, compile reporting, graph/package commands, JIT/native backend, hotreload daemon, protocol gen, crepuscularity plugin |
+| `in-cli` | CLI, `.in` parser, Core IR, MIR, compile reporting, graph/package commands, JIT/native backend, hotreload daemon, protocol gen |
 | `compiler\/rust-driver` | orchestration pipeline, stage model, IR analysis, batch path |
-| `plugins/registry` | project accelerators (crepuscularity, aurorality) |
+| `plugins/registry` | project accelerators (aurorality) |
 | `docs/architecture` | language, compiler, interop, roadmap docs |
 | `scripts` | validation, generation, install, workflow |
 
@@ -120,21 +114,34 @@ Supported ecosystems: `cargo:` (crates.io), `npm:` (npm registry), `pypi:` (PyPI
 | Odin | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Hare | ✓ | ✓ | ✓ | ✓ | — |
 | HolyC | ✓ | ✓ | — | — | — |
-| Crepus🅡 | ✓ | — | — | — | ✓ |
 
-*\* Objective-C: typecheck partial. 🅡 requires `--features crepus`.*
+*\* Objective-C: typecheck partial.*
 
-## Crepuscularity Plugin (optional)
+## Performance
 
-When built with `--features crepus`, `in` can compile `.crepus` templates through
-the Core IR pipeline:
+Pipeline: **Source → UnifiedModule → native_emit/JIT** (Core IR verifier skipped for JIT).
+
+### Compile time (JIT)
+
+| Workload | Cold | Warm |
+|----------|------|------|
+| `fn main() -> Int { return 42 }` | **0.42ms** | **0.08ms** |
+| fib(35) recursive (2 functions) | **37.8ms** | **0.12ms** |
+| Self-host: `in-cli/src/lib.rs` (992 functions) | **666ms** | — |
+
+### Benchmark suite (`cargo bench`)
+
+| Benchmark | Time |
+|-----------|------|
+| `parse_textual_sil` / representative | 50.3 µs |
+| `remove_debug_insts` / representative | 25.9 µs |
+| `extract_call_graph` / representative | 26.2 µs |
+| `extract_call_graph` / multi_function | 6.8 µs |
+| `core_opt_optimize` | 67.9 µs |
 
 ```bash
-in build --path app.crepus --module-id MyView
+cd in-cli && cargo bench
 ```
-
-Output targets: SwiftUI, Jetpack Compose, HTML. The plugin routes `.crepus` files
-through a View IR envelope (`CrepusIr`) shared with the crepuscularity project.
 
 ## MIR (Machine IR) Layer
 
@@ -144,4 +151,4 @@ machine instructions but with symbolic operands and unresolved offsets. This
 makes code relocatable: ideal for JIT mmap, where offsets are patched at the
 last moment before execution.
 
-Pipeline: **Source → Core IR → MIR → native_emit → JIT**.0
+Pipeline: **Source → Core IR → MIR → native_emit → JIT**.
