@@ -174,7 +174,7 @@ See [docs/architecture/in-language.md](docs/architecture/in-language.md) for gra
 
 ## Performance
 
-macOS M1 Max (arm64), self-hosted compiler.
+macOS M5 Pro (arm64), self-hosted compiler.
 
 ### Binary size
 
