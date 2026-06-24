@@ -62,7 +62,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Build in binary
-        run: cargo build --release --bin in
+        run: cargo build --release --bin in --features extended
         working-directory: in-cli
       - name: Add in binary to PATH
         run: echo "$PWD/in-cli/target/release" >> "$GITHUB_PATH"
@@ -80,7 +80,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Build in binary
-        run: cargo build --release --bin in
+        run: cargo build --release --bin in --features extended
         working-directory: in-cli
       - name: Add in binary to PATH
         run: echo "$PWD/in-cli/target/release" >> "$GITHUB_PATH"
@@ -98,7 +98,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Build in binary
-        run: cargo build --release --bin in
+        run: cargo build --release --bin in --features extended
         working-directory: in-cli
       - name: Add in binary to PATH
         run: echo "$PWD/in-cli/target/release" >> "$GITHUB_PATH"
@@ -115,7 +115,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Build in binary
-        run: cargo build --release --bin in
+        run: cargo build --release --bin in --features extended
         working-directory: in-cli
       - name: Add in binary to PATH
         run: echo "$PWD/in-cli/target/release" >> "$GITHUB_PATH"
@@ -137,7 +137,7 @@ jobs:
         with:
           go-version: stable
       - name: Build in binary
-        run: cargo build --release --bin in
+        run: cargo build --release --bin in --features extended
         working-directory: in-cli
       - name: Add in binary to PATH
         run: echo "$PWD/in-cli/target/release" >> "$GITHUB_PATH"

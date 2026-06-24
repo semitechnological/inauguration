@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Swift is now a Tree-sitter Core IR front like all other languages.
-# The `in build` command works directly without any env vars.
+# Swift is a Tree-sitter Core IR front behind '--features extended'.
+# Skip if the `in` binary doesn't include the Swift parser.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+
+"${IN_BIN:-in}" compile --help 2>/dev/null | grep -q swift || {
+  echo "[check-native-subset-sample] Swift parser not available (rebuild with --features extended); skipping"
+  exit 0
+}
 
 for sample in \
   apps/native-subset-sample/App.swift \

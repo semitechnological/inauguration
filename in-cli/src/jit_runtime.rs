@@ -164,21 +164,13 @@ impl CodePage {
         unsafe {
             sys_icache_invalidate(self.ptr as *const std::ffi::c_void, self.used);
         }
-        #[cfg(any(target_os = "linux", target_os = "android"))]
+        #[cfg(all(any(target_os = "linux", target_os = "android"), target_arch = "aarch64"))]
         unsafe {
-            // Linux ARM64: explicit cache flush via system call
-            // x86_64: hardware manages icache coherency, no flush needed
-            #[cfg(target_arch = "aarch64")]
-            libc::sysconf(libc::_SC_PAGE_SIZE); // touch libc
-            // Use C library's __clear_cache if available on ARM64
-            #[cfg(target_arch = "aarch64")]
+            libc::sysconf(libc::_SC_PAGE_SIZE);
             extern "C" {
                 fn __clear_cache(start: *const u8, end: *const u8);
             }
-            #[cfg(target_arch = "aarch64")]
-            unsafe {
-                __clear_cache(self.ptr, self.ptr.add(self.used));
-            }
+            __clear_cache(self.ptr, self.ptr.add(self.used));
         }
         make_executable(self.ptr, self.size);
     }
