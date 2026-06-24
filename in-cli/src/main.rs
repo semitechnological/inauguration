@@ -499,9 +499,7 @@ fn run() -> Result<()> {
             None => cmd_package(&invocation_cwd, &path, json),
         },
         Commands::Languages { json } => cmd_languages(json),
-        Commands::Dev => {
-            cmd_dev(&workspace_root(invocation_cwd.clone())?)
-        }
+        Commands::Dev => cmd_dev(&workspace_root(invocation_cwd.clone())?),
         Commands::Ocaml { path } => cmd_ocaml(&invocation_cwd, &path),
         Commands::Run {
             watch_root,
@@ -1153,12 +1151,13 @@ fn run_pipeline_for_path(
     if verbose {
         println!("Compiled {} in {:.3}ms", path.display(), elapsed_ms);
         println!("  target: jit");
-        println!("  functions: {} parsed, {} typed", report.parsed_function_count, report.typed_function_count);
+        println!(
+            "  functions: {} parsed, {} typed",
+            report.parsed_function_count, report.typed_function_count
+        );
     }
     Ok(())
 }
-
-
 
 fn find_package_root(path: &Path) -> Option<PathBuf> {
     let mut current = if path.is_dir() {
@@ -2096,10 +2095,10 @@ fn infer_eval_parser(code: &str) -> parser_registry::ParserId {
         // Check for Rust-specific return types
         let rest =
             trimmed.trim_start_matches(|c: char| c.is_alphanumeric() || c == ' ' || c == '!');
-        if let Some(rest) = rest.strip_prefix("(") {
-            if rest.contains("println!") || rest.contains("let mut ") {
-                return parser_registry::ParserId::Rust;
-            }
+        if let Some(rest) = rest.strip_prefix("(")
+            && (rest.contains("println!") || rest.contains("let mut "))
+        {
+            return parser_registry::ParserId::Rust;
         }
         // .in has print() as builtin; Rust has println!
         if trimmed.contains("println!(") {
@@ -2545,13 +2544,13 @@ fn split_polyglot_blocks(code: &str) -> Vec<(&str, String)> {
 
     for line in code.lines() {
         if let Some(lang) = line.strip_prefix("## ") {
-            if let Some(lang) = current_lang.take() {
-                if !current_block.trim().is_empty() {
-                    blocks.push((lang, std::mem::take(&mut current_block)));
-                }
+            if let Some(lang) = current_lang.take()
+                && !current_block.trim().is_empty()
+            {
+                blocks.push((lang, std::mem::take(&mut current_block)));
             }
             // Map polyglot names to parser ids (first word only)
-            let lang_word = lang.trim().split_whitespace().next().unwrap_or("");
+            let lang_word = lang.split_whitespace().next().unwrap_or("");
             let lang = match lang_word.to_lowercase().as_str() {
                 "python" | "py" => "python",
                 "rust" | "rs" => "rust",
@@ -2596,10 +2595,10 @@ fn split_polyglot_blocks(code: &str) -> Vec<(&str, String)> {
             current_block.push('\n');
         }
     }
-    if let Some(lang) = current_lang {
-        if !current_block.trim().is_empty() {
-            blocks.push((lang, current_block));
-        }
+    if let Some(lang) = current_lang
+        && !current_block.trim().is_empty()
+    {
+        blocks.push((lang, current_block));
     }
     blocks
 }
@@ -2681,11 +2680,12 @@ fn extract_cargo_bin_path(contents: &str, dir: &Path) -> Result<PathBuf> {
             in_bin = true;
         } else if trimmed.starts_with("[[") {
             in_bin = false;
-        } else if in_bin && trimmed.starts_with("path") {
-            if let Some(val) = trimmed.split('=').nth(1) {
-                let path_str = val.trim().trim_matches('"');
-                return Ok(dir.join(path_str));
-            }
+        } else if in_bin
+            && trimmed.starts_with("path")
+            && let Some(val) = trimmed.split('=').nth(1)
+        {
+            let path_str = val.trim().trim_matches('"');
+            return Ok(dir.join(path_str));
         }
     }
     // Fallback: src/main.rs
@@ -3144,7 +3144,6 @@ fn toolchain_test_step_names() -> [&'static str; 3] {
         "protocol models (scripts/check-protocol-models.sh)",
         "compiler/rust-driver (cargo test --all)",
         "in-cli (cargo test)",
-
     ]
 }
 
@@ -3420,8 +3419,6 @@ fn cmd_update_remote() -> Result<()> {
         ))
     }
 }
-
-
 
 fn find_tool_path(tool: &str) -> Option<String> {
     let out = Command::new("which").arg(tool).output().ok()?;
@@ -4940,14 +4937,11 @@ mod tests {
         assert!(plans[0].print_result);
     }
 
-
     #[test]
     fn doctor_update_mode_reports_checkout_or_remote() {
         assert!(super::doctor_update_mode_text(true).contains("checkout"));
         assert!(super::doctor_update_mode_text(false).contains("remote install script"));
     }
-
-
 
     #[cfg(unix)]
     #[test]

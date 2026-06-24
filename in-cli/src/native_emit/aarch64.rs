@@ -232,5 +232,3 @@ impl CodeEmitter {
         self.bytes[start..start + 4].copy_from_slice(&insn.to_le_bytes());
     }
 }
-
-

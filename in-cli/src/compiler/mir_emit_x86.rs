@@ -80,12 +80,12 @@ fn emit_function(func: &MirFunction, code: &mut Vec<u8>) -> Result<(), String> {
 
 fn vreg(r: u32) -> Result<u8, String> {
     match r {
-        0 => Ok(0),  // rax
-        1 => Ok(3),  // rbx
-        2 => Ok(1),  // rcx
-        3 => Ok(7),  // rdi
-        4 => Ok(6),  // rsi
-        5 => Ok(0),  // r8 → fallback to rax
+        0 => Ok(0), // rax
+        1 => Ok(3), // rbx
+        2 => Ok(1), // rcx
+        3 => Ok(7), // rdi
+        4 => Ok(6), // rsi
+        5 => Ok(0), // r8 → fallback to rax
         _ => Err(format!("out of vregs: {}", r)),
     }
 }
@@ -138,8 +138,7 @@ fn emit_inst(inst: &MirInst, code: &mut Vec<u8>) -> Result<(), String> {
             }
         }
         MirOp::Sub => {
-            if let [MirOperand::Reg(d), MirOperand::Reg(a), MirOperand::Imm(i)] =
-                &inst.operands[..]
+            if let [MirOperand::Reg(d), MirOperand::Reg(a), MirOperand::Imm(i)] = &inst.operands[..]
             {
                 let rd = vreg(*d)?;
                 code.extend_from_slice(&x64::mov_rr(rd, vreg(*a)?));
@@ -147,15 +146,14 @@ fn emit_inst(inst: &MirInst, code: &mut Vec<u8>) -> Result<(), String> {
                     code.push(0x48);
                     code.push(0x83);
                     code.push(0xe8 | rd);
-                    code.push(*i as u8 & 0xff); // sub rd, imm8
+                    code.push(*i as u8); // sub rd, imm8
                 } else {
                     code.extend_from_slice(&x64::sub_rmi32(rd, *i as i32));
                 }
             }
         }
         MirOp::Mul => {
-            if let [MirOperand::Reg(d), MirOperand::Reg(a), MirOperand::Reg(b)] =
-                &inst.operands[..]
+            if let [MirOperand::Reg(d), MirOperand::Reg(a), MirOperand::Reg(b)] = &inst.operands[..]
             {
                 let rd = vreg(*d)?;
                 code.extend_from_slice(&x64::mov_rr(rd, vreg(*a)?));
@@ -163,8 +161,7 @@ fn emit_inst(inst: &MirInst, code: &mut Vec<u8>) -> Result<(), String> {
             }
         }
         MirOp::And => {
-            if let [MirOperand::Reg(d), MirOperand::Reg(a), MirOperand::Reg(b)] =
-                &inst.operands[..]
+            if let [MirOperand::Reg(d), MirOperand::Reg(a), MirOperand::Reg(b)] = &inst.operands[..]
             {
                 let rd = vreg(*d)?;
                 code.extend_from_slice(&x64::mov_rr(rd, vreg(*a)?));
@@ -176,8 +173,7 @@ fn emit_inst(inst: &MirInst, code: &mut Vec<u8>) -> Result<(), String> {
             }
         }
         MirOp::Or => {
-            if let [MirOperand::Reg(d), MirOperand::Reg(a), MirOperand::Reg(b)] =
-                &inst.operands[..]
+            if let [MirOperand::Reg(d), MirOperand::Reg(a), MirOperand::Reg(b)] = &inst.operands[..]
             {
                 let rd = vreg(*d)?;
                 code.extend_from_slice(&x64::mov_rr(rd, vreg(*a)?));
@@ -188,8 +184,7 @@ fn emit_inst(inst: &MirInst, code: &mut Vec<u8>) -> Result<(), String> {
             }
         }
         MirOp::Xor => {
-            if let [MirOperand::Reg(d), MirOperand::Reg(a), MirOperand::Reg(b)] =
-                &inst.operands[..]
+            if let [MirOperand::Reg(d), MirOperand::Reg(a), MirOperand::Reg(b)] = &inst.operands[..]
             {
                 let rd = vreg(*d)?;
                 code.extend_from_slice(&x64::mov_rr(rd, vreg(*a)?));
@@ -224,7 +219,10 @@ fn emit_inst(inst: &MirInst, code: &mut Vec<u8>) -> Result<(), String> {
         MirOp::Nop => {}
         MirOp::Comment(_) => {}
         _ => {
-            return Err(format!("mir: op {:?} not yet supported in x86_64 emitter", inst.op));
+            return Err(format!(
+                "mir: op {:?} not yet supported in x86_64 emitter",
+                inst.op
+            ));
         }
     }
     Ok(())

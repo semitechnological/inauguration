@@ -434,7 +434,7 @@ fn collect_functions(module: &UnifiedModule) -> Result<HashMap<String, FunctionI
     }
     // Build disambiguation map: original name → unique name
     let mut name_map: HashMap<String, String> = HashMap::new();
-    for (unique, _func) in &functions {
+    for unique in functions.keys() {
         // Strip the __dup suffix to get original
         let orig = unique.split("__dup").next().unwrap_or(unique).to_string();
         name_map.insert(orig, unique.clone());
@@ -860,6 +860,7 @@ fn alloc_slot_for_ctx(ctx: &mut LowerCtx<'_>) -> u32 {
     ctx.alloc_slot()
 }
 
+#[allow(clippy::only_used_in_recursion)]
 fn alloc_nested_struct_slots(
     ctx: &mut LowerCtx<'_>,
     struct_name: &str,

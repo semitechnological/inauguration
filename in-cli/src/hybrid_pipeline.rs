@@ -16,13 +16,11 @@ pub enum PipelineError {
     InvalidFrontendArtifact(#[from] serde_json::Error),
 }
 
-
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedFrontendArtifact {
     pub textual_sil: Option<String>,
 }
-
 
 fn textual_sil_from_value(value: &Value) -> Option<String> {
     let s = value
@@ -54,7 +52,6 @@ pub struct StageTimings {
     pub wave_us: u64,
     pub pipeline_us: u64,
 }
-
 
 #[allow(dead_code)]
 pub async fn run_wave_with_timings_from_frontend(
@@ -143,7 +140,6 @@ mod tests {
         assert!(timings.wave_us <= 50_000_000);
         assert_eq!(timings.pipeline_us, timings.wave_us);
     }
-
 
     #[test]
     fn parses_icore_bundle_with_embedded_sil() {

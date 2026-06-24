@@ -86,33 +86,49 @@ pub struct MirInst {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MirOp {
     // ── Data movement ──────────────────────────────────────────
-    Mov,    // reg, src
-    Load,   // reg, mem
-    Store,  // mem, reg
-    Lea,    // reg, mem (load effective address)
+    Mov,   // reg, src
+    Load,  // reg, mem
+    Store, // mem, reg
+    Lea,   // reg, mem (load effective address)
 
     // ── Arithmetic ─────────────────────────────────────────────
-    Add, Sub, Mul, Div,
-    And, Or, Xor,
-    Shl, Shr,
-    Not, Neg,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    And,
+    Or,
+    Xor,
+    Shl,
+    Shr,
+    Not,
+    Neg,
 
     // ── Float ──────────────────────────────────────────────────
-    FAdd, FSub, FMul, FDiv,
-    FMov,  // float reg, float reg/src
-    FCvt,  // int ↔ float conversion
+    FAdd,
+    FSub,
+    FMul,
+    FDiv,
+    FMov, // float reg, float reg/src
+    FCvt, // int ↔ float conversion
 
     // ── Control flow ───────────────────────────────────────────
-    Call,   // target, [args...]
-    Ret,    // [value]
-    Jmp,    // label
-    Jz,     // label (jump if zero)
-    Jnz,    // label
-    Je, Jne, Jl, Jle, Jg, Jge,
-    Cmp,    // left, right (sets flags)
+    Call, // target, [args...]
+    Ret,  // [value]
+    Jmp,  // label
+    Jz,   // label (jump if zero)
+    Jnz,  // label
+    Je,
+    Jne,
+    Jl,
+    Jle,
+    Jg,
+    Jge,
+    Cmp, // left, right (sets flags)
 
     // ── Stack ──────────────────────────────────────────────────
-    Push, Pop,
+    Push,
+    Pop,
     Alloca, // size → reg (stack allocation)
 
     // ── Function prologue/epilogue ─────────────────────────────
@@ -165,6 +181,12 @@ pub enum RelocKind {
     Rel32,
 }
 
+impl Default for MirModule {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MirModule {
     pub fn new() -> Self {
         Self {
@@ -198,20 +220,32 @@ impl MirModule {
                     match typed_op {
                         TypedOp::Call(target) => {
                             if !func_names.contains(&target.as_str()) {
-                                errors.push(format!("unresolved call target `{target}` in `{}`", func.name));
+                                errors.push(format!(
+                                    "unresolved call target `{target}` in `{}`",
+                                    func.name
+                                ));
                             }
                         }
                         TypedOp::Branch(target) => {
                             if !func_names.contains(&target.as_str()) {
-                                errors.push(format!("unresolved branch target `{target}` in `{}`", func.name));
+                                errors.push(format!(
+                                    "unresolved branch target `{target}` in `{}`",
+                                    func.name
+                                ));
                             }
                         }
                         TypedOp::Return(var) => {
                             if func.return_type.is_some() && var.is_none() {
-                                errors.push(format!("function `{}` has return type but empty return", func.name));
+                                errors.push(format!(
+                                    "function `{}` has return type but empty return",
+                                    func.name
+                                ));
                             }
                             if func.return_type.is_none() && var.is_some() {
-                                errors.push(format!("function `{}` is void but returns a value", func.name));
+                                errors.push(format!(
+                                    "function `{}` is void but returns a value",
+                                    func.name
+                                ));
                             }
                         }
                         _ => {}
@@ -219,17 +253,33 @@ impl MirModule {
                 }
             }
         }
-        if errors.is_empty() { Ok(()) } else { Err(errors) }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
     }
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
 pub fn mir(op: MirOp, operands: Vec<MirOperand>) -> MirInst {
-    MirInst { op, operands, offset: 0 }
+    MirInst {
+        op,
+        operands,
+        offset: 0,
+    }
 }
 
-pub fn vreg(id: u32) -> VReg { id }
-pub fn imm(v: i64) -> MirOperand { MirOperand::Imm(v) }
-pub fn label(name: &str) -> MirOperand { MirOperand::Label(name.to_string()) }
-pub fn global(name: &str) -> MirOperand { MirOperand::Global(name.to_string()) }
+pub fn vreg(id: u32) -> VReg {
+    id
+}
+pub fn imm(v: i64) -> MirOperand {
+    MirOperand::Imm(v)
+}
+pub fn label(name: &str) -> MirOperand {
+    MirOperand::Label(name.to_string())
+}
+pub fn global(name: &str) -> MirOperand {
+    MirOperand::Global(name.to_string())
+}

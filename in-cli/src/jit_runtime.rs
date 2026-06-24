@@ -199,6 +199,12 @@ impl Drop for CodePage {
     }
 }
 
+impl Default for JitRuntime {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl JitRuntime {
     pub fn new() -> Self {
         Self {
@@ -311,7 +317,9 @@ impl JitRuntime {
             6 => {
                 let f: extern "C" fn(i64, i64, i64, i64, i64, i64) -> i64 =
                     unsafe { std::mem::transmute(entry) };
-                Some(f(_args[0], _args[1], _args[2], _args[3], _args[4], _args[5]))
+                Some(f(
+                    _args[0], _args[1], _args[2], _args[3], _args[4], _args[5],
+                ))
             }
             _ => None,
         }

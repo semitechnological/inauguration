@@ -72,16 +72,30 @@ fn emit_inst(inst: &MirInst, code: &mut Vec<u8>) -> Result<(), String> {
             let (a, b) = (inst.operands.get(1), inst.operands.get(2));
             match (a, b) {
                 (Some(MirOperand::Reg(r1)), Some(MirOperand::Reg(r2))) => {
-                    emit_u32(code, aarch64::add_reg64(
-                        inst.operands.first().map_or(0, |o| match o { MirOperand::Reg(r) => *r as u8, _ => 0 }),
-                        *r1 as u8, *r2 as u8,
-                    ));
+                    emit_u32(
+                        code,
+                        aarch64::add_reg64(
+                            inst.operands.first().map_or(0, |o| match o {
+                                MirOperand::Reg(r) => *r as u8,
+                                _ => 0,
+                            }),
+                            *r1 as u8,
+                            *r2 as u8,
+                        ),
+                    );
                 }
                 (Some(MirOperand::Reg(r1)), Some(MirOperand::Imm(i))) => {
-                    emit_u32(code, aarch64::add_imm64(
-                        inst.operands.first().map_or(0, |o| match o { MirOperand::Reg(r) => *r as u8, _ => 0 }),
-                        *r1 as u8, *i as u16,
-                    ));
+                    emit_u32(
+                        code,
+                        aarch64::add_imm64(
+                            inst.operands.first().map_or(0, |o| match o {
+                                MirOperand::Reg(r) => *r as u8,
+                                _ => 0,
+                            }),
+                            *r1 as u8,
+                            *i as u16,
+                        ),
+                    );
                 }
                 _ => return Err("unsupported add operands".into()),
             }
@@ -90,10 +104,17 @@ fn emit_inst(inst: &MirInst, code: &mut Vec<u8>) -> Result<(), String> {
             let (a, b) = (inst.operands.get(1), inst.operands.get(2));
             match (a, b) {
                 (Some(MirOperand::Reg(r1)), Some(MirOperand::Imm(i))) => {
-                    emit_u32(code, aarch64::sub_imm64(
-                        inst.operands.first().map_or(0, |o| match o { MirOperand::Reg(r) => *r as u8, _ => 0 }),
-                        *r1 as u8, *i as u16,
-                    ));
+                    emit_u32(
+                        code,
+                        aarch64::sub_imm64(
+                            inst.operands.first().map_or(0, |o| match o {
+                                MirOperand::Reg(r) => *r as u8,
+                                _ => 0,
+                            }),
+                            *r1 as u8,
+                            *i as u16,
+                        ),
+                    );
                 }
                 _ => return Err("unsupported sub operands".into()),
             }
