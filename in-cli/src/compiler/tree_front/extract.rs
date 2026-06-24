@@ -222,7 +222,7 @@ pub fn parse_polyglot_file(id: ParserId, path: &Path) -> Result<UnifiedModule, S
     }
 }
 
-fn dispatch(id: ParserId, path: &Path, src: &str) -> Result<UnifiedModule, String> {
+fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, String> {
     match id {
         ParserId::C => parse_lang(
             try_lang_for(ParserId::C).ok_or_else(|| {

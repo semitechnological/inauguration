@@ -144,7 +144,7 @@ impl<'a> LowerCtx<'a> {
                     vec![("val".into(), Typ::Int)]
                 });
                 let mut slots = HashMap::new();
-                for (field, field_ty) in fields {
+                for (field, _field_ty) in fields {
                     // ponytail: all struct fields map to scalar slots
                     slots.insert(field.clone(), self.alloc_slot());
                 }
@@ -621,7 +621,7 @@ fn lower_function(
     is_interrupt: bool,
 ) -> Result<(), String> {
     // Validate return type and store for use in Return handling
-    let ret_is_struct = matches!(&func.ret, Typ::Named(_) | Typ::Array(_));
+    let _ret_is_struct = matches!(&func.ret, Typ::Named(_) | Typ::Array(_));
     match &func.ret {
         Typ::Int | Typ::Bool | Typ::Float | Typ::String | Typ::Void | Typ::Named(_) => {}
         _ => {
@@ -799,6 +799,7 @@ fn lower_stmt(
     stmt: &Stmt,
     pending_calls: &mut Vec<PendingCall>,
 ) -> Result<(), String> {
+    #[allow(unreachable_patterns)]
     match stmt {
         Stmt::Return(expr) => {
             if let Some(expr) = expr {
@@ -1603,16 +1604,14 @@ fn lower_expr_into(
                     return Ok(());
                 }
                 "outb" => {
-                    // outb(port: Int, value: Int)  → mov dx, port(rdi); mov al, value(rsi); out dx, al
+                    // outb(port: Int, value: Int)  → mov dx, port; mov al, value; out dx, al
                     if args.len() >= 2 {
-                        lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
+                        // Use RBX (callee-saved) for port so function calls in args[1] don't clobber it
+                        lower_expr_into(emitter, ctx, &args[0], RBX, pending_calls)?;
                         lower_expr_into(emitter, ctx, &args[1], RSI, pending_calls)?;
-                        // mov dx, di (args[0] → port → dx)
-                        emitter.emit_bytes(&[0x66, 0x89, 0xFA]); // mov dx, di
-                        // mov al, sil (args[1] → value → al)
-                        emitter.emit_bytes(&[0x40, 0x88, 0xF0]); // mov al, sil (32-bit REX)
-                        // out dx, al  → EE
-                        emitter.emit_bytes(&[0xEE]);
+                        emitter.emit_bytes(&[0x66, 0x89, 0xDA]); // mov dx, bx
+                        emitter.emit_bytes(&[0x40, 0x88, 0xF0]); // mov al, sil
+                        emitter.emit_bytes(&[0xEE]); // out dx, al
                     } else {
                         return Err(format!(
                             "x86_64-lower: `outb` requires 2 arguments in `{}`",
@@ -1642,11 +1641,11 @@ fn lower_expr_into(
                 "outl" => {
                     // outl(port: Int, value: Int)  → mov dx, port; mov eax, value; out dx, eax
                     if args.len() >= 2 {
-                        lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
+                        // Use RBX (callee-saved) for port so function calls in args[1] don't clobber it
+                        lower_expr_into(emitter, ctx, &args[0], RBX, pending_calls)?;
                         lower_expr_into(emitter, ctx, &args[1], RAX, pending_calls)?;
-                        emitter.emit_bytes(&[0x66, 0x89, 0xFA]); // mov dx, di
-                        // out dx, eax  → EF
-                        emitter.emit_bytes(&[0xEF]);
+                        emitter.emit_bytes(&[0x66, 0x89, 0xDA]); // mov dx, bx
+                        emitter.emit_bytes(&[0xEF]); // out dx, eax
                     } else {
                         return Err(format!(
                             "x86_64-lower: `outl` requires 2 arguments in `{}`",
@@ -1672,9 +1671,10 @@ fn lower_expr_into(
                 "outw" => {
                     // outw(port: Int, val: Int)  → mov dx, port; mov ax, val; out dx, ax
                     if args.len() >= 2 {
-                        lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
+                        // Use RBX (callee-saved) for port so function calls in args[1] don't clobber it
+                        lower_expr_into(emitter, ctx, &args[0], RBX, pending_calls)?;
                         lower_expr_into(emitter, ctx, &args[1], RAX, pending_calls)?;
-                        emitter.emit_bytes(&[0x66, 0x89, 0xFA]); // mov dx, di
+                        emitter.emit_bytes(&[0x66, 0x89, 0xDA]); // mov dx, bx
                         emitter.emit_bytes(&[0x66, 0xEF]); // out dx, ax (16-bit)
                     } else {
                         return Err(format!(
