@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "inauguration"
-version = "0.6.0"
+version = "0.6.1"
 edition = "2024"
 license = "MPL-2.0"
 description = ".in language and general compiler CLI (Core IR, hybrid SIL, staging, plugins)"
@@ -86,11 +86,11 @@ extended = [
 ]
 
 [target.'cfg(unix)'.dependencies]
-libloading = "0.8"
+libloading = "0.9"
 notify = "8"
 
 [build-dependencies]
-which = "6"
+which = "8"
 
 [dev-dependencies]
 criterion = "0.5"

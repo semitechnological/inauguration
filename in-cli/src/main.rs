@@ -33,7 +33,7 @@ enum InError {
 
 #[derive(Parser, Debug)]
 #[command(name = "in")]
-#[command(version = "0.6.0")]
+#[command(version = "0.6.1")]
 #[command(about = "inauguration v0.5.1")]
 struct Cli {
     #[command(subcommand)]
