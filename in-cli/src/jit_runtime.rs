@@ -164,7 +164,10 @@ impl CodePage {
         unsafe {
             sys_icache_invalidate(self.ptr as *const std::ffi::c_void, self.used);
         }
-        #[cfg(all(any(target_os = "linux", target_os = "android"), target_arch = "aarch64"))]
+        #[cfg(all(
+            any(target_os = "linux", target_os = "android"),
+            target_arch = "aarch64"
+        ))]
         unsafe {
             libc::sysconf(libc::_SC_PAGE_SIZE);
             extern "C" {
