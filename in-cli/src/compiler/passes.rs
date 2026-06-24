@@ -23,6 +23,7 @@ pub trait Pass {
 // ─── Pass Manager ────────────────────────────────────────────────────────
 
 /// Ordered pipeline of passes.
+#[derive(Default)]
 pub struct PassManager {
     passes: Vec<Box<dyn Pass>>,
     diagnostics: Vec<String>,
@@ -70,12 +71,6 @@ impl PassManager {
 
     pub fn diagnostics(&self) -> &[String] {
         &self.diagnostics
-    }
-}
-
-impl Default for PassManager {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

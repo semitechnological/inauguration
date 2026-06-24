@@ -51,17 +51,12 @@ pub enum TypeError {
     },
 }
 
+#[derive(Default)]
 pub struct TypeChecker;
 
 struct Facts {
     functions: HashMap<String, (Vec<(String, Typ)>, Typ)>,
     structs: HashMap<String, Vec<(String, Typ)>>,
-}
-
-impl Default for TypeChecker {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl TypeChecker {

@@ -1138,7 +1138,7 @@ fn run_pipeline_for_path(
         module_id: module_id.to_string(),
         parser,
         target: inauguration::owned_compile::CompileTarget::Jit,
-        entry: Some(module_id.to_string()),
+        entry: Some("main".to_string()),
         out: None,
         linkage: inauguration::native_emit::NativeLinkage::Executable,
         target_triple: None,

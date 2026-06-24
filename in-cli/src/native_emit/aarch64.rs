@@ -193,6 +193,7 @@ pub fn load_i64(rd: u8, value: i64) -> Vec<u32> {
     insns
 }
 
+#[derive(Default)]
 pub struct CodeEmitter {
     pub bytes: Vec<u8>,
 }
@@ -232,8 +233,4 @@ impl CodeEmitter {
     }
 }
 
-impl Default for CodeEmitter {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+
