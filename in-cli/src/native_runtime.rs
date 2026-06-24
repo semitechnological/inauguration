@@ -37,7 +37,7 @@ impl NativeRuntime {
             Box::new(|_args| {
                 match std::env::current_dir() {
                     Ok(path) => Ok(Value::String(path.display().to_string())),
-                    Err(e) => Ok(Value::Nil), // ponytail: return Nil on error
+                    Err(_e) => Ok(Value::Nil), // ponytail: return Nil on error
                 }
             }),
         );
@@ -237,7 +237,7 @@ impl NativeRuntime {
             Box::new(|args| Ok(Value::Bool(!matches!(args.first(), Some(Value::Nil))))),
         );
 
-        rt.register("any", Box::new(|args| Ok(Value::Bool(false))));
+        rt.register("any", Box::new(|_args| Ok(Value::Bool(false))));
 
         rt.register(
             "is_empty",
@@ -308,7 +308,7 @@ impl NativeRuntime {
 
         rt.register(
             "elapsed",
-            Box::new(|args| {
+            Box::new(|_args| {
                 // Return Duration
                 Ok(Value::Int(0))
             }),
@@ -316,7 +316,7 @@ impl NativeRuntime {
 
         rt.register(
             "as_secs_f64",
-            Box::new(|args| Ok(Value::String("0.000".to_string()))),
+            Box::new(|_args| Ok(Value::String("0.000".to_string()))),
         );
 
         // String operations
@@ -459,13 +459,13 @@ impl NativeRuntime {
 
         rt.register(
             "block_on",
-            Box::new(|args| {
+            Box::new(|_args| {
                 // Return Nil — async execution not needed for self-hosting
                 Ok(Value::Nil)
             }),
         );
 
-        rt.register("spawn", Box::new(|args| Ok(Value::Nil)));
+        rt.register("spawn", Box::new(|_args| Ok(Value::Nil)));
 
         rt.register("sleep", Box::new(|_args| Ok(Value::Nil)));
 
@@ -511,15 +511,15 @@ impl NativeRuntime {
         // serde
         rt.register(
             "serde :: Serialize",
-            Box::new(|args| Ok(Value::String("serialized".to_string()))),
+            Box::new(|_args| Ok(Value::String("serialized".to_string()))),
         );
 
-        rt.register("serde :: Deserialize", Box::new(|args| Ok(Value::Nil)));
+        rt.register("serde :: Deserialize", Box::new(|_args| Ok(Value::Nil)));
 
         // thiserror
         rt.register(
             "thiserror :: Error",
-            Box::new(|args| Ok(Value::String("error".to_string()))),
+            Box::new(|_args| Ok(Value::String("error".to_string()))),
         );
 
         rt
