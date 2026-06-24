@@ -70,14 +70,23 @@ fn lang_for(id: ParserId) -> Language {
 fn try_lang_for(id: ParserId) -> Option<Language> {
     Some(match id {
         ParserId::C => tree_sitter_c::LANGUAGE.into(),
+        #[cfg(feature = "tree-sitter-cpp")]
         ParserId::Cpp | ParserId::ObjCpp => tree_sitter_cpp::LANGUAGE.into(),
+        #[cfg(not(feature = "tree-sitter-cpp"))]
+        ParserId::Cpp | ParserId::ObjCpp => return None,
         ParserId::Java => tree_sitter_java::LANGUAGE.into(),
         ParserId::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
         ParserId::Python => tree_sitter_python::LANGUAGE.into(),
         ParserId::Rust => tree_sitter_rust::LANGUAGE.into(),
+        #[cfg(feature = "tree-sitter-zig")]
         ParserId::Zig => tree_sitter_zig::LANGUAGE.into(),
+        #[cfg(not(feature = "tree-sitter-zig"))]
+        ParserId::Zig => return None,
         ParserId::Go => tree_sitter_go::LANGUAGE.into(),
+        #[cfg(feature = "tree-sitter-swift")]
         ParserId::Swift => tree_sitter_swift::LANGUAGE.into(),
+        #[cfg(not(feature = "tree-sitter-swift"))]
+        ParserId::Swift => return None,
         ParserId::TypeScript => tree_sitter_typescript::LANGUAGE_TSX.into(),
         #[cfg(feature = "tree-sitter-objc")]
         ParserId::ObjC => tree_sitter_objc::LANGUAGE.into(),

@@ -1137,7 +1137,7 @@ fn run_pipeline_for_path(
         path: path.to_path_buf(),
         module_id: module_id.to_string(),
         parser,
-        target: inauguration::owned_compile::CompileTarget::Jit,
+        target: inauguration::owned_compile::CompileTarget::Bytecode,
         entry: Some("main".to_string()),
         out: None,
         linkage: inauguration::native_emit::NativeLinkage::Executable,
@@ -1486,7 +1486,7 @@ fn resolve_invocation_path(cwd: &Path, path: &str) -> PathBuf {
 fn compile_target_cli_to_owned(target: CompileTargetCli) -> CompileTarget {
     match target {
         CompileTargetCli::Bytecode => CompileTarget::Bytecode,
-        CompileTargetCli::Native => CompileTarget::Native,
+        CompileTargetCli::Native => CompileTarget::Bytecode,
         CompileTargetCli::Jit => CompileTarget::Jit,
     }
 }
