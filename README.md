@@ -1,9 +1,10 @@
 # inauguration
 
-`inauguration` is a language and general compiler project. One **Core IR** and SIL pipeline, many frontends.
+`inauguration` is a language and general compiler project. One **Core IR** → **native_emit/JIT** pipeline, 40 language frontends.
 
 - **`.in` language**: capability-aware systems and orchestration language with canonical and human-friendly forms.
-- **General compiler pipeline**: Tree-sitter polyglot frontends, Core IR, textual SIL, bytecode/native backend, graph reports.
+- **General compiler pipeline**: Tree-sitter polyglot frontends → Core IR → MIR → native_emit/JIT. No LLVM, no bytecode VM.
+- **`in` CLI**: build, inspect, graph, package, test, run, and developer workflow.
 - **`in` CLI**: build, inspect, graph, package, test, run, and developer workflow.
 - **Agent-readable facts**: JSON reports for parser decisions, imports, capabilities, effects, call graphs, diagnostics, and timing.
 - **Crepuscularity plugin** (optional, `--features crepus`): compile `.crepus` templates through Core IR → native codegen (SwiftUI/Compose/HTML)
@@ -71,7 +72,7 @@ Supported ecosystems: `cargo:` (crates.io), `npm:` (npm registry), `pypi:` (PyPI
 | Directory | What |
 |-----------|------|
 | `in-cli` | CLI, `.in` parser, Core IR, MIR, compile reporting, graph/package commands, JIT/native backend, hotreload daemon, protocol gen, crepuscularity plugin |
-| `compiler/rust-driver` | orchestration pipeline, stage model, SIL analysis, batch path |
+| `compiler\/rust-driver` | orchestration pipeline, stage model, IR analysis, batch path |
 | `plugins/registry` | project accelerators (crepuscularity, aurorality) |
 | `docs/architecture` | language, compiler, interop, roadmap docs |
 | `scripts` | validation, generation, install, workflow |
@@ -84,8 +85,8 @@ Supported ecosystems: `cargo:` (crates.io), `npm:` (npm registry), `pypi:` (PyPI
 |----------|:-----:|:-----:|:---------:|:--------:|:----------:|
 | in | ✓ | ✓ | ✓ | ✓ | ✓ |
 | icore | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Rust | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Swift | ✓ | ✓ | ✓ | — | — |
-| Rust | ✓ | ✓ | ✓ | ✓ | — |
 | Go | ✓ | ✓ | ✓ | — | — |
 | V | ✓ | ✓ | ✓ | ✓ | ✓ |
 | C / C++ | ✓ | ✓ | ✓ | — | — |
@@ -119,7 +120,7 @@ Supported ecosystems: `cargo:` (crates.io), `npm:` (npm registry), `pypi:` (PyPI
 | Odin | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Hare | ✓ | ✓ | ✓ | ✓ | — |
 | HolyC | ✓ | ✓ | — | — | — |
-| Crepus🅡 | ✓ | ✓ | ✓ | ✓ | — |
+| Crepus🅡 | ✓ | — | — | — | ✓ |
 
 *\* Objective-C: typecheck partial. 🅡 requires `--features crepus`.*
 
@@ -143,121 +144,4 @@ machine instructions but with symbolic operands and unresolved offsets. This
 makes code relocatable: ideal for JIT mmap, where offsets are patched at the
 last moment before execution.
 
-| Stage | Output |
-|-------|--------|
-| Core IR | SSA-like IR with types |
-| MIR | Offset-deferred machine ops, virtual registers |
-| native_emit | Raw machine bytes (AArch64, x86_64, WASM, ELF, Mach-O, COFF) |
-| JIT Runtime | mmap'd executable pages, function dispatch table |
-
-## Core Commands
-
-```bash
-in build --parser in --path apps/in-sample/hello.in --module-id App
-in build --parser icore --path apps/icore-sample/min.icore --module-id App
-in agent --path apps/in-sample/agent-native.in --parser in
-in graph --path apps/in-sample/agent-native.in --parser in --json
-in package --path apps/package-sample/main.in --json
-in languages --json
-in explain INAGENT020 --json
-in fix --plan --json --path apps/in-sample/hello.in --parser in
-in backend --path apps/in-sample/agent-native.in --target native --json
-in run
-in test
-in doctor
-```
-
-## `.in` Language
-
-Two forms over the same semantics: **explicit** (generated, reviewable) and **human** (readable, canonicalizes to explicit).
-
-Explicit:
-
-```in
-import std.io;
-capability process.stdout;
-extern rust fn host_log(text: String) -> void requires process.stdout;
-
-struct Message { String text }
-
-fn main() -> void {
-  print("hello from .in")
-  host_log("compiler-visible effect")
-}
-```
-
-Human:
-
-```in
-import std.io
-needs process.stdout
-host_log(text: String) uses process.stdout
-Message:
-  text: String
-main:
-  print "hello from .in"
-  host_log "compiler-visible effect"
-```
-
-Features: `import`, `capability`/`needs`, `extern`, `struct`, `fn`, `let`, `if`, `while`, `return`, annotations (`@pure`, `@gpu`, `@parallel_safe`), `distributed fn`, `parallel { }`.
-
-See [docs/architecture/in-language.md](docs/architecture/in-language.md) for grammar and status.
-
-## Performance
-
-macOS M5 Pro (arm64), self-hosted compiler.
-
-### Binary size
-
-| Compiler | Size |
-|----------|------|
-| **in** (release) | 73 MB |
-| go build (add.go) | 1.7 MB |
-
-### Compile time: `add(40, 2)`
-
-| Compiler | Time | Output |
-|----------|------|--------|
-| **in** JIT (default) | 0.5ms | native in-memory |
-| go build | 290ms | native |
-| rustc (debug) | 400ms | native |
-
-### Execution: `fib(35)`
-
-| Runtime | Time | vs Go |
-|---------|------|-------|
-| **in** JIT | 0.4ms | 325× faster |
-| Go native | 130ms | baseline |
-
-### Self-host: 992 Rust functions (JIT)
-
-| Metric | JIT |
-|--------|-----|
-| Parsed | 992 |
-| Lowered | 370 |
-| Cold | 713ms |
-| Warm | 755ms |
-
-## Validation
-
-```bash
-in test
-```
-
-Focused:
-
-```bash
-cd compiler/rust-driver && cargo test --all
-cd in-cli && cargo test
-./scripts/check-protocol-models.sh
-```
-
-Benchmarks:
-
-```bash
-cd in-cli && cargo bench --bench hybrid_sil
-```
-
-## License
-
-MPL-2.0
+Pipeline: **Source → Core IR → MIR → native_emit → JIT**.0
