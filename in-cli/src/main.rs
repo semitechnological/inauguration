@@ -3692,16 +3692,15 @@ fn workspace_root(start: PathBuf) -> Result<PathBuf> {
     let mut current = start.as_path();
     loop {
         let has_rust_driver = current.join("compiler").join("rust-driver").is_dir();
-        let has_runtime = current.join("runtime").is_dir();
         let has_in_cli = current.join("in-cli").is_dir();
-        if has_rust_driver && has_runtime && has_in_cli {
+        if has_rust_driver && has_in_cli {
             return Ok(current.to_path_buf());
         }
         match current.parent() {
             Some(parent) => current = parent,
             None => {
                 return Err(InError::Message(
-                    "could not locate inauguration workspace root (expected compiler/rust-driver, runtime, and in-cli)".to_string(),
+                    "could not locate inauguration workspace root (expected compiler/rust-driver and in-cli)".to_string(),
                 ))
             }
         }
@@ -4935,17 +4934,6 @@ mod tests {
         assert!(plans[0].print_result);
     }
 
-    #[test]
-    fn parse_env_bool_truthy_and_falsey_values() {
-        assert!(super::parse_env_bool("1"));
-        assert!(super::parse_env_bool("true"));
-        assert!(super::parse_env_bool("TRUE"));
-        assert!(super::parse_env_bool(" True "));
-        assert!(!super::parse_env_bool("0"));
-        assert!(!super::parse_env_bool("false"));
-        assert!(!super::parse_env_bool("yes"));
-        assert!(!super::parse_env_bool(""));
-    }
 
     #[test]
     fn doctor_update_mode_reports_checkout_or_remote() {

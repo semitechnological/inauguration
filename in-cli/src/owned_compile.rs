@@ -562,7 +562,7 @@ fn compile_jit(
         .entry
         .as_deref()
         .filter(|name| !name.is_empty())
-        .unwrap_or("answer");
+        .unwrap_or("main");
     let resolved_entry = resolve_jit_entry(module, entry);
 
     // Select lowering based on host architecture
@@ -658,7 +658,7 @@ fn compile_native(
         .entry
         .as_deref()
         .filter(|name| !name.is_empty())
-        .unwrap_or("answer");
+        .unwrap_or("main");
     let native_module = native_entry_module(module, entry);
     let eval_exit = match request.linkage {
         NativeLinkage::Executable => Some(const_eval_entry_exit_code(
