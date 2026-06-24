@@ -73,6 +73,8 @@ pub enum ParserId {
     Odin,
     Hare,
     HolyC,
+    /// Crepuscularity `.crepus` template language (plugin front).
+    Crepus,
 }
 
 impl ParserId {
@@ -117,6 +119,7 @@ impl ParserId {
             ParserId::Crystal => "crystal",
             ParserId::Odin => "odin",
             ParserId::Hare => "hare",
+            ParserId::Crepus => "crepus",
             ParserId::HolyC => "holyc",
         }
     }
@@ -146,6 +149,7 @@ impl ParserId {
             ParserId::Julia | ParserId::R => "numeric / scientific",
             ParserId::Nim | ParserId::D | ParserId::Crystal => "ALGOL-descended",
             ParserId::Odin | ParserId::Hare | ParserId::HolyC => "systems / native",
+            ParserId::Crepus => "ui / template",
         }
     }
 
@@ -190,6 +194,7 @@ impl ParserId {
             ParserId::Crystal => "cr",
             ParserId::Odin => "odin",
             ParserId::Hare => "ha",
+            ParserId::Crepus => "crepus",
             ParserId::HolyC => "hc",
         }
     }
@@ -237,6 +242,7 @@ pub fn parser_id_from_extension(ext: &str) -> Option<ParserId> {
         "cr" => Some(ParserId::Crystal),
         "odin" => Some(ParserId::Odin),
         "ha" => Some(ParserId::Hare),
+        "crepus" => Some(ParserId::Crepus),
         "hc" => Some(ParserId::HolyC),
         _ => None,
     }

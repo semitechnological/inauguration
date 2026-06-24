@@ -542,7 +542,8 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
         | ParserId::VbNet
         | ParserId::Odin
         | ParserId::Hare
-        | ParserId::V => unreachable!("filtered above"),
+        | ParserId::V
+        | ParserId::Crepus => unreachable!("filtered above"),
     }
 }
 
