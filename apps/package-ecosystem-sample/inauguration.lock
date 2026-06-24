@@ -5,7 +5,7 @@ dependencies:
   cargo:crepuscularity:
     version: latest
     kind: cargo
-    install_path: target/in/packages/cargo/crepuscularity/0.4.6
+    install_path: target/in/packages/cargo/crepuscularity/0.4.7
   go:fiber:
     version: latest
     kind: go

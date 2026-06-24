@@ -129,6 +129,20 @@ Pipeline: **Source → UnifiedModule → native_emit/JIT** (Core IR verifier ski
 | fib(35) recursive (2 functions) | **37.8ms** | **0.12ms** |
 | Self-host: `in-cli/src/lib.rs` (992 functions) | **666ms** | — |
 
+### Compiler binary size
+
+| Compiler | Size | Stripped | Dependencies |
+|----------|------|----------|--------------|
+| **in v0.6.5** (release, LTO) | **16MB** | 16MB | self-contained, no LLVM |
+| Zig 0.16.0 | 20.9MB | — | LLVM backend |
+| Go 1.26.4 | 13.8MB | — | self-contained |
+| V 0.5.1 | 3.9MB | — | self-contained |
+| Bun 1.x | 60.2MB | — | JS runtime + JSC |
+| rustc (driver only) | 0.4MB | — | +LLVM dylibs (~200MB) |
+
+Note: rustc is a thin driver; the actual LLVM codegen is in shared libraries.
+in bundles no LLVM dependency — native emit is built-in.
+
 ### Benchmark suite (`cargo bench`)
 
 | Benchmark | Time |
@@ -142,6 +156,22 @@ Pipeline: **Source → UnifiedModule → native_emit/JIT** (Core IR verifier ski
 ```bash
 cd in-cli && cargo bench
 ```
+
+### in vs Rust: compile and binary comparison
+
+| Metric | in (JIT) | Rust (cargo, debug) | Rust (cargo, release) |
+|--------|----------|---------------------|----------------------|
+| Compile `return 42` | **0.42ms** | ~178ms | ~900ms |
+| Compile fib(35) | **37ms** | — | — |
+| On-disk binary | none (in-memory JIT) | 396KB ELF | ~4.7MB static |
+| Linker needed? | no | yes (ld) | yes (ld) |
+| Compiler self-size | 16MB | 0.4MB + LLVM deps | — |
+| Languages | 40 | 1 (Rust) | 1 (Rust) |
+| Output | mmap'd code page | ELF/Mach-O | ELF/Mach-O |
+
+**Why in is fast**: no LLVM invocation, no linker process, no ELF generation.
+JIT produces relocatable code bytes and dispatches in-process.
+`cargo` must parse, typecheck, LLVM-IR-gen, optimize, link, and write ELF.
 
 ## MIR (Machine IR) Layer
 
