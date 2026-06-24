@@ -10,6 +10,12 @@ pub struct NativeRuntime {
     fns: BTreeMap<String, NativeFn>,
 }
 
+impl Default for NativeRuntime {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NativeRuntime {
     pub fn new() -> Self {
         Self {

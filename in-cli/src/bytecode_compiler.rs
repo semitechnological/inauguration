@@ -26,7 +26,7 @@ pub fn compile_source_path(
     // Desugar classes to structs before typecheck
     crate::lower_core::desugar_module(&mut module);
     // ponytail: skip family typecheck for Rust files (self-hosting demo)
-    if !path.extension().is_some_and(|e| e == "rs") {
+    if path.extension().is_none_or(|e| e != "rs") {
         crate::family_typecheck::typecheck_resolved(&resolved, &module)?;
     }
 

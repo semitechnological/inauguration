@@ -560,7 +560,7 @@ fn all_paths_return(stmts: &[Stmt]) -> bool {
         }
     }
     // Check if the last stmt(s) ensure all paths return
-    stmts.last().map_or(false, |last| stmt_ensures_return(last))
+    stmts.last().map_or(false, stmt_ensures_return)
 }
 
 fn stmt_ensures_return(stmt: &Stmt) -> bool {

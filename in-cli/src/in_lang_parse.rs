@@ -1159,7 +1159,10 @@ fn parse_expr(s: &str) -> Expr {
                     'r' => processed.push('\r'),
                     '\\' => processed.push('\\'),
                     '"' => processed.push('"'),
-                    _ => { processed.push('\\'); processed.push(c); }
+                    _ => {
+                        processed.push('\\');
+                        processed.push(c);
+                    }
                 }
                 esc = false;
             } else if c == '\\' {

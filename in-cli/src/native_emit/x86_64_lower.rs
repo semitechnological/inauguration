@@ -321,7 +321,7 @@ fn collect_functions(module: &UnifiedModule) -> Result<HashMap<String, FunctionI
     }
     // Build disambiguation map and update call targets
     let mut name_map: HashMap<String, String> = HashMap::new();
-    for (unique, _func) in &functions {
+    for unique in functions.keys() {
         let orig = unique.split("__dup").next().unwrap_or(unique).to_string();
         name_map.insert(orig, unique.clone());
     }
@@ -388,7 +388,7 @@ fn rename_calls_in_expr(expr: &mut Expr, name_map: &HashMap<String, String>) {
         Expr::Call { callee, args } => {
             if let Expr::Ident(name) = callee.as_ref() {
                 if let Some(mapped) = name_map.get(name.as_str()) {
-                    *callee = Box::new(Expr::Ident(mapped.clone()));
+                    **callee = Expr::Ident(mapped.clone());
                 }
             }
             for arg in args {
@@ -675,7 +675,7 @@ fn lower_function(
     let mut pushed: u32 = 0;
     for (i, (name, _)) in func.params.iter().enumerate() {
         if i < 6 {
-            if ctx.locals.get(name).is_some() {
+            if ctx.locals.contains_key(name) {
                 emitter.emit_insns(&x86_64::push_r(param_regs[i]));
                 pushed += 1;
             }

@@ -73,7 +73,6 @@ pub enum ParserId {
     Odin,
     Hare,
     HolyC,
-
 }
 
 impl ParserId {
@@ -526,7 +525,6 @@ pub fn parse_with_resolved(
 mod tests {
     use super::*;
     use std::path::Path;
-
 
     fn temp_file_path(suffix: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(

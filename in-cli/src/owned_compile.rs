@@ -370,8 +370,8 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
     // can't fully type-check yet (stdlib imports, generics, Result types).
     // Also skip for JIT (development speed) and when IN_SKIP_VERIFY env var is set.
     let effective_entry = request.entry.clone().or(pkg_entry);
-    let skip_verify = request.target == CompileTarget::Jit
-        || std::env::var("IN_SKIP_VERIFY").is_ok();
+    let skip_verify =
+        request.target == CompileTarget::Jit || std::env::var("IN_SKIP_VERIFY").is_ok();
     if !is_rust_source && !skip_verify {
         let verify_opts = core_ir_verifier::VerifyOptions {
             entry: effective_entry.clone(),

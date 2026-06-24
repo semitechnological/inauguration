@@ -18,7 +18,14 @@ use crate::core_ir::{Decl, Expr, LoopKind, Stmt, UnifiedModule};
 pub fn lower_to_mir(module: &UnifiedModule) -> MirModule {
     let mut mir = MirModule::new();
     for decl in &module.decls {
-        if let Decl::Function { name, params, ret, body, .. } = decl {
+        if let Decl::Function {
+            name,
+            params,
+            ret,
+            body,
+            ..
+        } = decl
+        {
             let mut func = MirFunction {
                 name: name.clone(),
                 instructions: Vec::new(),
@@ -50,39 +57,62 @@ fn lower_stmt(stmt: &Stmt, func: &mut MirFunction) {
             func.var_map.push((name.clone(), vreg));
             lower_expr_into(value, name, func);
         }
-        Stmt::Expr(expr) => { lower_expr(expr, func); }
-        Stmt::If { cond, then_body, else_body } => {
+        Stmt::Expr(expr) => {
+            lower_expr(expr, func);
+        }
+        Stmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
             lower_expr(cond, func);
-            for s in then_body { lower_stmt(s, func); }
-            for s in else_body { lower_stmt(s, func); }
-        }
-        Stmt::Loop { kind: LoopKind::While, cond: Some(cond), body } => {
-            lower_expr(cond, func);
-            for s in body { lower_stmt(s, func); }
-        }
-        Stmt::Loop { kind: _, cond: _, body } => {
-            for s in body { lower_stmt(s, func); }
-        }
-        Stmt::Return(expr) => {
-            match expr {
-                Some(e) => {
-                    let temp = format!("__ret_{}", func.instructions.len());
-                    let vreg = func.vreg_count;
-                    func.vreg_count += 1;
-                    func.var_map.push((temp.clone(), vreg));
-                    lower_expr_into(e, &temp, func);
-                    func.instructions.push(mir(MirOp::Typed(TypedOp::Return(Some(temp))), vec![]));
-                }
-                None => {
-                    func.instructions.push(mir(MirOp::Typed(TypedOp::Return(None)), vec![]));
-                }
+            for s in then_body {
+                lower_stmt(s, func);
+            }
+            for s in else_body {
+                lower_stmt(s, func);
             }
         }
+        Stmt::Loop {
+            kind: LoopKind::While,
+            cond: Some(cond),
+            body,
+        } => {
+            lower_expr(cond, func);
+            for s in body {
+                lower_stmt(s, func);
+            }
+        }
+        Stmt::Loop {
+            kind: _,
+            cond: _,
+            body,
+        } => {
+            for s in body {
+                lower_stmt(s, func);
+            }
+        }
+        Stmt::Return(expr) => match expr {
+            Some(e) => {
+                let temp = format!("__ret_{}", func.instructions.len());
+                let vreg = func.vreg_count;
+                func.vreg_count += 1;
+                func.var_map.push((temp.clone(), vreg));
+                lower_expr_into(e, &temp, func);
+                func.instructions
+                    .push(mir(MirOp::Typed(TypedOp::Return(Some(temp))), vec![]));
+            }
+            None => {
+                func.instructions
+                    .push(mir(MirOp::Typed(TypedOp::Return(None)), vec![]));
+            }
+        },
         Stmt::Assign(name, value) => {
             lower_expr_into(value, name, func);
         }
         _ => {
-            func.instructions.push(mir(MirOp::Typed(TypedOp::Nop), vec![]));
+            func.instructions
+                .push(mir(MirOp::Typed(TypedOp::Nop), vec![]));
         }
     }
 }
@@ -90,45 +120,75 @@ fn lower_stmt(stmt: &Stmt, func: &mut MirFunction) {
 fn lower_expr_into(expr: &Expr, target: &str, func: &mut MirFunction) {
     match expr {
         Expr::IntLit(v) => {
-            func.instructions.push(mir(MirOp::Typed(TypedOp::IntLit(*v)), vec![]));
-            func.instructions.push(mir(MirOp::Typed(TypedOp::Store(target.to_string())), vec![]));
+            func.instructions
+                .push(mir(MirOp::Typed(TypedOp::IntLit(*v)), vec![]));
+            func.instructions.push(mir(
+                MirOp::Typed(TypedOp::Store(target.to_string())),
+                vec![],
+            ));
         }
         Expr::BoolLit(v) => {
-            func.instructions.push(mir(MirOp::Typed(TypedOp::BoolLit(*v)), vec![]));
-            func.instructions.push(mir(MirOp::Typed(TypedOp::Store(target.to_string())), vec![]));
+            func.instructions
+                .push(mir(MirOp::Typed(TypedOp::BoolLit(*v)), vec![]));
+            func.instructions.push(mir(
+                MirOp::Typed(TypedOp::Store(target.to_string())),
+                vec![],
+            ));
         }
         Expr::StringLit(v) => {
-            func.instructions.push(mir(MirOp::Typed(TypedOp::StringLit(v.clone())), vec![]));
-            func.instructions.push(mir(MirOp::Typed(TypedOp::Store(target.to_string())), vec![]));
+            func.instructions
+                .push(mir(MirOp::Typed(TypedOp::StringLit(v.clone())), vec![]));
+            func.instructions.push(mir(
+                MirOp::Typed(TypedOp::Store(target.to_string())),
+                vec![],
+            ));
         }
         Expr::Ident(name) => {
-            func.instructions.push(mir(MirOp::Typed(TypedOp::Load(name.clone())), vec![]));
-            func.instructions.push(mir(MirOp::Typed(TypedOp::Store(target.to_string())), vec![]));
+            func.instructions
+                .push(mir(MirOp::Typed(TypedOp::Load(name.clone())), vec![]));
+            func.instructions.push(mir(
+                MirOp::Typed(TypedOp::Store(target.to_string())),
+                vec![],
+            ));
         }
         Expr::Binary { op, lhs, rhs } => {
             let ln = format!("__bin_{}_lhs", func.instructions.len());
             let rn = format!("__bin_{}_rhs", func.instructions.len());
-            let lv = func.vreg_count; func.vreg_count += 1;
-            let rv = func.vreg_count; func.vreg_count += 1;
+            let lv = func.vreg_count;
+            func.vreg_count += 1;
+            let rv = func.vreg_count;
+            func.vreg_count += 1;
             func.var_map.push((ln.clone(), lv));
             func.var_map.push((rn.clone(), rv));
             lower_expr_into(lhs, &ln, func);
             lower_expr_into(rhs, &rn, func);
-            func.instructions.push(mir(MirOp::Typed(TypedOp::BinOp { op: op.clone() }), vec![]));
-            func.instructions.push(mir(MirOp::Typed(TypedOp::Store(target.to_string())), vec![]));
+            func.instructions
+                .push(mir(MirOp::Typed(TypedOp::BinOp { op: op.clone() }), vec![]));
+            func.instructions.push(mir(
+                MirOp::Typed(TypedOp::Store(target.to_string())),
+                vec![],
+            ));
         }
         Expr::Unary { op, expr: inner } => {
             let n = format!("__un_{}", func.instructions.len());
-            let v = func.vreg_count; func.vreg_count += 1;
+            let v = func.vreg_count;
+            func.vreg_count += 1;
             func.var_map.push((n.clone(), v));
             lower_expr_into(inner, &n, func);
-            func.instructions.push(mir(MirOp::Typed(TypedOp::UnaryOp { op: op.clone() }), vec![]));
-            func.instructions.push(mir(MirOp::Typed(TypedOp::Store(target.to_string())), vec![]));
+            func.instructions.push(mir(
+                MirOp::Typed(TypedOp::UnaryOp { op: op.clone() }),
+                vec![],
+            ));
+            func.instructions.push(mir(
+                MirOp::Typed(TypedOp::Store(target.to_string())),
+                vec![],
+            ));
         }
         Expr::Call { callee, args } => {
             for (i, arg) in args.iter().enumerate() {
                 let an = format!("__call_arg_{}_{}", func.instructions.len(), i);
-                let av = func.vreg_count; func.vreg_count += 1;
+                let av = func.vreg_count;
+                func.vreg_count += 1;
                 func.var_map.push((an.clone(), av));
                 lower_expr_into(arg, &an, func);
             }
@@ -136,18 +196,24 @@ fn lower_expr_into(expr: &Expr, target: &str, func: &mut MirFunction) {
                 Expr::Ident(n) => n.clone(),
                 _ => "__unknown_call".to_string(),
             };
-            func.instructions.push(mir(MirOp::Typed(TypedOp::Call(fn_name)), vec![]));
-            func.instructions.push(mir(MirOp::Typed(TypedOp::Store(target.to_string())), vec![]));
+            func.instructions
+                .push(mir(MirOp::Typed(TypedOp::Call(fn_name)), vec![]));
+            func.instructions.push(mir(
+                MirOp::Typed(TypedOp::Store(target.to_string())),
+                vec![],
+            ));
         }
         _ => {
-            func.instructions.push(mir(MirOp::Typed(TypedOp::Nop), vec![]));
+            func.instructions
+                .push(mir(MirOp::Typed(TypedOp::Nop), vec![]));
         }
     }
 }
 
 fn lower_expr(expr: &Expr, func: &mut MirFunction) {
     let temp = format!("__expr_{}", func.instructions.len());
-    let v = func.vreg_count; func.vreg_count += 1;
+    let v = func.vreg_count;
+    func.vreg_count += 1;
     func.var_map.push((temp.clone(), v));
     lower_expr_into(expr, &temp, func);
 }

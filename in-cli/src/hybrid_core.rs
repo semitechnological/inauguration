@@ -25,4 +25,3 @@ pub struct BuildTask {
     pub deps: Vec<String>,
     pub cancel_token: String,
 }
-

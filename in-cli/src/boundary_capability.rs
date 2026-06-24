@@ -66,7 +66,7 @@ mod tests {
     #[test]
     fn in_has_full_capabilities() {
         let entry = language_support_for_parser(ParserId::In.as_str()).expect("in");
-        let cap = boundary_capability_for(&entry);
+        let cap = boundary_capability_for(entry);
         assert!(cap.can_parse);
         assert!(cap.can_lower);
         assert!(cap.can_typecheck);
@@ -77,7 +77,7 @@ mod tests {
     #[test]
     fn icore_has_boundary_capability() {
         let entry = language_support_for_parser(ParserId::Icore.as_str()).expect("icore");
-        let cap = boundary_capability_for(&entry);
+        let cap = boundary_capability_for(entry);
         assert!(cap.can_boundary);
         assert!(cap.can_bytecode);
     }
@@ -93,7 +93,7 @@ mod tests {
         ] {
             let entry = language_support_for_parser(parser_id.as_str())
                 .unwrap_or_else(|| panic!("{}", parser_id.as_str()));
-            let cap = boundary_capability_for(&entry);
+            let cap = boundary_capability_for(entry);
             assert!(
                 cap.can_boundary,
                 "{} should support boundary",
@@ -110,7 +110,7 @@ mod tests {
     #[test]
     fn rust_has_boundary_and_typecheck() {
         let entry = language_support_for_parser(ParserId::Rust.as_str()).expect("rust");
-        let cap = boundary_capability_for(&entry);
+        let cap = boundary_capability_for(entry);
         assert!(cap.can_boundary);
         assert!(cap.can_typecheck);
     }
@@ -120,7 +120,7 @@ mod tests {
         for parser_id in [ParserId::Nim, ParserId::Odin] {
             let entry = language_support_for_parser(parser_id.as_str())
                 .unwrap_or_else(|| panic!("{}", parser_id.as_str()));
-            let cap = boundary_capability_for(&entry);
+            let cap = boundary_capability_for(entry);
             assert!(cap.can_boundary, "{}", entry.language);
             assert!(cap.can_typecheck, "{}", entry.language);
         }
@@ -129,7 +129,7 @@ mod tests {
     #[test]
     fn php_can_typecheck() {
         let entry = language_support_for_parser(ParserId::Php.as_str()).expect("php");
-        let cap = boundary_capability_for(&entry);
+        let cap = boundary_capability_for(entry);
         assert!(cap.can_lower);
         assert!(cap.can_typecheck);
     }
