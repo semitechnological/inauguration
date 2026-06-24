@@ -33,7 +33,7 @@ enum InError {
 
 #[derive(Parser, Debug)]
 #[command(name = "in")]
-#[command(version = "0.5.1")]
+#[command(version = "0.6.0")]
 #[command(about = "inauguration v0.5.1")]
 struct Cli {
     #[command(subcommand)]
@@ -3485,11 +3485,6 @@ fn parse_env_bool(value: &str) -> bool {
     trimmed == "1" || trimmed.eq_ignore_ascii_case("true")
 }
 
-fn skip_swift_tests() -> bool {
-    std::env::var("IN_TEST_SKIP_SWIFT")
-        .ok()
-        .is_some_and(|value| parse_env_bool(&value))
-}
 
 fn find_tool_path(tool: &str) -> Option<String> {
     let out = Command::new("which").arg(tool).output().ok()?;
@@ -3539,7 +3534,7 @@ fn cmd_doctor() -> Result<()> {
     }
     println!("{}", doctor_update_mode_text(checkout_root.is_some()));
     println!(
-        "PATH tools (need cargo, bash for in test; curl for in update remote fallback; swift unless IN_TEST_SKIP_SWIFT; v for benchmarks):"
+        "PATH tools (need cargo, bash for in test; curl for in update remote fallback; v for benchmarks):"
     );
     for tool in ["bash", "curl", "cargo", "rustc", "swift", "v", "rg"] {
         match find_tool_path(tool) {
