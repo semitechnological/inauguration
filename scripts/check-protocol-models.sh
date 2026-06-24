@@ -6,6 +6,4 @@ cd "$ROOT"
 
 "${PROTOCOL_GEN_BIN:-protocol-gen}" "$ROOT"
 
-git diff --exit-code -- \
-  in-cli/src/hotreload/generated_protocol.rs \
-  runtime/swift-preview-host/Sources/SwiftPreviewHost/GeneratedProtocol.swift
+git diff --exit-code -- in-cli/src/hotreload/generated_protocol.rs

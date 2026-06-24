@@ -33,7 +33,7 @@ jobs:
       - name: Check generated protocol models
         run: cargo run --manifest-path in-cli/Cargo.toml --bin protocol-gen && git diff --exit-code -- in-cli/src/hotreload/generated_protocol.rs runtime/swift-preview-host/Sources/SwiftPreviewHost/GeneratedProtocol.swift
       - name: Build in binary
-        run: cargo build --release --bin in
+        run: cargo build --release --bin in --features extended
         working-directory: in-cli
       - name: Add in binary to PATH
         run: echo "$PWD/target/release" >> "$GITHUB_PATH"
