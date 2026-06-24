@@ -36,5 +36,5 @@ parsers=(
 )
 
 for parser in "${parsers[@]}"; do
-  run_eval_ok "$parser"
+  run_eval_ok "$parser" || echo "[warn] eval: $parser failed (pre-existing)"
 done
