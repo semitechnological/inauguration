@@ -66,9 +66,7 @@ enum PackageCommands {
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum PreviewClientKind {
-    /// SwiftPM preview-host-client against PreviewHost (SwiftUI-capable).
-    Swift,
-    /// Rust Unix socket reader — validates NDJSON envelopes; no SwiftUI.
+    /// Rust Unix socket reader — validates NDJSON envelopes.
     Rust,
 }
 
@@ -255,16 +253,8 @@ enum Commands {
         #[arg(long, default_value_t = false)]
         json: bool,
     },
-    #[command(about = "Run full local dev loop (daemon + client)")]
-    Dev {
-        #[arg(
-            long = "preview-client",
-            value_enum,
-            default_value_t = PreviewClientKind::Rust,
-            help = "Rust socket client (default) vs Swift PreviewHost"
-        )]
-        preview_client: PreviewClientKind,
-    },
+    #[command(about = "Run full local dev loop (daemon + Rust socket client)")]
+    Dev,
     #[command(about = "Swift subset parse/check → JSON artifact (Rust; legacy subcommand name)")]
     Ocaml {
         #[arg(default_value = "stdin.swift")]
@@ -307,7 +297,7 @@ enum Commands {
     Compile {
         #[arg(long)]
         path: String,
-        #[arg(long, value_enum, default_value_t = CompileTargetCli::Bytecode)]
+        #[arg(long, value_enum, default_value_t = CompileTargetCli::Jit)]
         target: CompileTargetCli,
         #[arg(long)]
         out: String,
@@ -349,7 +339,7 @@ enum Commands {
         module_id: String,
         #[arg(long, value_enum, default_value_t = ParserCli::Auto)]
         parser: ParserCli,
-        #[arg(long, value_enum, default_value_t = BackendTargetCli::Bytecode)]
+        #[arg(long, value_enum, default_value_t = BackendTargetCli::Native)]
         target: BackendTargetCli,
         #[arg(long, default_value_t = false)]
         json: bool,
@@ -512,8 +502,8 @@ fn run() -> Result<()> {
             None => cmd_package(&invocation_cwd, &path, json),
         },
         Commands::Languages { json } => cmd_languages(json),
-        Commands::Dev { preview_client } => {
-            cmd_dev(&workspace_root(invocation_cwd.clone())?, preview_client)
+        Commands::Dev => {
+            cmd_dev(&workspace_root(invocation_cwd.clone())?)
         }
         Commands::Ocaml { path } => cmd_ocaml(&invocation_cwd, &path),
         Commands::Run {
@@ -1452,7 +1442,7 @@ fn staging_emit_note(summary: &StageSummary, swift_products_dir: Option<&Path>) 
     format!(" -> {}", parts.join("; "))
 }
 
-fn cmd_dev(root: &Path, preview_client: PreviewClientKind) -> Result<()> {
+fn cmd_dev(root: &Path) -> Result<()> {
     use std::time::Duration;
 
     #[cfg(unix)]
@@ -1479,38 +1469,13 @@ fn cmd_dev(root: &Path, preview_client: PreviewClientKind) -> Result<()> {
             };
             let daemon = tokio::spawn(inauguration::hotreload::run_daemon(config));
             tokio::time::sleep(Duration::from_secs(1)).await;
-            let client_result = match preview_client {
-                PreviewClientKind::Swift => {
-                    let swift_root = root.join("runtime/swift-preview-host");
-                    let sock_arg = socket.to_string_lossy().to_string();
-                    let status = tokio::task::spawn_blocking(move || {
-                        Command::new("swift")
-                            .current_dir(swift_root)
-                            .args(["run", "swift-preview-host-client", sock_arg.as_str()])
-                            .status()
-                    })
-                    .await
-                    .map_err(|e| InError::Message(format!("swift task join: {e}")))?;
-                    let status =
-                        status.map_err(|e| InError::Message(format!("swift spawn: {e}")))?;
-                    if status.success() {
-                        Ok(())
-                    } else {
-                        Err(InError::Message(format!(
-                            "swift preview host client exited with {status}"
-                        )))
-                    }
-                }
-                PreviewClientKind::Rust => {
-                    let sock_path = socket.clone();
-                    tokio::task::spawn_blocking(move || {
-                        inauguration::preview_client::run_unix_preview_client(&sock_path)
-                            .map_err(|e| InError::Message(e.to_string()))
-                    })
-                    .await
-                    .map_err(|e| InError::Message(format!("rust preview client join: {e}")))?
-                }
-            };
+            let sock_path = socket.clone();
+            let client_result = tokio::task::spawn_blocking(move || {
+                inauguration::preview_client::run_unix_preview_client(&sock_path)
+                    .map_err(|e| InError::Message(e.to_string()))
+            })
+            .await
+            .map_err(|e| InError::Message(format!("rust preview client join: {e}")))?;
             daemon.abort();
             client_result
         })
@@ -3233,13 +3198,12 @@ fn test_step_names() -> [&'static str; 7] {
     ]
 }
 
-fn toolchain_test_step_names() -> [&'static str; 5] {
+fn toolchain_test_step_names() -> [&'static str; 3] {
     [
         "protocol models (scripts/check-protocol-models.sh)",
         "compiler/rust-driver (cargo test --all)",
         "in-cli (cargo test)",
-        "runtime/swift-preview-host (swift package clean && swift test)",
-        "runtime/hotreload-daemon (cargo test)",
+
     ]
 }
 
@@ -3287,7 +3251,7 @@ fn external_parity_test_groups(root: &Path) -> Vec<TestGroup> {
 }
 
 fn toolchain_test_groups(root: &Path) -> Vec<TestGroup> {
-    let mut groups = vec![
+    vec![
         TestGroup {
             name: toolchain_test_step_names()[0],
             commands: vec![bash_command(root, "scripts/check-protocol-models.sh")],
@@ -3308,35 +3272,7 @@ fn toolchain_test_groups(root: &Path) -> Vec<TestGroup> {
                 cwd: root.join("in-cli"),
             }],
         },
-        TestGroup {
-            name: toolchain_test_step_names()[4],
-            commands: vec![TestCommand {
-                program: "cargo".to_string(),
-                args: vec!["test".to_string()],
-                cwd: root.join("runtime").join("hotreload-daemon"),
-            }],
-        },
-    ];
-    if skip_swift_tests() {
-        eprintln!("Skipping runtime/swift-preview-host steps (IN_TEST_SKIP_SWIFT set).");
-    } else {
-        groups.push(TestGroup {
-            name: toolchain_test_step_names()[3],
-            commands: vec![
-                TestCommand {
-                    program: "swift".to_string(),
-                    args: vec!["package".to_string(), "clean".to_string()],
-                    cwd: root.join("runtime").join("swift-preview-host"),
-                },
-                TestCommand {
-                    program: "swift".to_string(),
-                    args: vec!["test".to_string()],
-                    cwd: root.join("runtime").join("swift-preview-host"),
-                },
-            ],
-        });
-    }
-    groups
+    ]
 }
 
 fn bash_command(root: &Path, script: &str) -> TestCommand {
@@ -4492,7 +4428,6 @@ mod tests {
                 .any(|step| step.contains("check-owned-native-compiler.sh"))
         );
         assert!(steps.iter().any(|step| step.contains("cargo test")));
-        assert!(steps.iter().any(|step| step.contains("swift test")));
         assert!(
             steps
                 .iter()
