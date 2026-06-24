@@ -2,9 +2,6 @@
 
 use clap::{Parser, Subcommand, ValueEnum};
 use inauguration::external_guard::ExternalInvocationGuard;
-use inauguration::hybrid_core::ChangeEvent;
-use inauguration::hybrid_pipeline::{StageTimings, run_wave_with_timings};
-use inauguration::hybrid_scheduler::BuildScheduler;
 use inauguration::native_emit::NativeLinkage;
 use inauguration::owned_compile::{
     CompileTarget, OwnedCompileRequest, compile_owned, report_to_json,
@@ -33,7 +30,7 @@ enum InError {
 
 #[derive(Parser, Debug)]
 #[command(name = "in")]
-#[command(version = "0.6.1")]
+#[command(version = "0.6.2")]
 #[command(about = "inauguration v0.5.1")]
 struct Cli {
     #[command(subcommand)]
@@ -1135,95 +1132,33 @@ fn run_pipeline_for_path(
     verbose: bool,
     parser: ParserCli,
 ) -> Result<()> {
-    let pipeline_start = std::time::Instant::now();
-    let resolved = parser_registry::resolve_parser_id(path, parser);
-
-    let (sil_source, swift_frontend_emit_us) = {
-        let emit_start = std::time::Instant::now();
-        let sil_source = match parser_registry::parse_with_resolved(resolved, path) {
-            Ok(Some(module)) => inauguration::compiler::driver::lower_unified_module(
-                &module,
-                module.effective_module_id(module_id),
-            ),
-            Ok(None) => Err(InError::Message(
-                "Swift Tree-sitter Core IR not available; use .in / .icore".to_string(),
-            ))?,
-            Err(e) => {
-                let hint = "Hint: for `.in` use `fn main() -> void`; for `.icore` see docs/architecture/general-compiler.md; polyglot Core IR uses Tree-sitter grammars with bounded extraction where wired. Unsupported languages need `.icore`.";
-                return Err(InError::Message(format!("{e}. {hint}")));
-            }
-        };
-        let emit_us = emit_start.elapsed().as_micros() as u64;
-        (sil_source, emit_us)
-    };
-
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|err| InError::Message(format!("failed to build runtime: {err}")))?;
-    let scheduler = BuildScheduler::default();
-    let event = ChangeEvent {
-        path: path.to_string_lossy().to_string(),
+    let start = std::time::Instant::now();
+    let request = inauguration::owned_compile::OwnedCompileRequest {
+        path: path.to_path_buf(),
         module_id: module_id.to_string(),
-        hash: "dev".to_string(),
-        timestamp_ms: 0,
+        parser,
+        target: inauguration::owned_compile::CompileTarget::Jit,
+        entry: None,
+        out: None,
+        linkage: inauguration::native_emit::NativeLinkage::Executable,
+        target_triple: None,
+        jobs: 1,
     };
-
-    let (count, mut timings) = runtime
-        .block_on(run_wave_with_timings(
-            &scheduler,
-            &event,
-            sil_source.as_str(),
-        ))
-        .map_err(|err| InError::Message(format!("pipeline failed: {err}")))?;
-
-    timings.swift_frontend_us = timings
-        .swift_frontend_us
-        .saturating_add(swift_frontend_emit_us);
-    timings.pipeline_us = pipeline_start.elapsed().as_micros() as u64;
-
+    let report = inauguration::owned_compile::compile_owned(&request);
+    let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+    if !report.success {
+        let err = report.error.unwrap_or_else(|| "unknown error".into());
+        return Err(InError::Message(format!("compile failed: {err}")));
+    }
     if verbose {
-        for line in pipeline_timing_lines(count, &timings, "SIL emit (subset or swiftc)") {
-            println!("{line}");
-        }
+        println!("Compiled {} in {:.3}ms", path.display(), elapsed_ms);
+        println!("  target: jit");
+        println!("  functions: {} parsed, {} typed", report.parsed_function_count, report.typed_function_count);
     }
     Ok(())
 }
 
-fn ms(us: u64) -> f64 {
-    (us as f64) / 1000.0
-}
 
-fn pipeline_timing_lines(
-    count: usize,
-    timings: &StageTimings,
-    frontend_label: &str,
-) -> Vec<String> {
-    vec![
-        format!(
-            "    Finished `in` compiler pipeline (tasks: {count}) in {:.3}ms",
-            ms(timings.pipeline_us)
-        ),
-        "      Stage timings:".to_string(),
-        format!("      - ast refresh: {:.3}ms", ms(timings.ast_refresh_us)),
-        format!(
-            "      - {frontend_label}: {:.3}ms",
-            ms(timings.swift_frontend_us)
-        ),
-        format!("      - sil analysis: {:.3}ms", ms(timings.sil_analysis_us)),
-        format!("      - wave: {:.3}ms", ms(timings.wave_us)),
-        format!("      - pipeline: {:.3}ms", ms(timings.pipeline_us)),
-        format!("processed tasks: {count}"),
-        format!("stage.ast_refresh_ms={:.3}", ms(timings.ast_refresh_us)),
-        format!(
-            "stage.swift_frontend_ms={:.3}",
-            ms(timings.swift_frontend_us)
-        ),
-        format!("stage.sil_analysis_ms={:.3}", ms(timings.sil_analysis_us)),
-        format!("timing.wave_ms={:.3}", ms(timings.wave_us)),
-        format!("timing.pipeline_ms={:.3}", ms(timings.pipeline_us)),
-    ]
-}
 
 fn find_package_root(path: &Path) -> Option<PathBuf> {
     let mut current = if path.is_dir() {
@@ -5018,25 +4953,7 @@ mod tests {
         assert!(super::doctor_update_mode_text(false).contains("remote install script"));
     }
 
-    #[test]
-    fn pipeline_timing_lines_separate_wave_and_pipeline_time() {
-        let lines = super::pipeline_timing_lines(
-            3,
-            &StageTimings {
-                ast_refresh_us: 1000,
-                swift_frontend_us: 2000,
-                sil_analysis_us: 3000,
-                wave_us: 4000,
-                pipeline_us: 9000,
-            },
-            "SIL emit (subset or swiftc)",
-        );
-        assert!(lines.contains(&"      - wave: 4.000ms".to_string()));
-        assert!(lines.contains(&"      - pipeline: 9.000ms".to_string()));
-        assert!(lines.contains(&"timing.wave_ms=4.000".to_string()));
-        assert!(lines.contains(&"timing.pipeline_ms=9.000".to_string()));
-        assert!(!lines.iter().any(|line| line.contains("stage.total_ms")));
-    }
+
 
     #[cfg(unix)]
     #[test]
