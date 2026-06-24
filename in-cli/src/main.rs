@@ -3480,10 +3480,6 @@ fn cmd_update_remote() -> Result<()> {
     }
 }
 
-fn parse_env_bool(value: &str) -> bool {
-    let trimmed = value.trim();
-    trimmed == "1" || trimmed.eq_ignore_ascii_case("true")
-}
 
 
 fn find_tool_path(tool: &str) -> Option<String> {
