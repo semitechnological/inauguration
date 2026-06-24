@@ -1,1 +1,2 @@
 *.in linguist-language=Inauguration
+*.sh linguist-vendored
