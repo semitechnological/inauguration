@@ -30,7 +30,7 @@ enum InError {
 
 #[derive(Parser, Debug)]
 #[command(name = "in")]
-#[command(version = "0.6.6")]
+#[command(version = "0.6.7")]
 #[command(about = "inauguration v0.5.1")]
 struct Cli {
     #[command(subcommand)]
@@ -1135,7 +1135,7 @@ fn run_pipeline_for_path(
         path: path.to_path_buf(),
         module_id: module_id.to_string(),
         parser,
-        target: inauguration::owned_compile::CompileTarget::Bytecode,
+        target: inauguration::owned_compile::CompileTarget::Jit,
         entry: Some("main".to_string()),
         out: None,
         linkage: inauguration::native_emit::NativeLinkage::Executable,
@@ -1484,8 +1484,8 @@ fn resolve_invocation_path(cwd: &Path, path: &str) -> PathBuf {
 
 fn compile_target_cli_to_owned(target: CompileTargetCli) -> CompileTarget {
     match target {
-        CompileTargetCli::Bytecode => CompileTarget::Bytecode,
-        CompileTargetCli::Native => CompileTarget::Bytecode,
+        CompileTargetCli::Bytecode => CompileTarget::Jit,
+        CompileTargetCli::Native => CompileTarget::Jit,
         CompileTargetCli::Jit => CompileTarget::Jit,
     }
 }
