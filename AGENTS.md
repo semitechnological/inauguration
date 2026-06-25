@@ -4,11 +4,11 @@ Contributor guide for humans and coding agents working in `inauguration`.
 
 ## Mission
 
-Ship an **ultrafast** compiler for **general object-oriented and C-type** languages: one **Core IR** and SIL pipeline, many fronts (C family via Tree-sitter, **`.in` / `.icore`**, Rust/Go/V lowers, Swift via **`swiftc`** and the in-tree **subset**). Improve these layers together:
+Ship an **ultrafast** compiler for **general object-oriented and C-type** languages: one **Core IR → MIR → native_emit/JIT** pipeline, many fronts (Tree-sitter polyglot, **`.in` / `.icore`**, Rust/Go/V lowers). JIT-primary: no LLVM, no SIL, no bytecode VM. Improve these layers together:
 
-1. **`in-cli`**: **`lower_core`**, **`core_ir`**, **`compiler::tree_front`** (Tree-sitter + trivial C/C++/ObjC++ bodies where wired), **`compiler::crepus_front`** (Crepuscularity template plugin), **`parser_registry`**, **`swift_subset`** + **`native_swift_sil`**, **`sil_emit`**, embedded **`hybrid_*`** crates, **`in`** CLI, hotreload daemon, **`protocol-gen`**
-2. **`compiler/rust-driver`**: pipeline, orchestration, **`hybrid-sil`** and related crates, batch path performance
-3. **`compiler::crepus_*`**: Crepuscularity View IR plugin pipeline (native codegen, template compilation)
+1. **`in-cli`**: **`lower_core`**, **`core_ir`**, **`compiler::tree_front`** (Tree-sitter polyglot), **`parser_registry`**, **`in_lang_parse`**, **`native_emit`** (JIT/AArch64/x86_64), **`mir`**/**`mir_lower`**/**`mir_emit`**, **`jit_runtime`**, **`native_link`**, **`inrt`** (builtins), **`in`** CLI, **`protocol-gen`**
+2. **`compiler/rust-driver`**: pipeline, orchestration, batch path performance
+3. **`crepuscularity`**: separate repo at `../crepuscularity` — GUI framework for `.in` programs, not a compiler frontend
 
 ## Working rules
 
@@ -42,17 +42,19 @@ in bench
 
 ## Code ownership map
 
-- `in-cli/src/swift_subset.rs`: subset parse + check + artifact JSON (contract: [docs/architecture/subset-grammar.md](docs/architecture/subset-grammar.md))
-- `in-cli/src/native_swift_sil.rs`: line filter + bridge into subset emit when **`IN_NATIVE_SWIFT_SIL`** is set
-- `in-cli/src/sil_emit.rs`: Swift source discovery, **`swiftc`** invocation, merge of textual SIL primaries
 - `in-cli/src/in_lang_parse.rs`, `lower_core.rs`, `core_ir.rs`: **`.in`** and unified Core IR module
-- `in-cli/src/parser_registry.rs`: extension and shebang resolution to parser ids
 - `in-cli/src/compiler/*`: multi-front driver, **icore** JSON → Core IR, **tree_front** (Tree-sitter polyglot + dedicated fronts)
+- `in-cli/src/parser_registry.rs`: extension and shebang resolution to parser ids
+- `in-cli/src/native_emit/lower.rs`: Core IR → AArch64 JIT lowering
+- `in-cli/src/native_emit/x86_64_lower.rs`: Core IR → x86_64 JIT lowering
+- `in-cli/src/native_emit/native_link.rs`: dlsym-based native symbol resolver for JIT FFI
+- `in-cli/src/native_emit/aarch64.rs`, `x86_64.rs`: instruction encoding helpers
+- `in-cli/src/mir.rs`, `mir_lower.rs`, `mir_emit.rs`, `mir_emit_x86.rs`: MIR layer (offset-deferred assembly)
+- `in-cli/src/jit_runtime.rs`: mmap dispatch, executable page management, error page
+- `in-cli/src/inrt.rs`: JIT runtime builtins (str_eq, str_contains, etc.)
+- `in-cli/src/owned_compile.rs`: `compile_jit()`, `compile_native()` dispatch, entry resolution
 - `compiler/rust-driver/crates/pipeline`: stage model + artifact ingestion
-- `compiler/rust-driver/crates/sil`: SIL analysis/transforms
-- `in-cli/src/hotreload/`: watch/decision/metrics loop daemon (runs as `in daemon`)
-- `in-cli/src/compiler/crepus_*`: Crepuscularity template compilation through Core IR pipeline
-- `in-cli` (remainder): **`main`**, plugins, **`in test`**, preview clients, hybrid embedding
+- `in-cli` (remainder): **`main`**, plugins, **`in test`**, hotreload daemon, protocol-gen
 
 ## Plugin policy
 

@@ -7,23 +7,26 @@
 - **`in` CLI**: build, inspect, graph, package, test, run, and developer workflow.
 - **Agent-readable facts**: JSON reports for parser decisions, imports, capabilities, effects, call graphs, diagnostics, and timing.
 - **MIR layer**: Machine IR between Core IR and native emit for relocatable JIT code
-- **Hot reload daemon**: in-process file watcher + patch planner via `in daemon`
+- **JIT-primary pipeline**: Core IR → MIR → native_emit/JIT dispatch. No LLVM, no bytecode VM, no linker.
 
 Inauguration owns the language, compiler infrastructure, Core IR, backend contracts, orchestration facts, and runtime-boundary tooling. UI rendering belongs in sibling projects such as Crepuscularity.
 
 ## Install
 
 ```bash
+# Wax (macOS, built on Homebrew)
+wax install inauguration
+
+# crates.io (all platforms)
 cargo install inauguration
-```
 
-Or from source:
-
-```bash
-git clone https://github.com/semitechnological/inauguration.git
+# From source
+git clone https://github.com/tschk/inauguration.git
 cd inauguration
 ./install.sh
 ```
+
+Binary size: **8.7MB** (release, LTO+strip), self-contained, no LLVM dependency.
 
 
 
@@ -127,13 +130,14 @@ Pipeline: **Source → UnifiedModule → native_emit/JIT** (Core IR verifier ski
 |----------|------|------|
 | `fn main() -> Int { return 42 }` | **0.42ms** | **0.08ms** |
 | fib(35) recursive (2 functions) | **37.8ms** | **0.12ms** |
-| Self-host: `in-cli/src/lib.rs` (992 functions) | **666ms** | — |
+| Self-host: `in-cli/src/main.rs` (988 functions) | **~1s** | **~0.3ms** |
+| Conformance suite (54 tests) | **3.7s** | — |
 
 ### Compiler binary size
 
 | Compiler | Size | Stripped | Dependencies |
 |----------|------|----------|--------------|
-| **in v0.6.5** (release, LTO) | **16MB** | 16MB | self-contained, no LLVM |
+| **in v0.6.14** (release, LTO+strip) | **8.7MB** | 8.7MB | self-contained, no LLVM |
 | Zig 0.16.0 | 20.9MB | — | LLVM backend |
 | Go 1.26.4 | 13.8MB | — | self-contained |
 | V 0.5.1 | 3.9MB | — | self-contained |
@@ -165,7 +169,7 @@ cd in-cli && cargo bench
 | Compile fib(35) | **37ms** | — | — |
 | On-disk binary | none (in-memory JIT) | 396KB ELF | ~4.7MB static |
 | Linker needed? | no | yes (ld) | yes (ld) |
-| Compiler self-size | 16MB | 0.4MB + LLVM deps | — |
+| Compiler self-size | 8.7MB | 0.4MB + LLVM deps | — |
 | Languages | 40 | 1 (Rust) | 1 (Rust) |
 | Output | mmap'd code page | ELF/Mach-O | ELF/Mach-O |
 
