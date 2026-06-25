@@ -2145,51 +2145,10 @@ fn lower_expr_into(
             pending_calls,
             fn_name,
         ),
-        Expr::ArrayLit(items) => lower_array_lit(
-            emitter, ctx, items, rd, functions, pending_calls, fn_name,
-        ),
-        Expr::Closure { .. } => {
-            // ponytail: closures not implemented for JIT stub
-            emitter.emit_insns(&aarch64::load_i64(rd, 0));
-            Ok(())
-        }
-        Expr::StructInit { .. } => Err(format!(
+        Expr::StructInit { .. } | Expr::ArrayLit(_) | Expr::Closure { .. } => Err(format!(
             "native-lower: unsupported expression in `{fn_name}`"
         )),
     }
-}
-
-fn lower_array_lit(
-    emitter: &mut CodeEmitter,
-    ctx: &mut LowerCtx<'_>,
-    items: &[Expr],
-    rd: u8,
-    functions: &HashMap<String, FunctionInfo>,
-    pending_calls: &mut Vec<PendingCall>,
-    fn_name: &str,
-) -> Result<(), String> {
-    // ponytail: stack-allocate array, store each element
-    // Return pointer in rd, length in rd+1
-    let count = items.len();
-    if count == 0 {
-        emitter.emit_insns(&aarch64::load_i64(rd, 0));
-        emitter.emit_insns(&aarch64::load_i64(rd + 1, 0));
-        return Ok(());
-    }
-    let byte_size = (count as u16) * 8;
-    emitter.emit_u32(aarch64::sub_imm64(
-        aarch64::REG_SP,
-        aarch64::REG_SP,
-        byte_size,
-    ));
-    for (i, item) in items.iter().enumerate() {
-        let off = (i as u32) * 8;
-        lower_expr_into(emitter, ctx, item, rd, functions, pending_calls, fn_name)?;
-        emitter.emit_u32(aarch64::str64(rd, aarch64::REG_SP, off));
-    }
-    emitter.emit_u32(aarch64::mov_reg64(rd, aarch64::REG_SP));
-    emitter.emit_insns(&aarch64::load_i64(rd + 1, count as i64));
-    Ok(())
 }
 
 fn lower_index(
@@ -2571,16 +2530,6 @@ fn lower_comparison_result(emitter: &mut CodeEmitter, rd: u8, op: &str) -> Resul
     Ok(())
 }
 
-fn inrt_name(name: &str) -> &str {
-    match name {
-        "str_concat" => "__inrt_str_concat",
-        "str_eq" => "__inrt_str_eq",
-        "str_contains" => "__inrt_str_contains",
-        "array_len" => "__inrt_array_len",
-        _ => name,
-    }
-}
-
 fn lower_call(
     emitter: &mut CodeEmitter,
     ctx: &mut LowerCtx<'_>,
@@ -2596,7 +2545,6 @@ fn lower_call(
             "native-lower: unsupported call callee in `{fn_name}`"
         ));
     };
-    let target = inrt_name(target);
     if is_inrt_builtin(target) {
         return lower_inrt_call(emitter, ctx, target, args, rd, fn_name);
     }
@@ -2638,7 +2586,7 @@ fn lower_call(
     emitter.emit_u32(aarch64::bl(0));
     pending_calls.push(PendingCall {
         site: call_site,
-        target: target.to_string(),
+        target: target.clone(),
     });
 
     if rd != 0 {
