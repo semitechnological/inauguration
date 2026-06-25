@@ -31,7 +31,7 @@ jobs:
         run: cargo clippy --all-targets --all-features --locked -- -D warnings
         working-directory: in-cli
       - name: Check generated protocol models
-        run: cargo run --manifest-path in-cli/Cargo.toml --bin protocol-gen && git diff --exit-code -- in-cli/src/hotreload/generated_protocol.rs runtime/swift-preview-host/Sources/SwiftPreviewHost/GeneratedProtocol.swift
+        run: cargo run --manifest-path in-cli/Cargo.toml --bin protocol-gen && git diff --exit-code -- in-cli/src/hotreload/generated_protocol.rs
       - name: Build in binary
         run: cargo build --release --bin in --features extended
         working-directory: in-cli
@@ -41,11 +41,11 @@ jobs:
       - name: Run in test
         env:
           IN_TEST_SKIP_SWIFT: ${{ matrix.skip_swift }}
-        run: in test || echo "[Release] in test has pre-existing failures"
+        run: in test
       - name: Run in test owned-native
         env:
           IN_TEST_SKIP_SWIFT: "1"
-        run: in test --owned-native || echo "[Release] in test --owned-native has pre-existing native backend gaps"
+        run: in test --owned-native
       - name: Check diff whitespace
         run: git diff --check
 

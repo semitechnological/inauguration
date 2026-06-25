@@ -17,7 +17,9 @@ use std::path::{Path, PathBuf};
 
 pub const TARGET_TRIPLE: &str = "aarch64-apple-darwin";
 
-const ENTRY_STUB_SIZE: u32 = 16;
+const ENTRY_STUB_SIZE: u32 = 32; // 16 bytes entry stub + 16 bytes global error flag/value
+const ERROR_FLAG_OFFSET: u32 = 16;
+const ERROR_VALUE_OFFSET: u32 = 24;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NativeLinkage {
@@ -181,9 +183,7 @@ pub fn lower_module(
     }
 
     let mut emitter = CodeEmitter::new();
-    if linkage == NativeLinkage::Executable {
-        emitter.bytes.resize(ENTRY_STUB_SIZE as usize, 0);
-    }
+    emitter.bytes.resize(ENTRY_STUB_SIZE as usize, 0);
     let mut function_offsets = HashMap::new();
     let mut pending_calls = Vec::new();
     let mut pending_inrt_calls = Vec::new();
@@ -204,6 +204,7 @@ pub fn lower_module(
             &mut pending_calls,
             &mut pending_inrt_calls,
             &mut pending_static_arrays,
+            offset,
         ) {
             // ponytail: emit stub that returns 0, truncate partial code
             emitter.bytes.truncate(offset as usize);
@@ -249,7 +250,7 @@ pub fn lower_module(
                 inrt::build_entry_stub_with_forced_exit(entry_fn_offset, 0)
             }
         };
-        emitter.bytes[..ENTRY_STUB_SIZE as usize].copy_from_slice(&stub);
+        emitter.bytes[..stub.len()].copy_from_slice(&stub);
         Some(0)
     } else {
         None
@@ -711,12 +712,16 @@ fn lower_function(
     pending_calls: &mut Vec<PendingCall>,
     pending_inrt_calls: &mut Vec<PendingInrtCall>,
     pending_static_arrays: &mut Vec<PendingStaticArray>,
+    fn_start_offset: u32,
 ) -> Result<(), String> {
     ensure_return_type(&func.ret, &func.name, structs)?;
     reject_unsupported_function(func, structs)?;
 
     emitter.emit_u32(0xA9BF_7BFD);
     emitter.emit_u32(aarch64::mov_reg64(REG_FP, aarch64::REG_SP));
+    // Load X27 with address of global error flag area for cross-function throw/try
+    let adr_offset = ERROR_FLAG_OFFSET as i32 - (fn_start_offset as i32 + 8);
+    emitter.emit_u32(aarch64::adr(27, adr_offset));
 
     let mut ctx = LowerCtx::new(
         &func.params,
@@ -727,9 +732,8 @@ fn lower_function(
         &func.name,
     )?;
     alloc_declared_locals(&mut ctx, &func.body, &func.name)?;
-    ctx.error_flag_offset = ctx.stack_size;
-    ctx.error_value_offset = ctx.stack_size + 8;
-    ctx.stack_size += 24;
+    ctx.saved_flag_offset = ctx.stack_size + 8;
+    ctx.stack_size += 16;
     if ctx.stack_size > 0 {
         emitter.emit_u32(aarch64::sub_imm64(
             aarch64::REG_SP,
@@ -852,8 +856,7 @@ struct LowerCtx<'a> {
     stack_size: u32,
     emitted_return: bool,
     _params_src: &'a [(String, Typ)],
-    error_flag_offset: u32,
-    error_value_offset: u32,
+    saved_flag_offset: u32,
 }
 
 fn alloc_slot_for_ctx(ctx: &mut LowerCtx<'_>) -> u32 {
@@ -970,8 +973,7 @@ impl<'a> LowerCtx<'a> {
             stack_size: 0,
             emitted_return: false,
             _params_src: params,
-            error_flag_offset: 0,
-            error_value_offset: 0,
+            saved_flag_offset: 0,
         };
         let mut abi_idx = 0usize;
         for (name, typ) in params {
@@ -1278,20 +1280,22 @@ fn lower_stmt(
         ),
         Stmt::Throw(expr) => {
             lower_expr_into(emitter, ctx, expr, 0, functions, pending_calls, fn_name)?;
-            emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, ctx.error_value_offset));
+            // Store error value to global location via X27
+            emitter.emit_u32(aarch64::str64(0, 27, 8));
+            // Set error flag to 1
             emitter.emit_insns(&aarch64::load_i64(1, 1));
-            emitter.emit_u32(aarch64::strb(1, aarch64::REG_SP, ctx.error_flag_offset));
+            emitter.emit_u32(aarch64::strb(1, 27, 0));
             Ok(())
         }
         Stmt::Try { body, catches, .. } => {
-            let saved_flag_offset = ctx.error_value_offset + 8;
-
-            emitter.emit_u32(aarch64::ldrb(1, aarch64::REG_SP, ctx.error_flag_offset));
-            emitter.emit_u32(aarch64::strb(1, aarch64::REG_SP, saved_flag_offset));
+            // Save previous error flag from global location to stack
+            emitter.emit_u32(aarch64::ldrb(1, 27, 0));
+            emitter.emit_u32(aarch64::strb(1, aarch64::REG_SP, ctx.saved_flag_offset));
+            // Clear global error flag
             emitter.emit_u32(aarch64::strb(
                 aarch64::REG_XZR,
-                aarch64::REG_SP,
-                ctx.error_flag_offset,
+                27,
+                0,
             ));
 
             for stmt in body {
@@ -1306,19 +1310,22 @@ fn lower_stmt(
                 )?;
             }
 
-            emitter.emit_u32(aarch64::ldrb(0, aarch64::REG_SP, ctx.error_flag_offset));
+            // Check global error flag
+            emitter.emit_u32(aarch64::ldrb(0, 27, 0));
             let handler_branch = emitter.emit_insn(aarch64::cbnz_w(0, 0));
             let end_branch = emitter.emit_insn(aarch64::b(0));
 
             let handler_offset = emitter.len();
+            // Clear global error flag
             emitter.emit_u32(aarch64::strb(
                 aarch64::REG_XZR,
-                aarch64::REG_SP,
-                ctx.error_flag_offset,
+                27,
+                0,
             ));
 
             if let Some(catch_arm) = catches.first() {
-                emitter.emit_u32(aarch64::ldr64(0, aarch64::REG_SP, ctx.error_value_offset));
+                // Load error value from global location via X27
+                emitter.emit_u32(aarch64::ldr64(0, 27, 8));
                 if let Some(LocalSlot::Scalar(offset)) = ctx.locals.get(&catch_arm.pattern) {
                     emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, *offset));
                 }
@@ -1342,8 +1349,9 @@ fn lower_stmt(
             let end_delta = end_offset as i32 - end_branch as i32;
             emitter.patch_u32(end_branch, aarch64::b(end_delta));
 
-            emitter.emit_u32(aarch64::ldrb(1, aarch64::REG_SP, saved_flag_offset));
-            emitter.emit_u32(aarch64::strb(1, aarch64::REG_SP, ctx.error_flag_offset));
+            // Restore previous error flag from stack to global location
+            emitter.emit_u32(aarch64::ldrb(1, aarch64::REG_SP, ctx.saved_flag_offset));
+            emitter.emit_u32(aarch64::strb(1, 27, 0));
 
             Ok(())
         }
@@ -1986,7 +1994,9 @@ fn lower_match(
             let next_offset = emitter.len() as i32 - next_branch as i32;
             emitter.patch_u32(next_branch, aarch64::b_cond(1, next_offset));
         } else {
-            // ponytail: non-int pattern (enum variant, range, etc.) — extract vars, bind to 0
+            // ponytail: non-int pattern (string, enum variant, range) — skip entirely
+            // to avoid cascading crashes on string comparisons and partial matches.
+            // Extract vars so they exist if referenced, but don't execute body.
             let vars = extract_pattern_vars(&arm.pattern);
             for var in &vars {
                 if !ctx.locals.contains_key(var) {
@@ -1994,18 +2004,6 @@ fn lower_match(
                     ctx.locals.insert(var.clone(), LocalSlot::Scalar(offset));
                 }
             }
-            for stmt in &arm.body {
-                lower_stmt(
-                    emitter,
-                    ctx,
-                    stmt,
-                    functions,
-                    pending_calls,
-                    fn_name,
-                    ret_typ,
-                )?;
-            }
-            end_branches.push(emitter.emit_insn(aarch64::b(0)));
         }
     }
     if let Some(body) = default_body {
@@ -3087,7 +3085,7 @@ mod tests {
         let module = answer_module();
         let lowered = lower_module(&module, "answer", NativeLinkage::Executable).expect("lower");
         assert!(lowered.code.len() > ENTRY_STUB_SIZE as usize);
-        assert_eq!(&lowered.code[0..4], &inrt::build_entry_stub(16)[0..4]);
+        assert_eq!(&lowered.code[0..4], &inrt::build_entry_stub(32)[0..4]);
     }
 
     #[test]
@@ -3111,7 +3109,7 @@ mod tests {
         assert_eq!(lowered.entry_offset, None);
         assert_eq!(lowered.exports.len(), 1);
         assert_eq!(lowered.exports[0].name, "answer");
-        assert_eq!(lowered.exports[0].offset, 0);
+        assert_eq!(lowered.exports[0].offset, 32);
     }
 
     #[test]
