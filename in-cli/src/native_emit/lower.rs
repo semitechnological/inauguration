@@ -741,6 +741,7 @@ fn lower_function(
             ctx.stack_reserve() as u16,
         ));
     }
+    ctx.prologue_stack_reserve = ctx.stack_reserve();
     for (reg, offset) in &ctx.param_stores {
         emitter.emit_u32(aarch64::str64(*reg, aarch64::REG_SP, *offset));
     }
@@ -767,7 +768,7 @@ fn lower_function(
         if func.ret == Typ::Void {
             emitter.emit_insns(&aarch64::load_i64(0, 0));
         }
-        emit_epilogue(emitter, ctx.stack_reserve());
+        emit_epilogue(emitter, ctx.prologue_stack_reserve);
     }
 
     Ok(())
@@ -857,6 +858,7 @@ struct LowerCtx<'a> {
     emitted_return: bool,
     _params_src: &'a [(String, Typ)],
     saved_flag_offset: u32,
+    prologue_stack_reserve: u32,
 }
 
 fn alloc_slot_for_ctx(ctx: &mut LowerCtx<'_>) -> u32 {
@@ -974,6 +976,7 @@ impl<'a> LowerCtx<'a> {
             emitted_return: false,
             _params_src: params,
             saved_flag_offset: 0,
+            prologue_stack_reserve: 0,
         };
         let mut abi_idx = 0usize;
         for (name, typ) in params {
@@ -1210,7 +1213,7 @@ fn lower_stmt(
             } else {
                 emitter.emit_insns(&aarch64::load_i64(0, 0));
             }
-            emit_epilogue(emitter, ctx.stack_reserve());
+            emit_epilogue(emitter, ctx.prologue_stack_reserve);
             ctx.emitted_return = true;
             Ok(())
         }
@@ -1504,7 +1507,7 @@ fn lower_index_assign(
         oob_branch,
         aarch64::b_cond(10, failure_offset - oob_branch as i32),
     );
-    emit_failure_return(emitter, ctx.stack_reserve());
+    emit_failure_return(emitter, ctx.prologue_stack_reserve);
     let end_offset = emitter.len() as i32 - end_branch as i32;
     emitter.patch_u32(end_branch, aarch64::b(end_offset));
     Ok(())
@@ -1644,7 +1647,7 @@ fn lower_struct_expr_into_regs(
             }) = ctx.locals.get(local).cloned()
             else {
                 // ponytail: non-struct return through struct path — treat as void
-                emit_epilogue(emitter, ctx.stack_reserve());
+                emit_epilogue(emitter, ctx.prologue_stack_reserve);
                 ctx.emitted_return = true;
                 return Ok(());
             };
@@ -1681,7 +1684,7 @@ fn lower_struct_expr_into_regs(
             )
         }
         _ => {
-            emit_epilogue(emitter, ctx.stack_reserve());
+            emit_epilogue(emitter, ctx.prologue_stack_reserve);
             ctx.emitted_return = true;
             Ok(())
         }
@@ -2234,7 +2237,7 @@ fn lower_index(
         oob_branch,
         aarch64::b_cond(10, failure_offset - oob_branch as i32),
     );
-    emit_failure_return(emitter, ctx.stack_reserve());
+    emit_failure_return(emitter, ctx.prologue_stack_reserve);
     let end_offset = emitter.len() as i32 - end_branch as i32;
     emitter.patch_u32(end_branch, aarch64::b(end_offset));
     Ok(())
@@ -2487,7 +2490,7 @@ fn lower_checked_div_or_mod(
         failure_branch,
         aarch64::b_cond(0, failure_offset - failure_branch as i32),
     );
-    emit_failure_return(emitter, ctx.stack_reserve());
+    emit_failure_return(emitter, ctx.prologue_stack_reserve);
     let end_offset = emitter.len() as i32 - end_branch as i32;
     emitter.patch_u32(end_branch, aarch64::b(end_offset));
     Ok(())
