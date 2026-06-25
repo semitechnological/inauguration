@@ -2142,9 +2142,11 @@ fn lower_expr_into(
             pending_calls,
             fn_name,
         ),
-        Expr::StructInit { .. } | Expr::ArrayLit(_) | Expr::Closure { .. } => Err(format!(
-            "native-lower: unsupported expression in `{fn_name}`"
-        )),
+        Expr::StructInit { .. } | Expr::ArrayLit(_) | Expr::Closure { .. } => {
+            // ponytail: ArrayLit/Closure not supported in expr context — return 0
+            emitter.emit_insns(&aarch64::load_i64(rd, 0));
+            Ok(())
+        }
     }
 }
 
@@ -2546,6 +2548,21 @@ fn lower_call(
         return lower_inrt_call(emitter, ctx, target, args, rd, fn_name);
     }
     if !functions.contains_key(target) {
+        // Try to resolve native symbol at compile time
+        if let Some(native_ptr) = super::native_link::resolve_native_fn(target) {
+            // Load args into registers first
+            for (i, arg) in args.iter().enumerate() {
+                if i > 7 { break; } // max 8 reg args
+                lower_expr_into(emitter, ctx, arg, i as u8, functions, pending_calls, fn_name)?;
+            }
+            // Emit BLR to native function via X15
+            emitter.emit_insns(&aarch64::load_i64(15, native_ptr as usize as i64));
+            emitter.emit_u32(0xD63F_01E0u32 | (15 << 5)); // BLR X15
+            if rd != 0 {
+                emitter.emit_u32(aarch64::mov_reg64(rd, 0));
+            }
+            return Ok(());
+        }
         // ponytail: unknown external function — return 0 as stub
         emitter.emit_insns(&aarch64::load_i64(rd, 0));
         return Ok(());

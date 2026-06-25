@@ -9,6 +9,7 @@ pub mod object;
 pub mod raw;
 pub mod target;
 pub mod wasm;
+pub mod native_link;
 pub mod x86_64;
 pub mod x86_64_lower;
 
