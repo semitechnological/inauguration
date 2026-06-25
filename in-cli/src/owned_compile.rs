@@ -596,8 +596,7 @@ fn compile_jit(
     if resolved_module.files_parsed > 0 {
         eprintln!(
             "[dep-resolve] parsed {} files, added {} functions",
-            resolved_module.files_parsed,
-            resolved_module.functions_added,
+            resolved_module.files_parsed, resolved_module.functions_added,
         );
     }
 
@@ -610,8 +609,9 @@ fn compile_jit(
 
     // Select lowering based on host architecture
     let lowered = if cfg!(target_arch = "x86_64") {
-        let result = crate::native_emit::x86_64_lower::lower_module(expanded_module, &resolved_entry)
-            .map_err(|e| format!("jit-lowering-failed: {e}"))?;
+        let result =
+            crate::native_emit::x86_64_lower::lower_module(expanded_module, &resolved_entry)
+                .map_err(|e| format!("jit-lowering-failed: {e}"))?;
         // Wrap into LoweredModule-compatible shape
         crate::native_emit::lower::LoweredModule {
             code: result.code,

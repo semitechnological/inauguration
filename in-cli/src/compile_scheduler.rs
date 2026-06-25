@@ -67,7 +67,9 @@ fn lower_one(decl: &Decl, _module: &UnifiedModule) -> Result<Vec<u8>, String> {
     // ponytail: stub — actual lowering uses compile_jit pipeline
     // For now, returns empty code block. Real implementation calls
     // native_emit::lower machinery.
-    Err(format!("lower_one not wired — use compile_jit for `{name}`"))
+    Err(format!(
+        "lower_one not wired — use compile_jit for `{name}`"
+    ))
 }
 
 /// GPU backend — architecture placeholder.
@@ -86,7 +88,9 @@ pub struct CompileScheduler {
 
 impl CompileScheduler {
     pub fn new_cpu() -> Self {
-        Self { backend: Box::new(CpuBackend) }
+        Self {
+            backend: Box::new(CpuBackend),
+        }
     }
     pub fn set_backend(&mut self, backend: Box<dyn CompileBackend>) {
         self.backend = backend;
