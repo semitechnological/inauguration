@@ -567,16 +567,50 @@ fn compile_jit(
         );
     }
 
+    // Lazy dependency resolution: before lowering, resolve external
+    // function calls by loading their source crates.
+    let crate_db = crate::crate_db::CrateDb::new();
+    // Register the std crate (found via sysroot or vendor)
+    for root in &crate_db.search_roots {
+        let std_root = root.join("std");
+        if std_root.join("src").exists() {
+            crate_db.register_crate("std", std_root);
+            break;
+        }
+    }
+    // Register core and alloc too
+    for name in &["core", "alloc"] {
+        for root in &crate_db.search_roots {
+            let crate_root = root.join(name);
+            if crate_root.join("src").exists() {
+                crate_db.register_crate(name, crate_root);
+                break;
+            }
+        }
+    }
+
+    let resolved_module = crate::dep_resolver::resolve_deps(module, &crate_db);
+    let expanded_module = &resolved_module.module;
+
+    // Debug log how many deps were resolved
+    if resolved_module.files_parsed > 0 {
+        eprintln!(
+            "[dep-resolve] parsed {} files, added {} functions",
+            resolved_module.files_parsed,
+            resolved_module.functions_added,
+        );
+    }
+
     let entry = request
         .entry
         .as_deref()
         .filter(|name| !name.is_empty())
         .unwrap_or("main");
-    let resolved_entry = resolve_jit_entry(module, entry);
+    let resolved_entry = resolve_jit_entry(expanded_module, entry);
 
     // Select lowering based on host architecture
     let lowered = if cfg!(target_arch = "x86_64") {
-        let result = crate::native_emit::x86_64_lower::lower_module(module, &resolved_entry)
+        let result = crate::native_emit::x86_64_lower::lower_module(expanded_module, &resolved_entry)
             .map_err(|e| format!("jit-lowering-failed: {e}"))?;
         // Wrap into LoweredModule-compatible shape
         crate::native_emit::lower::LoweredModule {
@@ -586,7 +620,7 @@ fn compile_jit(
             function_offsets: result.exports.into_iter().collect(),
         }
     } else {
-        lower_module(module, &resolved_entry, NativeLinkage::Executable)
+        lower_module(expanded_module, &resolved_entry, NativeLinkage::Executable)
             .map_err(|e| format!("jit-lowering-failed: {e}"))?
     };
 
