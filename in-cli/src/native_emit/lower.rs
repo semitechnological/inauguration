@@ -719,9 +719,7 @@ fn lower_function(
 
     emitter.emit_u32(0xA9BF_7BFD);
     emitter.emit_u32(aarch64::mov_reg64(REG_FP, aarch64::REG_SP));
-    // Load X27 with address of global error flag area for cross-function throw/try
-    let adr_offset = ERROR_FLAG_OFFSET as i32 - (fn_start_offset as i32 + 8);
-    emitter.emit_u32(aarch64::adr(27, adr_offset));
+    // X27 set by JIT caller to error page address (throw/try/catch).
 
     let mut ctx = LowerCtx::new(
         &func.params,
