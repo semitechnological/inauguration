@@ -205,6 +205,8 @@ impl Default for JitRuntime {
 
 impl JitRuntime {
     pub fn new() -> Self {
+        // Bootstrap native symbol cache with critical libc symbols
+        crate::native_emit::native_link::bootstrap_jit_native();
         // Allocate a small writable page for error flag/value.
         // Not MAP_JIT — just RW for throw/try/catch writes.
         let error_page = unsafe {
