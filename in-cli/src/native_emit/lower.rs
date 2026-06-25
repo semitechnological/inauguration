@@ -712,7 +712,7 @@ fn lower_function(
     pending_calls: &mut Vec<PendingCall>,
     pending_inrt_calls: &mut Vec<PendingInrtCall>,
     pending_static_arrays: &mut Vec<PendingStaticArray>,
-    fn_start_offset: u32,
+    _fn_start_offset: u32,
 ) -> Result<(), String> {
     ensure_return_type(&func.ret, &func.name, structs)?;
     reject_unsupported_function(func, structs)?;
@@ -1293,11 +1293,7 @@ fn lower_stmt(
             emitter.emit_u32(aarch64::ldrb(1, 27, 0));
             emitter.emit_u32(aarch64::strb(1, aarch64::REG_SP, ctx.saved_flag_offset));
             // Clear global error flag
-            emitter.emit_u32(aarch64::strb(
-                aarch64::REG_XZR,
-                27,
-                0,
-            ));
+            emitter.emit_u32(aarch64::strb(aarch64::REG_XZR, 27, 0));
 
             for stmt in body {
                 lower_stmt(
@@ -1318,11 +1314,7 @@ fn lower_stmt(
 
             let handler_offset = emitter.len();
             // Clear global error flag
-            emitter.emit_u32(aarch64::strb(
-                aarch64::REG_XZR,
-                27,
-                0,
-            ));
+            emitter.emit_u32(aarch64::strb(aarch64::REG_XZR, 27, 0));
 
             if let Some(catch_arm) = catches.first() {
                 // Load error value from global location via X27
@@ -2552,8 +2544,18 @@ fn lower_call(
         if let Some(native_ptr) = super::native_link::resolve_native_fn(target) {
             // Load args into registers first
             for (i, arg) in args.iter().enumerate() {
-                if i > 7 { break; } // max 8 reg args
-                lower_expr_into(emitter, ctx, arg, i as u8, functions, pending_calls, fn_name)?;
+                if i > 7 {
+                    break;
+                } // max 8 reg args
+                lower_expr_into(
+                    emitter,
+                    ctx,
+                    arg,
+                    i as u8,
+                    functions,
+                    pending_calls,
+                    fn_name,
+                )?;
             }
             // Emit BLR to native function via X15
             emitter.emit_insns(&aarch64::load_i64(15, native_ptr as usize as i64));

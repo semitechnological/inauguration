@@ -43,7 +43,9 @@ impl CrateDb {
     pub fn new() -> Self {
         let mut search_roots = Vec::new();
         if let Ok(out) = std::process::Command::new("rustc")
-            .arg("--print").arg("sysroot").output()
+            .arg("--print")
+            .arg("sysroot")
+            .output()
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         {
             let lib = PathBuf::from(&out).join("lib/rustlib/src/rust/library");
@@ -75,10 +77,7 @@ impl CrateDb {
 
     /// Resolve a fully-qualified name like "std::fs::read_to_string".
     /// Returns (crate, module_path, parsed_module).
-    pub fn resolve(
-        &self,
-        fq_name: &str,
-    ) -> Result<(String, String, Arc<UnifiedModule>), String> {
+    pub fn resolve(&self, fq_name: &str) -> Result<(String, String, Arc<UnifiedModule>), String> {
         // Check cache
         {
             let idx = self.symbol_index.read().unwrap();
@@ -102,10 +101,9 @@ impl CrateDb {
 
         // Find source file
         let rel = module_path.replace("::", "/");
-        let source_file =
-            self.find_source(&crate_name, &rel).ok_or_else(|| {
-                format!("no source for `{fq_name}` (crate={crate_name}, path={rel})")
-            })?;
+        let source_file = self
+            .find_source(&crate_name, &rel)
+            .ok_or_else(|| format!("no source for `{fq_name}` (crate={crate_name}, path={rel})"))?;
 
         // Cache the lookup
         self.symbol_index.write().unwrap().insert(
@@ -141,10 +139,9 @@ impl CrateDb {
 
         // Find and parse source file
         let rel = module_path.replace("::", "/");
-        let source_file =
-            self.find_source(crate_name, &rel).ok_or_else(|| {
-                format!("source not found for `{crate_name}::{module_path}`")
-            })?;
+        let source_file = self
+            .find_source(crate_name, &rel)
+            .ok_or_else(|| format!("source not found for `{crate_name}::{module_path}`"))?;
 
         // Parse via standard pipeline
         let parser_id = if source_file.extension().and_then(|e| e.to_str()) == Some("rs") {

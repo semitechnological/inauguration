@@ -310,44 +310,50 @@ impl JitRuntime {
         let result = match _args.len() {
             0 => {
                 let r: i64;
-                std::arch::asm!(
-                    "mov x27, {e}",
-                    "blr {f}",
-                    e = in(reg) ep,
-                    f = in(reg) entry,
-                    lateout("x0") r,
-                    clobber_abi("C"),
-                );
+                unsafe {
+                    std::arch::asm!(
+                        "mov x27, {e}",
+                        "blr {f}",
+                        e = in(reg) ep,
+                        f = in(reg) entry,
+                        lateout("x0") r,
+                        clobber_abi("C"),
+                    );
+                }
                 r
             }
             1 => {
                 let a0 = _args[0];
                 let r: i64;
-                std::arch::asm!(
-                    "mov x27, {e}",
-                    "blr {f}",
-                    e = in(reg) ep,
-                    f = in(reg) entry,
-                    in("x0") a0,
-                    lateout("x0") r,
-                    clobber_abi("C"),
-                );
+                unsafe {
+                    std::arch::asm!(
+                        "mov x27, {e}",
+                        "blr {f}",
+                        e = in(reg) ep,
+                        f = in(reg) entry,
+                        in("x0") a0,
+                        lateout("x0") r,
+                        clobber_abi("C"),
+                    );
+                }
                 r
             }
             2 => {
                 let a0 = _args[0];
                 let a1 = _args[1];
                 let r: i64;
-                std::arch::asm!(
-                    "mov x27, {e}",
-                    "blr {f}",
-                    e = in(reg) ep,
-                    f = in(reg) entry,
-                    in("x0") a0,
-                    in("x1") a1,
-                    lateout("x0") r,
-                    clobber_abi("C"),
-                );
+                unsafe {
+                    std::arch::asm!(
+                        "mov x27, {e}",
+                        "blr {f}",
+                        e = in(reg) ep,
+                        f = in(reg) entry,
+                        in("x0") a0,
+                        in("x1") a1,
+                        lateout("x0") r,
+                        clobber_abi("C"),
+                    );
+                }
                 r
             }
             _ => 0,
