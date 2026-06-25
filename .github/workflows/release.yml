@@ -14,38 +14,35 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            skip_swift: "1"
-          - os: macos-latest
-            skip_swift: "0"
+        os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Format in-cli
+      - name: Install rust-src (for self-host sysroot)
+        run: rustup component add rust-src
+      - name: Format
         run: cargo fmt --check
         working-directory: in-cli
-      - name: Clippy in-cli
+      - name: Clippy
         run: cargo clippy --all-targets --all-features --locked -- -D warnings
+        working-directory: in-cli
+      - name: Test
+        run: cargo test --features extended
         working-directory: in-cli
       - name: Check generated protocol models
         run: cargo run --manifest-path in-cli/Cargo.toml --bin protocol-gen && git diff --exit-code -- in-cli/src/hotreload/generated_protocol.rs
-      - name: Build in binary
+      - name: Build in binary (extended)
         run: cargo build --release --bin in --features extended
         working-directory: in-cli
-      - name: Add in binary to PATH
+      - name: Add to PATH
         run: echo "$PWD/target/release" >> "$GITHUB_PATH"
         working-directory: in-cli
-      - name: Run in test
-        env:
-          IN_TEST_SKIP_SWIFT: ${{ matrix.skip_swift }}
-        run: in test
-      - name: Run in test owned-native
-        env:
-          IN_TEST_SKIP_SWIFT: "1"
-        run: in test --owned-native
+      - name: Run conformance suite
+        run: ./scripts/run-conformance.sh
+      - name: Self-host check
+        run: in build --path in-cli/src/main.rs --module-id InCli --verbose
       - name: Check diff whitespace
         run: git diff --check
 
@@ -76,8 +73,8 @@ jobs:
         run: |
           mkdir -p dist
           cp "in-cli/target/${{ matrix.target }}/release/${{ matrix.binary_name }}" "dist/${{ matrix.binary_name }}"
-          tar -czf "dist/${{ matrix.binary_name }}-${{ matrix.asset_suffix }}.tar.gz" -C dist "${{ matrix.binary_name }}"
-          shasum -a 256 "dist/${{ matrix.binary_name }}-${{ matrix.asset_suffix }}.tar.gz" > "dist/${{ matrix.binary_name }}-${{ matrix.asset_suffix }}.sha256"
+          tar -czf "dist/in-${{ matrix.asset_suffix }}.tar.gz" -C dist "${{ matrix.binary_name }}"
+          shasum -a 256 "dist/in-${{ matrix.asset_suffix }}.tar.gz" > "dist/in-${{ matrix.asset_suffix }}.sha256"
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
