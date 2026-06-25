@@ -8,6 +8,8 @@ pub const INRT_ENTRY_SYMBOL: &str = "_inrt_start";
 pub const INRT_BUILTINS: &[&str] = &[
     "__inrt_str_len",
     "__inrt_str_concat",
+    "__inrt_str_eq",
+    "__inrt_str_contains",
     "__inrt_str_substr",
     "__inrt_array_len",
     "__inrt_array_load",
@@ -25,7 +27,7 @@ pub fn inrt_builtin_param_slots(name: &str) -> Option<usize> {
         "__inrt_array_load" => Some(2),
         "__inrt_array_store" => Some(3),
         "__inrt_array_push" => Some(2),
-        "__inrt_str_concat" => Some(2),
+        "__inrt_str_concat" | "__inrt_str_eq" | "__inrt_str_contains" => Some(2),
         "__inrt_str_substr" => Some(3),
         _ => None,
     }
@@ -74,6 +76,7 @@ mod r {
     pub const X7: u8 = 7;
     pub const X8: u8 = 8;
     pub const X9: u8 = 9;
+    pub const X10: u8 = 10;
     pub const X16: u8 = 16;
     pub const SP: u8 = 31;
     pub const XZR: u8 = 31;
@@ -175,6 +178,216 @@ fn build_inrt_str_concat() -> Vec<u8> {
         ],
         &mut buf,
     );
+    buf
+}
+
+fn build_inrt_str_eq() -> Vec<u8> {
+    let mut buf = Vec::with_capacity(128);
+    // prologue: save fp, lr
+    emit_insn_blob(
+        &[
+            aarch64::stp_pre(FP, LR, -16),
+            aarch64::add_imm64(FP, SP, 0),
+        ],
+        &mut buf,
+    );
+    // load lengths
+    emit_insn_blob(
+        &[
+            aarch64::ldr64(X2, X0, 0),
+            aarch64::ldr64(X3, X1, 0),
+            aarch64::cmp_reg64(X2, X3),
+        ],
+        &mut buf,
+    );
+    // forward: b.ne -> not_equal
+    let ne_len = buf.len() as u32;
+    emit_insn_blob(&[aarch64::b_cond(1, 0)], &mut buf);
+    // setup loop: p1 = str1+8, p2 = str2+8, remaining = len (same for both)
+    emit_insn_blob(
+        &[
+            aarch64::add_imm64(X4, X0, 8),
+            aarch64::add_imm64(X5, X1, 8),
+            aarch64::mov_reg64(X6, X2),
+        ],
+        &mut buf,
+    );
+    // loop: check remaining == 0
+    let l_loop = buf.len() as u32;
+    emit_insn_blob(&[aarch64::cmp_reg64(X6, XZR)], &mut buf);
+    let eq_rem = buf.len() as u32;
+    emit_insn_blob(&[aarch64::b_cond(0, 0)], &mut buf);
+    // compare byte
+    emit_insn_blob(
+        &[
+            aarch64::ldrb(X8, X4, 0),
+            aarch64::ldrb(X9, X5, 0),
+            aarch64::cmp_reg64(X8, X9),
+        ],
+        &mut buf,
+    );
+    let ne_byte = buf.len() as u32;
+    emit_insn_blob(&[aarch64::b_cond(1, 0)], &mut buf);
+    // advance ptrs, decrement remaining, loop
+    emit_insn_blob(
+        &[
+            aarch64::add_imm64(X4, X4, 1),
+            aarch64::add_imm64(X5, X5, 1),
+            aarch64::sub_imm64(X6, X6, 1),
+            aarch64::b(l_loop as i32 - buf.len() as i32),
+        ],
+        &mut buf,
+    );
+    // equal: return 1
+    let l_equal = buf.len() as u32;
+    emit_insn_blob(&[aarch64::movz64(X0, 1, 0)], &mut buf);
+    let b_done = buf.len() as u32;
+    emit_insn_blob(&[aarch64::b(0)], &mut buf);
+    // not_equal: return 0
+    let l_ne = buf.len() as u32;
+    emit_insn_blob(&[aarch64::mov_reg64(X0, XZR)], &mut buf);
+    // done: epilogue
+    let l_done = buf.len() as u32;
+    emit_insn_blob(&[aarch64::ldp_post(FP, LR, 16), aarch64::ret()], &mut buf);
+    // patch forward branches
+    buf[ne_len as usize..ne_len as usize + 4]
+        .copy_from_slice(&aarch64::b_cond(1, l_ne as i32 - ne_len as i32).to_le_bytes());
+    buf[eq_rem as usize..eq_rem as usize + 4]
+        .copy_from_slice(&aarch64::b_cond(0, l_equal as i32 - eq_rem as i32).to_le_bytes());
+    buf[ne_byte as usize..ne_byte as usize + 4]
+        .copy_from_slice(&aarch64::b_cond(1, l_ne as i32 - ne_byte as i32).to_le_bytes());
+    buf[b_done as usize..b_done as usize + 4]
+        .copy_from_slice(&aarch64::b(l_done as i32 - b_done as i32).to_le_bytes());
+    buf
+}
+
+fn build_inrt_str_contains() -> Vec<u8> {
+    let mut buf = Vec::with_capacity(256);
+    // prologue: save fp, lr, callee-saved regs
+    emit_insn_blob(
+        &[
+            aarch64::stp_pre(FP, LR, -64),
+            aarch64::add_imm64(FP, SP, 0),
+            aarch64::str64(X0, SP, 0),
+            aarch64::str64(X1, SP, 8),
+        ],
+        &mut buf,
+    );
+    // load lengths
+    emit_insn_blob(
+        &[
+            aarch64::ldr64(X2, X0, 0),
+            aarch64::ldr64(X3, X1, 0),
+            aarch64::str64(X2, SP, 16),
+            aarch64::str64(X3, SP, 24),
+        ],
+        &mut buf,
+    );
+    // if n_len == 0: return 1 (empty needle matches)
+    emit_insn_blob(&[aarch64::cmp_reg64(X3, XZR)], &mut buf);
+    let eq_zero = buf.len() as u32;
+    emit_insn_blob(&[aarch64::b_cond(0, 0)], &mut buf);
+    // if n_len > h_len: return 0
+    emit_insn_blob(&[aarch64::cmp_reg64(X3, X2)], &mut buf);
+    let hi_nlen = buf.len() as u32;
+    emit_insn_blob(&[aarch64::b_cond(8, 0)], &mut buf);
+    // max_start = h_len - n_len + 1
+    emit_insn_blob(
+        &[
+            aarch64::sub_reg64(X4, X2, X3),
+            aarch64::add_imm64(X4, X4, 1),
+            aarch64::str64(X4, SP, 32),
+            aarch64::mov_reg64(X5, XZR),
+            aarch64::str64(X5, SP, 40),
+        ],
+        &mut buf,
+    );
+    // outer_loop: check i >= max_start
+    let l_outer = buf.len() as u32;
+    emit_insn_blob(
+        &[
+            aarch64::ldr64(X4, SP, 32),
+            aarch64::ldr64(X5, SP, 40),
+            aarch64::cmp_reg64(X5, X4),
+        ],
+        &mut buf,
+    );
+    let hs_outer = buf.len() as u32;
+    emit_insn_blob(&[aarch64::b_cond(2, 0)], &mut buf);
+    // setup inner loop: haystack[i..i+n_len] vs needle[0..n_len]
+    emit_insn_blob(
+        &[
+            aarch64::ldr64(X0, SP, 0),
+            aarch64::ldr64(X1, SP, 8),
+            aarch64::ldr64(X3, SP, 24),
+            aarch64::add_imm64(X6, X0, 8),
+            aarch64::add_imm64(X7, X1, 8),
+            aarch64::add_reg64(X6, X6, X5),
+            aarch64::mov_reg64(X8, XZR),
+        ],
+        &mut buf,
+    );
+    // inner_loop: check j >= n_len
+    let l_inner = buf.len() as u32;
+    emit_insn_blob(&[aarch64::cmp_reg64(X8, X3)], &mut buf);
+    let hs_inner = buf.len() as u32;
+    emit_insn_blob(&[aarch64::b_cond(2, 0)], &mut buf);
+    // compare byte
+    emit_insn_blob(
+        &[
+            aarch64::ldrb(X9, X6, 0),
+            aarch64::ldrb(X10, X7, 0),
+            aarch64::cmp_reg64(X9, X10),
+        ],
+        &mut buf,
+    );
+    let ne_byte = buf.len() as u32;
+    emit_insn_blob(&[aarch64::b_cond(1, 0)], &mut buf);
+    // advance inner loop
+    emit_insn_blob(
+        &[
+            aarch64::add_imm64(X6, X6, 1),
+            aarch64::add_imm64(X7, X7, 1),
+            aarch64::add_imm64(X8, X8, 1),
+            aarch64::b(l_inner as i32 - buf.len() as i32),
+        ],
+        &mut buf,
+    );
+    // next: advance outer loop
+    let l_next = buf.len() as u32;
+    emit_insn_blob(
+        &[
+            aarch64::ldr64(X5, SP, 40),
+            aarch64::add_imm64(X5, X5, 1),
+            aarch64::str64(X5, SP, 40),
+            aarch64::b(l_outer as i32 - buf.len() as i32),
+        ],
+        &mut buf,
+    );
+    // found: return 1
+    let l_found = buf.len() as u32;
+    emit_insn_blob(&[aarch64::movz64(X0, 1, 0)], &mut buf);
+    let b_done = buf.len() as u32;
+    emit_insn_blob(&[aarch64::b(0)], &mut buf);
+    // not_found: return 0
+    let l_nf = buf.len() as u32;
+    emit_insn_blob(&[aarch64::mov_reg64(X0, XZR)], &mut buf);
+    // done: epilogue
+    let l_done = buf.len() as u32;
+    emit_insn_blob(&[aarch64::ldp_post(FP, LR, 64), aarch64::ret()], &mut buf);
+    // patch forward branches
+    buf[eq_zero as usize..eq_zero as usize + 4]
+        .copy_from_slice(&aarch64::b_cond(0, l_found as i32 - eq_zero as i32).to_le_bytes());
+    buf[hi_nlen as usize..hi_nlen as usize + 4]
+        .copy_from_slice(&aarch64::b_cond(8, l_nf as i32 - hi_nlen as i32).to_le_bytes());
+    buf[hs_outer as usize..hs_outer as usize + 4]
+        .copy_from_slice(&aarch64::b_cond(2, l_nf as i32 - hs_outer as i32).to_le_bytes());
+    buf[hs_inner as usize..hs_inner as usize + 4]
+        .copy_from_slice(&aarch64::b_cond(2, l_found as i32 - hs_inner as i32).to_le_bytes());
+    buf[ne_byte as usize..ne_byte as usize + 4]
+        .copy_from_slice(&aarch64::b_cond(1, l_next as i32 - ne_byte as i32).to_le_bytes());
+    buf[b_done as usize..b_done as usize + 4]
+        .copy_from_slice(&aarch64::b(l_done as i32 - b_done as i32).to_le_bytes());
     buf
 }
 
@@ -434,6 +647,8 @@ pub fn build_runtime_blob() -> (Vec<u8>, BTreeMap<String, u32>) {
     }
     add_fn!("__inrt_str_len", build_inrt_str_len());
     add_fn!("__inrt_str_concat", build_inrt_str_concat());
+    add_fn!("__inrt_str_eq", build_inrt_str_eq());
+    add_fn!("__inrt_str_contains", build_inrt_str_contains());
     add_fn!("__inrt_str_substr", build_inrt_str_substr());
     add_fn!("__inrt_array_len", build_inrt_array_len());
     add_fn!("__inrt_array_load", build_inrt_array_load());
@@ -476,6 +691,8 @@ mod tests {
             let f = match *name {
                 "__inrt_str_len" => build_inrt_str_len(),
                 "__inrt_str_concat" => build_inrt_str_concat(),
+                "__inrt_str_eq" => build_inrt_str_eq(),
+                "__inrt_str_contains" => build_inrt_str_contains(),
                 "__inrt_str_substr" => build_inrt_str_substr(),
                 "__inrt_array_len" => build_inrt_array_len(),
                 "__inrt_array_load" => build_inrt_array_load(),
