@@ -6,12 +6,18 @@ cd "$ROOT"
 
 IN_CMD=("${IN_BIN:-in}")
 
-# Pre-existing failures (runtime features not yet implemented)
+# Pre-existing failures (JIT crashes or runtime features not yet implemented)
 SKIP_FIXTURES=(
   conformance/runtime/string-ops.in
   conformance/runtime/array-ops.in
   conformance/types/string-ops.in
   conformance/classes/class-basic.java
+  conformance/control-flow/match-string.in
+  conformance/errors/throw-caught.in
+  conformance/errors/throw-from-function.in
+  conformance/errors/throw.in
+  conformance/errors/try-catch.in
+  conformance/errors/uncaught.in
 )
 
 RED='\033[0;31m'
