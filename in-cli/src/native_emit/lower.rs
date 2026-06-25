@@ -1060,7 +1060,7 @@ impl<'a> LowerCtx<'a> {
                     .insert(name.to_string(), LocalSlot::Scalar(offset));
                 Ok(())
             }
-            Some(Typ::Int | Typ::Bool | Typ::String) => {
+            Some(Typ::Int | Typ::Bool | Typ::String | Typ::Float) => {
                 let offset = self.alloc_slot();
                 self.locals
                     .insert(name.to_string(), LocalSlot::Scalar(offset));
@@ -3045,6 +3045,7 @@ fn expr_type(expr: &Expr) -> Option<Typ> {
         Expr::ArrayLit(items) => Some(Typ::Array(Box::new(
             items.iter().find_map(expr_type).unwrap_or(Typ::Void),
         ))),
+        Expr::StructInit { name, .. } => Some(Typ::Named(name.clone())),
         _ => None,
     }
 }
