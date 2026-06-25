@@ -47,6 +47,9 @@ pub struct JitRuntime {
     code_pages: Vec<CodePage>,
     /// Function dispatch table: name → entry point.
     functions: RwLock<HashMap<String, JitFunction>>,
+    /// Writable page for error flag (byte at +0) and error value (ptr at +8).
+    /// Set by invoke() into X27 before calling JIT code. Throw/try use this.
+    error_page: *mut u8,
 }
 
 struct CodePage {
@@ -202,9 +205,27 @@ impl Default for JitRuntime {
 
 impl JitRuntime {
     pub fn new() -> Self {
+        // Allocate a small writable page for error flag/value.
+        // Not MAP_JIT — just RW for throw/try/catch writes.
+        let error_page = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                64,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_PRIVATE | libc::MAP_ANON,
+                -1,
+                0,
+            )
+        };
+        let error_page = if error_page == libc::MAP_FAILED {
+            std::ptr::null_mut()
+        } else {
+            error_page as *mut u8
+        };
         Self {
             code_pages: Vec::new(),
             functions: RwLock::new(HashMap::new()),
+            error_page,
         }
     }
 
@@ -281,48 +302,70 @@ impl JitRuntime {
             return Some(0);
         }
 
-        // Call the function through a raw function pointer.
-        match _args.len() {
+        // Set X27 to error page for throw/try/catch, then call through blr.
+        // JIT functions no longer emit adr x27 in prologue.
+        let ep = self.error_page as usize;
+        let result = match _args.len() {
             0 => {
-                let f: extern "C" fn() -> i64 = unsafe { std::mem::transmute(entry) };
-                Some(f())
+                let r: i64;
+                std::arch::asm!(
+                    "mov x27, {e}",
+                    "blr {f}",
+                    e = in(reg) ep,
+                    f = in(reg) entry,
+                    lateout("x0") r,
+                    clobber_abi("C"),
+                );
+                r
             }
             1 => {
-                let f: extern "C" fn(i64) -> i64 = unsafe { std::mem::transmute(entry) };
-                Some(f(_args[0]))
+                let a0 = _args[0];
+                let r: i64;
+                std::arch::asm!(
+                    "mov x27, {e}",
+                    "blr {f}",
+                    e = in(reg) ep,
+                    f = in(reg) entry,
+                    in("x0") a0,
+                    lateout("x0") r,
+                    clobber_abi("C"),
+                );
+                r
             }
             2 => {
-                let f: extern "C" fn(i64, i64) -> i64 = unsafe { std::mem::transmute(entry) };
-                Some(f(_args[0], _args[1]))
+                let a0 = _args[0];
+                let a1 = _args[1];
+                let r: i64;
+                std::arch::asm!(
+                    "mov x27, {e}",
+                    "blr {f}",
+                    e = in(reg) ep,
+                    f = in(reg) entry,
+                    in("x0") a0,
+                    in("x1") a1,
+                    lateout("x0") r,
+                    clobber_abi("C"),
+                );
+                r
             }
-            3 => {
-                let f: extern "C" fn(i64, i64, i64) -> i64 = unsafe { std::mem::transmute(entry) };
-                Some(f(_args[0], _args[1], _args[2]))
-            }
-            4 => {
-                let f: extern "C" fn(i64, i64, i64, i64) -> i64 =
-                    unsafe { std::mem::transmute(entry) };
-                Some(f(_args[0], _args[1], _args[2], _args[3]))
-            }
-            5 => {
-                let f: extern "C" fn(i64, i64, i64, i64, i64) -> i64 =
-                    unsafe { std::mem::transmute(entry) };
-                Some(f(_args[0], _args[1], _args[2], _args[3], _args[4]))
-            }
-            6 => {
-                let f: extern "C" fn(i64, i64, i64, i64, i64, i64) -> i64 =
-                    unsafe { std::mem::transmute(entry) };
-                Some(f(
-                    _args[0], _args[1], _args[2], _args[3], _args[4], _args[5],
-                ))
-            }
-            _ => None,
-        }
+            _ => 0,
+        };
+        Some(result)
     }
 
     /// Returns the number of loaded functions.
     pub fn function_count(&self) -> usize {
         self.functions.read().unwrap().len()
+    }
+}
+
+impl Drop for JitRuntime {
+    fn drop(&mut self) {
+        if !self.error_page.is_null() {
+            unsafe {
+                libc::munmap(self.error_page as *mut c_void, 64);
+            }
+        }
     }
 }
 
