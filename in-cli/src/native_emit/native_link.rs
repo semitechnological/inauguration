@@ -34,6 +34,15 @@ pub fn resolve_native_fn(name: &str) -> Option<*const u8> {
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "android"))]
+/// Pre-register critical libc symbols on init.
+pub fn bootstrap_jit_native() {
+    for name in &["system", "exit", "puts", "putchar", "printf"] {
+        if let Some(ptr) = dlsym_exact(name) {
+            cache().lock().unwrap().insert(name.to_string(), NativePtr(ptr));
+        }
+    }
+}
+
 fn dlsym_exact(name: &str) -> Option<*const u8> {
     let c_name = std::ffi::CString::new(name).ok()?;
     let ptr = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c_name.as_ptr()) };
