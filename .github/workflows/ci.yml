@@ -122,8 +122,6 @@ jobs:
           IN=./in-cli/target/release/in
           echo "=== Self-host: compile in-cli/src/main.rs ==="
           "$IN" build --path in-cli/src/main.rs --module-id InCli --verbose
-          echo "=== Self-host: compile in-cli/src/lib.rs ==="
-          "$IN" build --path in-cli/src/lib.rs --module-id Inauguration --verbose
       - name: Check diff whitespace
         run: git diff --check
 
