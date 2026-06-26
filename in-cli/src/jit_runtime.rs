@@ -240,7 +240,7 @@ impl JitRuntime {
         &mut self,
         code: &[u8],
         function_offsets: &[(String, u32, u32)], // (name, offset, size)
-        relocations: &[(u32, u64)],               // (offset, codegen_base) — patched at load time
+        relocations: &[(u32, u64)],              // (offset, codegen_base) — patched at load time
     ) -> Result<(), String> {
         // Allocate a code page large enough
         let page = CodePage::new(code.len()).ok_or_else(|| "jit: mmap failed".to_string())?;
@@ -257,8 +257,14 @@ impl JitRuntime {
                 let site = offset as usize;
                 if site + 8 <= code.len() {
                     let old_val = u64::from_le_bytes([
-                        code[site], code[site+1], code[site+2], code[site+3],
-                        code[site+4], code[site+5], code[site+6], code[site+7],
+                        code[site],
+                        code[site + 1],
+                        code[site + 2],
+                        code[site + 3],
+                        code[site + 4],
+                        code[site + 5],
+                        code[site + 6],
+                        code[site + 7],
                     ]);
                     let new_val = old_val.wrapping_sub(codegen_base).wrapping_add(actual_base);
                     let patch = new_val.to_le_bytes();
