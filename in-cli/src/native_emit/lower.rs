@@ -274,7 +274,7 @@ pub fn lower_module(
         entry_offset,
         exports,
         function_offsets,
-        relocations: Vec::new(),  // AArch64 uses position-independent code
+        relocations: Vec::new(), // AArch64 uses position-independent code
     })
 }
 
