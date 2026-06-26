@@ -20,6 +20,11 @@ pub struct X86_64CompileResult {
     pub code: Vec<u8>,
     pub entry_offset: u32,
     pub exports: Vec<(String, u32)>,
+    /// Byte offsets in `code` where 8-byte absolute addresses were written.
+    /// At load time, patch each by adding (actual_base - codegen_base).
+    pub relocations: Vec<u32>,
+    /// The base address used during codegen (KERNEL_BASE = 0x101100).
+    pub codegen_base: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -225,6 +230,7 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
 
     // Resolve calls — collect string refs, resolve function addresses and calls
     let mut str_refs: Vec<(u32, String)> = Vec::new();
+    let mut relocations: Vec<u32> = Vec::new();
     for call in &all_pending_calls {
         if call.target.starts_with("@addr_") {
             // Function address reference: write absolute address at site
@@ -234,6 +240,7 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
                 let site = call.site as usize;
                 if site + 8 <= emitter.bytes.len() {
                     emitter.bytes[site..site + 8].copy_from_slice(&abs_addr.to_le_bytes());
+                    relocations.push(call.site);
                 }
             }
         } else if call.target.starts_with("@str_") {
@@ -258,6 +265,7 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
                     let site_u = site as usize;
                     if site_u + 8 <= emitter.bytes.len() {
                         emitter.bytes[site_u..site_u + 8].copy_from_slice(&abs_addr.to_le_bytes());
+                        relocations.push(site);
                     }
                 }
             }
@@ -284,6 +292,8 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
         code: emitter.bytes,
         entry_offset,
         exports,
+        relocations,
+        codegen_base: KERNEL_BASE,
     })
 }
 
