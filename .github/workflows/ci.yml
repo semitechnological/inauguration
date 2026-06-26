@@ -77,7 +77,11 @@ jobs:
   # ── JIT conformance (54/54) ───────────────────────────────────────
   jit-conformance:
     name: JIT conformance
-    runs-on: macos-latest  # ponytail: x86_64 codegen has codegen bugs for multi-fn programs; aarch64 54/54
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
