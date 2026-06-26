@@ -1,1 +1,0 @@
-{"slug":"command-execution","description":"Potential command execution or shell invocation with variable input.","noise":"precise","filePath":"scripts/check-native-answer-sample.sh","line":52,"snippet":"status = subprocess.run([str(binary)], check=False)","matchedPattern":"python process","score":80,"source":"builtin"}
