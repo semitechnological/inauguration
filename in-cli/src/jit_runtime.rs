@@ -304,61 +304,79 @@ impl JitRuntime {
             return Some(0);
         }
 
-        // Set X27 to error page for throw/try/catch, then call through blr.
-        // JIT functions no longer emit adr x27 in prologue.
-        let ep = self.error_page as usize;
-        let result = match _args.len() {
-            0 => {
-                let r: i64;
-                unsafe {
-                    std::arch::asm!(
-                        "mov x27, {e}",
-                        "blr {f}",
-                        e = in(reg) ep,
-                        f = in(reg) entry,
-                        lateout("x0") r,
-                        clobber_abi("C"),
-                    );
+        #[cfg(target_arch = "aarch64")]
+        {
+            // Set X27 to error page for throw/try/catch, then call through blr.
+            // JIT functions no longer emit adr x27 in prologue.
+            let ep = self.error_page as usize;
+            let result = match _args.len() {
+                0 => {
+                    let r: i64;
+                    unsafe {
+                        std::arch::asm!(
+                            "mov x27, {e}",
+                            "blr {f}",
+                            e = in(reg) ep,
+                            f = in(reg) entry,
+                            lateout("x0") r,
+                            clobber_abi("C"),
+                        );
+                    }
+                    r
                 }
-                r
-            }
-            1 => {
-                let a0 = _args[0];
-                let r: i64;
-                unsafe {
-                    std::arch::asm!(
-                        "mov x27, {e}",
-                        "blr {f}",
-                        e = in(reg) ep,
-                        f = in(reg) entry,
-                        in("x0") a0,
-                        lateout("x0") r,
-                        clobber_abi("C"),
-                    );
+                1 => {
+                    let a0 = _args[0];
+                    let r: i64;
+                    unsafe {
+                        std::arch::asm!(
+                            "mov x27, {e}",
+                            "blr {f}",
+                            e = in(reg) ep,
+                            f = in(reg) entry,
+                            in("x0") a0,
+                            lateout("x0") r,
+                            clobber_abi("C"),
+                        );
+                    }
+                    r
                 }
-                r
-            }
-            2 => {
-                let a0 = _args[0];
-                let a1 = _args[1];
-                let r: i64;
-                unsafe {
-                    std::arch::asm!(
-                        "mov x27, {e}",
-                        "blr {f}",
-                        e = in(reg) ep,
-                        f = in(reg) entry,
-                        in("x0") a0,
-                        in("x1") a1,
-                        lateout("x0") r,
-                        clobber_abi("C"),
-                    );
+                2 => {
+                    let a0 = _args[0];
+                    let a1 = _args[1];
+                    let r: i64;
+                    unsafe {
+                        std::arch::asm!(
+                            "mov x27, {e}",
+                            "blr {f}",
+                            e = in(reg) ep,
+                            f = in(reg) entry,
+                            in("x0") a0,
+                            in("x1") a1,
+                            lateout("x0") r,
+                            clobber_abi("C"),
+                        );
+                    }
+                    r
                 }
-                r
-            }
-            _ => 0,
-        };
-        Some(result)
+                _ => 0,
+            };
+            Some(result)
+        }
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            // System V AMD64 ABI: args in rdi, rsi, rdx, rcx, r8, r9; return in rax.
+            // x86_64 JIT uses stack-based error handling — no register setup needed.
+            type JitFn = unsafe extern "C" fn(i64, i64, i64, i64, i64, i64) -> i64;
+            let f: JitFn = std::mem::transmute(entry);
+            let result = match _args.len() {
+                0 => f(0, 0, 0, 0, 0, 0),
+                1 => f(_args[0], 0, 0, 0, 0, 0),
+                2 => f(_args[0], _args[1], 0, 0, 0, 0),
+                _ => 0,
+            };
+            Some(result)
+        }
     }
 
     /// Returns the number of loaded functions.
