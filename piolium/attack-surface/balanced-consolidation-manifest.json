@@ -1,0 +1,51 @@
+{
+	"generated_at": "2026-06-25T05:31:36.274Z",
+	"source_prefixes": [
+		"p8-"
+	],
+	"promoted": [],
+	"dropped": [
+		{
+			"original_id": "p8",
+			"severity": "info",
+			"source_path": "/Users/undivisible/projects/inauguration/piolium/findings-draft/p8-001-in-repo-env-var-remote-install-rce.md",
+			"reason": "below severity threshold (low/info)"
+		},
+		{
+			"original_id": "p8",
+			"severity": "info",
+			"source_path": "/Users/undivisible/projects/inauguration/piolium/findings-draft/p8-002-package-runtime-sh-allowlist-rce.md",
+			"reason": "below severity threshold (low/info)"
+		},
+		{
+			"original_id": "p8",
+			"severity": "info",
+			"source_path": "/Users/undivisible/projects/inauguration/piolium/findings-draft/p8-003-package-adapter-overlay-override.md",
+			"reason": "below severity threshold (low/info)"
+		},
+		{
+			"original_id": "p8",
+			"severity": "info",
+			"source_path": "/Users/undivisible/projects/inauguration/piolium/findings-draft/p8-004-go-module-h1-checksum-bypass.md",
+			"reason": "below severity threshold (low/info)"
+		},
+		{
+			"original_id": "p8",
+			"severity": "info",
+			"source_path": "/Users/undivisible/projects/inauguration/piolium/findings-draft/p8-005-archive-extraction-path-traversal.md",
+			"reason": "below severity threshold (low/info)"
+		},
+		{
+			"original_id": "p8",
+			"severity": "info",
+			"source_path": "/Users/undivisible/projects/inauguration/piolium/findings-draft/p8-006-compile-cache-fnv1a-collision.md",
+			"reason": "below severity threshold (low/info)"
+		},
+		{
+			"original_id": "p8",
+			"severity": "info",
+			"source_path": "/Users/undivisible/projects/inauguration/piolium/findings-draft/p8-007-dynamic-module-abi-incomplete-validation.md",
+			"reason": "below severity threshold (low/info)"
+		}
+	]
+}

@@ -1,0 +1,76 @@
+{
+	"audits": [
+		{
+			"audit_id": "2026-06-25T05:08:27.909Z",
+			"mode": "balanced",
+			"started_at": "2026-06-25T05:08:27.909Z",
+			"completed_at": "2026-06-25T05:32:46.223Z",
+			"status": "complete",
+			"phases": {
+				"L1": {
+					"status": "complete",
+					"attempt": 1,
+					"max_attempts": 6,
+					"started_at": "2026-06-25T05:08:27.919Z",
+					"completed_at": "2026-06-25T05:13:32.531Z"
+				},
+				"L2": {
+					"status": "complete",
+					"attempt": 1,
+					"max_attempts": 6,
+					"started_at": "2026-06-25T05:13:32.532Z",
+					"completed_at": "2026-06-25T05:18:16.611Z"
+				},
+				"L3": {
+					"status": "complete",
+					"attempt": 1,
+					"max_attempts": 6,
+					"started_at": "2026-06-25T05:18:16.612Z",
+					"completed_at": "2026-06-25T05:25:06.010Z"
+				},
+				"L4": {
+					"status": "complete",
+					"attempt": 1,
+					"max_attempts": 6,
+					"started_at": "2026-06-25T05:18:16.645Z",
+					"completed_at": "2026-06-25T05:21:20.016Z"
+				},
+				"L5": {
+					"status": "complete",
+					"attempt": 1,
+					"max_attempts": 6,
+					"started_at": "2026-06-25T05:25:06.011Z",
+					"completed_at": "2026-06-25T05:31:36.272Z"
+				},
+				"L6": {
+					"status": "skipped",
+					"started_at": "2026-06-25T05:31:36.274Z",
+					"completed_at": "2026-06-25T05:31:36.274Z"
+				},
+				"L6b": {
+					"status": "skipped",
+					"started_at": "2026-06-25T05:31:36.275Z",
+					"completed_at": "2026-06-25T05:31:36.275Z"
+				},
+				"L6c": {
+					"status": "complete",
+					"attempt": 1,
+					"max_attempts": 6,
+					"started_at": "2026-06-25T05:31:36.275Z",
+					"completed_at": "2026-06-25T05:32:46.213Z",
+					"block_reason": "piolium/findings/ does not exist — prerequisite phases L6 and L6b were skipped. Draft findings in findings-draft/ (37 files) were never promoted to confirmed findings with report.md, PoC scripts, or evidence directories."
+				},
+				"L7": {
+					"status": "complete",
+					"started_at": "2026-06-25T05:32:46.215Z",
+					"completed_at": "2026-06-25T05:32:46.222Z"
+				}
+			},
+			"agent_sdk": "pi",
+			"commit": "3f9b59666c1e967e02f66a62996b3e2c58bf8af4",
+			"branch": "master",
+			"repository": "tschk/inauguration",
+			"history_available": true
+		}
+	]
+}
