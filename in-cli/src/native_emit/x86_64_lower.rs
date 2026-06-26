@@ -678,17 +678,15 @@ fn lower_function(
         emitter.emit_insns(&x86_64::sub_rsp_i32(frame_size as i32));
     }
 
-    // Push register parameters onto the stack to preserve them across the
-    // rep stosq zero-fill, which clobbers rdi, rcx, rax, and overwrites the
-    // entire frame including param slots.
+    // Save param registers that rep stosq will clobber (rdi, rcx) to temp
+    // slots in the caller's stack frame ([rbp + 16 + i*8]) before zero-fill.
+    // We can't use push/pop here because sub rsp between them shifts rsp.
     let param_regs = [RDI, RSI, RDX, RCX, 8, 9];
-    let mut pushed: u32 = 0;
+    let stosq_clobbers = [true, false, false, true, false, false]; // rdi, rcx
     for (i, (name, _)) in func.params.iter().enumerate() {
-        if i < 6 {
-            if ctx.locals.contains_key(name) {
-                emitter.emit_insns(&x86_64::push_r(param_regs[i]));
-                pushed += 1;
-            }
+        if i < 6 && ctx.locals.contains_key(name) && stosq_clobbers[i] {
+            let temp_disp = 16 + i as i32 * 8; // caller's frame, above ret addr
+            emitter.emit_insns(&x86_64::mov_m_r(RBP, temp_disp, param_regs[i]));
         }
     }
 
@@ -701,24 +699,22 @@ fn lower_function(
         let mut mov_rcx = vec![0x48, 0xC7, 0xC1];
         mov_rcx.extend_from_slice(&qwords.to_le_bytes());
         emitter.emit_insns(&mov_rcx);
-        // lea rdi, [rsp + pushed*8]  — skip pushed param registers
-        if pushed > 0 {
-            // lea rdi, [rsp + disp8]  (48 8D 7C 24 XX)
-            emitter.emit_bytes(&[0x48, 0x8D, 0x7C, 0x24]);
-            emitter.emit_bytes(&[(pushed as u8) * 8]);
-        } else {
-            // lea rdi, [rsp]  (48 8D 3C 24)
-            emitter.emit_bytes(&[0x48, 0x8D, 0x3C, 0x24]);
-        }
+        // lea rdi, [rsp]  (48 8D 3C 24) — zero from bottom of allocated frame
+        emitter.emit_bytes(&[0x48, 0x8D, 0x3C, 0x24]);
         // rep stosq  (F3 48 AB)
         emitter.emit_bytes(&[0xF3, 0x48, 0xAB]);
     }
 
-    // Pop register parameters and store to their stack slots.
-    for (i, (name, _)) in func.params.iter().enumerate().rev() {
+    // Restore clobbered param regs and store all params to their stack slots.
+    for (i, (name, _)) in func.params.iter().enumerate() {
         if i < 6 {
             if let Some(StackSlot::Scalar(offset)) = ctx.locals.get(name) {
-                emitter.emit_insns(&x86_64::pop_r(param_regs[i]));
+                // Restore from temp slot if clobbered
+                if stosq_clobbers[i] {
+                    let temp_disp = 16 + i as i32 * 8;
+                    emitter.emit_insns(&x86_64::mov_r_m(param_regs[i], RBP, temp_disp));
+                }
+                // Store to proper stack slot
                 emitter.emit_insns(&x86_64::str64(param_regs[i], *offset as u16));
             }
         }
