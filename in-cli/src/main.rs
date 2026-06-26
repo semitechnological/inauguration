@@ -1674,6 +1674,8 @@ fn cmd_emit_boot(
         code,
         entry_offset: 0,
         exports: vec![],
+        relocations: vec![],
+        codegen_base: 0x101100,
     };
 
     // Build the flat boot image: trampoline + kernel code

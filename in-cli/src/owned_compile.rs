@@ -618,6 +618,7 @@ fn compile_jit(
             entry_offset: Some(result.entry_offset),
             exports: vec![],
             function_offsets: result.exports.into_iter().collect(),
+            relocations: result.relocations.into_iter().map(|o| (o, result.codegen_base)).collect(),
         }
     } else {
         lower_module(expanded_module, &resolved_entry, NativeLinkage::Executable)
@@ -663,7 +664,7 @@ fn compile_jit(
     .ok();
 
     let mut rt = crate::jit_runtime::JitRuntime::new();
-    rt.load(&lowered.code, &function_offsets)
+    rt.load(&lowered.code, &function_offsets, &lowered.relocations)
         .map_err(|e| format!("jit-load-failed: {e}"))?;
 
     std::fs::write(

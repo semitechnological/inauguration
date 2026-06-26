@@ -240,6 +240,7 @@ impl JitRuntime {
         &mut self,
         code: &[u8],
         function_offsets: &[(String, u32, u32)], // (name, offset, size)
+        relocations: &[(u32, u64)],               // (offset, codegen_base) — patched at load time
     ) -> Result<(), String> {
         // Allocate a code page large enough
         let page = CodePage::new(code.len()).ok_or_else(|| "jit: mmap failed".to_string())?;
@@ -247,6 +248,25 @@ impl JitRuntime {
         let dest = page.ptr;
         unsafe {
             std::ptr::copy_nonoverlapping(code.as_ptr(), dest, code.len());
+        }
+
+        // Apply relocations: patch each absolute address by adding (actual_base - codegen_base)
+        if !relocations.is_empty() {
+            let actual_base = dest as u64;
+            for &(offset, codegen_base) in relocations {
+                let site = offset as usize;
+                if site + 8 <= code.len() {
+                    let old_val = u64::from_le_bytes([
+                        code[site], code[site+1], code[site+2], code[site+3],
+                        code[site+4], code[site+5], code[site+6], code[site+7],
+                    ]);
+                    let new_val = old_val.wrapping_sub(codegen_base).wrapping_add(actual_base);
+                    let patch = new_val.to_le_bytes();
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(patch.as_ptr(), dest.add(site), 8);
+                    }
+                }
+            }
         }
 
         // On Apple ARM64, flush the instruction cache after writing code

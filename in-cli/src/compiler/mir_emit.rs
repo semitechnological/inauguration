@@ -137,5 +137,5 @@ fn emit_inst(inst: &MirInst, code: &mut Vec<u8>) -> Result<(), String> {
 /// Load a MIR module into the JIT runtime and return it.
 pub fn load_jit(module: &MirModule, rt: &mut JitRuntime) -> Result<(), String> {
     let (code, functions) = emit_jit(module)?;
-    rt.load(&code, &functions)
+    rt.load(&code, &functions, &[])
 }

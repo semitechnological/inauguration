@@ -45,6 +45,9 @@ pub struct LoweredModule {
     pub exports: Vec<ExportSymbol>,
     /// Function name → byte offset in code (for JIT dispatch)
     pub function_offsets: std::collections::HashMap<String, u32>,
+    /// (offset, codegen_base) — absolute address relocations to patch at JIT load time.
+    /// Empty for AArch64 (position-independent code).
+    pub relocations: Vec<(u32, u64)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -271,6 +274,7 @@ pub fn lower_module(
         entry_offset,
         exports,
         function_offsets,
+        relocations: Vec::new(),  // AArch64 uses position-independent code
     })
 }
 
