@@ -6,120 +6,13 @@ on:
   pull_request:
 
 jobs:
-  # ── Rust crate quality gates ──────────────────────────────────────
-  in-cli:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Format
-        run: cargo fmt --check
-        working-directory: in-cli
-      - name: Clippy
-        run: cargo clippy --all-targets --all-features --locked -- -D warnings
-        working-directory: in-cli
-      - name: Test
-        run: cargo test --features extended
-        working-directory: in-cli
-
-  rust-driver-cli:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Format
-        run: cargo fmt --check --all
-        working-directory: compiler/rust-driver
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-        working-directory: compiler/rust-driver
-      - name: Test hybrid-cli
-        run: cargo test -p hybrid-cli
-        working-directory: compiler/rust-driver
-
-  # ── Protocol model generation ─────────────────────────────────────
-  protocol-models:
-    name: Protocol models
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Build protocol-gen
-        run: cargo build --bin protocol-gen
-        working-directory: in-cli
-      - name: Add to PATH
-        run: echo "$PWD/target/debug" >> "$GITHUB_PATH"
-        working-directory: in-cli
-      - name: Check generated models
-        run: ./scripts/check-protocol-models.sh
-
-  # ── Polyglot language samples (Tree-sitter frontends) ─────────────
-  polyglot-samples:
-    name: Polyglot samples
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Install rust-src (for sysroot)
-        run: rustup component add rust-src
-      - name: Build in binary
-        run: cargo build --release --bin in --features extended
-        working-directory: in-cli
-      - name: Add to PATH
-        run: echo "$PWD/in-cli/target/release" >> "$GITHUB_PATH"
-      - name: in build (.in sample)
-        run: ./scripts/check-in-lang-sample.sh
-      - name: in build (.icore sample)
-        run: ./scripts/check-icore-sample.sh
-      - name: in build (Swift sample)
-        run: ./scripts/check-native-subset-sample.sh
-
-  # ── JIT conformance (54/54) ───────────────────────────────────────
-  jit-conformance:
-    name: JIT conformance
-    runs-on: macos-latest  # x86_64 JIT codegen needs on-hardware debugging; aarch64 54/54
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Install rust-src
-        run: rustup component add rust-src
-      - name: Build in binary
-        run: cargo build --release --bin in --features extended
-        working-directory: in-cli
-      - name: Add to PATH
-        run: echo "$PWD/in-cli/target/release" >> "$GITHUB_PATH"
-      - name: Run conformance suite
-        run: ./scripts/run-conformance.sh
-
-  # ── Self-hosting: compile compiler with itself ────────────────────
-  self-host:
-    name: Self-host
-    runs-on: macos-latest  # ponytail: x86_64 JIT codegen not mature enough for self-host yet
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Install rust-src
-        run: rustup component add rust-src
-      - name: Build in binary
-        run: cargo build --release --bin in --features extended
-        working-directory: in-cli
-      - name: Add to PATH
-        run: echo "$PWD/in-cli/target/release" >> "$GITHUB_PATH"
-      - name: Self-host compile
-        run: |
-          IN=./in-cli/target/release/in
-          echo "=== Self-host: compile in-cli/src/main.rs ==="
-          "$IN" build --path in-cli/src/main.rs --module-id InCli --verbose
-      - name: Check diff whitespace
-        run: git diff --check
-
-  # ── Hybrid library crates ────────────────────────────────────────
-  hybrid-libs:
-    name: Hybrid library crates
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Test hybrid crates
-        run: cd compiler/rust-driver && cargo test -p hybrid-pipeline -p hybrid-sil -p hybrid-core -p hybrid-scheduler
+  ci:
+    name: Inauguration CI
+    uses: tschk/ci-recipes/.github/workflows/inauguration-ci.yml@main
+    with:
+      rust-version: "stable"
+      in-cli-features: "extended"
+      run-jit-conformance: true
+      run-polyglot-samples: true
+      run-self-host: true
+      run-protocol-models: true
