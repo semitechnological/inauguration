@@ -1,0 +1,33 @@
+{
+	"summaryPath": "piolium/attack-surface/balanced-cleanup-summary.json",
+	"removed": [
+		"piolium/tmp",
+		"piolium/chamber-workspace",
+		"piolium/codeql-artifacts",
+		"piolium/codeql-queries",
+		"piolium/semgrep-rules",
+		"piolium/findings-draft",
+		"piolium/attack-pattern-registry.json"
+	],
+	"missing": [
+		"piolium/probe-workspace",
+		"piolium/adversarial-reviews",
+		"piolium/bypass-analysis",
+		"piolium/agentic-actions-res",
+		"piolium/confirm-workspace",
+		"piolium/codeql-res",
+		"piolium/semgrep-res",
+		"piolium/real-env-evidence",
+		"piolium/raw",
+		"piolium/file-records",
+		"piolium/attack-surface/raw",
+		"piolium/authz-coverage-gaps.md",
+		"piolium/merged-results.sarif"
+	],
+	"retained": [
+		"piolium/attack-surface/",
+		"piolium/findings/",
+		"piolium/final-audit-report.md",
+		"piolium/audit-state.json"
+	]
+}

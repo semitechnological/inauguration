@@ -368,11 +368,11 @@ impl JitRuntime {
             // System V AMD64 ABI: args in rdi, rsi, rdx, rcx, r8, r9; return in rax.
             // x86_64 JIT uses stack-based error handling — no register setup needed.
             type JitFn = unsafe extern "C" fn(i64, i64, i64, i64, i64, i64) -> i64;
-            let f: JitFn = std::mem::transmute(entry);
+            let f: JitFn = unsafe { std::mem::transmute(entry) };
             let result = match _args.len() {
-                0 => f(0, 0, 0, 0, 0, 0),
-                1 => f(_args[0], 0, 0, 0, 0, 0),
-                2 => f(_args[0], _args[1], 0, 0, 0, 0),
+                0 => unsafe { f(0, 0, 0, 0, 0, 0) },
+                1 => unsafe { f(_args[0], 0, 0, 0, 0, 0) },
+                2 => unsafe { f(_args[0], _args[1], 0, 0, 0, 0) },
                 _ => 0,
             };
             Some(result)
