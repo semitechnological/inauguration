@@ -6,13 +6,120 @@ on:
   pull_request:
 
 jobs:
-  ci:
-    name: Inauguration CI
-    uses: tschk/ci-recipes/.github/workflows/inauguration-ci.yml@master
-    with:
-      rust-version: "stable"
-      in-cli-features: "extended"
-      run-jit-conformance: true
-      run-polyglot-samples: true
-      run-self-host: true
-      run-protocol-models: true
+  in-cli:
+    name: in-cli (fmt/clippy/test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: Format
+        run: cargo fmt --check
+        working-directory: in-cli
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
+        working-directory: in-cli
+      - name: Test
+        run: cargo test --features extended
+        working-directory: in-cli
+
+  rust-driver:
+    name: rust-driver (hybrid pipeline)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: Format
+        run: cargo fmt --check --all
+        working-directory: compiler/rust-driver
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+        working-directory: compiler/rust-driver
+      - name: Test hybrid-cli
+        run: cargo test -p hybrid-cli
+        working-directory: compiler/rust-driver
+
+  protocol-models:
+    name: Protocol models
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build protocol-gen
+        run: cargo build --bin protocol-gen
+        working-directory: in-cli
+      - name: Add to PATH
+        run: echo "$PWD/target/debug" >> "$GITHUB_PATH"
+        working-directory: in-cli
+      - name: Check generated models
+        run: ./scripts/check-protocol-models.sh
+
+  polyglot-samples:
+    name: Polyglot samples
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install rust-src
+        run: rustup component add rust-src
+      - name: Build in binary
+        run: cargo build --release --bin in --features extended
+        working-directory: in-cli
+      - name: Add to PATH
+        run: echo "$PWD/in-cli/target/release" >> "$GITHUB_PATH"
+      - name: in build (.in sample)
+        run: ./scripts/check-in-lang-sample.sh
+      - name: in build (.icore sample)
+        run: ./scripts/check-icore-sample.sh
+      - name: in build (Swift sample)
+        run: ./scripts/check-native-subset-sample.sh
+
+  jit-conformance:
+    name: JIT conformance
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install rust-src
+        run: rustup component add rust-src
+      - name: Build in binary
+        run: cargo build --release --bin in --features extended
+        working-directory: in-cli
+      - name: Add to PATH
+        run: echo "$PWD/in-cli/target/release" >> "$GITHUB_PATH"
+      - name: Run conformance suite
+        run: ./scripts/run-conformance.sh
+
+  self-host:
+    name: Self-host
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install rust-src
+        run: rustup component add rust-src
+      - name: Build in binary
+        run: cargo build --release --bin in --features extended
+        working-directory: in-cli
+      - name: Add to PATH
+        run: echo "$PWD/in-cli/target/release" >> "$GITHUB_PATH"
+      - name: Self-host compile
+        run: |
+          IN=./in-cli/target/release/in
+          "$IN" build --path in-cli/src/main.rs --module-id InCli --verbose
+      - name: Check diff whitespace
+        run: git diff --check
+
+  hybrid-libs:
+    name: Hybrid library crates
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test hybrid crates
+        run: cargo test -p hybrid-pipeline -p hybrid-sil -p hybrid-core -p hybrid-scheduler
+        working-directory: compiler/rust-driver
