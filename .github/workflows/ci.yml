@@ -8,7 +8,7 @@ on:
 jobs:
   ci:
     name: Inauguration CI
-    uses: tschk/ci-recipes/.github/workflows/inauguration-ci.yml@main
+    uses: tschk/ci-recipes/.github/workflows/inauguration-ci.yml@master
     with:
       rust-version: "stable"
       in-cli-features: "extended"
