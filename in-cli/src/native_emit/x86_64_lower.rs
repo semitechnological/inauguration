@@ -678,44 +678,48 @@ fn lower_function(
         emitter.emit_insns(&x86_64::sub_rsp_i32(frame_size as i32));
     }
 
-    // Save param registers that rep stosq will clobber (rdi, rcx) to temp
-    // slots in the caller's stack frame ([rbp + 16 + i*8]) before zero-fill.
-    // We can't use push/pop here because sub rsp between them shifts rsp.
+    // Save param registers that rep stosq will clobber (RDI=param0, RCX=param3)
+    // into the caller's stack frame (above return address) before zero-fill.
+    // For NORMAL functions: [rbp+16+i*8] is safe (7th+ stack parameter area).
+    // For INTERRUPT functions: [rbp+16] = R15 in saved context — skip save
+    // and zero-fill entirely since interrupt handlers explicitly init locals.
     let param_regs = [RDI, RSI, RDX, RCX, 8, 9];
     let stosq_clobbers = [true, false, false, true, false, false]; // rdi, rcx
-    for (i, (name, _)) in func.params.iter().enumerate() {
-        if i < 6 && ctx.locals.contains_key(name) && stosq_clobbers[i] {
-            let temp_disp = 16 + i as i32 * 8; // caller's frame, above ret addr
-            emitter.emit_insns(&x86_64::mov_m_r(RBP, temp_disp, param_regs[i]));
+    if !is_interrupt {
+        for (i, (name, _)) in func.params.iter().enumerate() {
+            if i < 6 && ctx.locals.contains_key(name) && stosq_clobbers[i] {
+                let temp_disp = 16 + i as i32 * 8;
+                emitter.emit_insns(&x86_64::mov_m_r(RBP, temp_disp, param_regs[i]));
+            }
         }
     }
 
-    // Zero-fill the allocated stack frame (Linux doesn't zero stack, macOS does)
-    if frame_size >= 8 {
+    // Zero-fill the allocated stack frame
+    if frame_size >= 8 && !is_interrupt {
         let qwords = frame_size / 8;
-        // xor eax, eax  (31 C0) — zero RAX
-        emitter.emit_bytes(&[0x48, 0x31, 0xC0]);
-        // mov rcx, qwords (48 C7 C1 XX XX XX XX)
+        emitter.emit_bytes(&[0x48, 0x31, 0xC0]); // xor eax, eax
         let mut mov_rcx = vec![0x48, 0xC7, 0xC1];
         mov_rcx.extend_from_slice(&qwords.to_le_bytes());
         emitter.emit_insns(&mov_rcx);
-        // lea rdi, [rsp]  (48 8D 3C 24) — zero from bottom of allocated frame
-        emitter.emit_bytes(&[0x48, 0x8D, 0x3C, 0x24]);
-        // rep stosq  (F3 48 AB)
-        emitter.emit_bytes(&[0xF3, 0x48, 0xAB]);
+        emitter.emit_bytes(&[0x48, 0x8D, 0x3C, 0x24]); // lea rdi, [rsp]
+        emitter.emit_bytes(&[0xF3, 0x48, 0xAB]); // rep stosq
     }
 
-    // Restore clobbered param regs and store all params to their stack slots.
-    for (i, (name, _)) in func.params.iter().enumerate() {
-        if i < 6 {
-            if let Some(StackSlot::Scalar(offset)) = ctx.locals.get(name) {
-                // Restore from temp slot if clobbered
-                if stosq_clobbers[i] {
-                    let temp_disp = 16 + i as i32 * 8;
-                    emitter.emit_insns(&x86_64::mov_r_m(param_regs[i], RBP, temp_disp));
+    // Restore clobbered param regs and store to their stack slots.
+    // For interrupt functions, params were not saved — restore from original
+    // register values if they survived (interrupt handlers push all regs
+    // before calling, so RDI/RCX values are available from the saved context
+    // on the stack, but we simply skip zero-fill for interrupts).
+    if !is_interrupt {
+        for (i, (name, _)) in func.params.iter().enumerate() {
+            if i < 6 {
+                if let Some(StackSlot::Scalar(offset)) = ctx.locals.get(name) {
+                    if stosq_clobbers[i] {
+                        let temp_disp = 16 + i as i32 * 8;
+                        emitter.emit_insns(&x86_64::mov_r_m(param_regs[i], RBP, temp_disp));
+                    }
+                    emitter.emit_insns(&x86_64::str64(param_regs[i], *offset as u16));
                 }
-                // Store to proper stack slot
-                emitter.emit_insns(&x86_64::str64(param_regs[i], *offset as u16));
             }
         }
     }
