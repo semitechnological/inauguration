@@ -287,26 +287,40 @@ pub fn prepare_installed_package(install_path: &Path, ecosystem: &str) -> Result
     if ecosystem != "cargo" {
         return Ok(());
     }
-    let runner_manifest = install_path.join("inauguration-runner").join("Cargo.toml");
+    // Canonicalize to prevent path traversal outside the install directory
+    let install_canon = install_path
+        .canonicalize()
+        .map_err(|e| format!("invalid install path {}: {e}", install_path.display()))?;
+    let runner_manifest = install_canon.join("inauguration-runner").join("Cargo.toml");
     let manifest = if runner_manifest.is_file() {
         runner_manifest
     } else {
-        let root_manifest = install_path.join("Cargo.toml");
+        let root_manifest = install_canon.join("Cargo.toml");
         if !root_manifest.is_file() {
             return Ok(());
         }
         root_manifest
     };
+    // Validate manifest is within install directory
+    let manifest_canon = manifest
+        .canonicalize()
+        .map_err(|e| format!("invalid manifest path {}: {e}", manifest.display()))?;
+    if !manifest_canon.starts_with(&install_canon) {
+        return Err(format!(
+            "manifest outside install directory: {}",
+            manifest_canon.display()
+        ));
+    }
     let status = std::process::Command::new("cargo")
         .args(["build", "--quiet", "--manifest-path"])
-        .arg(&manifest)
-        .current_dir(install_path)
+        .arg(&manifest_canon)
+        .current_dir(&install_canon)
         .status()
         .map_err(|err| format!("cargo build not available for {ecosystem} package: {err}"))?;
     if !status.success() {
         return Err(format!(
             "cargo build failed for package at {}",
-            install_path.display()
+            install_canon.display()
         ));
     }
     Ok(())

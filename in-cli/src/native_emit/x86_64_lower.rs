@@ -1295,20 +1295,12 @@ fn extract_pattern_vars(pattern: &str) -> Vec<String> {
     vars
 }
 
-fn lower_int_lit(
-    emitter: &mut CodeEmitter,
-    target_reg: u8,
-    value: i64,
-) -> Result<(), String> {
+fn lower_int_lit(emitter: &mut CodeEmitter, target_reg: u8, value: i64) -> Result<(), String> {
     emitter.emit_insns(&x86_64::load_i64(target_reg, value));
     Ok(())
 }
 
-fn lower_bool_lit(
-    emitter: &mut CodeEmitter,
-    target_reg: u8,
-    value: bool,
-) -> Result<(), String> {
+fn lower_bool_lit(emitter: &mut CodeEmitter, target_reg: u8, value: bool) -> Result<(), String> {
     emitter.emit_insns(&x86_64::load_i64(target_reg, if value { 1 } else { 0 }));
     Ok(())
 }
@@ -2059,7 +2051,6 @@ fn lower_string_lit(
     Ok(())
 }
 
-
 fn lower_expr_into(
     emitter: &mut CodeEmitter,
     ctx: &mut LowerCtx<'_>,
@@ -2070,14 +2061,36 @@ fn lower_expr_into(
     match expr {
         Expr::IntLit(value) => lower_int_lit(emitter, target_reg, *value),
         Expr::BoolLit(value) => lower_bool_lit(emitter, target_reg, *value),
-        Expr::Ident(name) => lower_ident_ref(emitter, ctx, target_reg, name.as_str(), pending_calls),
-        Expr::Binary { op, lhs, rhs, .. } => lower_binary_expr(emitter, ctx, target_reg, op.as_str(), lhs, rhs, pending_calls),
-        Expr::Call { callee, args, .. } => lower_call_expr(emitter, ctx, target_reg, callee, args, pending_calls),
-        Expr::StructInit { name, fields, .. } => lower_struct_init(emitter, ctx, name.as_str(), fields, pending_calls),
-        Expr::Field { base, name, .. } => lower_field_access(emitter, ctx, target_reg, base, name.as_str()),
-        Expr::Unary { op, expr, .. } => lower_unary_expr(emitter, ctx, target_reg, op.as_str(), expr, pending_calls),
-        Expr::Index { base, index, .. } => lower_index_expr(emitter, ctx, target_reg, base, index, pending_calls),
-        Expr::StringLit(content) => lower_string_lit(emitter, target_reg, content.as_str(), pending_calls),
+        Expr::Ident(name) => {
+            lower_ident_ref(emitter, ctx, target_reg, name.as_str(), pending_calls)
+        }
+        Expr::Binary { op, lhs, rhs, .. } => lower_binary_expr(
+            emitter,
+            ctx,
+            target_reg,
+            op.as_str(),
+            lhs,
+            rhs,
+            pending_calls,
+        ),
+        Expr::Call { callee, args, .. } => {
+            lower_call_expr(emitter, ctx, target_reg, callee, args, pending_calls)
+        }
+        Expr::StructInit { name, fields, .. } => {
+            lower_struct_init(emitter, ctx, name.as_str(), fields, pending_calls)
+        }
+        Expr::Field { base, name, .. } => {
+            lower_field_access(emitter, ctx, target_reg, base, name.as_str())
+        }
+        Expr::Unary { op, expr, .. } => {
+            lower_unary_expr(emitter, ctx, target_reg, op.as_str(), expr, pending_calls)
+        }
+        Expr::Index { base, index, .. } => {
+            lower_index_expr(emitter, ctx, target_reg, base, index, pending_calls)
+        }
+        Expr::StringLit(content) => {
+            lower_string_lit(emitter, target_reg, content.as_str(), pending_calls)
+        }
         _ => Err(format!(
             "x86_64-lower: unsupported expression in `{}`",
             ctx.fn_name

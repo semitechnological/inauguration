@@ -211,9 +211,27 @@ impl Compiler {
     // ─── Type Check ────────────────────────────────────────────────────
 
     /// Run type checking on the module.
-    pub fn type_check(&mut self, _module: &mut IrModule) -> Result<(), CompileError> {
+    /// Validates return instructions match their function's declared return type.
+    pub fn type_check(&mut self, module: &mut IrModule) -> Result<(), CompileError> {
         let start = Instant::now();
-        // TODO: implement real type checker
+        for func in &module.functions {
+            for block in &func.blocks {
+                if let Some(term) = &block.terminator {
+                    if term.opcode == IrOpcode::Return {
+                        if term.result_type != func.return_type {
+                            self.timings.stages.push(StageTime {
+                                stage: Stage::TypeCheck,
+                                elapsed_us: start.elapsed().as_micros() as u64,
+                            });
+                            return Err(CompileError::TypeCheck(format!(
+                                "{}: return type {:?} does not match function return type {:?}",
+                                func.name, term.result_type, func.return_type
+                            )));
+                        }
+                    }
+                }
+            }
+        }
         self.timings.stages.push(StageTime {
             stage: Stage::TypeCheck,
             elapsed_us: start.elapsed().as_micros() as u64,
@@ -224,10 +242,14 @@ impl Compiler {
     // ─── Lower ─────────────────────────────────────────────────────────
 
     /// Lower the module (additional IR transforms before optimization).
+    /// The primary AST-to-IR lowering happens during frontend parsing.
+    /// This stage handles any additional IR-level transformations needed
+    /// before optimization passes run.
     pub fn lower(&mut self, _module: &mut IrModule) -> Result<(), CompileError> {
         let start = Instant::now();
-        // Additional lowering transforms are not currently specified.
-        // The main lowering from AST to IR happens during frontend parsing.
+// The primary AST-to-IR lowering happens during frontend parsing.
+        // This stage handles any additional IR-level transformations needed
+        // before optimization passes run.
         self.timings.stages.push(StageTime {
             stage: Stage::Lower,
             elapsed_us: start.elapsed().as_micros() as u64,

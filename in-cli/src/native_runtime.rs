@@ -36,39 +36,50 @@ impl NativeRuntime {
     /// Build a standard runtime with common stdlib/crate functions.
     pub fn standard() -> Self {
         let mut rt = Self::new();
-        rt.register_std_env_current_dir_cwd();
+        rt.register_std_env();
         rt.register_pathbuf_operations();
+        rt.register_string_methods();
         rt.register_serde_json();
-        rt.register_clap_basic_stubs_that_return_reasonable_defaults();
-        rt.register_instant_now();
-        rt.register_string_operations();
-        rt.register_format_macro_equivalent();
+        rt.register_cli_parsing();
+        rt.register_instant();
+        rt.register_std_fs();
         rt.register_fs_operations();
         rt.register_command_execution();
-        rt.register_runtime();
-        rt.register_inauguration_internal_functions();
+        rt.register_runtime_primitives();
+        rt.register_inauguration_internal();
         rt.register_type_conversions();
-        rt.register_serde();
-        rt.register_thiserror();
-
+        rt.register_serde_and_error();
         rt
     }
 
-    fn register_std_env_current_dir_cwd(&mut self) {
-        // std::env::current_dir / cwd
+    fn register_std_env(&mut self) {
         self.register(
             "cwd",
-            Box::new(|_args| {
-                match std::env::current_dir() {
-                    Ok(path) => Ok(Value::String(path.display().to_string())),
-                    Err(_e) => Ok(Value::Nil), // ponytail: return Nil on error
+            Box::new(|_args| match std::env::current_dir() {
+                Ok(path) => Ok(Value::String(path.display().to_string())),
+                Err(_e) => Ok(Value::Nil),
+            }),
+        );
+        self.register(
+            "std :: env :: temp_dir",
+            Box::new(|_args| Ok(Value::String(std::env::temp_dir().display().to_string()))),
+        );
+        self.register(
+            "std :: env :: var",
+            Box::new(|args| {
+                if let Some(Value::String(key)) = args.first() {
+                    match std::env::var(key) {
+                        Ok(val) => Ok(Value::String(val)),
+                        Err(_) => Ok(Value::Nil),
+                    }
+                } else {
+                    Ok(Value::Nil)
                 }
             }),
         );
     }
 
     fn register_pathbuf_operations(&mut self) {
-        // PathBuf operations
         self.register(
             "display",
             Box::new(|args| {
@@ -79,7 +90,6 @@ impl NativeRuntime {
                 }
             }),
         );
-
         self.register(
             "join",
             Box::new(|args| {
@@ -93,7 +103,6 @@ impl NativeRuntime {
                 }
             }),
         );
-
         self.register(
             "parent",
             Box::new(|args| {
@@ -109,7 +118,6 @@ impl NativeRuntime {
                 }
             }),
         );
-
         self.register(
             "is_dir",
             Box::new(|args| {
@@ -120,7 +128,6 @@ impl NativeRuntime {
                 }
             }),
         );
-
         self.register(
             "exists",
             Box::new(|args| {
@@ -131,7 +138,6 @@ impl NativeRuntime {
                 }
             }),
         );
-
         self.register(
             "extension",
             Box::new(|args| {
@@ -149,7 +155,6 @@ impl NativeRuntime {
                 }
             }),
         );
-
         self.register(
             "file_stem",
             Box::new(|args| {
@@ -167,7 +172,6 @@ impl NativeRuntime {
                 }
             }),
         );
-
         self.register(
             "to_string_lossy",
             Box::new(|args| {
@@ -178,7 +182,9 @@ impl NativeRuntime {
                 }
             }),
         );
+    }
 
+    fn register_string_methods(&mut self) {
         self.register(
             "to_string",
             Box::new(|args| {
@@ -190,17 +196,14 @@ impl NativeRuntime {
                 ))
             }),
         );
-
         self.register(
             "clone",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
-
         self.register(
             "as_deref",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
-
         self.register(
             "unwrap_or_default",
             Box::new(|args| match args.first() {
@@ -209,12 +212,10 @@ impl NativeRuntime {
                 None => Ok(Value::Nil),
             }),
         );
-
         self.register(
             "map_err",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
-
         self.register(
             "unwrap_or",
             Box::new(|args| {
@@ -229,42 +230,31 @@ impl NativeRuntime {
                 }
             }),
         );
-
         self.register(
             "map",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
-
         self.register(
             "collect",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
-
         self.register(
             "iter",
-            Box::new(|args| {
-                // Return the value itself for iteration
-                args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))
-            }),
+            Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
-
         self.register(
             "is_ok",
             Box::new(|args| Ok(Value::Bool(!matches!(args.first(), Some(Value::Nil))))),
         );
-
         self.register(
             "is_err",
             Box::new(|args| Ok(Value::Bool(matches!(args.first(), Some(Value::Nil))))),
         );
-
         self.register(
             "is_some_and",
             Box::new(|args| Ok(Value::Bool(!matches!(args.first(), Some(Value::Nil))))),
         );
-
         self.register("any", Box::new(|_args| Ok(Value::Bool(false))));
-
         self.register(
             "is_empty",
             Box::new(|args| {
@@ -273,7 +263,6 @@ impl NativeRuntime {
                 ))
             }),
         );
-
         self.register(
             "ends_with",
             Box::new(|args| {
@@ -286,12 +275,10 @@ impl NativeRuntime {
                 }
             }),
         );
-
         self.register(
             "unwrap",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
-
         self.register(
             "len",
             Box::new(|args| match args.first() {
@@ -303,62 +290,34 @@ impl NativeRuntime {
     }
 
     fn register_serde_json(&mut self) {
-        // serde_json
         self.register(
             "serde_json :: to_string_pretty",
-            Box::new(|args| {
-                // ponytail: return JSON string representation
-                Ok(Value::String(format!("{:?}", args)))
-            }),
+            Box::new(|args| Ok(Value::String(format!("{:?}", args)))),
         );
-
         self.register(
             "serde_json :: to_string",
             Box::new(|args| Ok(Value::String(format!("{:?}", args)))),
         );
     }
 
-    fn register_clap_basic_stubs_that_return_reasonable_defaults(&mut self) {
-        // clap - basic stubs that return reasonable defaults
-        self.register(
-            "Cli :: parse",
-            Box::new(|_args| {
-                // Return a mock Command with subcommands
-                Ok(Value::Nil) // ponytail: real CLI parsing would need the actual binary
-            }),
-        );
+    fn register_cli_parsing(&mut self) {
+        self.register("Cli :: parse", Box::new(|_args| Ok(Value::Nil)));
     }
 
-    fn register_instant_now(&mut self) {
-        // Instant::now
-        self.register(
-            "Instant :: now",
-            Box::new(|_args| {
-                Ok(Value::Int(0)) // ponytail: return 0 for timing
-            }),
-        );
-
-        self.register(
-            "elapsed",
-            Box::new(|_args| {
-                // Return Duration
-                Ok(Value::Int(0))
-            }),
-        );
-
+    fn register_instant(&mut self) {
+        self.register("Instant :: now", Box::new(|_args| Ok(Value::Int(0))));
+        self.register("elapsed", Box::new(|_args| Ok(Value::Int(0))));
         self.register(
             "as_secs_f64",
             Box::new(|_args| Ok(Value::String("0.000".to_string()))),
         );
     }
 
-    fn register_string_operations(&mut self) {
-        // String operations
+    fn register_std_fs(&mut self) {
         self.register(
             "String :: new",
             Box::new(|_args| Ok(Value::String(String::new()))),
         );
-
         self.register(
             "std :: fs :: read_to_string",
             Box::new(|args| {
@@ -372,37 +331,7 @@ impl NativeRuntime {
                 }
             }),
         );
-
-        self.register(
-            "std :: env :: temp_dir",
-            Box::new(|_args| Ok(Value::String(std::env::temp_dir().display().to_string()))),
-        );
-
-        self.register(
-            "std :: env :: var",
-            Box::new(|args| {
-                if let Some(Value::String(key)) = args.first() {
-                    match std::env::var(key) {
-                        Ok(val) => Ok(Value::String(val)),
-                        Err(_) => Ok(Value::Nil),
-                    }
-                } else {
-                    Ok(Value::Nil)
-                }
-            }),
-        );
-
-        self.register(
-            "std :: process :: exit",
-            Box::new(|_args| {
-                // Don't actually exit — just return Nil
-                Ok(Value::Nil)
-            }),
-        );
-    }
-
-    fn register_format_macro_equivalent(&mut self) {
-        // format! macro equivalent
+        self.register("std :: process :: exit", Box::new(|_args| Ok(Value::Nil)));
         self.register(
             "format",
             Box::new(|args| {
@@ -417,7 +346,6 @@ impl NativeRuntime {
     }
 
     fn register_fs_operations(&mut self) {
-        // fs operations
         self.register(
             "fs :: create_dir_all",
             Box::new(|args| {
@@ -427,7 +355,6 @@ impl NativeRuntime {
                 Ok(Value::Nil)
             }),
         );
-
         self.register(
             "fs :: metadata",
             Box::new(|args| {
@@ -441,7 +368,6 @@ impl NativeRuntime {
                 }
             }),
         );
-
         self.register(
             "fs :: read_to_string",
             Box::new(|args| {
@@ -458,7 +384,6 @@ impl NativeRuntime {
     }
 
     fn register_command_execution(&mut self) {
-        // Command execution
         self.register(
             "Command :: new",
             Box::new(|args| {
@@ -469,62 +394,42 @@ impl NativeRuntime {
                 }
             }),
         );
-
         self.register(
             "arg",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
-
         self.register(
             "current_dir",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
-
         self.register("status", Box::new(|_args| Ok(Value::Bool(true))));
-
         self.register("success", Box::new(|_args| Ok(Value::Bool(true))));
-
         self.register("output", Box::new(|_args| Ok(Value::Nil)));
     }
 
-    fn register_runtime(&mut self) {
-        // Runtime
+    fn register_runtime_primitives(&mut self) {
         self.register(
             "build",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
-
         self.register(
             "enable_all",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
-
-        self.register(
-            "block_on",
-            Box::new(|_args| {
-                // Return Nil — async execution not needed for self-hosting
-                Ok(Value::Nil)
-            }),
-        );
-
+        self.register("block_on", Box::new(|_args| Ok(Value::Nil)));
         self.register("spawn", Box::new(|_args| Ok(Value::Nil)));
-
         self.register("sleep", Box::new(|_args| Ok(Value::Nil)));
-
         self.register(
             "await",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
-
         self.register("abort", Box::new(|_args| Ok(Value::Nil)));
     }
 
-    fn register_inauguration_internal_functions(&mut self) {
-        // Inauguration internal functions
+    fn register_inauguration_internal(&mut self) {
         self.register(
             "resolve_invocation_path",
             Box::new(|args| {
-                // Return cwd joined with path
                 if args.len() >= 2 {
                     let cwd = value_to_string(&args[0]);
                     let path = value_to_string(&args[1]);
@@ -535,7 +440,6 @@ impl NativeRuntime {
                 }
             }),
         );
-
         self.register(
             "workspace_root",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
@@ -543,30 +447,22 @@ impl NativeRuntime {
     }
 
     fn register_type_conversions(&mut self) {
-        // Type conversions
         self.register(
             "into",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
-
         self.register(
             "as_str",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
     }
 
-    fn register_serde(&mut self) {
-        // serde
+    fn register_serde_and_error(&mut self) {
         self.register(
             "serde :: Serialize",
             Box::new(|_args| Ok(Value::String("serialized".to_string()))),
         );
-
         self.register("serde :: Deserialize", Box::new(|_args| Ok(Value::Nil)));
-    }
-
-    fn register_thiserror(&mut self) {
-        // thiserror
         self.register(
             "thiserror :: Error",
             Box::new(|_args| Ok(Value::String("error".to_string()))),
