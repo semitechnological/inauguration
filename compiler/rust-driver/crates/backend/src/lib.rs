@@ -406,4 +406,52 @@ mod tests {
         assert!(!caps.supports_raw_binary);
         assert_eq!(caps.object_format, "mach-o");
     }
+
+    #[test]
+    fn test_backend_capabilities_x86_64_windows() {
+        let caps = backend_capabilities("x86_64-pc-windows-msvc");
+        assert!(caps.implemented);
+        assert!(caps.supports_executable);
+        assert!(caps.supports_shared_library);
+        assert!(caps.supports_static_library);
+        assert!(!caps.supports_wasm_module);
+        assert!(!caps.supports_raw_binary);
+        assert_eq!(caps.object_format, "coff");
+    }
+
+    #[test]
+    fn test_backend_capabilities_raw() {
+        let caps = backend_capabilities("unknown-unknown-unknown");
+        assert!(caps.implemented);
+        assert!(caps.supports_executable);
+        assert!(!caps.supports_shared_library);
+        assert!(!caps.supports_static_library);
+        assert!(!caps.supports_wasm_module);
+        assert!(caps.supports_raw_binary);
+        assert_eq!(caps.object_format, "raw");
+    }
+
+    #[test]
+    fn test_backend_capabilities_unsupported_elf() {
+        let caps = backend_capabilities("riscv64-unknown-linux-gnu");
+        assert!(!caps.implemented);
+        assert!(!caps.supports_executable);
+        assert!(!caps.supports_shared_library);
+        assert!(!caps.supports_static_library);
+        assert!(!caps.supports_wasm_module);
+        assert!(!caps.supports_raw_binary);
+        assert_eq!(caps.object_format, "elf");
+    }
+
+    #[test]
+    fn test_backend_capabilities_unsupported_coff() {
+        let caps = backend_capabilities("mips-pc-windows-msvc");
+        assert!(!caps.implemented);
+        assert!(!caps.supports_executable);
+        assert!(!caps.supports_shared_library);
+        assert!(!caps.supports_static_library);
+        assert!(!caps.supports_wasm_module);
+        assert!(!caps.supports_raw_binary);
+        assert_eq!(caps.object_format, "coff");
+    }
 }
