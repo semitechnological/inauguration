@@ -884,10 +884,24 @@ mod tests {
     #[test]
     fn component_metadata_from_spec() {
         let mut spec = ComponentSpec::host_executable("app", Some("main"));
-        spec.imports = vec![ComponentImport { name: "imp".to_string(), interface: "iface".to_string() }];
-        spec.exports = vec![ComponentExport { name: "exp".to_string(), interface: "iface2".to_string() }];
-        spec.capabilities = vec![ComponentCapability { name: "cap".to_string(), capability_type: "type".to_string(), args: vec!["arg".to_string()] }];
-        spec.capabilities_exported = vec![ComponentCapability { name: "cap_exp".to_string(), capability_type: "type2".to_string(), args: vec!["arg2".to_string()] }];
+        spec.imports = vec![ComponentImport {
+            name: "imp".to_string(),
+            interface: "iface".to_string(),
+        }];
+        spec.exports = vec![ComponentExport {
+            name: "exp".to_string(),
+            interface: "iface2".to_string(),
+        }];
+        spec.capabilities = vec![ComponentCapability {
+            name: "cap".to_string(),
+            capability_type: "type".to_string(),
+            args: vec!["arg".to_string()],
+        }];
+        spec.capabilities_exported = vec![ComponentCapability {
+            name: "cap_exp".to_string(),
+            capability_type: "type2".to_string(),
+            args: vec!["arg2".to_string()],
+        }];
 
         let module = IrModule::new("app");
         let meta = ComponentMetadata::from_spec(&spec, &module);
