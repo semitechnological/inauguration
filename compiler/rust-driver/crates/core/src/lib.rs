@@ -308,6 +308,20 @@ impl IrModule {
         self.string_literals.push(s.to_string());
         idx
     }
+
+    /// Remove blocks with no instructions and Unreachable terminator
+    pub fn remove_unreachable_blocks(&mut self) {
+        for func in &mut self.functions {
+            func.blocks.retain(|b| {
+                if b.instructions.is_empty() {
+                    if let Some(ref term) = b.terminator {
+                        return term.opcode != IrOpcode::Unreachable;
+                    }
+                }
+                true
+            });
+        }
+    }
 }
 
 // ─── Component Spec ──────────────────────────────────────────────────────
