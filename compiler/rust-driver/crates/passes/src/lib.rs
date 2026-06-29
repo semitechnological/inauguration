@@ -19,7 +19,7 @@
 //! IrModule (optimized, to backend)
 //! ```
 
-use hybrid_core::{IrModule, IrOpcode};
+use hybrid_core::IrModule;
 
 /// Error returned by a pass.
 #[derive(Debug, Clone, thiserror::Error)]
@@ -113,22 +113,7 @@ impl Pass for SimplifyCFG {
     }
 
     fn run(&self, module: &mut IrModule) -> PassResult {
-        for func in &mut module.functions {
-            let mut i = 0;
-            while i < func.blocks.len() {
-                let block = &func.blocks[i];
-                // Remove blocks with only an Unreachable terminator after any instructions
-                if block.instructions.is_empty() {
-                    if let Some(ref term) = block.terminator {
-                        if term.opcode == IrOpcode::Unreachable {
-                            func.blocks.remove(i);
-                            continue;
-                        }
-                    }
-                }
-                i += 1;
-            }
-        }
+        module.remove_unreachable_blocks();
         Ok(())
     }
 
@@ -241,17 +226,7 @@ impl Pass for Cleanup {
     }
 
     fn run(&self, module: &mut IrModule) -> PassResult {
-        for func in &mut module.functions {
-            // Remove blocks with no instructions and Unreachable terminator
-            func.blocks.retain(|b| {
-                if b.instructions.is_empty() {
-                    if let Some(ref term) = b.terminator {
-                        return term.opcode != IrOpcode::Unreachable;
-                    }
-                }
-                true
-            });
-        }
+        module.remove_unreachable_blocks();
         Ok(())
     }
 
