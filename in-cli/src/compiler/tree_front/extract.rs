@@ -690,12 +690,8 @@ pub(super) fn first_named<'a>(n: Node<'a>, kind: &str) -> Option<Node<'a>> {
 }
 
 pub(super) fn last_named<'a>(n: Node<'a>) -> Option<Node<'a>> {
-    let mut out = None;
     let mut w = n.walk();
-    for ch in n.named_children(&mut w) {
-        out = Some(ch);
-    }
-    out
+    n.named_children(&mut w).last()
 }
 
 fn named_descendant<'a>(root: Node<'a>, kind: &str) -> Option<Node<'a>> {
@@ -703,12 +699,7 @@ fn named_descendant<'a>(root: Node<'a>, kind: &str) -> Option<Node<'a>> {
         return Some(root);
     }
     let mut w = root.walk();
-    for ch in root.named_children(&mut w) {
-        if let Some(f) = named_descendant(ch, kind) {
-            return Some(f);
-        }
-    }
-    None
+    root.named_children(&mut w).find_map(|ch| named_descendant(ch, kind))
 }
 
 #[derive(Clone, Copy)]
