@@ -396,18 +396,18 @@ fn ptr_in_expr(e: &Expr, out: &mut Vec<String>) {
 /// x+0→x, x*1→x, x&-1→x, x|0→x, x^0→x, x<<0→x, etc.
 fn algebraic_simplify(decls: &mut [Decl]) {
     for body in fn_bodies_mut(decls) {
-        *body = body
-            .iter()
-            .map(|s| map_stmt(s.clone(), &mut |e| simplify_expr(e)))
+        let old_body = std::mem::take(body);
+        *body = old_body
+            .into_iter()
+            .map(|s| map_stmt(s, &mut |e| simplify_expr(e)))
             .collect();
     }
 }
 
 fn simplify_expr(e: Expr) -> Expr {
-    // Clone-and-match on owned value to avoid borrow gymnastics
-    match e.clone() {
-        Expr::Binary { op, lhs, rhs, .. } => {
-            let is_zero = |e: &Expr| matches!(e, Expr::IntLit(0));
+    match e {
+        Expr::Binary { op, lhs, rhs } => {
+            let is_zero = |expr: &Expr| matches!(expr, Expr::IntLit(0));
             let is_one = |e: &Expr| matches!(e, Expr::IntLit(1));
             let is_neg1 = |e: &Expr| matches!(e, Expr::IntLit(-1));
             match op.as_str() {
@@ -478,18 +478,18 @@ fn simplify_expr(e: Expr) -> Expr {
                 }
                 _ => {}
             }
-            e
+            Expr::Binary { op, lhs, rhs }
         }
-        Expr::Unary { op, expr, .. } => {
+        Expr::Unary { op, expr } => {
             match op.as_str() {
                 "neg" => {
                     if let Expr::Unary {
                         op: inner_op,
                         expr: inner_expr,
-                    } = *expr
+                    } = &*expr
                     {
                         if inner_op == "neg" {
-                            return *inner_expr;
+                            return *inner_expr.clone();
                         }
                     }
                 }
@@ -497,18 +497,18 @@ fn simplify_expr(e: Expr) -> Expr {
                     if let Expr::Unary {
                         op: inner_op,
                         expr: inner_expr2,
-                    } = *expr
+                    } = &*expr
                     {
                         if inner_op == "not" {
-                            return *inner_expr2;
+                            return *inner_expr2.clone();
                         }
                     }
                 }
                 _ => {}
             }
-            e
+            Expr::Unary { op, expr }
         }
-        _ => e,
+        other => other,
     }
 }
 
