@@ -1295,6 +1295,771 @@ fn extract_pattern_vars(pattern: &str) -> Vec<String> {
     vars
 }
 
+fn lower_int_lit(
+    emitter: &mut CodeEmitter,
+    target_reg: u8,
+    value: i64,
+) -> Result<(), String> {
+    emitter.emit_insns(&x86_64::load_i64(target_reg, value));
+    Ok(())
+}
+
+fn lower_bool_lit(
+    emitter: &mut CodeEmitter,
+    target_reg: u8,
+    value: bool,
+) -> Result<(), String> {
+    emitter.emit_insns(&x86_64::load_i64(target_reg, if value { 1 } else { 0 }));
+    Ok(())
+}
+
+fn lower_ident_ref(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    target_reg: u8,
+    name: &str,
+    pending_calls: &mut Vec<PendingCall>,
+) -> Result<(), String> {
+    // Check if this is a global variable
+    if let Some(&addr) = ctx.globals.get(name) {
+        let addr32 = addr as u32;
+        if target_reg == RAX {
+            emitter.emit_insns(&x86_64::mov_rax_from_abs(addr));
+        } else {
+            emitter.emit_insns(&x86_64::mov_r_from_abs32(target_reg, addr32));
+        }
+        return Ok(());
+    }
+    // Check if this is a function name (used as address/pointer)
+    if ctx.functions.contains_key(name) {
+        // Emit placeholder address (will be patched after all functions are laid out).
+        let placeholder = if target_reg == RAX {
+            let mut code = vec![0x48, 0xB8];
+            code.extend_from_slice(&[0xEF, 0xBE, 0xAD, 0xDE, 0x00, 0x00, 0x00, 0x00]);
+            code
+        } else {
+            x86_64::mov_ri64(target_reg, 0xDEADBEEF)
+        };
+        let site_offset = emitter.len() + 2;
+        emitter.emit_insns(&placeholder);
+        pending_calls.push(PendingCall {
+            site: site_offset as u32,
+            target: format!("@addr_{}", name),
+        });
+        return Ok(());
+    }
+    let offset = ctx.slot_offset(name).unwrap_or_else(|_| {
+        let off = ctx.alloc_slot();
+        ctx.locals.insert(name.to_string(), StackSlot::Scalar(off));
+        off
+    });
+    if target_reg == RAX {
+        emitter.emit_insns(&x86_64::ldr64(target_reg, offset as u16));
+    } else {
+        emitter.emit_insns(&x86_64::ldr64(RAX, offset as u16));
+        if target_reg != RAX {
+            emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
+        }
+    }
+    Ok(())
+}
+
+fn lower_binary_expr(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    target_reg: u8,
+    op: &str,
+    lhs: &Expr,
+    rhs: &Expr,
+    pending_calls: &mut Vec<PendingCall>,
+) -> Result<(), String> {
+    lower_expr_into(emitter, ctx, lhs, RAX, pending_calls)?;
+    emitter.emit_insns(&x86_64::push_r(RAX));
+    lower_expr_into(emitter, ctx, rhs, RAX, pending_calls)?;
+    emitter.emit_insns(&x86_64::pop_r(RBX));
+
+    match op {
+        "+" => {
+            emitter.emit_insns(&x86_64::add_rr(RAX, RBX));
+        }
+        "-" => {
+            emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
+            emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
+            emitter.emit_insns(&x86_64::sub_rr(RAX, RCX));
+        }
+        "*" => {
+            emitter.emit_insns(&x86_64::imul_rr(RAX, RBX));
+        }
+        ">" => {
+            emitter.emit_insns(&x86_64::cmp_rr(RBX, RAX));
+            emitter.emit_bytes(&[0x0F, 0x9F, 0xC0]); // setg al
+            emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]); // movzx rax, al
+        }
+        ">=" => {
+            emitter.emit_insns(&x86_64::cmp_rr(RBX, RAX));
+            emitter.emit_bytes(&[0x0F, 0x9D, 0xC0]); // setge al
+            emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]); // movzx rax, al
+        }
+        "&&" => {
+            emitter.emit_insns(&x86_64::test_rr(RAX, RAX));
+            emitter.emit_bytes(&[0x0F, 0x95, 0xC0]); // setne al
+            emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]); // movzx rax, al
+            emitter.emit_bytes(&[0x48, 0x89, 0xC1]); // mov rcx, rax
+            emitter.emit_bytes(&[0x48, 0x85, 0xDB]); // test rbx, rbx
+            emitter.emit_bytes(&[0x0F, 0x95, 0xC3]); // setne bl
+            emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC3]); // movzx rbx, bl
+            emitter.emit_bytes(&[0x48, 0x21, 0xD9]); // and rcx, rbx
+            emitter.emit_bytes(&[0x48, 0x89, 0xC8]); // mov rax, rcx
+        }
+        "||" => {
+            emitter.emit_insns(&x86_64::test_rr(RAX, RAX));
+            emitter.emit_bytes(&[0x0F, 0x95, 0xC0]); // setne al
+            emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]); // movzx rax, al
+            emitter.emit_bytes(&[0x48, 0x89, 0xC1]); // mov rcx, rax
+            emitter.emit_bytes(&[0x48, 0x85, 0xDB]); // test rbx, rbx
+            emitter.emit_bytes(&[0x0F, 0x95, 0xC3]); // setne bl
+            emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC3]); // movzx rbx, bl
+            emitter.emit_bytes(&[0x48, 0x09, 0xD9]); // or rcx, rbx
+            emitter.emit_bytes(&[0x48, 0x89, 0xC8]); // mov rax, rcx
+        }
+        "<=" => {
+            emitter.emit_insns(&x86_64::cmp_rr(RBX, RAX));
+            emitter.emit_bytes(&[0x0F, 0x9E, 0xC0]); // setle al
+            emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]); // movzx rax, al
+        }
+        "/" => {
+            emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
+            emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
+            emitter.emit_bytes(&[0x48, 0x31, 0xD2]); // xor rdx, rdx
+            emitter.emit_bytes(&[0x48, 0xF7, 0xF1]); // div rcx
+        }
+        "<" => {
+            emitter.emit_insns(&x86_64::cmp_rr(RBX, RAX));
+            emitter.emit_bytes(&[0x0F, 0x9C, 0xC0]); // setl al
+            emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]); // movzx rax, al
+        }
+        "==" | "=" => {
+            emitter.emit_insns(&x86_64::cmp_rr(RBX, RAX));
+            emitter.emit_bytes(&[0x0F, 0x94, 0xC0]); // sete al
+            emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]); // movzx rax, al
+        }
+        "!=" => {
+            emitter.emit_insns(&x86_64::cmp_rr(RBX, RAX));
+            emitter.emit_bytes(&[0x0F, 0x95, 0xC0]); // setne al
+            emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]); // movzx rax, al
+        }
+        "^" => {
+            emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
+            emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
+            emitter.emit_bytes(&[0x48, 0x31, 0xC8]); // xor rax, rcx
+        }
+        "<<" => {
+            emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
+            emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
+            emitter.emit_bytes(&[0x48, 0xD3, 0xE0]); // shl rax, cl
+        }
+        ">>" => {
+            emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
+            emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
+            emitter.emit_bytes(&[0x48, 0xD3, 0xE8]); // shr rax, cl
+        }
+        "&" => {
+            emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
+            emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
+            emitter.emit_bytes(&[0x48, 0x21, 0xC8]); // and rax, rcx
+        }
+        "+=" => {
+            emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
+            emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
+            emitter.emit_insns(&x86_64::add_rr(RAX, RCX));
+        }
+        "-=" => {
+            emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
+            emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
+            emitter.emit_insns(&x86_64::sub_rr(RAX, RCX));
+        }
+        "|" => {
+            emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
+            emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
+            emitter.emit_bytes(&[0x48, 0x09, 0xC8]); // or rax, rcx
+        }
+        "*=" => {
+            emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
+            emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
+            emitter.emit_insns(&x86_64::imul_rr(RAX, RCX));
+        }
+        "/=" => {
+            emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
+            emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
+            emitter.emit_bytes(&[0x48, 0x31, 0xD2]); // xor rdx, rdx
+            emitter.emit_bytes(&[0x48, 0xF7, 0xF1]); // div rcx
+        }
+        "%=" => {
+            emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
+            emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
+            emitter.emit_bytes(&[0x48, 0x31, 0xD2]); // xor rdx, rdx
+            emitter.emit_bytes(&[0x48, 0xF7, 0xF1]); // div rcx
+            emitter.emit_bytes(&[0x48, 0x89, 0xD0]); // mov rax, rdx
+        }
+        "&=" => {
+            emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
+            emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
+            emitter.emit_bytes(&[0x48, 0x21, 0xC8]); // and rax, rcx
+        }
+        "|=" => {
+            emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
+            emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
+            emitter.emit_bytes(&[0x48, 0x09, 0xC8]); // or rax, rcx
+        }
+        "^=" => {
+            emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
+            emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
+            emitter.emit_bytes(&[0x48, 0x31, 0xC8]); // xor rax, rcx
+        }
+        "<<=" => {
+            emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
+            emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
+            emitter.emit_bytes(&[0x48, 0xD3, 0xE0]); // shl rax, cl
+        }
+        ">>=" => {
+            emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
+            emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
+            emitter.emit_bytes(&[0x48, 0xD3, 0xE8]); // shr rax, cl
+        }
+        "%" => {
+            emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
+            emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
+            emitter.emit_bytes(&[0x48, 0x31, 0xD2]); // xor rdx, rdx
+            emitter.emit_bytes(&[0x48, 0xF7, 0xF1]); // div rcx
+            emitter.emit_bytes(&[0x48, 0x89, 0xD0]); // mov rax, rdx
+        }
+        _ => {
+            return Err(format!(
+                "x86_64-lower: unsupported operator `{op}` in `{}`",
+                ctx.fn_name
+            ));
+        }
+    }
+
+    if target_reg != RAX {
+        emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
+    }
+    Ok(())
+}
+
+fn lower_call_expr(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    target_reg: u8,
+    callee: &Expr,
+    args: &[Expr],
+    pending_calls: &mut Vec<PendingCall>,
+) -> Result<(), String> {
+    let target_name = match callee {
+        Expr::Ident(name) => name.clone(),
+        _ => {
+            return Err(format!(
+                "x86_64-lower: unsupported call callee in `{}`",
+                ctx.fn_name
+            ));
+        }
+    };
+
+    match target_name.as_str() {
+        "hlt" => {
+            emitter.emit_bytes(&[0xF4]);
+            if target_reg != RAX {
+                emitter.emit_insns(&x86_64::xor_rr(target_reg, target_reg));
+            }
+            return Ok(());
+        }
+        "pause" => {
+            emitter.emit_bytes(&[0xF3, 0x90]);
+            if target_reg != RAX {
+                emitter.emit_insns(&x86_64::xor_rr(target_reg, target_reg));
+            }
+            return Ok(());
+        }
+        "cli" => {
+            emitter.emit_bytes(&[0xFA]);
+            return Ok(());
+        }
+        "sti" => {
+            emitter.emit_bytes(&[0xFB]);
+            return Ok(());
+        }
+        "outb" => {
+            if args.len() >= 2 {
+                lower_expr_into(emitter, ctx, &args[0], RBX, pending_calls)?;
+                lower_expr_into(emitter, ctx, &args[1], RSI, pending_calls)?;
+                emitter.emit_bytes(&[0x66, 0x89, 0xDA]); // mov dx, bx
+                emitter.emit_bytes(&[0x40, 0x88, 0xF0]); // mov al, sil
+                emitter.emit_bytes(&[0xEE]); // out dx, al
+            } else {
+                return Err(format!(
+                    "x86_64-lower: `outb` requires 2 arguments in `{}`",
+                    ctx.fn_name
+                ));
+            }
+            return Ok(());
+        }
+        "inb" => {
+            if args.len() >= 1 {
+                lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
+                emitter.emit_bytes(&[0x66, 0x89, 0xFA]); // mov dx, di
+                emitter.emit_bytes(&[0xEC]); // in al, dx
+                emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]); // movzx rax, al
+            } else {
+                return Err(format!(
+                    "x86_64-lower: `inb` requires 1 argument in `{}`",
+                    ctx.fn_name
+                ));
+            }
+            return Ok(());
+        }
+        "outl" => {
+            if args.len() >= 2 {
+                lower_expr_into(emitter, ctx, &args[0], RBX, pending_calls)?;
+                lower_expr_into(emitter, ctx, &args[1], RAX, pending_calls)?;
+                emitter.emit_bytes(&[0x66, 0x89, 0xDA]); // mov dx, bx
+                emitter.emit_bytes(&[0xEF]); // out dx, eax
+            } else {
+                return Err(format!(
+                    "x86_64-lower: `outl` requires 2 arguments in `{}`",
+                    ctx.fn_name
+                ));
+            }
+            return Ok(());
+        }
+        "inl" => {
+            if args.len() >= 1 {
+                lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
+                emitter.emit_bytes(&[0x66, 0x89, 0xFA]); // mov dx, di
+                emitter.emit_bytes(&[0xED]); // in eax, dx
+            } else {
+                return Err(format!(
+                    "x86_64-lower: `inl` requires 1 argument in `{}`",
+                    ctx.fn_name
+                ));
+            }
+            return Ok(());
+        }
+        "outw" => {
+            if args.len() >= 2 {
+                lower_expr_into(emitter, ctx, &args[0], RBX, pending_calls)?;
+                lower_expr_into(emitter, ctx, &args[1], RAX, pending_calls)?;
+                emitter.emit_bytes(&[0x66, 0x89, 0xDA]); // mov dx, bx
+                emitter.emit_bytes(&[0x66, 0xEF]); // out dx, ax (16-bit)
+            } else {
+                return Err(format!(
+                    "x86_64-lower: `outw` requires 2 arguments in `{}`",
+                    ctx.fn_name
+                ));
+            }
+            return Ok(());
+        }
+        "inw" => {
+            if args.len() >= 1 {
+                lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
+                emitter.emit_bytes(&[0x66, 0x89, 0xFA]); // mov dx, di
+                emitter.emit_bytes(&[0x66, 0xED]); // in ax, dx (16-bit)
+                emitter.emit_bytes(&[0x48, 0x0F, 0xB7, 0xC0]); // movzx rax, ax
+            } else {
+                return Err(format!(
+                    "x86_64-lower: `inw` requires 1 argument in `{}`",
+                    ctx.fn_name
+                ));
+            }
+            return Ok(());
+        }
+        "load8" => {
+            if args.len() >= 1 {
+                lower_expr_into(emitter, ctx, &args[0], RCX, pending_calls)?;
+                emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0x01]); // movzx rax, byte [rcx]
+                if target_reg != RAX {
+                    emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
+                }
+            } else {
+                return Err(format!(
+                    "x86_64-lower: `load8` requires 1 argument in `{}`",
+                    ctx.fn_name
+                ));
+            }
+            return Ok(());
+        }
+        "store8" => {
+            if args.len() >= 2 {
+                lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
+                emitter.emit_insns(&x86_64::push_r(RDI));
+                lower_expr_into(emitter, ctx, &args[1], RSI, pending_calls)?;
+                emitter.emit_insns(&x86_64::pop_r(RDI));
+                emitter.emit_bytes(&[0x40, 0x88, 0x37]); // mov [rdi], sil
+            } else {
+                return Err(format!(
+                    "x86_64-lower: `store8` requires 2 arguments in `{}`",
+                    ctx.fn_name
+                ));
+            }
+            return Ok(());
+        }
+        "load16" => {
+            if args.len() >= 1 {
+                lower_expr_into(emitter, ctx, &args[0], RCX, pending_calls)?;
+                emitter.emit_bytes(&[0x48, 0x0F, 0xB7, 0x01]); // movzx rax, word [rcx]
+                if target_reg != RAX {
+                    emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
+                }
+            } else {
+                return Err(format!(
+                    "x86_64-lower: `load16` requires 1 argument in `{}`",
+                    ctx.fn_name
+                ));
+            }
+            return Ok(());
+        }
+        "store16" => {
+            if args.len() >= 2 {
+                lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
+                emitter.emit_insns(&x86_64::push_r(RDI));
+                lower_expr_into(emitter, ctx, &args[1], RSI, pending_calls)?;
+                emitter.emit_insns(&x86_64::pop_r(RDI));
+                emitter.emit_bytes(&[0x66, 0x89, 0x37]); // mov [rdi], si
+            } else {
+                return Err(format!(
+                    "x86_64-lower: `store16` requires 2 arguments in `{}`",
+                    ctx.fn_name
+                ));
+            }
+            return Ok(());
+        }
+        "load32" => {
+            if args.len() >= 1 {
+                lower_expr_into(emitter, ctx, &args[0], RCX, pending_calls)?;
+                emitter.emit_bytes(&[0x8B, 0x01]); // mov eax, [rcx]
+                if target_reg != RAX {
+                    emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
+                }
+            } else {
+                return Err(format!(
+                    "x86_64-lower: `load32` requires 1 argument in `{}`",
+                    ctx.fn_name
+                ));
+            }
+            return Ok(());
+        }
+        "store32" => {
+            if args.len() >= 2 {
+                lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
+                emitter.emit_insns(&x86_64::push_r(RDI));
+                lower_expr_into(emitter, ctx, &args[1], RSI, pending_calls)?;
+                emitter.emit_insns(&x86_64::pop_r(RDI));
+                emitter.emit_bytes(&[0x89, 0x37]); // mov [rdi], esi
+            } else {
+                return Err(format!(
+                    "x86_64-lower: `store32` requires 2 arguments in `{}`",
+                    ctx.fn_name
+                ));
+            }
+            return Ok(());
+        }
+        "load64" => {
+            if args.len() >= 1 {
+                lower_expr_into(emitter, ctx, &args[0], RCX, pending_calls)?;
+                emitter.emit_bytes(&[0x48, 0x8B, 0x01]); // mov rax, [rcx]
+                if target_reg != RAX {
+                    emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
+                }
+            } else {
+                return Err(format!(
+                    "x86_64-lower: `load64` requires 1 argument in `{}`",
+                    ctx.fn_name
+                ));
+            }
+            return Ok(());
+        }
+        "store64" => {
+            if args.len() >= 2 {
+                lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
+                emitter.emit_insns(&x86_64::push_r(RDI));
+                lower_expr_into(emitter, ctx, &args[1], RSI, pending_calls)?;
+                emitter.emit_insns(&x86_64::pop_r(RDI));
+                emitter.emit_bytes(&[0x48, 0x89, 0x37]); // mov [rdi], rsi
+            } else {
+                return Err(format!(
+                    "x86_64-lower: `store64` requires 2 arguments in `{}`",
+                    ctx.fn_name
+                ));
+            }
+            return Ok(());
+        }
+        "read_cr2" => {
+            emitter.emit_bytes(&[0x48, 0x0F, 0x20, 0xD0]); // mov rax, cr2
+            if target_reg != RAX {
+                emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
+            }
+            return Ok(());
+        }
+        "read_cr3" => {
+            emitter.emit_bytes(&[0x48, 0x0F, 0x20, 0xD8]); // mov rax, cr3
+            if target_reg != RAX {
+                emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
+            }
+            return Ok(());
+        }
+        "write_cr3" => {
+            if args.len() >= 1 {
+                lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
+                emitter.emit_bytes(&[0x0F, 0x22, 0xC7]); // mov cr3, rdi
+            }
+            return Ok(());
+        }
+        "invlpg" => {
+            if args.len() >= 1 {
+                lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
+                emitter.emit_bytes(&[0x48, 0x0F, 0x01, 0x3F]); // invlpg [rdi]
+            } else {
+                return Err(format!(
+                    "x86_64-lower: `invlpg` requires 1 argument in `{}`",
+                    ctx.fn_name
+                ));
+            }
+            return Ok(());
+        }
+        "lidt" => {
+            if args.len() >= 1 {
+                lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
+                emitter.emit_bytes(&[0x0F, 0x01, 0x1F]); // lidt [rdi]
+            } else {
+                return Err(format!(
+                    "x86_64-lower: `lidt` requires 1 argument in `{}`",
+                    ctx.fn_name
+                ));
+            }
+            return Ok(());
+        }
+        "invoke" | "invoke1" | "invoke2" => {
+            if args.len() >= 1 {
+                lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
+                if args.len() >= 2 {
+                    lower_expr_into(emitter, ctx, &args[1], RSI, pending_calls)?;
+                }
+                if args.len() >= 3 {
+                    lower_expr_into(emitter, ctx, &args[2], RDX, pending_calls)?;
+                }
+                if args.len() == 1 {
+                    emitter.emit_bytes(&[0x48, 0x89, 0xF8]); // mov rax, rdi
+                    emitter.emit_bytes(&[0xFF, 0xD0]); // call rax
+                } else if args.len() >= 2 {
+                    emitter.emit_bytes(&[0x48, 0x89, 0xF8]); // mov rax, rdi
+                    emitter.emit_bytes(&[0x48, 0x89, 0xF7]); // mov rdi, rsi
+                    if args.len() >= 3 {
+                        emitter.emit_bytes(&[0x48, 0x89, 0xD6]); // mov rsi, rdx
+                    }
+                    emitter.emit_bytes(&[0xFF, 0xD0]); // call rax
+                }
+            } else {
+                return Err(format!(
+                    "x86_64-lower: `invoke` requires at least 1 argument in `{}`",
+                    ctx.fn_name
+                ));
+            }
+            return Ok(());
+        }
+        _ => {}
+    }
+
+    let arg_regs = [RDI, RSI, RDX, RCX, 8, 9];
+    if args.len() > 16 {
+        return Err(format!(
+            "x86_64-lower: too many arguments in call to `{target_name}` in `{}`",
+            ctx.fn_name
+        ));
+    }
+    if args.len() > 6 {
+        for arg in args[6..].iter().rev() {
+            lower_expr_into(emitter, ctx, arg, RAX, pending_calls)?;
+            emitter.emit_insns(&x86_64::push_r(RAX));
+        }
+    }
+    for (i, arg) in args[..6.min(args.len())].iter().enumerate() {
+        if i > 0 {
+            for j in 0..i {
+                emitter.emit_insns(&x86_64::push_r(arg_regs[j]));
+            }
+        }
+        lower_expr_into(emitter, ctx, arg, arg_regs[i], pending_calls)?;
+        if i > 0 {
+            for j in (0..i).rev() {
+                emitter.emit_insns(&x86_64::pop_r(arg_regs[j]));
+            }
+        }
+    }
+
+    if !ctx.functions.contains_key(&target_name) {
+        if args.len() > 6 {
+            let stack_bytes = (args.len() - 6) * 8;
+            emitter.emit_bytes(&[0x48, 0x81, 0xC4]); // add rsp, imm32
+            emitter.emit_bytes(&(stack_bytes as u32).to_le_bytes());
+        }
+        if target_name.ends_with("process :: exit")
+            || target_name == "exit"
+            || target_name.ends_with("process :: abort")
+        {
+            emitter.emit_bytes(&[0x48, 0xC7, 0xC0, 0x3C, 0x00, 0x00, 0x00]); // mov rax, 60
+            emitter.emit_bytes(&[0x0F, 0x05]); // syscall
+        }
+        emitter.emit_insns(&x86_64::load_i64(target_reg, 0));
+        return Ok(());
+    }
+
+    let site = emitter.len() as u32;
+    emitter.emit_insns(&x86_64::call_rel32(0));
+    pending_calls.push(PendingCall {
+        site,
+        target: target_name,
+    });
+
+    if args.len() > 6 {
+        let stack_bytes = (args.len() - 6) * 8;
+        emitter.emit_bytes(&[0x48, 0x81, 0xC4]); // add rsp, imm32
+        emitter.emit_bytes(&(stack_bytes as u32).to_le_bytes());
+    }
+
+    if target_reg != RAX {
+        emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
+    }
+    Ok(())
+}
+
+fn lower_struct_init(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    name: &str,
+    fields: &[(String, Expr)],
+    pending_calls: &mut Vec<PendingCall>,
+) -> Result<(), String> {
+    let field_offsets: Vec<(String, u32)> = match ctx.locals.get(name) {
+        Some(StackSlot::Struct { fields: field_map }) => fields
+            .iter()
+            .filter_map(|(fn_, _)| field_map.get(fn_).map(|off| (fn_.clone(), *off)))
+            .collect(),
+        _ => Vec::new(),
+    };
+    for (field_name, field_offset) in &field_offsets {
+        if let Some((_, value)) = fields.iter().find(|(fn_, _)| fn_ == field_name) {
+            lower_expr_into(emitter, ctx, value, RAX, pending_calls)?;
+            emitter.emit_insns(&x86_64::str64(RAX, *field_offset as u16));
+        }
+    }
+    Ok(())
+}
+
+fn lower_field_access(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    target_reg: u8,
+    base: &Expr,
+    name: &str,
+) -> Result<(), String> {
+    let Expr::Ident(base_name) = base else {
+        emitter.emit_insns(&x86_64::load_i64(target_reg, 0));
+        return Ok(());
+    };
+    match ctx.locals.get(base_name) {
+        Some(StackSlot::Struct { fields }) => {
+            if let Some(field_offset) = fields.get(name) {
+                emitter.emit_insns(&x86_64::ldr64(RAX, *field_offset as u16));
+                if target_reg != RAX {
+                    emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
+                }
+                Ok(())
+            } else {
+                Err(format!(
+                    "x86_64-lower: unknown field `{name}` in `{}`",
+                    ctx.fn_name
+                ))
+            }
+        }
+        _ => {
+            emitter.emit_insns(&x86_64::load_i64(target_reg, 0));
+            Ok(())
+        }
+    }
+}
+
+fn lower_unary_expr(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    target_reg: u8,
+    op: &str,
+    expr: &Expr,
+    pending_calls: &mut Vec<PendingCall>,
+) -> Result<(), String> {
+    lower_expr_into(emitter, ctx, expr, RAX, pending_calls)?;
+    match op {
+        "-" => {
+            emitter.emit_bytes(&[0x48, 0xF7, 0xD8]); // neg rax
+        }
+        "!" => {
+            emitter.emit_insns(&x86_64::test_rr(RAX, RAX));
+            emitter.emit_bytes(&[0x0F, 0x94, 0xC0]); // sete al
+            emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]); // movzx rax, al
+        }
+        "~" => {
+            emitter.emit_bytes(&[0x48, 0xF7, 0xD0]); // not rax
+        }
+        "*" => {
+            emitter.emit_bytes(&[0x48, 0x8B, 0x00]); // mov rax, [rax]
+        }
+        "&" => {}
+        _ => {
+            return Err(format!(
+                "x86_64-lower: unsupported unary op `{op}` in `{}`",
+                ctx.fn_name
+            ));
+        }
+    }
+    if target_reg != RAX {
+        emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
+    }
+    Ok(())
+}
+
+fn lower_index_expr(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    target_reg: u8,
+    base: &Expr,
+    index: &Expr,
+    pending_calls: &mut Vec<PendingCall>,
+) -> Result<(), String> {
+    lower_expr_into(emitter, ctx, base, RDI, pending_calls)?;
+    lower_expr_into(emitter, ctx, index, RAX, pending_calls)?;
+    emitter.emit_bytes(&[0x48, 0xC1, 0xE0, 0x03]); // shl rax, 3
+    emitter.emit_bytes(&[0x48, 0x01, 0xC7]); // add rdi, rax
+    emitter.emit_bytes(&[0x48, 0x8B, 0x07]); // mov rax, [rdi]
+    if target_reg != RAX {
+        emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
+    }
+    Ok(())
+}
+
+fn lower_string_lit(
+    emitter: &mut CodeEmitter,
+    target_reg: u8,
+    content: &str,
+    pending_calls: &mut Vec<PendingCall>,
+) -> Result<(), String> {
+    let site = emitter.len() + 2;
+    emitter.emit_insns(&x86_64::mov_ri64(target_reg, 0xDEADBEEF));
+    pending_calls.push(PendingCall {
+        site: site as u32,
+        target: format!("@str_{}", content),
+    });
+    Ok(())
+}
+
+
 fn lower_expr_into(
     emitter: &mut CodeEmitter,
     ctx: &mut LowerCtx<'_>,
@@ -1303,851 +2068,16 @@ fn lower_expr_into(
     pending_calls: &mut Vec<PendingCall>,
 ) -> Result<(), String> {
     match expr {
-        Expr::IntLit(value) => {
-            emitter.emit_insns(&x86_64::load_i64(target_reg, *value));
-            Ok(())
-        }
-        Expr::BoolLit(value) => {
-            emitter.emit_insns(&x86_64::load_i64(target_reg, if *value { 1 } else { 0 }));
-            Ok(())
-        }
-        Expr::Ident(name) => {
-            // Check if this is a global variable
-            if let Some(&addr) = ctx.globals.get(name) {
-                let addr32 = addr as u32;
-                if target_reg == RAX {
-                    emitter.emit_insns(&x86_64::mov_rax_from_abs(addr));
-                } else {
-                    emitter.emit_insns(&x86_64::mov_r_from_abs32(target_reg, addr32));
-                }
-                return Ok(());
-            }
-            // Check if this is a function name (used as address/pointer)
-            if ctx.functions.contains_key(name) {
-                // Emit placeholder address (will be patched after all functions are laid out).
-                // mov rax, imm64 is 10 bytes: 48 B8 <8 byte addr>
-                let placeholder = if target_reg == RAX {
-                    let mut code = vec![0x48, 0xB8]; // mov rax, imm64
-                    code.extend_from_slice(&[0xEF, 0xBE, 0xAD, 0xDE, 0x00, 0x00, 0x00, 0x00]); // placeholder
-                    code
-                } else {
-                    x86_64::mov_ri64(target_reg, 0xDEADBEEF)
-                };
-                let site_offset = emitter.len() + 2; // byte 2 of the mov instruction
-                emitter.emit_insns(&placeholder);
-                // Use address marker prefix in pending_calls for function address references
-                pending_calls.push(PendingCall {
-                    site: site_offset as u32,
-                    target: format!("@addr_{}", name),
-                });
-                return Ok(());
-            }
-            let offset = ctx.slot_offset(name).unwrap_or_else(|_| {
-                // ponytail: auto-create local for unknown identifier (struct field fallback)
-                let off = ctx.alloc_slot();
-                ctx.locals.insert(name.to_string(), StackSlot::Scalar(off));
-                off
-            });
-            if target_reg == RAX {
-                emitter.emit_insns(&x86_64::ldr64(target_reg, offset as u16));
-            } else {
-                // Load into RAX first, then move to target
-                emitter.emit_insns(&x86_64::ldr64(RAX, offset as u16));
-                if target_reg != RAX {
-                    emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
-                }
-            }
-            Ok(())
-        }
-        Expr::Binary { op, lhs, rhs, .. } => {
-            // Evaluate lhs into RAX
-            lower_expr_into(emitter, ctx, lhs, RAX, pending_calls)?;
-            // Push RAX to stack
-            emitter.emit_insns(&x86_64::push_r(RAX));
-            // Evaluate rhs into RAX
-            lower_expr_into(emitter, ctx, rhs, RAX, pending_calls)?;
-            // Pop lhs into RBX
-            emitter.emit_insns(&x86_64::pop_r(RBX));
-
-            match op.as_str() {
-                "+" => {
-                    emitter.emit_insns(&x86_64::add_rr(RAX, RBX));
-                }
-                "-" => {
-                    // RAX = RBX - RAX (lhs - rhs), so need to swap
-                    // stack has: lhs (in RBX), rhs (in RAX)
-                    // We want: lhs - rhs
-                    // mov RCX, RAX (rhs); mov RAX, RBX (lhs); sub RAX, RCX
-                    emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
-                    emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
-                    emitter.emit_insns(&x86_64::sub_rr(RAX, RCX));
-                }
-                "*" => {
-                    emitter.emit_insns(&x86_64::imul_rr(RAX, RBX));
-                }
-                ">" => {
-                    // lhs > rhs: cmp RBX, RAX; setg al
-                    emitter.emit_insns(&x86_64::cmp_rr(RBX, RAX));
-                    emitter.emit_bytes(&[0x0F, 0x9F, 0xC0]); // setg al
-                    emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]); // movzx rax, al
-                }
-                ">=" => {
-                    // lhs >= rhs: cmp RBX, RAX; setge al
-                    emitter.emit_insns(&x86_64::cmp_rr(RBX, RAX));
-                    emitter.emit_bytes(&[0x0F, 0x9D, 0xC0]); // setge al
-                    emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]); // movzx rax, al
-                }
-                "&&" => {
-                    // lhs && rhs: test each non-zero, multiply booleans
-                    // RAX = lhs, RBX = rhs (after push/pop)
-                    // test rax, rax; setne al; movzx rax, al
-                    emitter.emit_insns(&x86_64::test_rr(RAX, RAX));
-                    emitter.emit_bytes(&[0x0F, 0x95, 0xC0]); // setne al
-                    emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]); // movzx rax, al
-                    // mov rcx, rax (save lhs_bool)
-                    emitter.emit_bytes(&[0x48, 0x89, 0xC1]); // mov rcx, rax
-                    // test rbx, rbx; setne bl; movzx rbx, bl
-                    emitter.emit_bytes(&[0x48, 0x85, 0xDB]); // test rbx, rbx
-                    emitter.emit_bytes(&[0x0F, 0x95, 0xC3]); // setne bl
-                    emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC3]); // movzx rbx, bl
-                    // rax = rcx & rbx
-                    emitter.emit_bytes(&[0x48, 0x21, 0xD9]); // and rcx, rbx
-                    emitter.emit_bytes(&[0x48, 0x89, 0xC8]); // mov rax, rcx
-                }
-                "||" => {
-                    // lhs || rhs: test each non-zero, OR booleans
-                    emitter.emit_insns(&x86_64::test_rr(RAX, RAX));
-                    emitter.emit_bytes(&[0x0F, 0x95, 0xC0]); // setne al
-                    emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]); // movzx rax, al
-                    emitter.emit_bytes(&[0x48, 0x89, 0xC1]); // mov rcx, rax
-                    emitter.emit_bytes(&[0x48, 0x85, 0xDB]); // test rbx, rbx
-                    emitter.emit_bytes(&[0x0F, 0x95, 0xC3]); // setne bl
-                    emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC3]); // movzx rbx, bl
-                    emitter.emit_bytes(&[0x48, 0x09, 0xD9]); // or rcx, rbx
-                    emitter.emit_bytes(&[0x48, 0x89, 0xC8]); // mov rax, rcx
-                }
-                "<=" => {
-                    // lhs <= rhs: cmp RBX, RAX; setle al
-                    emitter.emit_insns(&x86_64::cmp_rr(RBX, RAX));
-                    emitter.emit_bytes(&[0x0F, 0x9E, 0xC0]); // setle al
-                    emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]); // movzx rax, al
-                }
-                "/" => {
-                    // RAX = RBX / RAX (lhs / rhs)
-                    // mov RCX, RAX (rhs); mov RAX, RBX (lhs); xor RDX, RDX; div RCX
-                    emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
-                    emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
-                    // xor rdx, rdx (zero-extend for div)
-                    emitter.emit_bytes(&[0x48, 0x31, 0xD2]);
-                    // div rcx  → 48 F7 F1
-                    emitter.emit_bytes(&[0x48, 0xF7, 0xF1]);
-                }
-                "<" => {
-                    // lhs < rhs: cmp RBX, RAX; setl al
-                    emitter.emit_insns(&x86_64::cmp_rr(RBX, RAX));
-                    emitter.emit_bytes(&[0x0F, 0x9C, 0xC0]); // setl al
-                    emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]); // movzx rax, al
-                }
-                "==" | "=" => {
-                    // lhs == rhs: cmp RBX, RAX; sete al
-                    emitter.emit_insns(&x86_64::cmp_rr(RBX, RAX));
-                    emitter.emit_bytes(&[0x0F, 0x94, 0xC0]); // sete al
-                    emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]); // movzx rax, al
-                }
-                "!=" => {
-                    // lhs != rhs: cmp RBX, RAX; setne al
-                    emitter.emit_insns(&x86_64::cmp_rr(RBX, RAX));
-                    emitter.emit_bytes(&[0x0F, 0x95, 0xC0]); // setne al
-                    emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]); // movzx rax, al
-                }
-                "^" => {
-                    // lhs ^ rhs: XOR
-                    // After push/pop: RAX=rhs, RBX=lhs
-                    // RAX = RBX ^ RAX
-                    // mov RCX, RAX (rhs); mov RAX, RBX (lhs); xor RAX, RCX
-                    emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
-                    emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
-                    // xor rax, rcx  → 48 31 C8
-                    emitter.emit_bytes(&[0x48, 0x31, 0xC8]);
-                }
-                "<<" => {
-                    // lhs << rhs: shift left. RAX=rhs, RBX=lhs.
-                    // mov RCX, RAX; mov RAX, RBX; shl rax, cl
-                    emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
-                    emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
-                    // shl rax, cl  → 48 D3 E0
-                    emitter.emit_bytes(&[0x48, 0xD3, 0xE0]);
-                }
-                ">>" => {
-                    // lhs >> rhs: shift right (logical). RAX=rhs, RBX=lhs.
-                    emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
-                    emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
-                    // shr rax, cl  → 48 D3 E8
-                    emitter.emit_bytes(&[0x48, 0xD3, 0xE8]);
-                }
-                "&" => {
-                    // lhs & rhs: AND
-                    emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
-                    emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
-                    // and rax, rcx  → 48 21 C8
-                    emitter.emit_bytes(&[0x48, 0x21, 0xC8]);
-                }
-                "+=" => {
-                    // lhs += rhs: add
-                    emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
-                    emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
-                    emitter.emit_insns(&x86_64::add_rr(RAX, RCX));
-                }
-                "-=" => {
-                    // lhs -= rhs: sub
-                    emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
-                    emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
-                    emitter.emit_insns(&x86_64::sub_rr(RAX, RCX));
-                }
-                "|" => {
-                    // lhs | rhs: OR
-                    emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
-                    emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
-                    // or rax, rcx  → 48 09 C8
-                    emitter.emit_bytes(&[0x48, 0x09, 0xC8]);
-                }
-                "*=" => {
-                    // lhs *= rhs: imul
-                    emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
-                    emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
-                    emitter.emit_insns(&x86_64::imul_rr(RAX, RCX));
-                }
-                "/=" => {
-                    // lhs /= rhs: div
-                    emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
-                    emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
-                    emitter.emit_bytes(&[0x48, 0x31, 0xD2]); // xor rdx, rdx
-                    emitter.emit_bytes(&[0x48, 0xF7, 0xF1]); // div rcx
-                }
-                "%=" => {
-                    // lhs %= rhs: mod
-                    emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
-                    emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
-                    emitter.emit_bytes(&[0x48, 0x31, 0xD2]); // xor rdx, rdx
-                    emitter.emit_bytes(&[0x48, 0xF7, 0xF1]); // div rcx
-                    emitter.emit_bytes(&[0x48, 0x89, 0xD0]); // mov rax, rdx
-                }
-                "&=" => {
-                    emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
-                    emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
-                    emitter.emit_bytes(&[0x48, 0x21, 0xC8]); // and rax, rcx
-                }
-                "|=" => {
-                    emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
-                    emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
-                    emitter.emit_bytes(&[0x48, 0x09, 0xC8]); // or rax, rcx
-                }
-                "^=" => {
-                    emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
-                    emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
-                    emitter.emit_bytes(&[0x48, 0x31, 0xC8]); // xor rax, rcx
-                }
-                "<<=" => {
-                    emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
-                    emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
-                    emitter.emit_bytes(&[0x48, 0xD3, 0xE0]); // shl rax, cl
-                }
-                ">>=" => {
-                    emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
-                    emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
-                    emitter.emit_bytes(&[0x48, 0xD3, 0xE8]); // shr rax, cl
-                }
-                "%" => {
-                    // lhs %% rhs: modulo. mov RCX, RAX (rhs); mov RAX, RBX (lhs);
-                    // xor RDX, RDX; div RCX; RAX = RDX (remainder)
-                    emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
-                    emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
-                    emitter.emit_bytes(&[0x48, 0x31, 0xD2]); // xor rdx, rdx
-                    emitter.emit_bytes(&[0x48, 0xF7, 0xF1]); // div rcx
-                    // mov rax, rdx  → 48 89 D0
-                    emitter.emit_bytes(&[0x48, 0x89, 0xD0]);
-                }
-                _ => {
-                    return Err(format!(
-                        "x86_64-lower: unsupported operator `{op}` in `{}`",
-                        ctx.fn_name
-                    ));
-                }
-            }
-
-            if target_reg != RAX {
-                emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
-            }
-            Ok(())
-        }
-        Expr::Call { callee, args, .. } => {
-            let target_name = match callee.as_ref() {
-                Expr::Ident(name) => name.clone(),
-                _ => {
-                    return Err(format!(
-                        "x86_64-lower: unsupported call callee in `{}`",
-                        ctx.fn_name
-                    ));
-                }
-            };
-
-            // Check for intrinsics (inline without call)
-            match target_name.as_str() {
-                "hlt" => {
-                    // hlt  → F4
-                    emitter.emit_bytes(&[0xF4]);
-                    if target_reg != RAX {
-                        emitter.emit_insns(&x86_64::xor_rr(target_reg, target_reg));
-                    }
-                    return Ok(());
-                }
-                "pause" => {
-                    // pause → F3 90
-                    emitter.emit_bytes(&[0xF3, 0x90]);
-                    if target_reg != RAX {
-                        emitter.emit_insns(&x86_64::xor_rr(target_reg, target_reg));
-                    }
-                    return Ok(());
-                }
-                "cli" => {
-                    // cli  → FA
-                    emitter.emit_bytes(&[0xFA]);
-                    return Ok(());
-                }
-                "sti" => {
-                    // sti  → FB
-                    emitter.emit_bytes(&[0xFB]);
-                    return Ok(());
-                }
-                "outb" => {
-                    // outb(port: Int, value: Int)  → mov dx, port; mov al, value; out dx, al
-                    if args.len() >= 2 {
-                        // Use RBX (callee-saved) for port so function calls in args[1] don't clobber it
-                        lower_expr_into(emitter, ctx, &args[0], RBX, pending_calls)?;
-                        lower_expr_into(emitter, ctx, &args[1], RSI, pending_calls)?;
-                        emitter.emit_bytes(&[0x66, 0x89, 0xDA]); // mov dx, bx
-                        emitter.emit_bytes(&[0x40, 0x88, 0xF0]); // mov al, sil
-                        emitter.emit_bytes(&[0xEE]); // out dx, al
-                    } else {
-                        return Err(format!(
-                            "x86_64-lower: `outb` requires 2 arguments in `{}`",
-                            ctx.fn_name
-                        ));
-                    }
-                    return Ok(());
-                }
-                "inb" => {
-                    // inb(port: Int) -> Int  → mov dx, port(rdi); in al, dx
-                    if args.len() >= 1 {
-                        lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
-                        // mov dx, di
-                        emitter.emit_bytes(&[0x66, 0x89, 0xFA]); // mov dx, di
-                        // in al, dx  → EC
-                        emitter.emit_bytes(&[0xEC]);
-                        // movzx rax, al  → 48 0F B6 C0
-                        emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]);
-                    } else {
-                        return Err(format!(
-                            "x86_64-lower: `inb` requires 1 argument in `{}`",
-                            ctx.fn_name
-                        ));
-                    }
-                    return Ok(());
-                }
-                "outl" => {
-                    // outl(port: Int, value: Int)  → mov dx, port; mov eax, value; out dx, eax
-                    if args.len() >= 2 {
-                        // Use RBX (callee-saved) for port so function calls in args[1] don't clobber it
-                        lower_expr_into(emitter, ctx, &args[0], RBX, pending_calls)?;
-                        lower_expr_into(emitter, ctx, &args[1], RAX, pending_calls)?;
-                        emitter.emit_bytes(&[0x66, 0x89, 0xDA]); // mov dx, bx
-                        emitter.emit_bytes(&[0xEF]); // out dx, eax
-                    } else {
-                        return Err(format!(
-                            "x86_64-lower: `outl` requires 2 arguments in `{}`",
-                            ctx.fn_name
-                        ));
-                    }
-                    return Ok(());
-                }
-                "inl" => {
-                    // inl(port: Int) -> Int  → mov dx, port; in eax, dx
-                    if args.len() >= 1 {
-                        lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
-                        emitter.emit_bytes(&[0x66, 0x89, 0xFA]); // mov dx, di
-                        emitter.emit_bytes(&[0xED]); // in eax, dx
-                    } else {
-                        return Err(format!(
-                            "x86_64-lower: `inl` requires 1 argument in `{}`",
-                            ctx.fn_name
-                        ));
-                    }
-                    return Ok(());
-                }
-                "outw" => {
-                    // outw(port: Int, val: Int)  → mov dx, port; mov ax, val; out dx, ax
-                    if args.len() >= 2 {
-                        // Use RBX (callee-saved) for port so function calls in args[1] don't clobber it
-                        lower_expr_into(emitter, ctx, &args[0], RBX, pending_calls)?;
-                        lower_expr_into(emitter, ctx, &args[1], RAX, pending_calls)?;
-                        emitter.emit_bytes(&[0x66, 0x89, 0xDA]); // mov dx, bx
-                        emitter.emit_bytes(&[0x66, 0xEF]); // out dx, ax (16-bit)
-                    } else {
-                        return Err(format!(
-                            "x86_64-lower: `outw` requires 2 arguments in `{}`",
-                            ctx.fn_name
-                        ));
-                    }
-                    return Ok(());
-                }
-                "inw" => {
-                    // inw(port: Int) -> Int  → mov dx, port; in ax, dx
-                    if args.len() >= 1 {
-                        lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
-                        emitter.emit_bytes(&[0x66, 0x89, 0xFA]); // mov dx, di
-                        emitter.emit_bytes(&[0x66, 0xED]); // in ax, dx (16-bit)
-                        // movzx rax, ax  → 48 0F B7 C0
-                        emitter.emit_bytes(&[0x48, 0x0F, 0xB7, 0xC0]);
-                    } else {
-                        return Err(format!(
-                            "x86_64-lower: `inw` requires 1 argument in `{}`",
-                            ctx.fn_name
-                        ));
-                    }
-                    return Ok(());
-                }
-                "load8" => {
-                    // load8(addr: Int) -> Int  → movzx rax, byte [addr]
-                    if args.len() >= 1 {
-                        // Use RCX to avoid clobbering RDI (may hold prior function arg)
-                        lower_expr_into(emitter, ctx, &args[0], RCX, pending_calls)?;
-                        // movzx rax, byte [rcx]  → 48 0F B6 01
-                        emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0x01]);
-                        if target_reg != RAX {
-                            emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
-                        }
-                    } else {
-                        return Err(format!(
-                            "x86_64-lower: `load8` requires 1 argument in `{}`",
-                            ctx.fn_name
-                        ));
-                    }
-                    return Ok(());
-                }
-                "store8" => {
-                    // store8(addr: Int, value: Int) -> void
-                    if args.len() >= 2 {
-                        lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
-                        emitter.emit_insns(&x86_64::push_r(RDI)); // save address
-                        lower_expr_into(emitter, ctx, &args[1], RSI, pending_calls)?;
-                        emitter.emit_insns(&x86_64::pop_r(RDI)); // restore address
-                        // mov [rdi], sil  → 40 88 37
-                        emitter.emit_bytes(&[0x40, 0x88, 0x37]);
-                    } else {
-                        return Err(format!(
-                            "x86_64-lower: `store8` requires 2 arguments in `{}`",
-                            ctx.fn_name
-                        ));
-                    }
-                    return Ok(());
-                }
-                "load16" => {
-                    if args.len() >= 1 {
-                        lower_expr_into(emitter, ctx, &args[0], RCX, pending_calls)?;
-                        // movzx rax, word [rcx]  → 48 0F B7 01
-                        emitter.emit_bytes(&[0x48, 0x0F, 0xB7, 0x01]);
-                        if target_reg != RAX {
-                            emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
-                        }
-                    } else {
-                        return Err(format!(
-                            "x86_64-lower: `load16` requires 1 argument in `{}`",
-                            ctx.fn_name
-                        ));
-                    }
-                    return Ok(());
-                }
-                "store16" => {
-                    if args.len() >= 2 {
-                        lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
-                        emitter.emit_insns(&x86_64::push_r(RDI));
-                        lower_expr_into(emitter, ctx, &args[1], RSI, pending_calls)?;
-                        emitter.emit_insns(&x86_64::pop_r(RDI));
-                        // mov [rdi], si  → 66 89 37
-                        emitter.emit_bytes(&[0x66, 0x89, 0x37]);
-                    } else {
-                        return Err(format!(
-                            "x86_64-lower: `store16` requires 2 arguments in `{}`",
-                            ctx.fn_name
-                        ));
-                    }
-                    return Ok(());
-                }
-                "load32" => {
-                    if args.len() >= 1 {
-                        lower_expr_into(emitter, ctx, &args[0], RCX, pending_calls)?;
-                        // mov eax, [rcx]  → 8B 01
-                        emitter.emit_bytes(&[0x8B, 0x01]);
-                        if target_reg != RAX {
-                            emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
-                        }
-                    } else {
-                        return Err(format!(
-                            "x86_64-lower: `load32` requires 1 argument in `{}`",
-                            ctx.fn_name
-                        ));
-                    }
-                    return Ok(());
-                }
-                "store32" => {
-                    if args.len() >= 2 {
-                        lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
-                        emitter.emit_insns(&x86_64::push_r(RDI));
-                        lower_expr_into(emitter, ctx, &args[1], RSI, pending_calls)?;
-                        emitter.emit_insns(&x86_64::pop_r(RDI));
-                        // mov [rdi], esi  → 89 37
-                        emitter.emit_bytes(&[0x89, 0x37]);
-                    } else {
-                        return Err(format!(
-                            "x86_64-lower: `store32` requires 2 arguments in `{}`",
-                            ctx.fn_name
-                        ));
-                    }
-                    return Ok(());
-                }
-                "load64" => {
-                    if args.len() >= 1 {
-                        lower_expr_into(emitter, ctx, &args[0], RCX, pending_calls)?;
-                        // mov rax, [rcx]  → 48 8B 01
-                        emitter.emit_bytes(&[0x48, 0x8B, 0x01]);
-                        if target_reg != RAX {
-                            emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
-                        }
-                    } else {
-                        return Err(format!(
-                            "x86_64-lower: `load64` requires 1 argument in `{}`",
-                            ctx.fn_name
-                        ));
-                    }
-                    return Ok(());
-                }
-                "store64" => {
-                    if args.len() >= 2 {
-                        lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
-                        emitter.emit_insns(&x86_64::push_r(RDI));
-                        lower_expr_into(emitter, ctx, &args[1], RSI, pending_calls)?;
-                        emitter.emit_insns(&x86_64::pop_r(RDI));
-                        // mov [rdi], rsi  → 48 89 37
-                        emitter.emit_bytes(&[0x48, 0x89, 0x37]);
-                    } else {
-                        return Err(format!(
-                            "x86_64-lower: `store64` requires 2 arguments in `{}`",
-                            ctx.fn_name
-                        ));
-                    }
-                    return Ok(());
-                }
-                "read_cr2" => {
-                    // read_cr2() -> Int  → mov rax, cr2; ret
-                    emitter.emit_bytes(&[0x48, 0x0F, 0x20, 0xD0]);
-                    if target_reg != RAX {
-                        emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
-                    }
-                    return Ok(());
-                }
-                "read_cr3" => {
-                    // read_cr3() -> Int  → mov rax, cr3; ret
-                    emitter.emit_bytes(&[0x48, 0x0F, 0x20, 0xD8]);
-                    if target_reg != RAX {
-                        emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
-                    }
-                    return Ok(());
-                }
-                "write_cr3" => {
-                    // write_cr3(val: Int) -> void  → mov cr3, rdi
-                    if args.len() >= 1 {
-                        lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
-                        emitter.emit_bytes(&[0x0F, 0x22, 0xC7]); // mov cr3, rdi
-                    }
-                    return Ok(());
-                }
-                "invlpg" => {
-                    // invlpg(addr: Int)  → invlpg [rdi]
-                    if args.len() >= 1 {
-                        lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
-                        // invlpg [rdi]  → 0F 01 3F (with REX.W for 64-bit)
-                        emitter.emit_bytes(&[0x48, 0x0F, 0x01, 0x3F]);
-                    } else {
-                        return Err(format!(
-                            "x86_64-lower: `invlpg` requires 1 argument in `{}`",
-                            ctx.fn_name
-                        ));
-                    }
-                    return Ok(());
-                }
-                "lidt" => {
-                    // lidt(desc: Int)  → lidt [rdi]
-                    if args.len() >= 1 {
-                        lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
-                        // lidt [rdi]  → 0F 01 1F (with REX.W for 64-bit lidt)
-                        // Actually lidt operand is a 6-byte pseudo-descriptor in memory.
-                        // On x86_64: lidt [rdi] → 0F 01 1F
-                        emitter.emit_bytes(&[0x0F, 0x01, 0x1F]);
-                    } else {
-                        return Err(format!(
-                            "x86_64-lower: `lidt` requires 1 argument in `{}`",
-                            ctx.fn_name
-                        ));
-                    }
-                    return Ok(());
-                }
-                "invoke" | "invoke1" | "invoke2" => {
-                    // invoke(fn_ptr: Int) -> Int: call the function pointer in rdi
-                    // invoke1(fn_ptr: Int, arg: Int) -> Int: call fn_ptr with arg in rdi
-                    // invoke2(fn_ptr: Int, arg1: Int, arg2: Int) -> Int
-                    if args.len() >= 1 {
-                        lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
-                        if args.len() >= 2 {
-                            lower_expr_into(emitter, ctx, &args[1], RSI, pending_calls)?;
-                        }
-                        if args.len() >= 3 {
-                            lower_expr_into(emitter, ctx, &args[2], RDX, pending_calls)?;
-                        }
-                        // mov rax, rdi (function ptr)
-                        emitter.emit_bytes(&[0x48, 0x89, 0xF8]); // mov rax, rdi
-                        // Actually for indirect call through pointer:
-                        // Args: fn_ptr was rdi, arg1 in rsi, arg2 in rdx
-                        // But rdi is also first arg position in calling convention!
-                        // We need to shift: if invoke1: ptr in rdi, arg1 in rsi (already correct)
-                        // For invoke with 0 args: ptr in rdi, call rax
-                        // For invoke1: ptr in rdi, arg1 in rsi. rdi=ptr, rsi=arg1... but ptr should be in rdi for call.
-                        // Actually the convention is: fn_ptr in first arg slot (rdi),
-                        // argument to the called function in subsequent slots.
-                        // For invoke1(fn_ptr, arg1): rdi=fn_ptr, rsi=arg1 already correct!
-                        // call rax where rax = fn_ptr
-                        emitter.emit_bytes(&[0x48, 0x89, 0xF8]); // mov rax, rdi
-                        // But wait we overwrote rdi above... Hmm.
-                        // Simpler: push the fnptr, call it. For invoke1: ptr, arg already in rsi
-                        // Actually let me just call the pointer: arg1 in rsi (if present) works.
-                        // But rdi needs to be the FIRST argument to the CALLED function!
-                        // For invoke1(fn_ptr, arg): we want rdi=arg (for the called fn).
-                        // So: ptr is in rdi now. Save it to rax. rsi has arg1.
-                        // We need rdi = rsi (the arg), then call rax (the ptr).
-                        // But for invoke(fn_ptr): just call rax with current regs.
-                        if args.len() == 1 {
-                            // invoke(ptr) → call ptr
-                            emitter.emit_bytes(&[0x48, 0x89, 0xF8]); // mov rax, rdi
-                            // call rax → FF D0
-                            emitter.emit_bytes(&[0xFF, 0xD0]);
-                        } else if args.len() >= 2 {
-                            // invoke1(ptr, arg1) or invoke2(ptr, arg1, arg2)
-                            // After arg eval: ptr=rdi, arg1=rsi, arg2=rdx
-                            // Called fn expects: rdi=arg1, rsi=arg2
-                            // mov rax, rdi (save ptr)
-                            emitter.emit_bytes(&[0x48, 0x89, 0xF8]); // mov rax, rdi
-                            // mov rdi, rsi (arg1 → first call arg)
-                            emitter.emit_bytes(&[0x48, 0x89, 0xF7]); // mov rdi, rsi
-                            if args.len() >= 3 {
-                                // mov rsi, rdx (arg2 → second call arg)
-                                emitter.emit_bytes(&[0x48, 0x89, 0xD6]); // mov rsi, rdx
-                            }
-                            // call rax
-                            emitter.emit_bytes(&[0xFF, 0xD0]);
-                        }
-                    } else {
-                        return Err(format!(
-                            "x86_64-lower: `invoke` requires at least 1 argument in `{}`",
-                            ctx.fn_name
-                        ));
-                    }
-                    return Ok(());
-                }
-                _ => {}
-            }
-
-            // Evaluate arguments into registers (System V AMD64 ABI).
-            // Save previously-computed arg registers before evaluating each
-            // subsequent arg, because nested calls/intrinsics may clobber them.
-            let arg_regs = [RDI, RSI, RDX, RCX, 8, 9];
-            if args.len() > 16 {
-                return Err(format!(
-                    "x86_64-lower: too many arguments in call to `{target_name}` in `{}`",
-                    ctx.fn_name
-                ));
-            }
-            // Push args 7+ onto the stack (x86_64 calling convention: >6 args go on stack)
-            if args.len() > 6 {
-                for arg in args[6..].iter().rev() {
-                    lower_expr_into(emitter, ctx, arg, RAX, pending_calls)?;
-                    emitter.emit_insns(&x86_64::push_r(RAX));
-                }
-            }
-            for (i, arg) in args[..6.min(args.len())].iter().enumerate() {
-                if i > 0 {
-                    for j in 0..i {
-                        emitter.emit_insns(&x86_64::push_r(arg_regs[j]));
-                    }
-                }
-                lower_expr_into(emitter, ctx, arg, arg_regs[i], pending_calls)?;
-                if i > 0 {
-                    for j in (0..i).rev() {
-                        emitter.emit_insns(&x86_64::pop_r(arg_regs[j]));
-                    }
-                }
-            }
-
-            // For unknown external functions, skip call and return 0
-            if !ctx.functions.contains_key(&target_name) {
-                // ponytail: unknown external function — return 0 as stub, clean up stack
-                if args.len() > 6 {
-                    let stack_bytes = (args.len() - 6) * 8;
-                    emitter.emit_bytes(&[0x48, 0x81, 0xC4]); // add rsp, imm32
-                    emitter.emit_bytes(&(stack_bytes as u32).to_le_bytes());
-                }
-                // For exit/abort functions, emit real exit syscall
-                if target_name.ends_with("process :: exit")
-                    || target_name == "exit"
-                    || target_name.ends_with("process :: abort")
-                {
-                    // First arg (if any) is the exit code in RDI
-                    // syscall: exit(rdi) on x86_64 Linux — rax=60
-                    emitter.emit_bytes(&[0x48, 0xC7, 0xC0, 0x3C, 0x00, 0x00, 0x00]); // mov rax, 60 (SYS_exit)
-                    emitter.emit_bytes(&[0x0F, 0x05]); // syscall
-                }
-                emitter.emit_insns(&x86_64::load_i64(target_reg, 0));
-                return Ok(());
-            }
-
-            // Emit call (placeholder, patched later)
-            let site = emitter.len();
-            emitter.emit_insns(&x86_64::call_rel32(0));
-            pending_calls.push(PendingCall {
-                site,
-                target: target_name,
-            });
-
-            // Clean up stack args (caller cleanup in System V AMD64)
-            if args.len() > 6 {
-                let stack_bytes = (args.len() - 6) * 8;
-                emitter.emit_bytes(&[0x48, 0x81, 0xC4]); // add rsp, imm32
-                emitter.emit_bytes(&(stack_bytes as u32).to_le_bytes());
-            }
-
-            if target_reg != RAX {
-                emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
-            }
-            Ok(())
-        }
-        Expr::StructInit { name, fields, .. } => {
-            // Evaluate each field into its corresponding stack slot
-            let field_offsets: Vec<(String, u32)> = match ctx.locals.get(name) {
-                Some(StackSlot::Struct { fields: field_map }) => fields
-                    .iter()
-                    .filter_map(|(fn_, _)| field_map.get(fn_).map(|off| (fn_.clone(), *off)))
-                    .collect(),
-                _ => Vec::new(),
-            };
-            for (field_name, field_offset) in &field_offsets {
-                if let Some((_, value)) = fields.iter().find(|(fn_, _)| fn_ == field_name) {
-                    lower_expr_into(emitter, ctx, value, RAX, pending_calls)?;
-                    emitter.emit_insns(&x86_64::str64(RAX, *field_offset as u16));
-                }
-            }
-            Ok(())
-        }
-        Expr::Field { base, name, .. } => {
-            let Expr::Ident(base_name) = base.as_ref() else {
-                // ponytail: chain field/deref access — return 0
-                emitter.emit_insns(&x86_64::load_i64(target_reg, 0));
-                return Ok(());
-            };
-            match ctx.locals.get(base_name) {
-                Some(StackSlot::Struct { fields }) => {
-                    if let Some(field_offset) = fields.get(name) {
-                        emitter.emit_insns(&x86_64::ldr64(RAX, *field_offset as u16));
-                        if target_reg != RAX {
-                            emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
-                        }
-                        Ok(())
-                    } else {
-                        Err(format!(
-                            "x86_64-lower: unknown field `{name}` in `{}`",
-                            ctx.fn_name
-                        ))
-                    }
-                }
-                _ => {
-                    // ponytail: unknown struct — return 0
-                    emitter.emit_insns(&x86_64::load_i64(target_reg, 0));
-                    Ok(())
-                }
-            }
-        }
-        Expr::Unary { op, expr, .. } => {
-            lower_expr_into(emitter, ctx, expr, RAX, pending_calls)?;
-            match op.as_str() {
-                "-" => {
-                    // neg rax  (48 F7 D8)
-                    emitter.emit_bytes(&[0x48, 0xF7, 0xD8]);
-                }
-                "!" => {
-                    // test rax, rax; sete al; movzx rax, al
-                    emitter.emit_insns(&x86_64::test_rr(RAX, RAX));
-                    // sete al -> 0F 94 C0
-                    emitter.emit_bytes(&[0x0F, 0x94, 0xC0]);
-                    // movzx rax, al -> 48 0F B6 C0
-                    emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]);
-                }
-                "~" => {
-                    // not rax  -> 48 F7 D0
-                    emitter.emit_bytes(&[0x48, 0xF7, 0xD0]);
-                }
-                "*" => {
-                    // *expr: dereference — load from address in rax
-                    // mov rax, [rax]  -> 48 8B 00
-                    emitter.emit_bytes(&[0x48, 0x8B, 0x00]);
-                }
-                "&" => {
-                    // &expr: address of — rax already holds the address (stack slot or global)
-                    // No-op at machine level: the identifier lower already produces the address
-                }
-                _ => {
-                    return Err(format!(
-                        "x86_64-lower: unsupported unary op `{op}` in `{}`",
-                        ctx.fn_name
-                    ));
-                }
-            }
-            if target_reg != RAX {
-                emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
-            }
-            Ok(())
-        }
-        Expr::Index { base, index, .. } => {
-            // a[i] → compute addr = base + i*8, load 8 bytes
-            lower_expr_into(emitter, ctx, base, RDI, pending_calls)?;
-            lower_expr_into(emitter, ctx, index, RAX, pending_calls)?;
-            // shl rax, 3 (multiply by 8)
-            emitter.emit_bytes(&[0x48, 0xC1, 0xE0, 0x03]);
-            // add rdi, rax
-            emitter.emit_bytes(&[0x48, 0x01, 0xC7]);
-            // mov rax, [rdi]
-            emitter.emit_bytes(&[0x48, 0x8B, 0x07]);
-            if target_reg != RAX {
-                emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
-            }
-            Ok(())
-        }
-        Expr::StringLit(content) => {
-            // RUNTIME-ABSOLUTE: emit placeholder address, patched after all code is laid out
-            let site = emitter.len() + 2; // offset of 8-byte immediate in mov_ri64
-            emitter.emit_insns(&x86_64::mov_ri64(target_reg, 0xDEADBEEF));
-            pending_calls.push(PendingCall {
-                site: site as u32,
-                target: format!("@str_{}", content.clone()),
-            });
-            Ok(())
-        }
+        Expr::IntLit(value) => lower_int_lit(emitter, target_reg, *value),
+        Expr::BoolLit(value) => lower_bool_lit(emitter, target_reg, *value),
+        Expr::Ident(name) => lower_ident_ref(emitter, ctx, target_reg, name.as_str(), pending_calls),
+        Expr::Binary { op, lhs, rhs, .. } => lower_binary_expr(emitter, ctx, target_reg, op.as_str(), lhs, rhs, pending_calls),
+        Expr::Call { callee, args, .. } => lower_call_expr(emitter, ctx, target_reg, callee, args, pending_calls),
+        Expr::StructInit { name, fields, .. } => lower_struct_init(emitter, ctx, name.as_str(), fields, pending_calls),
+        Expr::Field { base, name, .. } => lower_field_access(emitter, ctx, target_reg, base, name.as_str()),
+        Expr::Unary { op, expr, .. } => lower_unary_expr(emitter, ctx, target_reg, op.as_str(), expr, pending_calls),
+        Expr::Index { base, index, .. } => lower_index_expr(emitter, ctx, target_reg, base, index, pending_calls),
+        Expr::StringLit(content) => lower_string_lit(emitter, target_reg, content.as_str(), pending_calls),
         _ => Err(format!(
             "x86_64-lower: unsupported expression in `{}`",
             ctx.fn_name
