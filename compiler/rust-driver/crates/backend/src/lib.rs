@@ -406,4 +406,13 @@ mod tests {
         assert!(!caps.supports_raw_binary);
         assert_eq!(caps.object_format, "mach-o");
     }
+
+    #[test]
+    fn test_resolve_backend_spec_unsupported() {
+        let res = resolve_backend_spec(&spec("mips-unknown-linux-gnu", Executable));
+        assert!(matches!(
+            res,
+            Err(BackendError::UnsupportedTarget(target, ArtifactKind::Executable)) if target == "mips-unknown-linux-gnu"
+        ));
+    }
 }
