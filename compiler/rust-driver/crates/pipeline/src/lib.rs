@@ -226,7 +226,8 @@ impl Compiler {
     /// Lower the module (additional IR transforms before optimization).
     pub fn lower(&mut self, _module: &mut IrModule) -> Result<(), CompileError> {
         let start = Instant::now();
-        // TODO: lower AST-level constructs to Core IR instructions
+        // Additional lowering transforms are not currently specified.
+        // The main lowering from AST to IR happens during frontend parsing.
         self.timings.stages.push(StageTime {
             stage: Stage::Lower,
             elapsed_us: start.elapsed().as_micros() as u64,
