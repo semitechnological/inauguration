@@ -36,9 +36,27 @@ impl NativeRuntime {
     /// Build a standard runtime with common stdlib/crate functions.
     pub fn standard() -> Self {
         let mut rt = Self::new();
+        rt.register_std_env_current_dir_cwd();
+        rt.register_pathbuf_operations();
+        rt.register_serde_json();
+        rt.register_clap_basic_stubs_that_return_reasonable_defaults();
+        rt.register_instant_now();
+        rt.register_string_operations();
+        rt.register_format_macro_equivalent();
+        rt.register_fs_operations();
+        rt.register_command_execution();
+        rt.register_runtime();
+        rt.register_inauguration_internal_functions();
+        rt.register_type_conversions();
+        rt.register_serde();
+        rt.register_thiserror();
 
+        rt
+    }
+
+    fn register_std_env_current_dir_cwd(&mut self) {
         // std::env::current_dir / cwd
-        rt.register(
+        self.register(
             "cwd",
             Box::new(|_args| {
                 match std::env::current_dir() {
@@ -47,9 +65,11 @@ impl NativeRuntime {
                 }
             }),
         );
+    }
 
+    fn register_pathbuf_operations(&mut self) {
         // PathBuf operations
-        rt.register(
+        self.register(
             "display",
             Box::new(|args| {
                 if let Some(Value::String(s)) = args.first() {
@@ -60,7 +80,7 @@ impl NativeRuntime {
             }),
         );
 
-        rt.register(
+        self.register(
             "join",
             Box::new(|args| {
                 if args.len() >= 2 {
@@ -74,7 +94,7 @@ impl NativeRuntime {
             }),
         );
 
-        rt.register(
+        self.register(
             "parent",
             Box::new(|args| {
                 if let Some(Value::String(s)) = args.first() {
@@ -90,7 +110,7 @@ impl NativeRuntime {
             }),
         );
 
-        rt.register(
+        self.register(
             "is_dir",
             Box::new(|args| {
                 if let Some(Value::String(s)) = args.first() {
@@ -101,7 +121,7 @@ impl NativeRuntime {
             }),
         );
 
-        rt.register(
+        self.register(
             "exists",
             Box::new(|args| {
                 if let Some(Value::String(s)) = args.first() {
@@ -112,7 +132,7 @@ impl NativeRuntime {
             }),
         );
 
-        rt.register(
+        self.register(
             "extension",
             Box::new(|args| {
                 if let Some(Value::String(s)) = args.first() {
@@ -130,7 +150,7 @@ impl NativeRuntime {
             }),
         );
 
-        rt.register(
+        self.register(
             "file_stem",
             Box::new(|args| {
                 if let Some(Value::String(s)) = args.first() {
@@ -148,7 +168,7 @@ impl NativeRuntime {
             }),
         );
 
-        rt.register(
+        self.register(
             "to_string_lossy",
             Box::new(|args| {
                 if let Some(Value::String(s)) = args.first() {
@@ -159,7 +179,7 @@ impl NativeRuntime {
             }),
         );
 
-        rt.register(
+        self.register(
             "to_string",
             Box::new(|args| {
                 Ok(Value::String(
@@ -171,17 +191,17 @@ impl NativeRuntime {
             }),
         );
 
-        rt.register(
+        self.register(
             "clone",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
 
-        rt.register(
+        self.register(
             "as_deref",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
 
-        rt.register(
+        self.register(
             "unwrap_or_default",
             Box::new(|args| match args.first() {
                 Some(Value::Nil) => Ok(Value::String(String::new())),
@@ -190,12 +210,12 @@ impl NativeRuntime {
             }),
         );
 
-        rt.register(
+        self.register(
             "map_err",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
 
-        rt.register(
+        self.register(
             "unwrap_or",
             Box::new(|args| {
                 if let Some(v) = args.first() {
@@ -210,17 +230,17 @@ impl NativeRuntime {
             }),
         );
 
-        rt.register(
+        self.register(
             "map",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
 
-        rt.register(
+        self.register(
             "collect",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
 
-        rt.register(
+        self.register(
             "iter",
             Box::new(|args| {
                 // Return the value itself for iteration
@@ -228,24 +248,24 @@ impl NativeRuntime {
             }),
         );
 
-        rt.register(
+        self.register(
             "is_ok",
             Box::new(|args| Ok(Value::Bool(!matches!(args.first(), Some(Value::Nil))))),
         );
 
-        rt.register(
+        self.register(
             "is_err",
             Box::new(|args| Ok(Value::Bool(matches!(args.first(), Some(Value::Nil))))),
         );
 
-        rt.register(
+        self.register(
             "is_some_and",
             Box::new(|args| Ok(Value::Bool(!matches!(args.first(), Some(Value::Nil))))),
         );
 
-        rt.register("any", Box::new(|_args| Ok(Value::Bool(false))));
+        self.register("any", Box::new(|_args| Ok(Value::Bool(false))));
 
-        rt.register(
+        self.register(
             "is_empty",
             Box::new(|args| {
                 Ok(Value::Bool(
@@ -254,7 +274,7 @@ impl NativeRuntime {
             }),
         );
 
-        rt.register(
+        self.register(
             "ends_with",
             Box::new(|args| {
                 if let (Some(Value::String(s)), Some(Value::String(suffix))) =
@@ -267,12 +287,12 @@ impl NativeRuntime {
             }),
         );
 
-        rt.register(
+        self.register(
             "unwrap",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
 
-        rt.register(
+        self.register(
             "len",
             Box::new(|args| match args.first() {
                 Some(Value::String(s)) => Ok(Value::Int(s.len() as i64)),
@@ -280,9 +300,11 @@ impl NativeRuntime {
                 _ => Ok(Value::Int(0)),
             }),
         );
+    }
 
+    fn register_serde_json(&mut self) {
         // serde_json
-        rt.register(
+        self.register(
             "serde_json :: to_string_pretty",
             Box::new(|args| {
                 // ponytail: return JSON string representation
@@ -290,29 +312,33 @@ impl NativeRuntime {
             }),
         );
 
-        rt.register(
+        self.register(
             "serde_json :: to_string",
             Box::new(|args| Ok(Value::String(format!("{:?}", args)))),
         );
+    }
 
+    fn register_clap_basic_stubs_that_return_reasonable_defaults(&mut self) {
         // clap - basic stubs that return reasonable defaults
-        rt.register(
+        self.register(
             "Cli :: parse",
             Box::new(|_args| {
                 // Return a mock Command with subcommands
                 Ok(Value::Nil) // ponytail: real CLI parsing would need the actual binary
             }),
         );
+    }
 
+    fn register_instant_now(&mut self) {
         // Instant::now
-        rt.register(
+        self.register(
             "Instant :: now",
             Box::new(|_args| {
                 Ok(Value::Int(0)) // ponytail: return 0 for timing
             }),
         );
 
-        rt.register(
+        self.register(
             "elapsed",
             Box::new(|_args| {
                 // Return Duration
@@ -320,18 +346,20 @@ impl NativeRuntime {
             }),
         );
 
-        rt.register(
+        self.register(
             "as_secs_f64",
             Box::new(|_args| Ok(Value::String("0.000".to_string()))),
         );
+    }
 
+    fn register_string_operations(&mut self) {
         // String operations
-        rt.register(
+        self.register(
             "String :: new",
             Box::new(|_args| Ok(Value::String(String::new()))),
         );
 
-        rt.register(
+        self.register(
             "std :: fs :: read_to_string",
             Box::new(|args| {
                 if let Some(Value::String(path)) = args.first() {
@@ -345,12 +373,12 @@ impl NativeRuntime {
             }),
         );
 
-        rt.register(
+        self.register(
             "std :: env :: temp_dir",
             Box::new(|_args| Ok(Value::String(std::env::temp_dir().display().to_string()))),
         );
 
-        rt.register(
+        self.register(
             "std :: env :: var",
             Box::new(|args| {
                 if let Some(Value::String(key)) = args.first() {
@@ -364,16 +392,18 @@ impl NativeRuntime {
             }),
         );
 
-        rt.register(
+        self.register(
             "std :: process :: exit",
             Box::new(|_args| {
                 // Don't actually exit — just return Nil
                 Ok(Value::Nil)
             }),
         );
+    }
 
+    fn register_format_macro_equivalent(&mut self) {
         // format! macro equivalent
-        rt.register(
+        self.register(
             "format",
             Box::new(|args| {
                 Ok(Value::String(
@@ -384,9 +414,11 @@ impl NativeRuntime {
                 ))
             }),
         );
+    }
 
+    fn register_fs_operations(&mut self) {
         // fs operations
-        rt.register(
+        self.register(
             "fs :: create_dir_all",
             Box::new(|args| {
                 if let Some(Value::String(path)) = args.first() {
@@ -396,7 +428,7 @@ impl NativeRuntime {
             }),
         );
 
-        rt.register(
+        self.register(
             "fs :: metadata",
             Box::new(|args| {
                 if let Some(Value::String(path)) = args.first() {
@@ -410,7 +442,7 @@ impl NativeRuntime {
             }),
         );
 
-        rt.register(
+        self.register(
             "fs :: read_to_string",
             Box::new(|args| {
                 if let Some(Value::String(path)) = args.first() {
@@ -423,9 +455,11 @@ impl NativeRuntime {
                 }
             }),
         );
+    }
 
+    fn register_command_execution(&mut self) {
         // Command execution
-        rt.register(
+        self.register(
             "Command :: new",
             Box::new(|args| {
                 if let Some(Value::String(prog)) = args.first() {
@@ -436,34 +470,36 @@ impl NativeRuntime {
             }),
         );
 
-        rt.register(
+        self.register(
             "arg",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
 
-        rt.register(
+        self.register(
             "current_dir",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
 
-        rt.register("status", Box::new(|_args| Ok(Value::Bool(true))));
+        self.register("status", Box::new(|_args| Ok(Value::Bool(true))));
 
-        rt.register("success", Box::new(|_args| Ok(Value::Bool(true))));
+        self.register("success", Box::new(|_args| Ok(Value::Bool(true))));
 
-        rt.register("output", Box::new(|_args| Ok(Value::Nil)));
+        self.register("output", Box::new(|_args| Ok(Value::Nil)));
+    }
 
+    fn register_runtime(&mut self) {
         // Runtime
-        rt.register(
+        self.register(
             "build",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
 
-        rt.register(
+        self.register(
             "enable_all",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
 
-        rt.register(
+        self.register(
             "block_on",
             Box::new(|_args| {
                 // Return Nil — async execution not needed for self-hosting
@@ -471,19 +507,21 @@ impl NativeRuntime {
             }),
         );
 
-        rt.register("spawn", Box::new(|_args| Ok(Value::Nil)));
+        self.register("spawn", Box::new(|_args| Ok(Value::Nil)));
 
-        rt.register("sleep", Box::new(|_args| Ok(Value::Nil)));
+        self.register("sleep", Box::new(|_args| Ok(Value::Nil)));
 
-        rt.register(
+        self.register(
             "await",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
 
-        rt.register("abort", Box::new(|_args| Ok(Value::Nil)));
+        self.register("abort", Box::new(|_args| Ok(Value::Nil)));
+    }
 
+    fn register_inauguration_internal_functions(&mut self) {
         // Inauguration internal functions
-        rt.register(
+        self.register(
             "resolve_invocation_path",
             Box::new(|args| {
                 // Return cwd joined with path
@@ -498,37 +536,41 @@ impl NativeRuntime {
             }),
         );
 
-        rt.register(
+        self.register(
             "workspace_root",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
+    }
 
+    fn register_type_conversions(&mut self) {
         // Type conversions
-        rt.register(
+        self.register(
             "into",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
 
-        rt.register(
+        self.register(
             "as_str",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
+    }
 
+    fn register_serde(&mut self) {
         // serde
-        rt.register(
+        self.register(
             "serde :: Serialize",
             Box::new(|_args| Ok(Value::String("serialized".to_string()))),
         );
 
-        rt.register("serde :: Deserialize", Box::new(|_args| Ok(Value::Nil)));
+        self.register("serde :: Deserialize", Box::new(|_args| Ok(Value::Nil)));
+    }
 
+    fn register_thiserror(&mut self) {
         // thiserror
-        rt.register(
+        self.register(
             "thiserror :: Error",
             Box::new(|_args| Ok(Value::String("error".to_string()))),
         );
-
-        rt
     }
 }
 
