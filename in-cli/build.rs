@@ -4,6 +4,12 @@ use std::process::Command;
 fn main() {
     println!("cargo::rustc-check-cfg=cfg(has_v_native)");
 
+    // Only build V native when the "v-native" feature is enabled
+    if std::env::var("CARGO_FEATURE_V_NATIVE").is_err() {
+        println!("cargo:warning=V native feature not enabled; skipping V native build");
+        return;
+    }
+
     let manifest_dir =
         std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default());
 
@@ -15,14 +21,14 @@ fn main() {
     let v_native_dir = manifest_dir.join("v-native");
     println!("cargo:rerun-if-changed={}", v_native_dir.display());
 
-    let v_ok = match which::which("v") {
-        Ok(v_path) => {
-            println!("cargo:warning=found v compiler at {}", v_path.display());
+    let v_ok = match Command::new("v").env_clear().output() {
+        Ok(out) if out.status.success() => {
+            println!("cargo:warning=found v compiler");
             true
         }
-        Err(_) => {
+        _ => {
             println!("cargo:warning=v compiler not found; skipping V native build");
-            false
+            return;
         }
     };
 
@@ -51,6 +57,7 @@ fn main() {
         let c_file = out_dir.join(format!("{stem}.c"));
 
         let status = Command::new("v")
+            .env_clear()
             .args([
                 "-shared",
                 "-gc",
@@ -95,6 +102,7 @@ fn main() {
 
         let obj_file = out_dir.join(format!("{stem}.o"));
         let cc_status = Command::new("cc")
+            .env_clear()
             .args([
                 "-c",
                 c_file.to_str().unwrap_or(""),
@@ -135,7 +143,7 @@ fn main() {
     let libtool = std::path::Path::new("/usr/bin/libtool");
     if libtool.exists() {
         let mut lt_cmd = Command::new("libtool");
-        lt_cmd.arg("-static").arg("-o").arg(&lib_path);
+        lt_cmd.env_clear().arg("-static").arg("-o").arg(&lib_path);
         for obj in &c_objects {
             lt_cmd.arg(obj);
         }
@@ -163,7 +171,7 @@ fn main() {
 
 fn fallback_ar(lib_path: &std::path::PathBuf, c_objects: &[std::path::PathBuf]) {
     let mut ar_cmd = std::process::Command::new("ar");
-    ar_cmd.arg("crs").arg(lib_path);
+    ar_cmd.env_clear().arg("crs").arg(lib_path);
     for obj in c_objects {
         ar_cmd.arg(obj);
     }

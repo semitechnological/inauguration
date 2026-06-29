@@ -3068,6 +3068,54 @@ mod tests {
         }
     }
 
+    /// Run a native executable on macOS AArch64: ad-hoc codesign, execute via /bin/sh.
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    fn run_native_exe(path: &std::path::Path) -> std::process::Output {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let sign = std::process::Command::new("codesign")
+            .args(["-s", "-", "-f", path.to_str().unwrap()])
+            .status()
+            .expect("codesign spawn");
+        assert!(sign.success(), "codesign failed for native executable");
+        std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(path.to_str().unwrap())
+            .output()
+            .expect("run executable")
+    }
+
+    /// Assert exit code matches, with fallback to otool disassembly check on signal 9.
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    fn assert_exit_or_disasm(
+        output: &std::process::Output,
+        expected: i32,
+        path: &std::path::Path,
+        insns: &[&str],
+    ) {
+        use std::os::unix::process::ExitStatusExt;
+        match output.status.code() {
+            Some(code) => assert_eq!(code, expected, "exit {code} != expected {expected}"),
+            None if output.status.signal() == Some(9) => {
+                let dump = std::process::Command::new("otool")
+                    .args(["-tV", path.to_str().unwrap()])
+                    .output()
+                    .expect("otool");
+                let text = String::from_utf8_lossy(&dump.stdout);
+                for insn in insns {
+                    assert!(
+                        text.contains(insn),
+                        "expected '{insn}' in __text; otool:\n{text}"
+                    );
+                }
+            }
+            other => panic!(
+                "unexpected native exit {:?}; stdout={:?} stderr={:?}",
+                other, output.stdout, output.stderr
+            ),
+        }
+    }
+
     fn return_binary_module(op: &str, lhs: i64, rhs: i64) -> UnifiedModule {
         UnifiedModule {
             identity: Default::default(),
@@ -3666,44 +3714,11 @@ fn main() -> Int {
     #[test]
     fn answer_executable_exits_with_return_value() {
         let module = answer_module();
-        let path = std::path::PathBuf::from("/tmp/inauguration-native-answer-exe");
-        let _ = std::fs::remove_file(&path);
+        let path = temp_executable("answer-exe");
         compile_native_executable(&module, "answer", &path).expect("compile");
-
-        use std::os::unix::fs::PermissionsExt;
-        use std::os::unix::process::ExitStatusExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        let sign = std::process::Command::new("codesign")
-            .args(["-s", "-", "-f", path.to_str().unwrap()])
-            .status()
-            .expect("codesign spawn");
-        assert!(sign.success(), "codesign failed for native executable");
-
-        let output = std::process::Command::new("/bin/sh")
-            .arg("-c")
-            .arg(path.to_str().unwrap())
-            .output()
-            .expect("run executable");
-        match output.status.code() {
-            Some(42) => {}
-            None if output.status.signal() == Some(9) => {
-                let otool = std::process::Command::new("otool")
-                    .args(["-tV", path.to_str().unwrap()])
-                    .output()
-                    .expect("otool");
-                let dump = String::from_utf8_lossy(&otool.stdout);
-                assert!(
-                    dump.contains("mov\tx0, #0x2a"),
-                    "expected answer return literal in __text; otool:\n{dump}"
-                );
-            }
-            other => panic!(
-                "unexpected native exit {:?}; stdout={:?} stderr={:?}",
-                other, output.stdout, output.stderr
-            ),
-        }
-        let _ = std::fs::remove_file(path);
+        let output = run_native_exe(&path);
+        assert_exit_or_disasm(&output, 42, &path, &["mov\tx0, #0x2a"]);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -3764,46 +3779,15 @@ fn main() -> Int {
             ],
         };
         let path = temp_executable("scalar-subset-exe");
-        let _ = std::fs::remove_file(&path);
         compile_native_executable(&module, "main", &path).expect("compile");
-
-        use std::os::unix::fs::PermissionsExt;
-        use std::os::unix::process::ExitStatusExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        let sign = std::process::Command::new("codesign")
-            .args(["-s", "-", "-f", path.to_str().unwrap()])
-            .status()
-            .expect("codesign spawn");
-        assert!(sign.success(), "codesign failed for native executable");
-
-        let output = std::process::Command::new("/bin/sh")
-            .arg("-c")
-            .arg(path.to_str().unwrap())
-            .output()
-            .expect("run executable");
-        match output.status.code() {
-            Some(1) => {}
-            None if output.status.signal() == Some(9) => {
-                let otool = std::process::Command::new("otool")
-                    .args(["-tV", path.to_str().unwrap()])
-                    .output()
-                    .expect("otool");
-                let dump = String::from_utf8_lossy(&otool.stdout);
-                assert!(
-                    dump.contains("b.eq")
-                        && dump.contains("neg\tx0, x0")
-                        && dump.contains("str\tx0, [sp]")
-                        && dump.contains("add\tx0, x0, x1"),
-                    "expected scalar subset instructions in __text; otool:\n{dump}"
-                );
-            }
-            other => panic!(
-                "unexpected native exit {:?}; stdout={:?} stderr={:?}",
-                other, output.stdout, output.stderr
-            ),
-        }
-        let _ = std::fs::remove_file(path);
+        let output = run_native_exe(&path);
+        assert_exit_or_disasm(
+            &output,
+            1,
+            &path,
+            &["b.eq", "neg\tx0, x0", "str\tx0, [sp]", "add\tx0, x0, x1"],
+        );
+        let _ = std::fs::remove_file(&path);
     }
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -3824,43 +3808,10 @@ fn main() -> Int {
         )
         .expect("parse");
         let path = temp_executable("struct-field-exe");
-        let _ = std::fs::remove_file(&path);
         compile_native_executable(&module, "main", &path).expect("compile");
-
-        use std::os::unix::fs::PermissionsExt;
-        use std::os::unix::process::ExitStatusExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        let sign = std::process::Command::new("codesign")
-            .args(["-s", "-", "-f", path.to_str().unwrap()])
-            .status()
-            .expect("codesign spawn");
-        assert!(sign.success(), "codesign failed for native executable");
-
-        let output = std::process::Command::new("/bin/sh")
-            .arg("-c")
-            .arg(path.to_str().unwrap())
-            .output()
-            .expect("run executable");
-        match output.status.code() {
-            Some(5) => {}
-            None if output.status.signal() == Some(9) => {
-                let otool = std::process::Command::new("otool")
-                    .args(["-tV", path.to_str().unwrap()])
-                    .output()
-                    .expect("otool");
-                let dump = String::from_utf8_lossy(&otool.stdout);
-                assert!(
-                    dump.contains("str\tx0, [sp]") && dump.contains("ldr\tx0, [sp, #0x8]"),
-                    "expected struct field load/store instructions in __text; otool:\n{dump}"
-                );
-            }
-            other => panic!(
-                "unexpected native exit {:?}; stdout={:?} stderr={:?}",
-                other, output.stdout, output.stderr
-            ),
-        }
-        let _ = std::fs::remove_file(path);
+        let output = run_native_exe(&path);
+        assert_exit_or_disasm(&output, 5, &path, &["str\tx0, [sp]", "ldr\tx0, [sp, #0x8]"]);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -3887,43 +3838,14 @@ fn main() -> Int {
         let path = temp_executable("struct-param-exe");
         let _ = std::fs::remove_file(&path);
         compile_native_executable(&module, "main", &path).expect("compile");
-
-        use std::os::unix::fs::PermissionsExt;
-        use std::os::unix::process::ExitStatusExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        let sign = std::process::Command::new("codesign")
-            .args(["-s", "-", "-f", path.to_str().unwrap()])
-            .status()
-            .expect("codesign spawn");
-        assert!(sign.success(), "codesign failed for native executable");
-
-        let output = std::process::Command::new("/bin/sh")
-            .arg("-c")
-            .arg(path.to_str().unwrap())
-            .output()
-            .expect("run executable");
-        match output.status.code() {
-            Some(7) => {}
-            None if output.status.signal() == Some(9) => {
-                let otool = std::process::Command::new("otool")
-                    .args(["-tV", path.to_str().unwrap()])
-                    .output()
-                    .expect("otool");
-                let dump = String::from_utf8_lossy(&otool.stdout);
-                assert!(
-                    dump.contains("str\tx0, [sp]")
-                        && dump.contains("str\tx1, [sp, #0x8]")
-                        && dump.contains("add\tx0, x0, x1"),
-                    "expected flattened struct parameter instructions in __text; otool:\n{dump}"
-                );
-            }
-            other => panic!(
-                "unexpected native exit {:?}; stdout={:?} stderr={:?}",
-                other, output.stdout, output.stderr
-            ),
-        }
-        let _ = std::fs::remove_file(path);
+        let output = run_native_exe(&path);
+        assert_exit_or_disasm(
+            &output,
+            7,
+            &path,
+            &["str\tx0, [sp]", "str\tx1, [sp, #0x8]", "add\tx0, x0, x1"],
+        );
+        let _ = std::fs::remove_file(&path);
     }
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -3950,43 +3872,14 @@ fn main() -> Int {
         let path = temp_executable("struct-return-exe");
         let _ = std::fs::remove_file(&path);
         compile_native_executable(&module, "main", &path).expect("compile");
-
-        use std::os::unix::fs::PermissionsExt;
-        use std::os::unix::process::ExitStatusExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        let sign = std::process::Command::new("codesign")
-            .args(["-s", "-", "-f", path.to_str().unwrap()])
-            .status()
-            .expect("codesign spawn");
-        assert!(sign.success(), "codesign failed for native executable");
-
-        let output = std::process::Command::new("/bin/sh")
-            .arg("-c")
-            .arg(path.to_str().unwrap())
-            .output()
-            .expect("run executable");
-        match output.status.code() {
-            Some(5) => {}
-            None if output.status.signal() == Some(9) => {
-                let otool = std::process::Command::new("otool")
-                    .args(["-tV", path.to_str().unwrap()])
-                    .output()
-                    .expect("otool");
-                let dump = String::from_utf8_lossy(&otool.stdout);
-                assert!(
-                    dump.contains("mov\tx0, #0x2")
-                        && dump.contains("mov\tx1, #0x5")
-                        && dump.contains("str\tx1, [sp, #0x8]"),
-                    "expected flattened struct return instructions in __text; otool:\n{dump}"
-                );
-            }
-            other => panic!(
-                "unexpected native exit {:?}; stdout={:?} stderr={:?}",
-                other, output.stdout, output.stderr
-            ),
-        }
-        let _ = std::fs::remove_file(path);
+        let output = run_native_exe(&path);
+        assert_exit_or_disasm(
+            &output,
+            5,
+            &path,
+            &["mov\tx0, #0x2", "mov\tx1, #0x5", "str\tx1, [sp, #0x8]"],
+        );
+        let _ = std::fs::remove_file(&path);
     }
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -4028,41 +3921,9 @@ fn main() -> Int {
         let path = temp_executable("string-scalar-exe");
         let _ = std::fs::remove_file(&path);
         compile_native_executable(&module, "main", &path).expect("compile");
-
-        use std::os::unix::fs::PermissionsExt;
-        use std::os::unix::process::ExitStatusExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        let sign = std::process::Command::new("codesign")
-            .args(["-s", "-", "-f", path.to_str().unwrap()])
-            .status()
-            .expect("codesign spawn");
-        assert!(sign.success(), "codesign failed for native executable");
-
-        let output = std::process::Command::new("/bin/sh")
-            .arg("-c")
-            .arg(path.to_str().unwrap())
-            .output()
-            .expect("run executable");
-        match output.status.code() {
-            Some(7) => {}
-            None if output.status.signal() == Some(9) => {
-                let otool = std::process::Command::new("otool")
-                    .args(["-tV", path.to_str().unwrap()])
-                    .output()
-                    .expect("otool");
-                let dump = String::from_utf8_lossy(&otool.stdout);
-                assert!(
-                    dump.contains("cmp\tx0, x1") && dump.contains("mov\tx0, #0x7"),
-                    "expected string id comparison instructions in __text; otool:\n{dump}"
-                );
-            }
-            other => panic!(
-                "unexpected native exit {:?}; stdout={:?} stderr={:?}",
-                other, output.stdout, output.stderr
-            ),
-        }
-        let _ = std::fs::remove_file(path);
+        let output = run_native_exe(&path);
+        assert_exit_or_disasm(&output, 7, &path, &["cmp\tx0, x1", "mov\tx0, #0x7"]);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -4081,41 +3942,9 @@ fn main() -> Int {
         let path = temp_executable("array-index-exe");
         let _ = std::fs::remove_file(&path);
         compile_native_executable(&module, "main", &path).expect("compile");
-
-        use std::os::unix::fs::PermissionsExt;
-        use std::os::unix::process::ExitStatusExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        let sign = std::process::Command::new("codesign")
-            .args(["-s", "-", "-f", path.to_str().unwrap()])
-            .status()
-            .expect("codesign spawn");
-        assert!(sign.success(), "codesign failed for native executable");
-
-        let output = std::process::Command::new("/bin/sh")
-            .arg("-c")
-            .arg(path.to_str().unwrap())
-            .output()
-            .expect("run executable");
-        match output.status.code() {
-            Some(5) => {}
-            None if output.status.signal() == Some(9) => {
-                let otool = std::process::Command::new("otool")
-                    .args(["-tV", path.to_str().unwrap()])
-                    .output()
-                    .expect("otool");
-                let dump = String::from_utf8_lossy(&otool.stdout);
-                assert!(
-                    dump.contains("ldr\tx0, [sp, x1, lsl #3]"),
-                    "expected dynamic array index load in __text; otool:\n{dump}"
-                );
-            }
-            other => panic!(
-                "unexpected native exit {:?}; stdout={:?} stderr={:?}",
-                other, output.stdout, output.stderr
-            ),
-        }
-        let _ = std::fs::remove_file(path);
+        let output = run_native_exe(&path);
+        assert_exit_or_disasm(&output, 5, &path, &["ldr\tx0, [sp, x1, lsl #3]"]);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -4134,41 +3963,9 @@ fn main() -> Int {
         let path = temp_executable("array-index-assign-exe");
         let _ = std::fs::remove_file(&path);
         compile_native_executable(&module, "main", &path).expect("compile");
-
-        use std::os::unix::fs::PermissionsExt;
-        use std::os::unix::process::ExitStatusExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        let sign = std::process::Command::new("codesign")
-            .args(["-s", "-", "-f", path.to_str().unwrap()])
-            .status()
-            .expect("codesign spawn");
-        assert!(sign.success(), "codesign failed for native executable");
-
-        let output = std::process::Command::new("/bin/sh")
-            .arg("-c")
-            .arg(path.to_str().unwrap())
-            .output()
-            .expect("run executable");
-        match output.status.code() {
-            Some(9) => {}
-            None if output.status.signal() == Some(9) => {
-                let otool = std::process::Command::new("otool")
-                    .args(["-tV", path.to_str().unwrap()])
-                    .output()
-                    .expect("otool");
-                let dump = String::from_utf8_lossy(&otool.stdout);
-                assert!(
-                    dump.contains("str\tx0, [sp, x4, lsl #3]"),
-                    "expected dynamic array index store in __text; otool:\n{dump}"
-                );
-            }
-            other => panic!(
-                "unexpected native exit {:?}; stdout={:?} stderr={:?}",
-                other, output.stdout, output.stderr
-            ),
-        }
-        let _ = std::fs::remove_file(path);
+        let output = run_native_exe(&path);
+        assert_exit_or_disasm(&output, 9, &path, &["str\tx0, [sp, x4, lsl #3]"]);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -4188,41 +3985,9 @@ fn main() -> Int {
         let path = temp_executable("array-negative-index-assign-exe");
         let _ = std::fs::remove_file(&path);
         compile_native_executable(&module, "main", &path).expect("compile");
-
-        use std::os::unix::fs::PermissionsExt;
-        use std::os::unix::process::ExitStatusExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        let sign = std::process::Command::new("codesign")
-            .args(["-s", "-", "-f", path.to_str().unwrap()])
-            .status()
-            .expect("codesign spawn");
-        assert!(sign.success(), "codesign failed for native executable");
-
-        let output = std::process::Command::new("/bin/sh")
-            .arg("-c")
-            .arg(path.to_str().unwrap())
-            .output()
-            .expect("run executable");
-        match output.status.code() {
-            Some(1) => {}
-            None if output.status.signal() == Some(9) => {
-                let otool = std::process::Command::new("otool")
-                    .args(["-tV", path.to_str().unwrap()])
-                    .output()
-                    .expect("otool");
-                let dump = String::from_utf8_lossy(&otool.stdout);
-                assert!(
-                    dump.contains("b.lt") && dump.contains("mov\tx0, #0x1"),
-                    "expected negative array index assignment failure path in __text; otool:\n{dump}"
-                );
-            }
-            other => panic!(
-                "unexpected native exit {:?}; stdout={:?} stderr={:?}",
-                other, output.stdout, output.stderr
-            ),
-        }
-        let _ = std::fs::remove_file(path);
+        let output = run_native_exe(&path);
+        assert_exit_or_disasm(&output, 1, &path, &["b.lt", "mov\tx0, #0x1"]);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -4242,41 +4007,9 @@ fn main() -> Int {
         let path = temp_executable("array-oob-index-assign-exe");
         let _ = std::fs::remove_file(&path);
         compile_native_executable(&module, "main", &path).expect("compile");
-
-        use std::os::unix::fs::PermissionsExt;
-        use std::os::unix::process::ExitStatusExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        let sign = std::process::Command::new("codesign")
-            .args(["-s", "-", "-f", path.to_str().unwrap()])
-            .status()
-            .expect("codesign spawn");
-        assert!(sign.success(), "codesign failed for native executable");
-
-        let output = std::process::Command::new("/bin/sh")
-            .arg("-c")
-            .arg(path.to_str().unwrap())
-            .output()
-            .expect("run executable");
-        match output.status.code() {
-            Some(1) => {}
-            None if output.status.signal() == Some(9) => {
-                let otool = std::process::Command::new("otool")
-                    .args(["-tV", path.to_str().unwrap()])
-                    .output()
-                    .expect("otool");
-                let dump = String::from_utf8_lossy(&otool.stdout);
-                assert!(
-                    dump.contains("b.ge") && dump.contains("mov\tx0, #0x1"),
-                    "expected out-of-bounds array index assignment failure path in __text; otool:\n{dump}"
-                );
-            }
-            other => panic!(
-                "unexpected native exit {:?}; stdout={:?} stderr={:?}",
-                other, output.stdout, output.stderr
-            ),
-        }
-        let _ = std::fs::remove_file(path);
+        let output = run_native_exe(&path);
+        assert_exit_or_disasm(&output, 1, &path, &["b.ge", "mov\tx0, #0x1"]);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -4298,41 +4031,9 @@ fn main() -> Int {
         let path = temp_executable("array-param-exe");
         let _ = std::fs::remove_file(&path);
         compile_native_executable(&module, "main", &path).expect("compile");
-
-        use std::os::unix::fs::PermissionsExt;
-        use std::os::unix::process::ExitStatusExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        let sign = std::process::Command::new("codesign")
-            .args(["-s", "-", "-f", path.to_str().unwrap()])
-            .status()
-            .expect("codesign spawn");
-        assert!(sign.success(), "codesign failed for native executable");
-
-        let output = std::process::Command::new("/bin/sh")
-            .arg("-c")
-            .arg(path.to_str().unwrap())
-            .output()
-            .expect("run executable");
-        match output.status.code() {
-            Some(8) => {}
-            None if output.status.signal() == Some(9) => {
-                let otool = std::process::Command::new("otool")
-                    .args(["-tV", path.to_str().unwrap()])
-                    .output()
-                    .expect("otool");
-                let dump = String::from_utf8_lossy(&otool.stdout);
-                assert!(
-                    dump.contains("mov\tx1, #0x3") && dump.contains("ldr\tx0, [x"),
-                    "expected array parameter pointer/length instructions in __text; otool:\n{dump}"
-                );
-            }
-            other => panic!(
-                "unexpected native exit {:?}; stdout={:?} stderr={:?}",
-                other, output.stdout, output.stderr
-            ),
-        }
-        let _ = std::fs::remove_file(path);
+        let output = run_native_exe(&path);
+        assert_exit_or_disasm(&output, 8, &path, &["mov\tx1, #0x3", "ldr\tx0, [x"]);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -4355,41 +4056,9 @@ fn main() -> Int {
         let path = temp_executable("array-return-exe");
         let _ = std::fs::remove_file(&path);
         compile_native_executable(&module, "main", &path).expect("compile");
-
-        use std::os::unix::fs::PermissionsExt;
-        use std::os::unix::process::ExitStatusExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        let sign = std::process::Command::new("codesign")
-            .args(["-s", "-", "-f", path.to_str().unwrap()])
-            .status()
-            .expect("codesign spawn");
-        assert!(sign.success(), "codesign failed for native executable");
-
-        let output = std::process::Command::new("/bin/sh")
-            .arg("-c")
-            .arg(path.to_str().unwrap())
-            .output()
-            .expect("run executable");
-        match output.status.code() {
-            Some(5) => {}
-            None if output.status.signal() == Some(9) => {
-                let otool = std::process::Command::new("otool")
-                    .args(["-tV", path.to_str().unwrap()])
-                    .output()
-                    .expect("otool");
-                let dump = String::from_utf8_lossy(&otool.stdout);
-                assert!(
-                    dump.contains("str\tx0, [sp") && dump.contains("str\tx1, [sp"),
-                    "expected array return pointer/length stores in __text; otool:\n{dump}"
-                );
-            }
-            other => panic!(
-                "unexpected native exit {:?}; stdout={:?} stderr={:?}",
-                other, output.stdout, output.stderr
-            ),
-        }
-        let _ = std::fs::remove_file(path);
+        let output = run_native_exe(&path);
+        assert_exit_or_disasm(&output, 5, &path, &["str\tx0, [sp", "str\tx1, [sp"]);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -4420,43 +4089,9 @@ fn main() -> Int {
         let path = temp_executable("bool-string-array-exe");
         let _ = std::fs::remove_file(&path);
         compile_native_executable(&module, "main", &path).expect("compile");
-
-        use std::os::unix::fs::PermissionsExt;
-        use std::os::unix::process::ExitStatusExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        let sign = std::process::Command::new("codesign")
-            .args(["-s", "-", "-f", path.to_str().unwrap()])
-            .status()
-            .expect("codesign spawn");
-        assert!(sign.success(), "codesign failed for native executable");
-
-        let output = std::process::Command::new("/bin/sh")
-            .arg("-c")
-            .arg(path.to_str().unwrap())
-            .output()
-            .expect("run executable");
-        match output.status.code() {
-            Some(7) => {}
-            None if output.status.signal() == Some(9) => {
-                let otool = std::process::Command::new("otool")
-                    .args(["-tV", path.to_str().unwrap()])
-                    .output()
-                    .expect("otool");
-                let dump = String::from_utf8_lossy(&otool.stdout);
-                assert!(
-                    dump.contains("ldr\tx0, [")
-                        && dump.contains("cmp")
-                        && dump.contains("mov\tx0, #0x7"),
-                    "expected bool/string array index and comparison path in __text; otool:\n{dump}"
-                );
-            }
-            other => panic!(
-                "unexpected native exit {:?}; stdout={:?} stderr={:?}",
-                other, output.stdout, output.stderr
-            ),
-        }
-        let _ = std::fs::remove_file(path);
+        let output = run_native_exe(&path);
+        assert_exit_or_disasm(&output, 7, &path, &["ldr\tx0, [", "cmp", "mov\tx0, #0x7"]);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -4475,41 +4110,9 @@ fn main() -> Int {
         let path = temp_executable("array-negative-index-exe");
         let _ = std::fs::remove_file(&path);
         compile_native_executable(&module, "main", &path).expect("compile");
-
-        use std::os::unix::fs::PermissionsExt;
-        use std::os::unix::process::ExitStatusExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        let sign = std::process::Command::new("codesign")
-            .args(["-s", "-", "-f", path.to_str().unwrap()])
-            .status()
-            .expect("codesign spawn");
-        assert!(sign.success(), "codesign failed for native executable");
-
-        let output = std::process::Command::new("/bin/sh")
-            .arg("-c")
-            .arg(path.to_str().unwrap())
-            .output()
-            .expect("run executable");
-        match output.status.code() {
-            Some(1) => {}
-            None if output.status.signal() == Some(9) => {
-                let otool = std::process::Command::new("otool")
-                    .args(["-tV", path.to_str().unwrap()])
-                    .output()
-                    .expect("otool");
-                let dump = String::from_utf8_lossy(&otool.stdout);
-                assert!(
-                    dump.contains("b.lt") && dump.contains("mov\tx0, #0x1"),
-                    "expected negative array index failure path in __text; otool:\n{dump}"
-                );
-            }
-            other => panic!(
-                "unexpected native exit {:?}; stdout={:?} stderr={:?}",
-                other, output.stdout, output.stderr
-            ),
-        }
-        let _ = std::fs::remove_file(path);
+        let output = run_native_exe(&path);
+        assert_exit_or_disasm(&output, 1, &path, &["b.lt", "mov\tx0, #0x1"]);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -4528,41 +4131,9 @@ fn main() -> Int {
         let path = temp_executable("array-oob-index-exe");
         let _ = std::fs::remove_file(&path);
         compile_native_executable(&module, "main", &path).expect("compile");
-
-        use std::os::unix::fs::PermissionsExt;
-        use std::os::unix::process::ExitStatusExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        let sign = std::process::Command::new("codesign")
-            .args(["-s", "-", "-f", path.to_str().unwrap()])
-            .status()
-            .expect("codesign spawn");
-        assert!(sign.success(), "codesign failed for native executable");
-
-        let output = std::process::Command::new("/bin/sh")
-            .arg("-c")
-            .arg(path.to_str().unwrap())
-            .output()
-            .expect("run executable");
-        match output.status.code() {
-            Some(1) => {}
-            None if output.status.signal() == Some(9) => {
-                let otool = std::process::Command::new("otool")
-                    .args(["-tV", path.to_str().unwrap()])
-                    .output()
-                    .expect("otool");
-                let dump = String::from_utf8_lossy(&otool.stdout);
-                assert!(
-                    dump.contains("b.ge") && dump.contains("mov\tx0, #0x1"),
-                    "expected out-of-bounds array index failure path in __text; otool:\n{dump}"
-                );
-            }
-            other => panic!(
-                "unexpected native exit {:?}; stdout={:?} stderr={:?}",
-                other, output.stdout, output.stderr
-            ),
-        }
-        let _ = std::fs::remove_file(path);
+        let output = run_native_exe(&path);
+        assert_exit_or_disasm(&output, 1, &path, &["b.ge", "mov\tx0, #0x1"]);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]

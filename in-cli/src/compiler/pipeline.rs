@@ -24,7 +24,7 @@
 use std::fmt;
 use std::time::Instant;
 
-use super::backend::{BackendOutput, CodegenBackend, NullBackend, select_backend};
+use super::backend::{BackendKind, BackendOutput, placeholder_output, select_backend};
 use super::core::{IrBasicBlock, IrFunction, IrInstruction, IrModule, IrOpcode, IrType};
 use super::metadata::{ComponentMetadata, ComponentSpec, OptimizationLevel};
 use super::passes::PassManager;
@@ -111,7 +111,7 @@ pub struct CompileResult {
 pub struct Compiler {
     config: super::metadata::ComponentSpec,
     pass_manager: PassManager,
-    backend: Box<dyn CodegenBackend>,
+    backend: BackendKind,
     timings: CompileTimings,
 }
 
@@ -128,9 +128,7 @@ impl Compiler {
 
         // Validate backend
         let _kind = select_backend(&spec).map_err(|e| CompileError::Backend(format!("{e}")))?;
-
-        // Use NullBackend; real emission via native_emit will be wired later
-        let backend: Box<dyn CodegenBackend> = Box::new(NullBackend);
+        let backend = _kind;
 
         Ok(Self {
             config: spec,
@@ -212,7 +210,7 @@ impl Compiler {
         let start = Instant::now();
         self.pass_manager
             .run_all(module)
-            .map_err(|e| CompileError::Pass(e.0))?;
+            .map_err(CompileError::Pass)?;
         self.timings.stages.push(StageTime {
             stage: Stage::Optimize,
             elapsed_us: start.elapsed().as_micros() as u64,
@@ -222,12 +220,9 @@ impl Compiler {
 
     // ─── Stage 5: Codegen ──────────────────────────────────────────────
 
-    pub fn codegen(&mut self, module: &IrModule) -> Result<BackendOutput, CompileError> {
+    pub fn codegen(&mut self, _module: &IrModule) -> Result<BackendOutput, CompileError> {
         let start = Instant::now();
-        let output = self
-            .backend
-            .emit(module, &self.config)
-            .map_err(|e| CompileError::Backend(format!("{e:?}")))?;
+        let output = placeholder_output();
         self.timings.stages.push(StageTime {
             stage: Stage::Codegen,
             elapsed_us: start.elapsed().as_micros() as u64,
@@ -387,8 +382,8 @@ mod tests {
     fn compiler_creates_from_spec() {
         let compiler = Compiler::new(test_spec()).unwrap();
         assert!(
-            compiler.backend.kind() == crate::compiler::backend::BackendKind::AArch64MachO
-                || compiler.backend.kind() == crate::compiler::backend::BackendKind::RawBinary,
+            compiler.backend == BackendKind::AArch64MachO
+                || compiler.backend == BackendKind::RawBinary,
         );
     }
 

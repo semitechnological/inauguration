@@ -4,9 +4,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
 
-use base64::Engine;
 use serde::{Deserialize, Serialize};
-use sha1::Digest as _;
+use sha2::Digest;
 
 use crate::package_lock::{PackageLock, write_package_lock};
 use crate::package_manifest::{
@@ -569,6 +568,7 @@ fn resolve_go_artifact(
     let latest = versions.last().map(|value| value.as_str());
     let version = select_version(requested_version, latest, Some(&versions))?;
     let output = Command::new("go")
+        .env_clear()
         .arg("mod")
         .arg("download")
         .arg("-json")
@@ -621,6 +621,7 @@ fn fetch_and_extract(
         }
     } else {
         let status = Command::new("tar")
+            .env_clear()
             .arg("-xf")
             .arg(&archive_path)
             .arg("-C")
@@ -645,7 +646,7 @@ fn verify_archive_checksum(path: &Path, checksum: &ArtifactChecksum) -> Result<(
     match checksum {
         ArtifactChecksum::Sha1Hex(expected) => verify_hex_digest(
             expected,
-            &hex_encode(&sha1::Sha1::digest(&data)),
+            &hex_encode(&sha2::Sha256::digest(&data)),
             path,
             "sha1",
         ),
@@ -656,8 +657,7 @@ fn verify_archive_checksum(path: &Path, checksum: &ArtifactChecksum) -> Result<(
             "sha256",
         ),
         ArtifactChecksum::Sha512Base64(expected) => {
-            let actual =
-                base64::engine::general_purpose::STANDARD.encode(sha2::Sha512::digest(&data));
+            let actual = hex_encode(&sha2::Sha512::digest(&data));
             if actual == *expected {
                 Ok(())
             } else {
@@ -689,6 +689,7 @@ fn verify_hex_digest(expected: &str, actual: &str, path: &Path, label: &str) -> 
 
 fn extract_zip(archive_path: &Path, install_path: &Path) -> Result<(), String> {
     let status = Command::new("unzip")
+        .env_clear()
         .arg("-oq")
         .arg(archive_path)
         .arg("-d")
@@ -819,6 +820,7 @@ fn require_https(url: &str) -> Result<(), String> {
 fn curl_get(url: &str) -> Result<String, String> {
     require_https(url)?;
     let output = Command::new("curl")
+        .env_clear()
         .args(["-fsSL", "-A", REGISTRY_USER_AGENT, url])
         .output()
         .map_err(|err| format!("curl not available for registry fetch: {err}"))?;

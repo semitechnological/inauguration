@@ -311,13 +311,14 @@ fn collect_functions(module: &UnifiedModule) -> Result<HashMap<String, FunctionI
         else {
             continue;
         };
+        // ponytail: single allocation for the unique name string
         let unique_name = if functions.contains_key(name) {
-            let count = name_counts.entry(name.clone()).or_insert(1);
+            let count = name_counts.entry(name.to_string()).or_insert(1);
             *count += 1;
             format!("{name}__dup{count}")
         } else {
-            name_counts.insert(name.clone(), 1);
-            name.clone()
+            name_counts.insert(name.to_string(), 1);
+            name.to_string()
         };
         functions.insert(
             unique_name.clone(),
@@ -678,39 +679,31 @@ fn lower_function(
         emitter.emit_insns(&x86_64::sub_rsp_i32(frame_size as i32));
     }
 
-    // Save param registers that rep stosq will clobber (RDI=param0, RCX=param3)
-    // into the caller's stack frame (above return address) before zero-fill.
-    // For NORMAL functions: [rbp+16+i*8] is safe (7th+ stack parameter area).
-    // For INTERRUPT functions: [rbp+16] = R15 in saved context — skip save
-    // and zero-fill entirely since interrupt handlers explicitly init locals.
+    // For normal functions: save clobbered param registers (RDI, RCX) that
+    // rep stosq will destroy, into [rbp+16+i*8] (caller's stack area).
+    // For interrupt functions: [rbp+16] = R15 in saved regs — can't use.
+    // Instead skip save AND zero-fill; params survive in registers.
     let param_regs = [RDI, RSI, RDX, RCX, 8, 9];
-    let stosq_clobbers = [true, false, false, true, false, false]; // rdi, rcx
+    let stosq_clobbers = [true, false, false, true, false, false];
     if !is_interrupt {
+        // Save clobbered params before zero-fill destroys them
         for (i, (name, _)) in func.params.iter().enumerate() {
             if i < 6 && ctx.locals.contains_key(name) && stosq_clobbers[i] {
                 let temp_disp = 16 + i as i32 * 8;
                 emitter.emit_insns(&x86_64::mov_m_r(RBP, temp_disp, param_regs[i]));
             }
         }
-    }
-
-    // Zero-fill the allocated stack frame
-    if frame_size >= 8 && !is_interrupt {
-        let qwords = frame_size / 8;
-        emitter.emit_bytes(&[0x48, 0x31, 0xC0]); // xor eax, eax
-        let mut mov_rcx = vec![0x48, 0xC7, 0xC1];
-        mov_rcx.extend_from_slice(&qwords.to_le_bytes());
-        emitter.emit_insns(&mov_rcx);
-        emitter.emit_bytes(&[0x48, 0x8D, 0x3C, 0x24]); // lea rdi, [rsp]
-        emitter.emit_bytes(&[0xF3, 0x48, 0xAB]); // rep stosq
-    }
-
-    // Restore clobbered param regs and store to their stack slots.
-    // For interrupt functions, params were not saved — restore from original
-    // register values if they survived (interrupt handlers push all regs
-    // before calling, so RDI/RCX values are available from the saved context
-    // on the stack, but we simply skip zero-fill for interrupts).
-    if !is_interrupt {
+        // Zero-fill the allocated stack frame
+        if frame_size >= 8 {
+            let qwords = frame_size / 8;
+            emitter.emit_bytes(&[0x48, 0x31, 0xC0]); // xor eax, eax
+            let mut mov_rcx = vec![0x48, 0xC7, 0xC1];
+            mov_rcx.extend_from_slice(&qwords.to_le_bytes());
+            emitter.emit_insns(&mov_rcx);
+            emitter.emit_bytes(&[0x48, 0x8D, 0x3C, 0x24]); // lea rdi, [rsp]
+            emitter.emit_bytes(&[0xF3, 0x48, 0xAB]); // rep stosq
+        }
+        // Restore clobbered params, then store ALL params to stack slots
         for (i, (name, _)) in func.params.iter().enumerate() {
             if i < 6 {
                 if let Some(StackSlot::Scalar(offset)) = ctx.locals.get(name) {
@@ -718,6 +711,19 @@ fn lower_function(
                         let temp_disp = 16 + i as i32 * 8;
                         emitter.emit_insns(&x86_64::mov_r_m(param_regs[i], RBP, temp_disp));
                     }
+                    emitter.emit_insns(&x86_64::str64(param_regs[i], *offset as u16));
+                }
+            }
+        }
+    } else {
+        // Interrupt functions: skip save and zero-fill entirely.
+        // [rbp+16+i*8] would corrupt saved R15 in the handler's reg context.
+        // Params survive in registers (no rep stosq clobber).
+        // But still store params to their stack slots so the function body
+        // can reload them via ldr64 from [rbp-offset-8].
+        for (i, (name, _)) in func.params.iter().enumerate() {
+            if i < 6 {
+                if let Some(StackSlot::Scalar(offset)) = ctx.locals.get(name) {
                     emitter.emit_insns(&x86_64::str64(param_regs[i], *offset as u16));
                 }
             }
