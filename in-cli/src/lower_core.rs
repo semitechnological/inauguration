@@ -1123,9 +1123,9 @@ fn lower_stmts_with_env(
                     );
                     out.push_str(&format!("label {arm_label}\n"));
                     out.push_str("// match.arm\n");
-                    let mut arm_env = env.clone();
+                    let pre_keys: Vec<String> = env.keys().cloned().collect();
                     for (name, id) in &bindings {
-                        arm_env.insert(name.clone(), *id);
+                        env.insert(name.clone(), *id);
                         out.push_str(&format!("store_var {name} %{id}\n"));
                     }
                     out.push_str(&lower_stmts_with_env(
@@ -1133,25 +1133,27 @@ fn lower_stmts_with_env(
                         ssa,
                         finish_with_return,
                         false,
-                        &mut arm_env,
+                        env,
                         direct_env,
                         true,
                     ));
+                    env.retain(|k, _| pre_keys.contains(k));
                     out.push_str(&format!("br {end_label}\n"));
                     out.push_str(&format!("label {next_label}\n"));
                 }
                 if let Some(arm) = default_arm {
                     out.push_str("// match.arm\n");
-                    let mut arm_env = env.clone();
+                    let pre_keys: Vec<String> = env.keys().cloned().collect();
                     out.push_str(&lower_stmts_with_env(
                         &arm.body,
                         ssa,
                         finish_with_return,
                         false,
-                        &mut arm_env,
+                        env,
                         direct_env,
                         true,
                     ));
+                    env.retain(|k, _| pre_keys.contains(k));
                 }
                 out.push_str(&format!("label {end_label}\n"));
             }
@@ -1190,29 +1192,31 @@ fn lower_stmts_with_env(
                 let try_end_label = format!("bb_try_end_{label_id}");
                 out.push_str(&format!("br {try_body_label}\n"));
                 out.push_str(&format!("label {try_body_label}\n"));
-                let mut body_env = env.clone();
+                let pre_keys: Vec<String> = env.keys().cloned().collect();
                 out.push_str(&lower_stmts_with_env(
                     body,
                     ssa,
                     finish_with_return,
                     false,
-                    &mut body_env,
+                    env,
                     direct_env,
                     force_stores,
                 ));
+                env.retain(|k, _| pre_keys.contains(k));
                 out.push_str(&format!("br {try_end_label}\n"));
                 out.push_str(&format!("label {try_catch_label}\n"));
                 for arm in catches {
-                    let mut arm_env = env.clone();
+                    let pre_keys: Vec<String> = env.keys().cloned().collect();
                     out.push_str(&lower_stmts_with_env(
                         &arm.body,
                         ssa,
                         finish_with_return,
                         false,
-                        &mut arm_env,
+                        env,
                         direct_env,
                         force_stores,
                     ));
+                    env.retain(|k, _| pre_keys.contains(k));
                 }
                 out.push_str(&format!("label {try_end_label}\n"));
             }
