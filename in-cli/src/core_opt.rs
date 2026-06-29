@@ -95,14 +95,21 @@ fn map_stmt_mut<F: FnMut(&mut Expr)>(s: &mut Stmt, f: &mut F) {
     match s {
         Stmt::Let(_, _, e) => map_expr_mut(e, f),
         Stmt::Assign(_, e) => map_expr_mut(e, f),
-        Stmt::IndexAssign { base, index, value, .. } => {
+        Stmt::IndexAssign {
+            base, index, value, ..
+        } => {
             map_expr_mut(base, f);
             map_expr_mut(index, f);
             map_expr_mut(value, f);
         }
         Stmt::Return(Some(e)) => map_expr_mut(e, f),
         Stmt::Return(None) => {}
-        Stmt::If { cond, then_body, else_body, .. } => {
+        Stmt::If {
+            cond,
+            then_body,
+            else_body,
+            ..
+        } => {
             map_expr_mut(cond, f);
             for s in then_body.iter_mut() {
                 map_stmt_mut(s, f);

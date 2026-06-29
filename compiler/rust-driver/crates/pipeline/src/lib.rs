@@ -361,7 +361,11 @@ mod tests {
         let mut module = compiler.parse_source("fn main() {}").unwrap();
         let result = compiler.lower(&mut module);
         assert!(result.is_ok());
-        assert!(compiler.timings.stages.iter().any(|s| s.stage == Stage::Lower));
+        assert!(compiler
+            .timings
+            .stages
+            .iter()
+            .any(|s| s.stage == Stage::Lower));
     }
 
     #[test]
@@ -401,7 +405,11 @@ mod tests {
         let result = compiler.optimize(&mut module);
         assert!(result.is_ok());
 
-        let has_optimize_stage = compiler.timings.stages.iter().any(|s| s.stage == Stage::Optimize);
+        let has_optimize_stage = compiler
+            .timings
+            .stages
+            .iter()
+            .any(|s| s.stage == Stage::Optimize);
         assert!(has_optimize_stage);
     }
 
@@ -414,7 +422,11 @@ mod tests {
         let result = compiler.optimize(&mut module);
         assert!(result.is_ok());
 
-        let has_optimize_stage = compiler.timings.stages.iter().any(|s| s.stage == Stage::Optimize);
+        let has_optimize_stage = compiler
+            .timings
+            .stages
+            .iter()
+            .any(|s| s.stage == Stage::Optimize);
         assert!(has_optimize_stage);
     }
 }

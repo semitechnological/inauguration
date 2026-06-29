@@ -699,7 +699,8 @@ fn named_descendant<'a>(root: Node<'a>, kind: &str) -> Option<Node<'a>> {
         return Some(root);
     }
     let mut w = root.walk();
-    root.named_children(&mut w).find_map(|ch| named_descendant(ch, kind))
+    root.named_children(&mut w)
+        .find_map(|ch| named_descendant(ch, kind))
 }
 
 #[derive(Clone, Copy)]
