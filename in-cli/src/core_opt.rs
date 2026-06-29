@@ -396,9 +396,10 @@ fn ptr_in_expr(e: &Expr, out: &mut Vec<String>) {
 /// x+0→x, x*1→x, x&-1→x, x|0→x, x^0→x, x<<0→x, etc.
 fn algebraic_simplify(decls: &mut [Decl]) {
     for body in fn_bodies_mut(decls) {
-        *body = body
-            .iter()
-            .map(|s| map_stmt(s.clone(), &mut |e| simplify_expr(e)))
+        let old = std::mem::take(body);
+        *body = old
+            .into_iter()
+            .map(|s| map_stmt(s, &mut |e| simplify_expr(e)))
             .collect();
     }
 }
@@ -594,9 +595,10 @@ fn collect_calls_in_expr(e: &Expr, out: &mut HashSet<String>) {
 /// Evaluate compile-time integer expressions: `3 + 4` → `7`.
 fn fold_constants_in_decls(decls: &mut [Decl]) {
     for body in fn_bodies_mut(decls) {
-        *body = body
-            .iter()
-            .map(|s| map_stmt(s.clone(), &mut |e| fold_expr(e)))
+        let old = std::mem::take(body);
+        *body = old
+            .into_iter()
+            .map(|s| map_stmt(s, &mut |e| fold_expr(e)))
             .collect();
     }
 }
