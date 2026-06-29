@@ -382,4 +382,30 @@ mod tests {
         assert_eq!(timings.stage_time(Stage::Lower), 2500);
         assert_eq!(timings.stage_time(Stage::Codegen), 0);
     }
+
+    #[test]
+    fn compiler_optimize_with_all_passes_enabled() {
+        let mut compiler = Compiler::new(test_spec()).unwrap();
+        compiler.config.enable_all_passes = true;
+        let mut module = compiler.parse_source("fn main() {}").unwrap();
+
+        let result = compiler.optimize(&mut module);
+        assert!(result.is_ok());
+
+        let has_optimize_stage = compiler.timings.stages.iter().any(|s| s.stage == Stage::Optimize);
+        assert!(has_optimize_stage);
+    }
+
+    #[test]
+    fn compiler_optimize_with_all_passes_disabled() {
+        let mut compiler = Compiler::new(test_spec()).unwrap();
+        compiler.config.enable_all_passes = false;
+        let mut module = compiler.parse_source("fn main() {}").unwrap();
+
+        let result = compiler.optimize(&mut module);
+        assert!(result.is_ok());
+
+        let has_optimize_stage = compiler.timings.stages.iter().any(|s| s.stage == Stage::Optimize);
+        assert!(has_optimize_stage);
+    }
 }
