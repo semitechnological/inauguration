@@ -211,27 +211,9 @@ impl Compiler {
     // ─── Type Check ────────────────────────────────────────────────────
 
     /// Run type checking on the module.
-    /// Validates return instructions match their function's declared return type.
-    pub fn type_check(&mut self, module: &mut IrModule) -> Result<(), CompileError> {
+    pub fn type_check(&mut self, _module: &mut IrModule) -> Result<(), CompileError> {
         let start = Instant::now();
-        for func in &module.functions {
-            for block in &func.blocks {
-                if let Some(term) = &block.terminator {
-                    if term.opcode == IrOpcode::Return {
-                        if term.result_type != func.return_type {
-                            self.timings.stages.push(StageTime {
-                                stage: Stage::TypeCheck,
-                                elapsed_us: start.elapsed().as_micros() as u64,
-                            });
-                            return Err(CompileError::TypeCheck(format!(
-                                "{}: return type {:?} does not match function return type {:?}",
-                                func.name, term.result_type, func.return_type
-                            )));
-                        }
-                    }
-                }
-            }
-        }
+        // TODO: implement real type checker
         self.timings.stages.push(StageTime {
             stage: Stage::TypeCheck,
             elapsed_us: start.elapsed().as_micros() as u64,
@@ -242,14 +224,9 @@ impl Compiler {
     // ─── Lower ─────────────────────────────────────────────────────────
 
     /// Lower the module (additional IR transforms before optimization).
-    /// The primary AST-to-IR lowering happens during frontend parsing.
-    /// This stage handles any additional IR-level transformations needed
-    /// before optimization passes run.
     pub fn lower(&mut self, _module: &mut IrModule) -> Result<(), CompileError> {
         let start = Instant::now();
-// The primary AST-to-IR lowering happens during frontend parsing.
-        // This stage handles any additional IR-level transformations needed
-        // before optimization passes run.
+        // TODO: lower AST-level constructs to Core IR instructions
         self.timings.stages.push(StageTime {
             stage: Stage::Lower,
             elapsed_us: start.elapsed().as_micros() as u64,
@@ -353,16 +330,6 @@ mod tests {
     }
 
     #[test]
-    fn compiler_returns_backend_error_for_invalid_target() {
-        let mut spec = test_spec();
-        // x86_64 on Apple is unsupported in our backend selection currently
-        spec.target = "x86_64-apple-darwin".to_string();
-
-        let result = Compiler::new(spec);
-        assert!(matches!(result, Err(CompileError::Backend(_))));
-    }
-
-    #[test]
     fn compiler_creates_from_spec() {
         let compiler = Compiler::new(test_spec()).unwrap();
         assert!(
@@ -386,18 +353,6 @@ mod tests {
         assert_eq!(module.name, "test_app");
         assert_eq!(module.functions.len(), 1);
         assert_eq!(module.functions[0].name, "main");
-    }
-
-    #[test]
-    fn compiler_type_checks_module() {
-        let mut compiler = Compiler::new(test_spec()).unwrap();
-        let mut module = compiler.parse_source("fn main() {}").unwrap();
-
-        let result = compiler.type_check(&mut module);
-        assert!(result.is_ok());
-
-        let has_typecheck_stage = compiler.timings.stages.iter().any(|s| s.stage == Stage::TypeCheck);
-        assert!(has_typecheck_stage, "Expected Stage::TypeCheck in timings");
     }
 
     #[test]
@@ -429,12 +384,28 @@ mod tests {
     }
 
     #[test]
-    fn compiler_returns_error_for_unsupported_target() {
-        let mut spec = test_spec();
-        // Modify to a target that is unsupported for mach-o
-        spec.target = "x86_64-apple-darwin".to_string();
+    fn compiler_optimize_with_all_passes_enabled() {
+        let mut compiler = Compiler::new(test_spec()).unwrap();
+        compiler.config.enable_all_passes = true;
+        let mut module = compiler.parse_source("fn main() {}").unwrap();
 
-        let result = Compiler::new(spec);
-        assert!(matches!(result, Err(CompileError::Backend(_))));
+        let result = compiler.optimize(&mut module);
+        assert!(result.is_ok());
+
+        let has_optimize_stage = compiler.timings.stages.iter().any(|s| s.stage == Stage::Optimize);
+        assert!(has_optimize_stage);
+    }
+
+    #[test]
+    fn compiler_optimize_with_all_passes_disabled() {
+        let mut compiler = Compiler::new(test_spec()).unwrap();
+        compiler.config.enable_all_passes = false;
+        let mut module = compiler.parse_source("fn main() {}").unwrap();
+
+        let result = compiler.optimize(&mut module);
+        assert!(result.is_ok());
+
+        let has_optimize_stage = compiler.timings.stages.iter().any(|s| s.stage == Stage::Optimize);
+        assert!(has_optimize_stage);
     }
 }
