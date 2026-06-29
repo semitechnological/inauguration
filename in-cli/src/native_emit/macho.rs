@@ -553,20 +553,22 @@ mod tests {
         use std::os::unix::process::ExitStatusExt;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
         let sign = std::process::Command::new("codesign")
-            .args(["-s", "-", "-f", path.to_str().unwrap()])
+            .args(["-s", "-", "-f"])
+            .arg(&path)
             .status()
             .expect("codesign");
         assert!(sign.success(), "codesign failed");
         let status = std::process::Command::new("/bin/sh")
             .arg("-c")
-            .arg(path.to_str().unwrap())
+            .arg(&path)
             .status()
             .expect("run");
         match status.code() {
             Some(42) => {}
             None if status.signal() == Some(9) => {
                 let otool = std::process::Command::new("otool")
-                    .args(["-tV", path.to_str().unwrap()])
+                    .arg("-tV")
+                    .arg(&path)
                     .output()
                     .expect("otool");
                 assert!(String::from_utf8_lossy(&otool.stdout).contains("mov\tx0, #0x2a"));
