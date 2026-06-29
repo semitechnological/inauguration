@@ -2437,7 +2437,11 @@ fn lower_binary(
             match op {
                 "&&" => aarch64::and_reg64(rd, lhs_reg, rhs_reg),
                 "||" => aarch64::orr_reg64(rd, lhs_reg, rhs_reg),
-                _ => unreachable!(),
+                _ => {
+                    return Err(format!(
+                        "native-lower: unsupported logical operator `{op}` in `{fn_name}`"
+                    ));
+                }
             }
         }
         "==" | "!=" | "<" | ">" | "<=" | ">=" => {
