@@ -292,7 +292,70 @@ fn optimize_bytecode(bytecode: &mut Vec<Instruction>) {
     *bytecode = optimized;
 }
 
-/// Parse a single SIL instruction and emit bytecode equivalent(s).
+/// Handle branching instructions: label, return, cond_br, br, bb0: labels
+fn parse_branching_instruction(
+    line: &str,
+    value_map: &HashMap<String, usize>,
+) -> Option<Result<Vec<Instruction>, String>> {
+    let mut out = Vec::new();
+    if let Some(label) = line.strip_prefix("label ").map(str::trim) {
+        out.push(Instruction::Label(label.to_string()));
+        if label.starts_with("bb_try_body_") {
+            let catch_label = label.replace("bb_try_body_", "bb_try_catch_");
+            out.push(Instruction::TryEnter(catch_label));
+        }
+        return Some(Ok(out));
+    }
+    if line.starts_with("return") {
+        if let Some(rest) = line.strip_prefix("return").map(str::trim)
+            && !rest.is_empty()
+            && rest.starts_with('%')
+        {
+            let reg = rest
+                .split(|c: char| c.is_whitespace() || c == ':')
+                .next()
+                .unwrap_or(rest);
+            if let Some(slot) = value_map.get(reg) {
+                out.push(Instruction::Load(*slot));
+            }
+        }
+        out.push(Instruction::Return);
+        return Some(Ok(out));
+    }
+    if line.starts_with("cond_br") {
+        if let Some(rest) = line.strip_prefix("cond_br").map(str::trim) {
+            let parts: Vec<&str> = rest.split(',').collect();
+            if parts.len() >= 3 {
+                let cond_reg = parts[0].trim();
+                let true_label = parts[1].trim();
+                let false_label = parts[2].trim();
+                if let Some(slot) = value_map.get(cond_reg) {
+                    out.push(Instruction::Load(*slot));
+                }
+                out.push(Instruction::JumpIfTrue(true_label.to_string()));
+                out.push(Instruction::Jump(false_label.to_string()));
+            }
+        }
+        return Some(Ok(out));
+    }
+    if line.starts_with("br ") {
+        if let Some(label) = line.strip_prefix("br ").map(str::trim) {
+            if label.starts_with("bb_try_end_") {
+                out.push(Instruction::TryEnd);
+            }
+            out.push(Instruction::Jump(label.to_string()));
+        }
+        return Some(Ok(out));
+    }
+    if line.ends_with(':') {
+        let label_name = line.trim_end_matches(':').to_string();
+        out.push(Instruction::Label(label_name));
+        return Some(Ok(out));
+    }
+    None
+}
+
+/// Handle memory/value operations: load_var, struct_init, field_access, array_init, index_access, store_var, index_store_var
 fn parse_memory_instruction(
     line: &str,
     local_counter: &mut usize,
@@ -302,7 +365,6 @@ fn parse_memory_instruction(
     var_slots: &mut HashMap<String, usize>,
 ) -> Option<Result<Vec<Instruction>, String>> {
     let mut out = Vec::new();
-
     if let Some((reg, rhs)) = assignment(line) {
         if let Some(name) = rhs.strip_prefix("load_var ").map(str::trim) {
             if let Some(slot) = var_slots.get(name) {
@@ -323,7 +385,7 @@ fn parse_memory_instruction(
             }
             out.push(Instruction::StructInit(
                 name,
-                fields.into_iter().map(|(field, _)| field).collect(),
+                fields.into_iter().map(|(f, _)| f).collect(),
             ));
             store_register(reg, local_counter, value_map, &mut out);
             clear_value_constants(reg, value_ints, value_bools);
@@ -339,16 +401,17 @@ fn parse_memory_instruction(
                 store_register(reg, local_counter, value_map, &mut out);
                 clear_value_constants(reg, value_ints, value_bools);
                 return Some(Ok(out));
-            } else {
-                return Some(Err("parse error".into()));
             }
+            return Some(Err(
+                "parse error: field_access needs source_reg and field_name".into(),
+            ));
         }
         if let Some(rest) = rhs.strip_prefix("array_init").map(str::trim) {
-            let args = rest
+            let args: Vec<&str> = rest
                 .split(',')
                 .map(str::trim)
-                .filter(|arg| !arg.is_empty())
-                .collect::<Vec<_>>();
+                .filter(|a| !a.is_empty())
+                .collect();
             for arg in &args {
                 if let Some(slot) = value_map.get(*arg) {
                     out.push(Instruction::Load(*slot));
@@ -360,7 +423,7 @@ fn parse_memory_instruction(
             return Some(Ok(out));
         }
         if let Some(rest) = rhs.strip_prefix("index_access ").map(str::trim) {
-            for arg in rest.split(',').map(str::trim).filter(|arg| !arg.is_empty()) {
+            for arg in rest.split(',').map(str::trim).filter(|a| !a.is_empty()) {
                 if let Some(slot) = value_map.get(arg) {
                     out.push(Instruction::Load(*slot));
                 }
@@ -371,7 +434,6 @@ fn parse_memory_instruction(
             return Some(Ok(out));
         }
     }
-
     if let Some(rest) = line.strip_prefix("store_var ").map(str::trim) {
         let mut parts = rest.split_whitespace();
         if let (Some(name), Some(reg)) = (parts.next(), parts.next()) {
@@ -382,9 +444,8 @@ fn parse_memory_instruction(
                 return Some(Ok(out));
             }
         }
-        return Some(Err("parse error".into()));
+        return Some(Err("parse error: store_var needs name and reg".into()));
     }
-
     if let Some(rest) = line.strip_prefix("index_store_var ").map(str::trim) {
         let mut parts = rest.split_whitespace();
         if let (Some(name), Some(index_reg_raw), Some(value_reg)) =
@@ -401,12 +462,14 @@ fn parse_memory_instruction(
                 return Some(Ok(out));
             }
         }
-        return Some(Err("parse error".into()));
+        return Some(Err(
+            "parse error: index_store_var needs name, index_reg, value_reg".into(),
+        ));
     }
-
     None
 }
 
+/// Handle arithmetic instructions: builtin_binop, builtin_unop
 fn parse_arithmetic_instruction(
     line: &str,
     local_counter: &mut usize,
@@ -415,7 +478,6 @@ fn parse_arithmetic_instruction(
     value_bools: &mut HashMap<String, bool>,
 ) -> Option<Result<Vec<Instruction>, String>> {
     let mut out = Vec::new();
-
     if let Some((reg, rhs)) = assignment(line) {
         if let Some(rest) = rhs.strip_prefix("builtin_binop ").map(str::trim) {
             let (op, args) = parse_quoted_op_and_args(rest);
@@ -431,14 +493,12 @@ fn parse_arithmetic_instruction(
                 return Some(Ok(out));
             }
             if args.len() == 2 {
-                let lhs = args[0];
-                let rhs_arg = args[1];
                 if let Some(b) = fold_bool_binop(
                     &op,
-                    value_ints.get(lhs).copied(),
-                    value_ints.get(rhs_arg).copied(),
-                    value_bools.get(lhs).copied(),
-                    value_bools.get(rhs_arg).copied(),
+                    value_ints.get(args[0]).copied(),
+                    value_ints.get(args[1]).copied(),
+                    value_bools.get(args[0]).copied(),
+                    value_bools.get(args[1]).copied(),
                 ) {
                     out.push(Instruction::LoadBool(b));
                     store_register(reg, local_counter, value_map, &mut out);
@@ -447,8 +507,8 @@ fn parse_arithmetic_instruction(
                     return Some(Ok(out));
                 }
             }
-            for arg in args {
-                if let Some(slot) = value_map.get(arg) {
+            for arg in &args {
+                if let Some(slot) = value_map.get(*arg) {
                     out.push(Instruction::Load(*slot));
                 }
             }
@@ -457,7 +517,6 @@ fn parse_arithmetic_instruction(
             clear_value_constants(reg, value_ints, value_bools);
             return Some(Ok(out));
         }
-
         if let Some(rest) = rhs.strip_prefix("builtin_unop ").map(str::trim) {
             let (op, args) = parse_quoted_op_and_args(rest);
             if let Some(arg) = args.first() {
@@ -489,10 +548,10 @@ fn parse_arithmetic_instruction(
             return Some(Ok(out));
         }
     }
-
     None
 }
 
+/// Handle literal instructions: string_literal, bool_literal, float_literal, integer_literal
 fn parse_literal_instruction(
     line: &str,
     local_counter: &mut usize,
@@ -501,7 +560,6 @@ fn parse_literal_instruction(
     value_bools: &mut HashMap<String, bool>,
 ) -> Option<Result<Vec<Instruction>, String>> {
     let mut out = Vec::new();
-
     if let Some((reg, rhs)) = assignment(line) {
         if let Some(s) = rhs.strip_prefix("string_literal ").map(str::trim) {
             out.push(Instruction::LoadString(parse_string_payload(s)));
@@ -518,75 +576,64 @@ fn parse_literal_instruction(
             return Some(Ok(out));
         }
     }
-
-    // %0 = float_literal $Builtin.FPIEEE64, 3.14
-    if line.contains("=")
-        && line.contains("float_literal")
-        && let Some(before_eq) = line.split('=').next()
-    {
-        let reg = before_eq.trim();
-        if reg.starts_with('%')
-            && let Some(rest) = line.split('=').nth(1)
-        {
-            let rest = rest.trim();
-            if let Some(f_str) = rest.strip_prefix("float_literal $Builtin.FPIEEE64,")
-                && let Ok(f) = f_str.trim().parse::<f64>()
+    if line.contains("=") && line.contains("float_literal") && line.contains("$Builtin.FPIEEE64") {
+        if let Some(before_eq) = line.split('=').next() {
+            let reg = before_eq.trim();
+            if reg.starts_with('%')
+                && let Some(rest) = line.split('=').nth(1)
             {
-                out.push(Instruction::LoadFloat(FloatVal(f)));
-                let slot = *local_counter;
-                *local_counter += 1;
-                value_map.insert(reg.to_string(), slot);
-                clear_value_constants(reg, value_ints, value_bools);
-                out.push(Instruction::Store(slot));
-                return Some(Ok(out));
+                let rest = rest.trim();
+                if let Some(f_str) = rest.strip_prefix("float_literal $Builtin.FPIEEE64,")
+                    && let Ok(f) = f_str.trim().parse::<f64>()
+                {
+                    out.push(Instruction::LoadFloat(FloatVal(f)));
+                    let slot = *local_counter;
+                    *local_counter += 1;
+                    value_map.insert(reg.to_string(), slot);
+                    clear_value_constants(reg, value_ints, value_bools);
+                    out.push(Instruction::Store(slot));
+                    return Some(Ok(out));
+                }
             }
         }
     }
-
-    // %0 = integer_literal $Builtin.Int64, 42
-    if line.contains("=")
-        && line.contains("integer_literal")
-        && let Some(before_eq) = line.split('=').next()
-    {
-        let reg = before_eq.trim();
-        if reg.starts_with('%')
-            && let Some(rest) = line.split('=').nth(1)
-        {
-            let rest = rest.trim();
-            if let Some(n_str) = rest.strip_prefix("integer_literal $Builtin.Int64,")
-                && let Ok(n) = n_str.trim().parse::<i64>()
+    if line.contains("=") && line.contains("integer_literal") && line.contains("$Builtin.Int64") {
+        if let Some(before_eq) = line.split('=').next() {
+            let reg = before_eq.trim();
+            if reg.starts_with('%')
+                && let Some(rest) = line.split('=').nth(1)
             {
-                out.push(Instruction::LoadInt(n));
-                // Store in "register" (local)
-                let slot = *local_counter;
-                *local_counter += 1;
-                value_map.insert(reg.to_string(), slot);
-                value_ints.insert(reg.to_string(), n);
-                out.push(Instruction::Store(slot));
-                return Some(Ok(out));
+                let rest = rest.trim();
+                if let Some(n_str) = rest.strip_prefix("integer_literal $Builtin.Int64,")
+                    && let Ok(n) = n_str.trim().parse::<i64>()
+                {
+                    out.push(Instruction::LoadInt(n));
+                    let slot = *local_counter;
+                    *local_counter += 1;
+                    value_map.insert(reg.to_string(), slot);
+                    value_ints.insert(reg.to_string(), n);
+                    out.push(Instruction::Store(slot));
+                    return Some(Ok(out));
+                }
             }
         }
     }
-
-    // integer_literal $Builtin.Int64, 42 (standalone)
     if let Some(rest) = line.strip_prefix("integer_literal $Builtin.Int64,")
         && let Ok(n) = rest.trim().parse::<i64>()
     {
         out.push(Instruction::LoadInt(n));
         return Some(Ok(out));
     }
-
-    // float_literal $Builtin.FPIEEE64, 3.14 (standalone)
     if let Some(rest) = line.strip_prefix("float_literal $Builtin.FPIEEE64,")
         && let Ok(f) = rest.trim().parse::<f64>()
     {
         out.push(Instruction::LoadFloat(FloatVal(f)));
         return Some(Ok(out));
     }
-
     None
 }
 
+/// Handle call instructions: apply, function_ref, builtin_call
 fn parse_call_instruction(
     line: &str,
     local_counter: &mut usize,
@@ -596,84 +643,75 @@ fn parse_call_instruction(
     function_refs: &mut HashMap<String, String>,
 ) -> Option<Result<Vec<Instruction>, String>> {
     let mut out = Vec::new();
-
-    // %0 = apply %1(%2, %3) : $... (function call)
     if line.contains("= apply")
         && let Some(eq_split) = line.split('=').nth(1)
         && let Some(apply_rest) = eq_split.trim().strip_prefix("apply").map(str::trim)
     {
-        // Extract function ref
-        if let Some(paren_idx) = apply_rest.find('(') {
-            let func_ref = &apply_rest[..paren_idx].trim();
-
-            // Extract arguments between parens
-            if let Some(close_paren) = apply_rest.find(')') {
-                let args_str = &apply_rest[paren_idx + 1..close_paren];
-                for arg in args_str.split(',') {
-                    let arg = arg.trim();
-                    if arg.starts_with('%')
-                        && let Some(slot) = value_map.get(arg)
-                    {
-                        out.push(Instruction::Load(*slot));
-                    }
-                }
-                let callee = function_refs
-                    .get(*func_ref)
-                    .cloned()
-                    .unwrap_or_else(|| "user_func".to_string());
-                let argc = args_str
-                    .split(',')
-                    .map(str::trim)
-                    .filter(|arg| !arg.is_empty())
-                    .count();
-                let ret_count = builtin_return_count(&callee);
-                if is_builtin_function(&callee) {
-                    out.push(Instruction::CallBuiltin(callee.clone(), argc));
-                } else {
-                    out.push(Instruction::CallFunction(callee.clone(), argc));
-                }
-
-                if let Some(before_eq) = line.split('=').next() {
-                    let res_reg = before_eq.trim();
-                    if res_reg.starts_with('%') {
-                        store_register(res_reg, local_counter, value_map, &mut out);
-                        for _ in 1..ret_count {
-                            out.push(Instruction::Pop);
-                        }
-                        clear_value_constants(res_reg, value_ints, value_bools);
-                    }
+        let (func_ref, args_str) = if let Some(paren_idx) = apply_rest.find('(') {
+            let func_ref = apply_rest[..paren_idx].trim();
+            let close_paren = apply_rest.find(')').unwrap_or(apply_rest.len() - 1);
+            (func_ref, &apply_rest[paren_idx + 1..close_paren])
+        } else {
+            return Some(Err("apply missing (".into()));
+        };
+        for arg in args_str.split(',').map(str::trim).filter(|a| !a.is_empty()) {
+            if arg.starts_with('%') {
+                if let Some(slot) = value_map.get(arg) {
+                    out.push(Instruction::Load(*slot));
                 }
             }
-            return Some(Ok(out));
         }
+        let callee = function_refs
+            .get(func_ref)
+            .cloned()
+            .unwrap_or_else(|| "user_func".to_string());
+        let argc = args_str
+            .split(',')
+            .map(str::trim)
+            .filter(|a| !a.is_empty())
+            .count();
+        let ret_count = builtin_return_count(&callee);
+        if is_builtin_function(&callee) {
+            out.push(Instruction::CallBuiltin(callee.clone(), argc));
+        } else {
+            out.push(Instruction::CallFunction(callee.clone(), argc));
+        }
+        if let Some(before_eq) = line.split('=').next() {
+            let res_reg = before_eq.trim();
+            if res_reg.starts_with('%') {
+                store_register(res_reg, local_counter, value_map, &mut out);
+                for _ in 1..ret_count {
+                    out.push(Instruction::Pop);
+                }
+                clear_value_constants(res_reg, value_ints, value_bools);
+            }
+        }
+        return Some(Ok(out));
     }
-
-    // function_ref @helper : $...
     if line.contains("function_ref @") {
         if let Some(rest) = line.split("function_ref @").nth(1) {
             let func_name = rest
                 .split(|c: char| c.is_whitespace() || c == ':' || c == '(')
                 .next()
-                .unwrap_or("?");
+                .unwrap_or("?")
+                .to_string();
             if let Some(before_eq) = line.split('=').next() {
                 let reg = before_eq.trim();
                 if reg.starts_with('%') {
-                    function_refs.insert(reg.to_string(), func_name.to_string());
+                    function_refs.insert(reg.to_string(), func_name.clone());
                     let slot = *local_counter;
                     *local_counter += 1;
                     value_map.insert(reg.to_string(), slot);
                     clear_value_constants(reg, value_ints, value_bools);
-                    out.push(Instruction::LoadString(func_name.to_string()));
+                    out.push(Instruction::LoadString(func_name));
                     out.push(Instruction::Store(slot));
                     return Some(Ok(out));
                 }
             }
-            out.push(Instruction::LoadString(func_name.to_string()));
+            out.push(Instruction::LoadString(func_name));
         }
         return Some(Ok(out));
     }
-
-    // builtin_call "name" %arg1, %arg2, ...
     if let Some(rest) = line.strip_prefix("builtin_call ").map(str::trim) {
         let (name, args) = parse_quoted_op_and_args(rest);
         for arg in &args {
@@ -684,85 +722,6 @@ fn parse_call_instruction(
         out.push(Instruction::CallBuiltin(name, args.len()));
         return Some(Ok(out));
     }
-
-    None
-}
-
-fn parse_branching_instruction(
-    line: &str,
-    value_map: &HashMap<String, usize>,
-) -> Option<Result<Vec<Instruction>, String>> {
-    let mut out = Vec::new();
-
-    if let Some(label) = line.strip_prefix("label ").map(str::trim) {
-        out.push(Instruction::Label(label.to_string()));
-        if label.starts_with("bb_try_body_") {
-            let catch_label = label.replace("bb_try_body_", "bb_try_catch_");
-            out.push(Instruction::TryEnter(catch_label));
-        }
-        return Some(Ok(out));
-    }
-
-    // return %0 or return
-    if line.starts_with("return") {
-        if let Some(rest) = line.strip_prefix("return").map(str::trim)
-            && !rest.is_empty()
-            && rest.starts_with('%')
-        {
-            let reg = rest
-                .split(|c: char| c.is_whitespace() || c == ':')
-                .next()
-                .unwrap_or(rest);
-            // Load the return value
-            if let Some(slot) = value_map.get(reg) {
-                out.push(Instruction::Load(*slot));
-            }
-        }
-        out.push(Instruction::Return);
-        return Some(Ok(out));
-    }
-
-    // cond_br %0, bb1, bb2 (conditional branch)
-    if line.starts_with("cond_br") {
-        if let Some(rest) = line.strip_prefix("cond_br").map(str::trim) {
-            let parts: Vec<&str> = rest.split(',').collect();
-            if parts.len() >= 3 {
-                let cond_reg = parts[0].trim();
-                let true_label = parts[1].trim();
-                let false_label = parts[2].trim();
-
-                // Load condition
-                if let Some(slot) = value_map.get(cond_reg) {
-                    out.push(Instruction::Load(*slot));
-                }
-
-                // Jump if true
-                out.push(Instruction::JumpIfTrue(true_label.to_string()));
-                // Jump to false label unconditionally
-                out.push(Instruction::Jump(false_label.to_string()));
-            }
-        }
-        return Some(Ok(out));
-    }
-
-    // br bb1 (unconditional branch)
-    if line.starts_with("br ") {
-        if let Some(label) = line.strip_prefix("br ").map(str::trim) {
-            if label.starts_with("bb_try_end_") {
-                out.push(Instruction::TryEnd);
-            }
-            out.push(Instruction::Jump(label.to_string()));
-        }
-        return Some(Ok(out));
-    }
-
-    // bb0: / bb1: → Label
-    if line.ends_with(':') {
-        let label_name = line.trim_end_matches(':').to_string();
-        out.push(Instruction::Label(label_name));
-        return Some(Ok(out));
-    }
-
     None
 }
 
@@ -777,18 +736,14 @@ fn parse_sil_instruction_to_bytecode(
     function_refs: &mut HashMap<String, String>,
     _label_counter: &mut usize,
 ) -> Result<Vec<Instruction>, String> {
-    let mut out = Vec::new();
     let line = line.trim();
-
-    // Skip empty and comment lines
     if line.is_empty() || line.starts_with("//") {
-        return Ok(out);
+        return Ok(Vec::new());
     }
 
     if let Some(res) = parse_branching_instruction(line, value_map) {
         return res;
     }
-
     if let Some(res) = parse_memory_instruction(
         line,
         local_counter,
@@ -799,19 +754,16 @@ fn parse_sil_instruction_to_bytecode(
     ) {
         return res;
     }
-
     if let Some(res) =
         parse_arithmetic_instruction(line, local_counter, value_map, value_ints, value_bools)
     {
         return res;
     }
-
     if let Some(res) =
         parse_literal_instruction(line, local_counter, value_map, value_ints, value_bools)
     {
         return res;
     }
-
     if let Some(res) = parse_call_instruction(
         line,
         local_counter,
@@ -823,44 +775,34 @@ fn parse_sil_instruction_to_bytecode(
         return res;
     }
 
-    if line.contains("=")
-        && line.contains("argument ")
-        && let Some(before_eq) = line.split('=').next()
-    {
-        let reg = before_eq.trim();
-        if reg.starts_with('%') {
+    if let Some((reg, rhs)) = assignment(line) {
+        if rhs.starts_with("argument ") {
             let slot = *local_counter;
             *local_counter += 1;
             value_map.insert(reg.to_string(), slot);
             clear_value_constants(reg, value_ints, value_bools);
-            return Ok(out);
+            return Ok(Vec::new());
         }
     }
-
-    // Skip debug_value
     if line.starts_with("debug_value") {
-        return Ok(out);
+        return Ok(Vec::new());
     }
 
-    // For other register assignments, emit a safe default (load 0)
+    let mut out = Vec::new();
     if line.starts_with("%") || line.contains("=") {
-        out.push(Instruction::LoadInt(0));
-        // Try to capture result register
+        let slot = *local_counter;
+        *local_counter += 1;
         if let Some(before_eq) = line.split('=').next() {
             let reg = before_eq.trim();
             if reg.starts_with('%') {
-                let slot = *local_counter;
-                *local_counter += 1;
                 value_map.insert(reg.to_string(), slot);
                 clear_value_constants(reg, value_ints, value_bools);
-                out.push(Instruction::Store(slot));
             }
         }
+        out.push(Instruction::LoadInt(0));
     }
-
     Ok(out)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
