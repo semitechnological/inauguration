@@ -136,12 +136,30 @@ pub struct CompileResult {
     pub diagnostics: Vec<Diagnostic>,
 }
 
+// ─── Type Checker ────────────────────────────────────────────────────────
+
+/// A trait for type checking the IR module.
+pub trait TypeChecker {
+    fn check(&self, module: &mut IrModule) -> Result<(), CompileError>;
+}
+
+/// A null type checker that does not perform any validation.
+pub struct NullTypeChecker;
+
+impl TypeChecker for NullTypeChecker {
+    fn check(&self, _module: &mut IrModule) -> Result<(), CompileError> {
+        // TODO: implement real type checker
+        Ok(())
+    }
+}
+
 // ─── The Compiler ────────────────────────────────────────────────────────
 
 /// The Inauguration compiler — drives the multi-stage pipeline.
 pub struct Compiler {
     config: CompilerConfig,
     pass_manager: PassManager,
+    type_checker: Box<dyn TypeChecker>,
     backend: Box<dyn CodegenBackend>,
     diagnostics: Vec<Diagnostic>,
     timings: CompileTimings,
@@ -166,9 +184,12 @@ impl Compiler {
         // For now, use NullBackend; real backend wiring comes from in-cli
         let backend: Box<dyn CodegenBackend> = Box::new(NullBackend);
 
+        let type_checker: Box<dyn TypeChecker> = Box::new(NullTypeChecker);
+
         Ok(Self {
             config,
             pass_manager,
+            type_checker,
             backend,
             diagnostics: Vec::new(),
             timings: CompileTimings::default(),
@@ -211,9 +232,9 @@ impl Compiler {
     // ─── Type Check ────────────────────────────────────────────────────
 
     /// Run type checking on the module.
-    pub fn type_check(&mut self, _module: &mut IrModule) -> Result<(), CompileError> {
+    pub fn type_check(&mut self, module: &mut IrModule) -> Result<(), CompileError> {
         let start = Instant::now();
-        // TODO: implement real type checker
+        self.type_checker.check(module)?;
         self.timings.stages.push(StageTime {
             stage: Stage::TypeCheck,
             elapsed_us: start.elapsed().as_micros() as u64,

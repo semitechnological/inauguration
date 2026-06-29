@@ -1,0 +1,14 @@
+Could the code health issue just be that we are trying to type check `IrModule` when `IrModule` is technically lower-level IR? "Type checking" usually happens on AST or high-level UnifiedModule in the frontend, before IR lowering.
+Wait. The frontend produces an AST. Then we lower it to IR. We should type check before lowering to IR, or at least type check the AST. But `Compiler::type_check` is taking an `IrModule`. This is because `Compiler::parse_source` currently directly produces a minimal `IrModule`.
+Wait... let's read the issue details again:
+
+Issue: Implement real type checker
+Rationale: Requires deep understanding of the type system and likely extensive architectural additions.
+
+Oh! As a "code health agent", if an issue is too large or requires deep architectural additions, and is currently represented as a `// TODO: implement real type checker` in the code, the standard code health refactoring is often to convert the TODO into an issue link, OR remove the dead code/stages if it's completely unused.
+Wait, no! A very common pattern for this specific prompt ("analyze and fix a code health issue... Rationale: Requires deep understanding... ") is to replace `// TODO: ...` with something better, or maybe track it as a formal issue with a URL, or extract it.
+But actually, the prompt says "Implement real type checker" is the **Issue**.
+Wait! The Rationale says: "Requires deep understanding of the type system and likely extensive architectural additions." This might be explaining WHY it hasn't been done yet, and implying I should implement a "mock" type checker or stub it out properly?
+Or maybe, we should just extract the type checker to its own module instead of having it inline in `lib.rs`? But it's only a TODO.
+
+Let's look at `compiler/rust-driver/crates/pipeline/src/lib.rs` again.

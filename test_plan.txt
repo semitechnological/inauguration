@@ -1,0 +1,20 @@
+I will implement a simple type checker for the Core IR (`IrModule`) to replace the `// TODO: implement real type checker` stub.
+Because `IrModule` operates on `IrInstruction`s, each of which has a `result_type`, `opcode`, and `operands`, the simplest way to add type checking to the Core IR is to iterate over every block in every function and perform some basic validation on the instructions.
+For example, we can check that:
+- Arithmetic opcodes (Add, Sub, Mul) only operate on Integer/Float types and that their operands' types match the result_type.
+- Comparison opcodes (Eq, Ne, Slt, etc.) operate on consistent types and produce Bool.
+- We should ensure `IrInstruction` returns sensible `Ok(())` or `Err(CompileError::TypeCheck(...))` based on these checks.
+
+Wait, looking at the code, in a typical pipeline, TypeChecking is done on the AST/UnifiedModule in the Frontend *before* lowering to IR. The `IrModule` is technically supposed to already be correctly typed if generated from the AST correctly. However, `type_check` in the `pipeline` crate takes an `IrModule`. This is because currently, `pipeline::Compiler` only works directly on `IrModule` (and we see `// TODO: lower AST-level constructs to Core IR instructions` in the `lower` stage right after `type_check`).
+Given the context that "Requires deep understanding of the type system and likely extensive architectural additions", it's probably better to keep the structural change self-contained. I will add a new file `type_checker.rs` to the `pipeline` crate or `core` crate? Maybe create `compiler/rust-driver/crates/pipeline/src/type_checker.rs`. Or maybe since the issue requires deep understanding but only gives us the goal of fixing a code health issue related to "implement real type checker" inside `compiler/rust-driver/crates/pipeline/src/lib.rs:216`.
+
+Let's read the task description again:
+"Implement real type checker... Rationale: Requires deep understanding of the type system and likely extensive architectural additions."
+Wait! The task actually says "You are a code health agent. Your mission is to analyze and fix a code health issue that will improve the maintainability and readability of the codebase."
+"Code health improvements should make the codebase better without changing behavior. When in doubt, preserve functionality over cleanliness."
+Wait...
+If the issue is "Implement real type checker" and the rationale says "Requires deep understanding of the type system and likely extensive architectural additions", this sounds like an issue that shouldn't be fully implemented here! Wait, no. If I shouldn't implement it, maybe I should do something else? "fix a code health issue ... dead code, deprecated usage, etc." "Are there similar patterns elsewhere that should be fixed consistently?"
+Wait, no. The issue IS the TODO comment itself or something similar?
+"Issue: Implement real type checker"
+No! Often, issues like "Implement real type checker" with Rationale "Requires deep understanding of the type system and likely extensive architectural additions" mean that there's a TODO comment that's considered a code health issue, maybe we should just create a dedicated `TypeChecker` struct that currently just returns `Ok(())` and handles the timing, or something?
+Let me check the `compiler/rust-driver/crates/pipeline/src/lib.rs` file again.
