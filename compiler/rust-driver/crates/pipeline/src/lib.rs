@@ -356,6 +356,18 @@ mod tests {
     }
 
     #[test]
+    fn compiler_type_checks_module() {
+        let mut compiler = Compiler::new(test_spec()).unwrap();
+        let mut module = compiler.parse_source("fn main() {}").unwrap();
+
+        let result = compiler.type_check(&mut module);
+        assert!(result.is_ok());
+
+        let has_typecheck_stage = compiler.timings.stages.iter().any(|s| s.stage == Stage::TypeCheck);
+        assert!(has_typecheck_stage, "Expected Stage::TypeCheck in timings");
+    }
+
+    #[test]
     fn compiler_returns_timing_report() {
         let mut compiler = Compiler::new(test_spec()).unwrap();
         let _result = compiler.compile("fn main() {}").unwrap();
