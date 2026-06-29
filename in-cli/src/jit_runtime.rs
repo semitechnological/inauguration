@@ -86,6 +86,8 @@ fn alloc_executable_pages(size: usize) -> Option<*mut u8> {
 
 #[cfg(not(windows))]
 fn make_executable(ptr: *mut u8, size: usize) {
+    // ponytail: pthread_jit_write_protect_np regressed JIT on arm64 macOS CI;
+    // mprotect on MAP_JIT pages still passes conformance here.
     unsafe {
         libc::mprotect(
             ptr as *mut std::ffi::c_void,
@@ -172,7 +174,6 @@ impl CodePage {
             target_arch = "aarch64"
         ))]
         unsafe {
-            libc::sysconf(libc::_SC_PAGE_SIZE);
             extern "C" {
                 fn __clear_cache(start: *const u8, end: *const u8);
             }
@@ -307,28 +308,6 @@ impl JitRuntime {
         let funcs = self.functions.read().unwrap();
         let func = funcs.get(name)?;
         let entry = func.entry as *const ();
-
-        // Debug: log entry info for crash investigation
-        let entry_addr = entry as usize;
-        let code_base = self.code_pages.last().map(|p| p.ptr as usize).unwrap_or(0);
-        std::fs::write(
-            "/tmp/jit_invoke.log",
-            format!(
-                "invoke {name} entry={entry_addr:#x} base={code_base:#x} offset=0x{:x}\n",
-                entry_addr.wrapping_sub(code_base)
-            ),
-        )
-        .ok();
-
-        // Verify entry is plausible
-        if entry_addr < 0x10000 {
-            std::fs::write(
-                "/tmp/jit_bad_addr.log",
-                format!("BAD ADDR: {name} at {entry_addr:#x} base={code_base:#x}\n"),
-            )
-            .ok();
-            return Some(0);
-        }
 
         #[cfg(target_arch = "aarch64")]
         {
