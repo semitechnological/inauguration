@@ -356,6 +356,15 @@ mod tests {
     }
 
     #[test]
+    fn compiler_lowers_module() {
+        let mut compiler = Compiler::new(test_spec()).unwrap();
+        let mut module = compiler.parse_source("fn main() {}").unwrap();
+        let result = compiler.lower(&mut module);
+        assert!(result.is_ok());
+        assert!(compiler.timings.stages.iter().any(|s| s.stage == Stage::Lower));
+    }
+
+    #[test]
     fn compiler_returns_timing_report() {
         let mut compiler = Compiler::new(test_spec()).unwrap();
         let _result = compiler.compile("fn main() {}").unwrap();
