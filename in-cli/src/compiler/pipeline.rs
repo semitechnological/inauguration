@@ -28,6 +28,8 @@ use super::backend::{BackendKind, BackendOutput, placeholder_output, select_back
 use super::core::{IrBasicBlock, IrFunction, IrInstruction, IrModule, IrOpcode, IrType};
 use super::metadata::{ComponentMetadata, ComponentSpec, OptimizationLevel};
 use super::passes::PassManager;
+use crate::core_ir::UnifiedModule;
+use crate::typecheck::TypeChecker;
 
 /// Error from the compilation pipeline.
 #[derive(Debug, Clone)]
@@ -113,6 +115,7 @@ pub struct Compiler {
     pass_manager: PassManager,
     backend: BackendKind,
     timings: CompileTimings,
+    last_unified: Option<UnifiedModule>,
 }
 
 impl Compiler {
@@ -135,6 +138,7 @@ impl Compiler {
             pass_manager,
             backend,
             timings: CompileTimings::default(),
+            last_unified: None,
         })
     }
 
@@ -156,6 +160,8 @@ impl Compiler {
         // Try parsing as .in source first
         match crate::in_lang_parse::parse_in_source(source) {
             Ok(unified) => {
+                // Cache for type_check stage
+                self.last_unified = Some(unified.clone());
                 // We have a parsed UnifiedModule — lower it to IrModule
                 let lowered = lower_unified_to_ir(&unified, &entry_name)?;
                 module = lowered;
@@ -183,7 +189,22 @@ impl Compiler {
 
     pub fn type_check(&mut self, _module: &mut IrModule) -> Result<(), CompileError> {
         let start = Instant::now();
-        // TODO: wire real typechecker from typecheck.rs / core_typecheck.rs
+        if let Some(unified) = &self.last_unified {
+            let checker = TypeChecker::new();
+            if let Err(errors) = checker.check_module(unified) {
+                for e in &errors {
+                    eprintln!("  type error: {e:?}");
+                }
+                self.timings.stages.push(StageTime {
+                    stage: Stage::TypeCheck,
+                    elapsed_us: start.elapsed().as_micros() as u64,
+                });
+                return Err(CompileError::TypeCheck(format!(
+                    "{} type error(s) found",
+                    errors.len()
+                )));
+            }
+        }
         self.timings.stages.push(StageTime {
             stage: Stage::TypeCheck,
             elapsed_us: start.elapsed().as_micros() as u64,
