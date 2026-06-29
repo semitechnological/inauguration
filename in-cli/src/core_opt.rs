@@ -53,6 +53,77 @@ fn walk_expr<F: FnMut(&Expr)>(e: &Expr, f: &mut F) {
     }
 }
 
+fn map_expr_mut<F: FnMut(&mut Expr)>(e: &mut Expr, f: &mut F) {
+    match e {
+        Expr::Call { callee, args, .. } => {
+            map_expr_mut(callee, f);
+            for a in args.iter_mut() {
+                map_expr_mut(a, f);
+            }
+        }
+        Expr::Binary { lhs, rhs, .. } => {
+            map_expr_mut(lhs, f);
+            map_expr_mut(rhs, f);
+        }
+        Expr::Unary { expr, .. } => map_expr_mut(expr, f),
+        Expr::Field { base, .. } => map_expr_mut(base, f),
+        Expr::Index { base, index, .. } => {
+            map_expr_mut(base, f);
+            map_expr_mut(index, f);
+        }
+        Expr::StructInit { fields, .. } => {
+            for (_, expr) in fields.iter_mut() {
+                map_expr_mut(expr, f);
+            }
+        }
+        Expr::ArrayLit(args) => {
+            for a in args.iter_mut() {
+                map_expr_mut(a, f);
+            }
+        }
+        Expr::Closure { body, .. } => {
+            for s in body.iter_mut() {
+                map_stmt_mut(s, f);
+            }
+        }
+        _ => {}
+    }
+    f(e);
+}
+
+fn map_stmt_mut<F: FnMut(&mut Expr)>(s: &mut Stmt, f: &mut F) {
+    match s {
+        Stmt::Let(_, _, e) => map_expr_mut(e, f),
+        Stmt::Assign(_, e) => map_expr_mut(e, f),
+        Stmt::IndexAssign { base, index, value, .. } => {
+            map_expr_mut(base, f);
+            map_expr_mut(index, f);
+            map_expr_mut(value, f);
+        }
+        Stmt::Return(Some(e)) => map_expr_mut(e, f),
+        Stmt::Return(None) => {}
+        Stmt::If { cond, then_body, else_body, .. } => {
+            map_expr_mut(cond, f);
+            for s in then_body.iter_mut() {
+                map_stmt_mut(s, f);
+            }
+            for s in else_body.iter_mut() {
+                map_stmt_mut(s, f);
+            }
+        }
+        Stmt::Loop { cond, body, .. } => {
+            if let Some(c) = cond {
+                map_expr_mut(c, f);
+            }
+            for s in body.iter_mut() {
+                map_stmt_mut(s, f);
+            }
+        }
+        Stmt::Expr(e) => map_expr_mut(e, f),
+        _ => {}
+    }
+}
+
 fn map_expr<F: FnMut(Expr) -> Expr + Copy>(e: Expr, f: &mut F) -> Expr {
     match e {
         Expr::Call { callee, args, .. } => Expr::Call {
@@ -303,13 +374,15 @@ fn subst_stmt(s: &Stmt, sub: &HashMap<&str, &Expr>) -> Stmt {
     }
 }
 fn substitute_expr(e: &Expr, sub: &HashMap<&str, &Expr>) -> Expr {
-    map_expr(e.clone(), &mut |e| match e {
-        Expr::Ident(n) => sub
-            .get(n.as_str())
-            .map(|&expr| expr.clone())
-            .unwrap_or(Expr::Ident(n)),
-        other => other,
-    })
+    let mut e = e.clone();
+    map_expr_mut(&mut e, &mut |expr_mut| {
+        if let Expr::Ident(n) = expr_mut {
+            if let Some(&new_expr) = sub.get(n.as_str()) {
+                *expr_mut = new_expr.clone();
+            }
+        }
+    });
+    e
 }
 fn has_cf(stmts: &[Stmt]) -> bool {
     stmts
