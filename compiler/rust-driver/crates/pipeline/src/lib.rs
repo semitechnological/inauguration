@@ -382,4 +382,14 @@ mod tests {
         assert_eq!(timings.stage_time(Stage::Lower), 2500);
         assert_eq!(timings.stage_time(Stage::Codegen), 0);
     }
+
+    #[test]
+    fn compiler_returns_error_for_unsupported_target() {
+        let mut spec = test_spec();
+        // Modify to a target that is unsupported for mach-o
+        spec.target = "x86_64-apple-darwin".to_string();
+
+        let result = Compiler::new(spec);
+        assert!(matches!(result, Err(CompileError::Backend(_))));
+    }
 }
