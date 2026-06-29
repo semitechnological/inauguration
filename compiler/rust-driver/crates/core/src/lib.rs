@@ -685,7 +685,10 @@ mod tests {
         assert_eq!(IrType::Ptr(Box::new(IrType::I32)).size_bytes(), Some(8));
         assert_eq!(IrType::Void.size_bytes(), Some(0));
         assert_eq!(IrType::Never.size_bytes(), Some(0));
+
+        // Named edge cases
         assert_eq!(IrType::Named("Foo".to_string()).size_bytes(), None);
+        assert_eq!(IrType::Named("".to_string()).size_bytes(), None);
     }
 
     #[test]
