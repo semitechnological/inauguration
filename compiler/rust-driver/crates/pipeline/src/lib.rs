@@ -330,6 +330,16 @@ mod tests {
     }
 
     #[test]
+    fn compiler_returns_backend_error_for_invalid_target() {
+        let mut spec = test_spec();
+        // x86_64 on Apple is unsupported in our backend selection currently
+        spec.target = "x86_64-apple-darwin".to_string();
+
+        let result = Compiler::new(spec);
+        assert!(matches!(result, Err(CompileError::Backend(_))));
+    }
+
+    #[test]
     fn compiler_creates_from_spec() {
         let compiler = Compiler::new(test_spec()).unwrap();
         assert!(
