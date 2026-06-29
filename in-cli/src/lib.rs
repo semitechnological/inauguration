@@ -39,7 +39,6 @@ pub mod bytecode_compiler;
 pub mod cargo_linker;
 pub mod compile_cache;
 pub mod compile_error;
-pub mod compile_scheduler;
 pub mod compiler;
 pub mod core_ir;
 pub mod core_ir_verifier;
@@ -52,9 +51,6 @@ pub mod external_guard;
 pub mod family_typecheck;
 pub mod graph_report;
 pub mod hotreload;
-pub mod hybrid_core;
-pub mod hybrid_pipeline;
-pub mod hybrid_scheduler;
 pub mod hybrid_sil;
 pub mod in_canonical;
 pub mod in_lang_parse;
@@ -80,6 +76,7 @@ pub mod parser_registry;
 pub mod sil_to_bytecode;
 pub mod target;
 pub mod typecheck;
+#[cfg(feature = "v-native")]
 pub mod v_native;
 pub mod vm;
 

@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "inauguration"
-version = "0.7.0"
+version = "0.7.1"
 edition = "2024"
 license = "MPL-2.0"
 description = ".in language and general compiler CLI (Core IR, hybrid SIL, staging, plugins)"
@@ -32,8 +32,6 @@ libc = "0.2"
 quote = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-base64 = "0.22"
-sha1 = "0.11"
 sha2 = "0.11"
 syn = { version = "2", features = ["full"] }
 thiserror = "2"
@@ -70,10 +68,9 @@ tree-sitter-r = { version = "1.2.0", optional = true }
 tree-sitter-ruby = { version = "0.23.1", optional = true }
 tree-sitter-scala = { version = "0.26.0", optional = true }
 tree-sitter-v = { version = "0.0.2", optional = true }
-tree-sitter-language = "0.1.7"
-
 [features]
 default = []
+v-native = []  # Build V native runtime (requires `v` compiler on PATH)
 extended = [
     "tree-sitter-cpp", "tree-sitter-swift", "tree-sitter-zig",
     "tree-sitter-c-sharp", "tree-sitter-dart", "tree-sitter-elixir",
@@ -90,7 +87,6 @@ libloading = "0.9"
 notify = "8"
 
 [build-dependencies]
-which = "8"
 
 [dev-dependencies]
 criterion = "0.5"

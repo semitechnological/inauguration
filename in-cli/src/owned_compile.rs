@@ -122,6 +122,7 @@ fn timing_waves_for_jobs(jobs: usize, total_micros: u128) -> Vec<u128> {
     if jobs <= 1 {
         return vec![total_micros];
     }
+    #[cfg(feature = "v-native")]
     if crate::v_native::v_native_available() {
         let boundaries = crate::v_native::parallel::wave_plan(jobs, jobs, jobs);
         let mut waves = Vec::with_capacity(boundaries.len());
@@ -629,16 +630,6 @@ fn compile_jit(
             .map_err(|e| format!("jit-lowering-failed: {e}"))?
     };
 
-    std::fs::write(
-        "/tmp/jit_debug.log",
-        format!(
-            "code={} entry={:?}\n",
-            lowered.code.len(),
-            lowered.entry_offset
-        ),
-    )
-    .ok();
-
     // Build function offset table for all compiled functions
     let function_offsets: Vec<(String, u32, u32)> = lowered
         .function_offsets
@@ -655,36 +646,14 @@ fn compile_jit(
         })
         .collect();
 
-    // Debug: log function count and code size before invoke
-    std::fs::write(
-        "/tmp/jit_pre_invoke.log",
-        format!(
-            "fns={} code={} entry={}\n",
-            function_offsets.len(),
-            lowered.code.len(),
-            &resolved_entry
-        ),
-    )
-    .ok();
+    // Build function offset table for all compiled functions
 
     let mut rt = crate::jit_runtime::JitRuntime::new();
     rt.load(&lowered.code, &function_offsets, &lowered.relocations)
         .map_err(|e| format!("jit-load-failed: {e}"))?;
 
-    std::fs::write(
-        "/tmp/jit_loaded.log",
-        format!("loaded {} functions\n", rt.function_count()),
-    )
-    .ok();
-
     // Invoke entry function via JIT
-    std::fs::write("/tmp/jit_before_invoke.log", "before invoke\n").ok();
     let exit_code = unsafe { rt.invoke(&resolved_entry, &[]).unwrap_or(1) } as u8;
-    std::fs::write(
-        "/tmp/jit_after_invoke.log",
-        format!("exit_code={}\n", exit_code),
-    )
-    .ok();
 
     Ok(NativeCompileResult {
         artifact_path: String::new(),
@@ -1233,7 +1202,10 @@ fn try_const_answer_entry(module: &UnifiedModule, entry: &str) -> Option<u8> {
                 return None;
             }
             if let Stmt::Return(Some(Expr::IntLit(val))) = &body[0] {
+                #[cfg(feature = "v-native")]
                 let code = crate::v_native::inrt::eval_answer(*val);
+                #[cfg(not(feature = "v-native"))]
+                let code = (*val & 0xff) as u8;
                 return Some(code);
             }
         }
@@ -1246,6 +1218,7 @@ fn const_eval_entry_exit_code(
     module_id: &str,
     entry: &str,
 ) -> Result<u8, String> {
+    #[cfg(feature = "v-native")]
     if crate::v_native::v_native_available()
         && let Some(code) = try_const_answer_entry(module, entry)
     {

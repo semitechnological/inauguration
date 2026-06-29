@@ -86,12 +86,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
-name = "base64"
-version = "0.22.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
-
-[[package]]
 name = "bitflags"
 version = "2.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -426,9 +420,8 @@ dependencies = [
 
 [[package]]
 name = "inauguration"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
- "base64",
  "blake3",
  "clap",
  "criterion",
@@ -438,7 +431,6 @@ dependencies = [
  "quote",
  "serde",
  "serde_json",
- "sha1",
  "sha2",
  "syn",
  "thiserror",
@@ -459,7 +451,6 @@ dependencies = [
  "tree-sitter-javascript",
  "tree-sitter-julia",
  "tree-sitter-kotlin-ng",
- "tree-sitter-language",
  "tree-sitter-lua",
  "tree-sitter-objc",
  "tree-sitter-ocaml",
@@ -474,7 +465,6 @@ dependencies = [
  "tree-sitter-typescript",
  "tree-sitter-v",
  "tree-sitter-zig",
- "which",
 ]
 
 [[package]]
@@ -822,17 +812,6 @@ dependencies = [
  "serde",
  "serde_core",
  "zmij",
-]
-
-[[package]]
-name = "sha1"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aacc4cc499359472b4abe1bf11d0b12e688af9a805fa5e3016f9a386dc2d0214"
-dependencies = [
- "cfg-if",
- "cpufeatures",
- "digest",
 ]
 
 [[package]]
@@ -1345,15 +1324,6 @@ checksum = "a6430a72df5eb332242960fe84b3002a241163998241eb596d4f739b9757061d"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "which"
-version = "8.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48d7cd18d4acb58fb3cdfe9ea54e6cd96a4e7d4cc45c56338b236e82dad47248"
-dependencies = [
- "libc",
 ]
 
 [[package]]

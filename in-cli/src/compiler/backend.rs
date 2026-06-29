@@ -1,17 +1,9 @@
-//! Backend selection and codegen dispatch — replaces LLVM TargetMachine + MC layer.
-//!
-//! Each [`CodegenBackend`] takes an optimized [`IrModule`] and a [`ComponentSpec`],
-//! emits machine code for the target architecture and object format,
-//! and returns raw artifact bytes.
-//!
-//! The actual code emission is handled by `crate::native_emit/*` — this module
-//! provides the trait interface and selection logic.
+//! Backend selection — target triple → backend type.
 
 use std::fmt;
 
 use serde::Serialize;
 
-use super::core::IrModule;
 use super::metadata::{ArtifactKind, ComponentSpec};
 
 /// Error during code generation.
@@ -86,16 +78,6 @@ impl BackendKind {
     }
 }
 
-// ─── Backend Trait ───────────────────────────────────────────────────────
-
-/// A codegen backend that emits machine code from [`IrModule`].
-pub trait CodegenBackend: std::fmt::Debug {
-    fn kind(&self) -> BackendKind;
-    fn emit(&self, module: &IrModule, spec: &ComponentSpec) -> Result<BackendOutput, BackendError>;
-}
-
-// ─── Backend Selection ───────────────────────────────────────────────────
-
 /// Select the [`BackendKind`] for a [`ComponentSpec`].
 pub fn select_backend(spec: &ComponentSpec) -> Result<BackendKind, BackendError> {
     let triple = spec.target.to_lowercase();
@@ -160,42 +142,6 @@ pub fn backend_extension(kind: BackendKind, is_dylib: bool, is_staticlib: bool) 
     }
 }
 
-// ─── Null Backend (default/fallback) ─────────────────────────────────────
-
-/// A backend that produces a placeholder binary.
-/// Real emission is handled by `crate::native_emit::*` backends.
-#[derive(Debug)]
-pub struct NullBackend;
-
-impl CodegenBackend for NullBackend {
-    fn kind(&self) -> BackendKind {
-        BackendKind::RawBinary
-    }
-
-    fn emit(
-        &self,
-        module: &IrModule,
-        _spec: &ComponentSpec,
-    ) -> Result<BackendOutput, BackendError> {
-        if module.functions.is_empty() {
-            return Err(BackendError::EmptyModule);
-        }
-        let mut data = Vec::new();
-        let mut symbols = Vec::new();
-        for func in &module.functions {
-            let offset = data.len() as u32;
-            symbols.push((func.name.clone(), offset));
-            data.extend_from_slice(&[0x00; 16]);
-        }
-        Ok(BackendOutput {
-            data,
-            extension: "bin",
-            entry_offset: symbols.first().map(|(_, off)| *off),
-            symbol_table: symbols,
-        })
-    }
-}
-
 /// Capabilities of a given target triple.
 #[derive(Debug, Clone)]
 pub struct BackendCapabilities {
@@ -252,9 +198,18 @@ pub fn backend_capabilities(triple: &str) -> BackendCapabilities {
     }
 }
 
+/// Generate a placeholder backend output for testing/driver usage.
+pub fn placeholder_output() -> BackendOutput {
+    BackendOutput {
+        data: vec![0x00; 16],
+        extension: "bin",
+        entry_offset: Some(0),
+        symbol_table: vec![],
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::super::core::{IrBasicBlock, IrFunction, IrInstruction, IrOpcode, IrType};
     use super::super::metadata::ArtifactKind::*;
     use super::*;
 
@@ -312,27 +267,9 @@ mod tests {
     }
 
     #[test]
-    fn null_backend_emits_placeholder() {
-        let mut module = IrModule::new("test");
-        let mut func = IrFunction::new("main", vec![], IrType::Void);
-        let mut block = IrBasicBlock::new("entry");
-        block.terminator = Some(IrInstruction::new(IrOpcode::Return, IrType::Void, vec![]));
-        func.add_block(block);
-        module.functions.push(func);
-
-        let backend = NullBackend;
-        let output = backend.emit(&module, &spec("raw", RawBinary)).unwrap();
+    fn placeholder_output_works() {
+        let output = placeholder_output();
         assert_eq!(output.data.len(), 16);
         assert_eq!(output.entry_offset, Some(0));
-    }
-
-    #[test]
-    fn null_backend_errors_on_empty_module() {
-        let module = IrModule::new("empty");
-        let backend = NullBackend;
-        assert!(matches!(
-            backend.emit(&module, &spec("raw", RawBinary)),
-            Err(BackendError::EmptyModule)
-        ));
     }
 }

@@ -62,12 +62,6 @@ enum PackageCommands {
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
-enum PreviewClientKind {
-    /// Rust Unix socket reader — validates NDJSON envelopes.
-    Rust,
-}
-
-#[derive(Clone, Copy, Debug, ValueEnum)]
 enum BackendTargetCli {
     Bytecode,
     Native,
@@ -1177,6 +1171,7 @@ fn find_package_root(path: &Path) -> Option<PathBuf> {
 
 fn swift_bin_path(package_root: &Path) -> Result<PathBuf> {
     let output = Command::new("swift")
+        .env_clear()
         .arg("build")
         .arg("--show-bin-path")
         .current_dir(package_root)
