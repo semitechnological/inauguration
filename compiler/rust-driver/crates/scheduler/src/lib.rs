@@ -98,4 +98,11 @@ mod tests {
             .await;
         assert!(scheduler.is_cancelled(&old.cancel_token));
     }
+
+    #[tokio::test]
+    async fn next_task_empty_queue_returns_error() {
+        let scheduler = BuildScheduler::default();
+        let result = scheduler.next_task().await;
+        assert!(matches!(result, Err(SchedulerError::Empty)));
+    }
 }
