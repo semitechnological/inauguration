@@ -95,9 +95,20 @@ enum Commands {
         #[arg(
             long,
             default_value = ".",
-            help = "Source path: .in, .icore, .swift file, or package directory"
+            help = "Source path: .in, .icore, .swift file, package directory, or Cargo.toml"
         )]
         path: String,
+        #[arg(
+            long,
+            help = "Output binary path (for Rust sources, runs cargo build with stats)"
+        )]
+        out: Option<String>,
+        #[arg(
+            long,
+            default_value_t = false,
+            help = "Enable optimization passes (core_opt)"
+        )]
+        release: bool,
         #[arg(long, default_value = "App")]
         module_id: String,
         #[arg(
@@ -407,6 +418,8 @@ fn run() -> Result<()> {
     match cli.command {
         Commands::Build {
             path,
+            out,
+            release,
             module_id,
             verbose,
             swiftpm,
@@ -415,6 +428,8 @@ fn run() -> Result<()> {
         } => cmd_build(
             &invocation_cwd,
             &path,
+            out,
+            release,
             &module_id,
             verbose,
             swiftpm,
@@ -697,6 +712,8 @@ fn run() -> Result<()> {
 fn cmd_build(
     invocation_cwd: &Path,
     path: &str,
+    out: Option<String>,
+    release: bool,
     module_id: &str,
     verbose: bool,
     swiftpm: bool,
@@ -723,7 +740,7 @@ fn cmd_build(
                 .to_string(),
         ));
     }
-    let result = run_pipeline_for_path(&resolved, module_id, verbose, parser);
+    let result = run_pipeline_for_path(&resolved, out, release, module_id, verbose, parser);
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
     let wall = format!("{elapsed_ms:.3}ms");
     let mut emit_note = String::new();
@@ -1171,12 +1188,153 @@ fn resolve_cargo_root(cargo_toml: &Path) -> Result<PathBuf> {
 
 fn run_pipeline_for_path(
     path: &Path,
+    out: Option<String>,
+    release: bool,
     module_id: &str,
     verbose: bool,
     parser: ParserCli,
 ) -> Result<()> {
     let source_path = resolve_source_path(path)?;
+    let is_rust = source_path.extension().is_some_and(|e| e == "rs");
+
+    if let Some(out_path_str) = out {
+        // Native binary output requested
+        let out_path = if Path::new(&out_path_str).is_absolute() {
+            PathBuf::from(&out_path_str)
+        } else {
+            std::env::current_dir().unwrap_or_default().join(&out_path_str)
+        };
+
+        if is_rust {
+            // For Rust sources, parse for stats + cargo build for final binary
+            let parse_start = std::time::Instant::now();
+            let parse_result = inauguration::compiler::rust_front::parse_rust_file(&source_path);
+            let parse_ms = parse_start.elapsed().as_secs_f64() * 1000.0;
+            let (func_count, parse_ok) = match &parse_result {
+                Ok(m) => {
+                    let n = m.decls.iter()
+                        .filter(|d| matches!(d, inauguration::core_ir::Decl::Function { .. }))
+                        .count();
+                    (n, true)
+                }
+                Err(e) => {
+                    if verbose { eprintln!("  in parse: {e}"); }
+                    (0, false)
+                }
+            };
+
+            // Find Cargo.toml and run cargo build
+            let cargo_dir = find_cargo_dir(&source_path)
+                .ok_or_else(|| InError::Message("no Cargo.toml found for Rust source".to_string()))?;
+            let cargo_build_start = std::time::Instant::now();
+            // Get the actual bin name from Cargo.toml (default-run or package name)
+            let cargo_toml_path = cargo_dir.join("Cargo.toml");
+            let bin_name = cargo_bin_name(&cargo_toml_path, &source_path);
+            let mut cmd = std::process::Command::new("cargo");
+            cmd.arg("build").arg("--manifest-path").arg(&cargo_toml_path);
+            if release {
+                cmd.arg("--release");
+            }
+            cmd.arg("--bin").arg(&bin_name);
+            let cargo_status = cmd
+                .stdout(std::process::Stdio::inherit())
+                .stderr(std::process::Stdio::inherit())
+                .status()
+                .map_err(|e| InError::Message(format!("cargo build failed: {e}")))?;
+            if !cargo_status.success() {
+                return Err(InError::Message("cargo build failed".to_string()));
+            }
+
+            // Copy the binary from cargo's output dir
+            let profile_dir = if release { "release" } else { "debug" };
+            let cargo_bin = cargo_dir
+                .join("target")
+                .join(profile_dir)
+                .join(&bin_name);
+            if cargo_bin.exists() {
+                std::fs::copy(&cargo_bin, &out_path)
+                    .map_err(|e| InError::Message(format!("copy binary: {e}")))?;
+            } else if verbose {
+                eprintln!("  note: expected binary at {}, not found", cargo_bin.display());
+            }
+
+            let cargo_elapsed = cargo_build_start.elapsed().as_secs_f64() * 1000.0;
+            if verbose {
+                let total_ms = parse_ms + cargo_elapsed;
+                println!("in built {} in {:.1}ms total", out_path.display(), total_ms);
+                if parse_ok {
+                    println!("  in parse: {:.1}ms ({} functions)", parse_ms, func_count);
+                }
+                println!("  cargo build: {:.1}ms", cargo_elapsed);
+            }
+            return Ok(());
+        }
+
+        // Non-Rust sources: use native compilation directly
+        let start = std::time::Instant::now();
+        let request = inauguration::owned_compile::OwnedCompileRequest {
+            path: source_path.clone(),
+            module_id: module_id.to_string(),
+            parser,
+            target: inauguration::owned_compile::CompileTarget::Native,
+            entry: Some("main".to_string()),
+            out: Some(out_path.clone()),
+            linkage: inauguration::native_emit::NativeLinkage::Executable,
+            target_triple: None,
+            jobs: 1,
+        };
+        let report = inauguration::owned_compile::compile_owned(&request);
+        let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+        if !report.success {
+            let err = report.error.unwrap_or_else(|| "unknown error".into());
+            return Err(InError::Message(format!("compile failed: {err}")));
+        }
+        if verbose {
+            println!("Compiled {} → {} in {:.3}ms", source_path.display(), out_path.display(), elapsed_ms);
+            println!(
+                "  functions: {} parsed, {} typed",
+                report.parsed_function_count, report.typed_function_count
+            );
+        }
+        return Ok(());
+    }
+
+    // JIT mode (no --out): compile with in pipeline
+    // For Rust files, skip native lowering (too many functions can overflow stack)
+    // and just report parsing stats.
     let start = std::time::Instant::now();
+
+    if is_rust {
+        // Rust files: use compile_owned with Bytecode target (analysis only, no native lower)
+        let request = inauguration::owned_compile::OwnedCompileRequest {
+            path: source_path.clone(),
+            module_id: module_id.to_string(),
+            parser,
+            target: inauguration::owned_compile::CompileTarget::Bytecode,
+            entry: Some("main".to_string()),
+            out: None,
+            linkage: inauguration::native_emit::NativeLinkage::Executable,
+            target_triple: None,
+            jobs: 1,
+        };
+        let report = inauguration::owned_compile::compile_owned(&request);
+        let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+        if !report.success {
+            let err = report.error.unwrap_or_else(|| "unknown error".into());
+            return Err(InError::Message(format!("compile failed: {err}")));
+        }
+        if verbose {
+            println!("Compiled {} in {:.3}ms", source_path.display(), elapsed_ms);
+            println!("  target: analysis (bytecode path)");
+            println!(
+                "  functions: {} parsed, {} typed",
+                report.parsed_function_count, report.typed_function_count
+            );
+            println!("  note: use --out <path> to compile to a native binary via cargo");
+        }
+        return Ok(());
+    }
+
     let request = inauguration::owned_compile::OwnedCompileRequest {
         path: source_path.clone(),
         module_id: module_id.to_string(),
@@ -1203,6 +1361,59 @@ fn run_pipeline_for_path(
         );
     }
     Ok(())
+}
+
+fn find_cargo_dir(source_path: &Path) -> Option<PathBuf> {
+    let mut dir = source_path.parent()?;
+    loop {
+        if dir.join("Cargo.toml").exists() {
+            return Some(dir.to_path_buf());
+        }
+        dir = dir.parent()?;
+    }
+}
+
+/// Extract the cargo bin name from Cargo.toml matching the given source path.
+fn cargo_bin_name(cargo_toml: &Path, source_path: &Path) -> String {
+    let source_str = source_path.to_string_lossy();
+    if let Ok(content) = std::fs::read_to_string(cargo_toml) {
+        let mut in_bin = false;
+        let mut bin_name = String::new();
+        let mut bin_path = String::new();
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed == "[[bin]]" {
+                if !bin_name.is_empty() && (bin_path.is_empty() || source_str.contains(&bin_path)) {
+                    return bin_name;
+                }
+                in_bin = true;
+                bin_name.clear();
+                bin_path.clear();
+                continue;
+            }
+            if in_bin {
+                if trimmed.starts_with("[[") || trimmed.starts_with('[') {
+                    if !bin_name.is_empty() && (bin_path.is_empty() || source_str.contains(&bin_path)) {
+                        return bin_name;
+                    }
+                    in_bin = false;
+                } else if let Some(n) = trimmed.strip_prefix("name = \"") {
+                    if let Some(end) = n.find('"') {
+                        bin_name = n[..end].to_string();
+                    }
+                } else if let Some(p) = trimmed.strip_prefix("path = \"") {
+                    if let Some(end) = p.find('"') {
+                        bin_path = p[..end].to_string();
+                    }
+                }
+            }
+        }
+        if !bin_name.is_empty() && (bin_path.is_empty() || source_str.contains(&bin_path)) {
+            return bin_name;
+        }
+    }
+    // Fallback: use file stem
+    source_path.file_stem().unwrap_or_default().to_string_lossy().to_string()
 }
 
 fn find_package_root(path: &Path) -> Option<PathBuf> {
@@ -1531,8 +1742,8 @@ fn resolve_invocation_path(cwd: &Path, path: &str) -> PathBuf {
 
 fn compile_target_cli_to_owned(target: CompileTargetCli) -> CompileTarget {
     match target {
-        CompileTargetCli::Bytecode => CompileTarget::Jit,
-        CompileTargetCli::Native => CompileTarget::Jit,
+        CompileTargetCli::Bytecode => CompileTarget::Bytecode,
+        CompileTargetCli::Native => CompileTarget::Native,
         CompileTargetCli::Jit => CompileTarget::Jit,
     }
 }
