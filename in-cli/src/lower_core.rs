@@ -67,7 +67,7 @@ pub fn desugar_module(module: &mut UnifiedModule) {
 fn desugar_closures_in_body(body: &mut [Stmt], counter: &mut usize, extra_decls: &mut Vec<Decl>) {
     for stmt in body {
         match stmt {
-            Stmt::Let(_, _, e) | Stmt::Assign(_, e) | Stmt::Return(Some(e)) | Stmt::Expr(e) => {
+            Stmt::Let(_, _, e) | Stmt::Assign(_, e) | Stmt::FieldAssign { value: e, .. } | Stmt::Return(Some(e)) | Stmt::Expr(e) => {
                 desugar_closures_in_expr(e, counter, extra_decls);
             }
             Stmt::IndexAssign {
@@ -164,7 +164,7 @@ fn collect_free_vars(body: &[Stmt], params: &[(String, Typ)]) -> Vec<String> {
 fn rewrite_captures_in_body(body: &mut [Stmt], captures: &HashSet<String>) {
     for stmt in body {
         match stmt {
-            Stmt::Let(_, _, e) | Stmt::Assign(_, e) | Stmt::Return(Some(e)) | Stmt::Expr(e) => {
+            Stmt::Let(_, _, e) | Stmt::Assign(_, e) | Stmt::FieldAssign { value: e, .. } | Stmt::Return(Some(e)) | Stmt::Expr(e) => {
                 rewrite_captures_in_expr(e, captures);
             }
             Stmt::IndexAssign {
@@ -335,7 +335,7 @@ fn desugar_closures_in_expr(expr: &mut Expr, counter: &mut usize, extra_decls: &
 fn rewrite_method_calls_in_body(body: &mut [Stmt], method_map: &HashMap<String, String>) {
     for stmt in body {
         match stmt {
-            Stmt::Let(_, _, e) | Stmt::Assign(_, e) | Stmt::Return(Some(e)) | Stmt::Expr(e) => {
+            Stmt::Let(_, _, e) | Stmt::Assign(_, e) | Stmt::FieldAssign { value: e, .. } | Stmt::Return(Some(e)) | Stmt::Expr(e) => {
                 rewrite_method_calls_in_expr(e, method_map);
             }
             Stmt::IndexAssign {
@@ -725,7 +725,7 @@ fn collect_expr_reads(e: &Expr, reads: &mut HashSet<String>) {
 
 fn collect_stmt_reads(st: &Stmt, reads: &mut HashSet<String>) {
     match st {
-        Stmt::Let(_, _, e) | Stmt::Assign(_, e) | Stmt::Expr(e) | Stmt::Return(Some(e)) => {
+        Stmt::Let(_, _, e) | Stmt::Assign(_, e) | Stmt::FieldAssign { value: e, .. } | Stmt::Expr(e) | Stmt::Return(Some(e)) => {
             collect_expr_reads(e, reads)
         }
         Stmt::IndexAssign {
@@ -1009,6 +1009,14 @@ fn lower_stmts_with_env(
                 if force_stores || future_reads(body, idx).contains(name) {
                     out.push_str(&format!("store_var {name} %{id}\n"));
                 }
+            }
+            Stmt::FieldAssign {
+                base, value, ..
+            } => {
+                // Lower as: load base, modify field, store base
+                let base_id = lower_expr(base, env, direct_env, ssa, &mut out);
+                let val_id = lower_expr(value, env, direct_env, ssa, &mut out);
+                out.push_str(&format!("field_assign %{base_id} %{val_id}\n"));
             }
             Stmt::IndexAssign {
                 base, index, value, ..

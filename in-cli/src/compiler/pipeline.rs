@@ -325,7 +325,7 @@ fn lower_unified_to_ir(
         }
     }
 
-    // Extract functions
+    // Extract functions with body awareness
     for decl in &unified.decls {
         if let crate::core_ir::Decl::Function {
             name,
@@ -343,7 +343,6 @@ fn lower_unified_to_ir(
             let ir_ret_for_block = ir_ret.clone();
 
             let mut func = IrFunction::new(name, ir_params, ir_ret);
-
             let mut block = IrBasicBlock::new("entry");
 
             let has_return = body

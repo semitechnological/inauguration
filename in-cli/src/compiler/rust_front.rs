@@ -75,6 +75,19 @@ fn lower_file_items_at(file: &syn::File, base_dir: &Path) -> Result<UnifiedModul
                 });
             }
             syn::Item::Fn(f) => decls.push(lower_fn(f.clone())),
+            syn::Item::Impl(i) => {
+                for method in lower_impl(i) {
+                    decls.push(method);
+                }
+            }
+            syn::Item::Enum(e) => {
+                if let Some(decl) = lower_enum(e) {
+                    decls.push(decl);
+                }
+            }
+            syn::Item::Use(_u) => {
+                // Skip `use` imports — path resolution is handled by cargo_linker.rs
+            }
             syn::Item::Mod(m) => {
                 // Handle `mod foo;` (external file) and `mod foo { ... }` (inline)
                 if let Some((_brace, items)) = &m.content {
@@ -421,6 +434,103 @@ fn rust_struct_fields(fields: &syn::Fields) -> Vec<(String, Typ)> {
     }
 }
 
+fn lower_impl(i: &syn::ItemImpl) -> Vec<Decl> {
+    let self_type = i.self_ty.to_token_stream().to_string();
+    let mut decls = Vec::new();
+    for item in &i.items {
+        if let syn::ImplItem::Fn(method) = item {
+            let f = method.clone();
+            let method_name = if i.trait_.is_some() {
+                // Trait impl: use the original method name
+                f.sig.ident.to_string()
+            } else {
+                // Inherent impl: `Type.method_name`
+                format!("{}.{}", self_type, f.sig.ident)
+            };
+            // Prepend self param if present
+            let params: Vec<(String, Typ)> = f
+                .sig
+                .inputs
+                .iter()
+                .map(|arg| match arg {
+                    syn::FnArg::Typed(pat_ty) => {
+                        let pname = pattern_name(&pat_ty.pat)
+                            .unwrap_or_else(|| format!("arg"));
+                        (pname, map_type(&pat_ty.ty))
+                    }
+                    syn::FnArg::Receiver(recv) => {
+                        let self_kind = if recv.reference.is_some() {
+                            if recv.mutability.is_some() {
+                                "&mut self"
+                            } else {
+                                "&self"
+                            }
+                        } else {
+                            "self"
+        
+                        };
+                        ("self".to_string(), Typ::Named(self_kind.to_string()))
+                    }
+                })
+                .collect();
+            let ret = match &f.sig.output {
+                syn::ReturnType::Default => Typ::Void,
+                syn::ReturnType::Type(_, ty) => map_type(ty),
+            };
+            let body = lower_block(&f.block);
+            decls.push(Decl::Function {
+                name: method_name,
+                params,
+                ret,
+                body,
+                type_params: vec![],
+            });
+        }
+    }
+    decls
+}
+
+fn lower_enum(e: &syn::ItemEnum) -> Option<Decl> {
+    // Lower enum to a struct with a discriminant field
+    let enum_name = e.ident.to_string();
+    let mut fields = vec![
+        ("__discriminant".to_string(), Typ::Int),
+    ];
+    for variant in &e.variants {
+        let variant_name = variant.ident.to_string();
+        match &variant.fields {
+            syn::Fields::Named(named) => {
+                for f in &named.named {
+                    if let Some(ident) = &f.ident {
+                        fields.push((
+                            format!("{variant_name}_{}", ident),
+                            map_type(&f.ty),
+                        ));
+                    }
+                }
+            }
+            syn::Fields::Unnamed(unnamed) => {
+                for (i, f) in unnamed.unnamed.iter().enumerate() {
+                    fields.push((
+                        format!("{variant_name}_{i}"),
+                        map_type(&f.ty),
+                    ));
+                }
+            }
+            syn::Fields::Unit => {}
+        }
+    }
+    if fields.len() <= 1 {
+        // Fieldless enum — skip (no lowering needed)
+        return None;
+    }
+    Some(Decl::Struct {
+        name: enum_name,
+        fields,
+        type_params: vec![],
+    })
+}
+
 fn lower_fn(f: syn::ItemFn) -> Decl {
     let name = f.sig.ident.to_string();
     let params = f
@@ -667,8 +777,13 @@ fn lower_expr_stmt(expr: &syn::Expr, out: &mut Vec<Stmt>) {
         syn::Expr::Assign(a) => {
             if let Some(name) = assign_lhs_name(&a.left) {
                 out.push(Stmt::Assign(name, lower_expr(&a.right)));
+            } else if let syn::Expr::Field(f) = &*a.left {
+                out.push(Stmt::FieldAssign {
+                    base: lower_expr(&f.base),
+                    name: f.member.to_token_stream().to_string(),
+                    value: lower_expr(&a.right),
+                });
             }
-            // ponytail: skip field/index assignments (timings.x = val)
         }
         _ => out.push(Stmt::Expr(lower_expr(expr))),
     }
@@ -689,7 +804,7 @@ fn lower_else_body(else_branch: &syn::Expr) -> Vec<Stmt> {
 fn assign_lhs_name(lhs: &syn::Expr) -> Option<String> {
     match lhs {
         syn::Expr::Path(p) => Some(p.path.to_token_stream().to_string()),
-        syn::Expr::Field(_) => None, // ponytail: skip field assignments (timings.x = val)
+        syn::Expr::Field(_) => None, // field assignments handled in Expr::Assign branch
         syn::Expr::Index(i) => Some(i.to_token_stream().to_string()),
         _ => None,
     }

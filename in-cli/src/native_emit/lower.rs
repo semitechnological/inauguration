@@ -458,7 +458,7 @@ fn rename_calls(stmts: &mut [Stmt], name_map: &HashMap<String, String>) {
     for stmt in stmts {
         match stmt {
             Stmt::Expr(expr) | Stmt::Return(Some(expr)) => rename_call_expr(expr, name_map),
-            Stmt::Let(_, _, expr) | Stmt::Assign(_, expr) => rename_call_expr(expr, name_map),
+            Stmt::Let(_, _, expr) | Stmt::Assign(_, expr) | Stmt::FieldAssign { value: expr, .. } => rename_call_expr(expr, name_map),
             Stmt::If {
                 then_body,
                 else_body,
@@ -616,6 +616,7 @@ fn collect_body_strings(body: &[Stmt], values: &mut Vec<String>) {
         match stmt {
             Stmt::Let(_, _, expr)
             | Stmt::Assign(_, expr)
+            | Stmt::FieldAssign { value: expr, .. }
             | Stmt::Return(Some(expr))
             | Stmt::Expr(expr) => collect_expr_strings(expr, values),
             Stmt::IndexAssign {
@@ -813,7 +814,7 @@ fn alloc_declared_locals(
                     alloc_declared_locals(ctx, &arm.body, fn_name)?;
                 }
             }
-            Stmt::Return(_) | Stmt::Assign(_, _) | Stmt::IndexAssign { .. } | Stmt::Expr(_) => {}
+            Stmt::Return(_) | Stmt::Assign(_, _) | Stmt::IndexAssign { .. } | Stmt::FieldAssign { .. } | Stmt::Expr(_) => {}
             Stmt::Throw(_) => {}
             Stmt::Try { body, catches, .. } => {
                 alloc_declared_locals(ctx, body, fn_name)?;
@@ -1257,6 +1258,18 @@ fn lower_stmt(
             pending_calls,
             fn_name,
         ),
+        Stmt::FieldAssign {
+            base, name, value, ..
+        } => lower_field_assign(
+            emitter,
+            ctx,
+            base,
+            name,
+            value,
+            functions,
+            pending_calls,
+            fn_name,
+        ),
         Stmt::Expr(expr) => {
             lower_expr_into(emitter, ctx, expr, 0, functions, pending_calls, fn_name)?;
             Ok(())
@@ -1432,6 +1445,38 @@ fn lower_store_local(
             fn_name,
         ),
     }
+}
+
+fn lower_field_assign(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    base: &Expr,
+    name: &str,
+    value: &Expr,
+    functions: &HashMap<String, FunctionInfo>,
+    pending_calls: &mut Vec<PendingCall>,
+    fn_name: &str,
+) -> Result<(), String> {
+    let Expr::Ident(base_name) = base else {
+        return Err(format!(
+            "native-lower: unsupported field assign base in `{fn_name}`"
+        ));
+    };
+    let field_offset = match ctx.locals.get(base_name) {
+        Some(LocalSlot::Struct { fields, .. }) => {
+            fields.get(name).copied().ok_or_else(|| {
+                format!("native-lower: field `{name}` not found in struct `{base_name}`")
+            })?
+        }
+        _ => {
+            return Err(format!(
+                "native-lower: expected struct local for field assign `{base_name}.{name}`"
+            ));
+        }
+    };
+    lower_expr_into(emitter, ctx, value, 0, functions, pending_calls, fn_name)?;
+    emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, field_offset));
+    Ok(())
 }
 
 fn lower_index_assign(

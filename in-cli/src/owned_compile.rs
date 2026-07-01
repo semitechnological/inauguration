@@ -1113,6 +1113,12 @@ fn native_entry_module(module: &UnifiedModule, entry: &str) -> UnifiedModule {
                 | Stmt::Return(Some(expr))
                 | Stmt::Expr(expr)
                 | Stmt::Throw(expr) => collect_expr_calls(expr, out),
+                Stmt::FieldAssign {
+                    base, value, ..
+                } => {
+                    collect_expr_calls(base, out);
+                    collect_expr_calls(value, out);
+                }
                 Stmt::IndexAssign {
                     base, index, value, ..
                 } => {
