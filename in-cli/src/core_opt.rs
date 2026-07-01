@@ -94,7 +94,7 @@ fn map_expr_mut<F: FnMut(&mut Expr)>(e: &mut Expr, f: &mut F) {
 fn map_stmt_mut<F: FnMut(&mut Expr)>(s: &mut Stmt, f: &mut F) {
     match s {
         Stmt::Let(_, _, e) => map_expr_mut(e, f),
-        Stmt::Assign(_, e) => map_expr_mut(e, f),
+        Stmt::Assign(_, e) | Stmt::FieldAssign { value: e, .. } => map_expr_mut(e, f),
         Stmt::IndexAssign {
             base, index, value, ..
         } => {
@@ -169,6 +169,13 @@ fn map_stmt<F: FnMut(Expr) -> Expr + Copy>(s: Stmt, f: &mut F) -> Stmt {
     match s {
         Stmt::Let(n, t, e) => Stmt::Let(n, t, map_expr(e, f)),
         Stmt::Assign(n, e) => Stmt::Assign(n, map_expr(e, f)),
+        Stmt::FieldAssign {
+            base, name, value, ..
+        } => Stmt::FieldAssign {
+            base: map_expr(base, f),
+            name,
+            value: map_expr(value, f),
+        },
         Stmt::IndexAssign {
             base, index, value, ..
         } => Stmt::IndexAssign {
@@ -350,6 +357,13 @@ fn subst_stmt(s: &Stmt, sub: &HashMap<&str, &Expr>) -> Stmt {
     match s {
         Stmt::Let(n, t, e) => Stmt::Let(n.clone(), t.clone(), substitute_expr(e, sub)),
         Stmt::Assign(n, e) => Stmt::Assign(n.clone(), substitute_expr(e, sub)),
+        Stmt::FieldAssign {
+            base, name, value, ..
+        } => Stmt::FieldAssign {
+            base: substitute_expr(base, sub),
+            name: name.clone(),
+            value: substitute_expr(value, sub),
+        },
         Stmt::IndexAssign {
             base, index, value, ..
         } => Stmt::IndexAssign {
@@ -426,6 +440,10 @@ fn ptr_in_stmts(stmts: &[Stmt], out: &mut Vec<String>) {
                 ptr_in_stmts(else_body, out);
             }
             Stmt::Loop { body, .. } => ptr_in_stmts(body, out),
+            Stmt::FieldAssign { base, value, .. } => {
+                ptr_in_expr(base, out);
+                ptr_in_expr(value, out);
+            }
             _ => {}
         }
     }
@@ -656,6 +674,10 @@ fn collect_calls_in_stmt(s: &Stmt, out: &mut HashSet<String>) {
                 collect_calls_in_stmt(s, out);
             }
         }
+        Stmt::FieldAssign { base, value, .. } => {
+            collect_calls_in_expr(base, out);
+            collect_calls_in_expr(value, out);
+        }
         _ => {}
     }
 }
@@ -808,6 +830,10 @@ fn count_uses_in_stmt(s: &Stmt, consts: &mut HashMap<String, (i64, usize)>) {
                 count_uses_in_stmt(s, consts);
             }
         }
+        Stmt::FieldAssign { base, value, .. } => {
+            count_uses_in_expr(base, consts);
+            count_uses_in_expr(value, consts);
+        }
         Stmt::Expr(e) => count_uses_in_expr(e, consts),
         _ => {}
     }
@@ -878,6 +904,7 @@ fn dce_body(stmts: &mut Vec<Stmt>) {
                 dce_body(else_body);
             }
             Stmt::Loop { body, .. } => dce_body(body),
+            Stmt::FieldAssign { .. } => {}
             _ => {}
         }
     }
@@ -915,6 +942,10 @@ fn collect_used(stmts: &[Stmt], out: &mut HashSet<String>) {
                     collect_used_in_expr(c, out);
                 }
                 collect_used(body, out);
+            }
+            Stmt::FieldAssign { base, value, .. } => {
+                collect_used_in_expr(base, out);
+                collect_used_in_expr(value, out);
             }
             _ => {}
         }

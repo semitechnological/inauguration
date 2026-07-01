@@ -104,6 +104,17 @@ fn format_stmt(stmt: &Stmt, depth: usize, out: &mut String) {
             out.push_str(&format_expr(expr));
             out.push('\n');
         }
+        Stmt::FieldAssign {
+            base, name, value, ..
+        } => {
+            out.push_str(&indent);
+            out.push_str(&format_expr(base));
+            out.push('.');
+            out.push_str(name);
+            out.push_str(" = ");
+            out.push_str(&format_expr(value));
+            out.push('\n');
+        }
         Stmt::IndexAssign {
             base, index, value, ..
         } => {

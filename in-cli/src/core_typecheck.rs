@@ -231,6 +231,13 @@ fn check_stmt(
             }
             Ok(())
         }
+        Stmt::FieldAssign {
+            base, value, ..
+        } => {
+            check_expr(fn_name, base, facts, env)?;
+            check_expr(fn_name, value, facts, env)?;
+            Ok(())
+        }
         Stmt::IndexAssign {
             base, index, value, ..
         } => {

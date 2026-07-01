@@ -1,9 +1,0 @@
-[package]
-name = "hybrid-passes"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-
-[dependencies]
-hybrid-core = { path = "../core" }
-thiserror.workspace = true

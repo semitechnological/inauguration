@@ -159,6 +159,12 @@ pub enum Stmt {
         index: Expr,
         value: Expr,
     },
+    /// Assign to a struct field: `s.x = val`.
+    FieldAssign {
+        base: Expr,
+        name: String,
+        value: Expr,
+    },
     Return(Option<Expr>),
     If {
         cond: Expr,

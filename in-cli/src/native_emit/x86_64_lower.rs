@@ -370,6 +370,10 @@ fn rename_calls_in_stmt(stmt: &mut Stmt, name_map: &HashMap<String, String>) {
         Stmt::Loop { body, .. } => {
             rename_calls(body, name_map);
         }
+        Stmt::FieldAssign { base, value, .. } => {
+            rename_calls_in_expr(base, name_map);
+            rename_calls_in_expr(value, name_map);
+        }
         Stmt::IndexAssign {
             base, index, value, ..
         } => {
@@ -537,6 +541,7 @@ fn collect_string_literals(module: &UnifiedModule) -> Vec<String> {
         match stmt {
             Stmt::Let(_, _, expr) => from_expr(expr, out),
             Stmt::Assign(_, expr) => from_expr(expr, out),
+            Stmt::FieldAssign { value: expr, .. } => from_expr(expr, out),
             Stmt::IndexAssign {
                 base, index, value, ..
             } => {
@@ -898,6 +903,32 @@ fn lower_stmt(
             if let Some(off) = offset {
                 emitter.emit_insns(&x86_64::str64(RAX, off as u16));
             }
+            Ok(())
+        }
+        Stmt::FieldAssign {
+            base, name, value, ..
+        } => {
+            // s.x = value → compute addr = &s + field_offset, store value
+            let Expr::Ident(base_name) = base else {
+                return Err(format!(
+                    "x86_64-lower: unsupported field assign base in `{}`", ctx.fn_name
+                ));
+            };
+            if !ctx.locals.contains_key(base_name) {
+                return Err(format!(
+                    "x86_64-lower: unknown local `{base_name}` for field assign"
+                ));
+            }
+            let field_offset = match ctx.locals.get(base_name) {
+                Some(StackSlot::Struct { fields, .. }) => {
+                    fields.get(name).copied().ok_or_else(|| {
+                        format!("field `{name}` not found in struct")
+                    })?
+                }
+                _ => return Err(format!("expected struct for field assign `{base_name}.{name}`")),
+            };
+            lower_expr_into(emitter, ctx, value, RAX, pending_calls)?;
+            emitter.emit_insns(&x86_64::str64(RAX, field_offset as u16));
             Ok(())
         }
         Stmt::Expr(expr) => {

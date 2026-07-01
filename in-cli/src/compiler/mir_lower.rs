@@ -110,6 +110,10 @@ fn lower_stmt(stmt: &Stmt, func: &mut MirFunction) {
         Stmt::Assign(name, value) => {
             lower_expr_into(value, name, func);
         }
+        Stmt::FieldAssign { value, .. } => {
+            // ponytail: MIR field assign = just lower the value, skip store
+            let _ = value;
+        }
         _ => {
             func.instructions
                 .push(mir(MirOp::Typed(TypedOp::Nop), vec![]));

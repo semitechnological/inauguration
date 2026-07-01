@@ -1014,6 +1014,24 @@ fn collect_dependency_symbol_calls_from_stmt<'a>(
         | Stmt::Expr(expr) => {
             collect_dependency_symbol_calls_from_expr(expr, symbols, functions, bound_aliases, out);
         }
+        Stmt::FieldAssign {
+            base, value, ..
+        } => {
+            collect_dependency_symbol_calls_from_expr(
+                base,
+                symbols,
+                functions,
+                bound_aliases,
+                out,
+            );
+            collect_dependency_symbol_calls_from_expr(
+                value,
+                symbols,
+                functions,
+                bound_aliases,
+                out,
+            );
+        }
         Stmt::IndexAssign {
             base, index, value, ..
         } => {
