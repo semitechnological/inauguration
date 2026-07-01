@@ -124,20 +124,26 @@ Supported ecosystems: `cargo:` (crates.io), `npm:` (npm registry), `pypi:` (PyPI
 
 Pipeline: **Source → UnifiedModule → native_emit/JIT** (Core IR verifier skipped for JIT).
 
-### Compile time (JIT)
+### Compile time
 
-| Workload | Cold | Warm |
-|----------|------|------|
-| `fn main() -> Int { return 42 }` | **0.42ms** | **0.08ms** |
-| fib(35) recursive (2 functions) | **37.8ms** | **0.12ms** |
-| Self-host: `in-cli/src/main.rs` (988 functions) | **~1s** | **~0.3ms** |
-| Conformance suite (54 tests) | **3.7s** | — |
+| Workload | in (JIT, cold) | in + cargo (debug) | rustc (debug) |
+|----------|:--------------:|:------------------:|:-------------:|
+| `fn main() -> i64 { return 42 }` | **~30ms** | — | ~50ms |
+| fib(30) (2 functions) | **~30ms** | — | ~50ms |
+| Self-host: `in-cli/src/main.rs` (3444 functions) | **~12s** (analysis) | **~120ms** (parse 50ms + cargo 70ms) | **~2s** (incremental) |
+| Self-host release build | — | **~42s** (parse 43ms + cargo --release) | **~43s** |
+
+For self-hosting: `in build --path in-cli/src/main.rs --out /tmp/in --verbose`
+- Frontend parses all 3444 functions in ~50ms (rust_front → Core IR)
+- Cargo backend produces the native binary in ~70ms (incremental) or ~42s (full release)
+- The output binary is a fully working `in` compiler that can compile itself again
 
 ### Compiler binary size
 
 | Compiler | Size | Stripped | Dependencies |
 |----------|------|----------|--------------|
-| **in v0.6.14** (release, LTO+strip) | **8.7MB** | 8.7MB | self-contained, no LLVM |
+| **in v0.7.1** (release, LTO optional) | **9.2MB** | — | self-contained, no LLVM |
+| **in debug** | **26.7MB** | — | self-contained, no LLVM |
 | Zig 0.16.0 | 20.9MB | — | LLVM backend |
 | Go 1.26.4 | 13.8MB | — | self-contained |
 | V 0.5.1 | 3.9MB | — | self-contained |
@@ -163,19 +169,19 @@ cd in-cli && cargo bench
 
 ### in vs Rust: compile and binary comparison
 
-| Metric | in (JIT) | Rust (cargo, debug) | Rust (cargo, release) |
+| Metric | in (JIT) | in + cargo (debug) | Rust (cargo, release) |
 |--------|----------|---------------------|----------------------|
-| Compile `return 42` | **0.42ms** | ~178ms | ~900ms |
-| Compile fib(35) | **37ms** | — | — |
-| On-disk binary | none (in-memory JIT) | 396KB ELF | ~4.7MB static |
-| Linker needed? | no | yes (ld) | yes (ld) |
-| Compiler self-size | 8.7MB | 0.4MB + LLVM deps | — |
-| Languages | 40 | 1 (Rust) | 1 (Rust) |
-| Output | mmap'd code page | ELF/Mach-O | ELF/Mach-O |
+| Compile fib(30) | **~30ms** | — | — |
+| Self-host compile | **~12s** (parse + verify only) | **~120ms** | **~2s** (incremental) |
+| On-disk binary | none (in-memory JIT) | ELF/Mach-O | ELF/Mach-O |
+| Linker needed? | no | yes (via cargo) | yes (ld) |
+| Languages | 40 | 1 (Rust via cargo backend) | 1 (Rust) |
+| Output | mmap'd code page | native binary | native binary |
 
-**Why in is fast**: no LLVM invocation, no linker process, no ELF generation.
+**Why in is fast**: no LLVM invocation, no linker process, no ELF generation for JIT.
 JIT produces relocatable code bytes and dispatches in-process.
-`cargo` must parse, typecheck, LLVM-IR-gen, optimize, link, and write ELF.
+For native Rust binaries, in uses cargo/rustc as backend — but the frontend
+analysis (parsing 3444 functions to Core IR) completes in ~50ms.
 
 ## MIR (Machine IR) Layer
 
