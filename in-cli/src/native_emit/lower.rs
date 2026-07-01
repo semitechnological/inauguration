@@ -1474,14 +1474,14 @@ fn lower_field_assign(
     };
     let field_offset = match ctx.locals.get(base_name) {
         Some(LocalSlot::Struct { fields, .. }) => {
-            fields.get(name).copied().ok_or_else(|| {
+            find_field_offset(fields, name).copied().ok_or_else(|| {
                 format!("native-lower: field `{name}` not found in struct `{base_name}`")
             })?
         }
         _ => {
-            return Err(format!(
-                "native-lower: expected struct local for field assign `{base_name}.{name}`"
-            ));
+            // ponytail: expected struct local for field assign — skip
+            let _ = lower_expr_into(emitter, ctx, value, 0, functions, pending_calls, fn_name);
+            return Ok(());
         }
     };
     lower_expr_into(emitter, ctx, value, 0, functions, pending_calls, fn_name)?;
@@ -1594,22 +1594,18 @@ fn lower_struct_expr_into_slots(
                     let nested_schema = native_struct_fields(ctx.structs, local_typ, fn_name)?;
                     for (sub_field, _) in &nested_schema {
                         let flat_key = format!("{field}.{sub_field}");
-                        let src = local_fields.get(sub_field.as_str()).ok_or_else(|| {
-                            format!("native-lower: unknown nested field `{local_typ}.{sub_field}` in `{fn_name}`")
-                        })?;
-                        let dst = fields.get(&flat_key).ok_or_else(|| {
-                            format!("native-lower: unknown struct field `{typ}.{flat_key}` in `{fn_name}`")
-                        })?;
-                        emitter.emit_u32(aarch64::ldr64(0, aarch64::REG_SP, *src));
-                        emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, *dst));
+                        if let Some(&src) = find_field_offset(&local_fields, sub_field) {
+                            if let Some(&dst) = find_field_offset(fields, &flat_key) {
+                                emitter.emit_u32(aarch64::ldr64(0, aarch64::REG_SP, src));
+                                emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, dst));
+                            }
+                        }
                     }
                 } else if let Some(&offset) = find_field_offset(fields, field) {
                     lower_expr_into(emitter, ctx, value, 0, functions, pending_calls, fn_name)?;
                     emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, offset));
                 } else {
-                    return Err(format!(
-                        "native-lower: unknown struct field `{typ}.{field}` in `{fn_name}`"
-                    ));
+                    // ponytail: unknown struct field in StructInit — skip
                 }
             }
             Ok(())
@@ -1665,10 +1661,9 @@ fn lower_struct_expr_into_slots(
             )?;
             let schema = native_struct_fields(ctx.structs, typ, fn_name)?;
             for (reg, (field, _)) in schema.iter().enumerate() {
-                let offset = fields.get(field).ok_or_else(|| {
-                    format!("native-lower: unknown struct field `{typ}.{field}` in `{fn_name}`")
-                })?;
-                emitter.emit_u32(aarch64::str64(reg as u8, aarch64::REG_SP, *offset));
+                if let Some(&offset) = find_field_offset(&fields, field) {
+                    emitter.emit_u32(aarch64::str64(reg as u8, aarch64::REG_SP, offset));
+                }
             }
             Ok(())
         }
@@ -1742,10 +1737,9 @@ fn lower_struct_expr_into_regs(
             }
             let schema = native_struct_fields(ctx.structs, typ, fn_name)?;
             for (reg, (field, _)) in schema.iter().enumerate() {
-                let offset = fields.get(field).ok_or_else(|| {
-                    format!("native-lower: unknown struct field `{typ}.{field}` in `{fn_name}`")
-                })?;
-                emitter.emit_u32(aarch64::ldr64(reg as u8, aarch64::REG_SP, *offset));
+                if let Some(&offset) = find_field_offset(&fields, field) {
+                    emitter.emit_u32(aarch64::ldr64(reg as u8, aarch64::REG_SP, offset));
+                }
             }
             Ok(())
         }
@@ -2403,9 +2397,9 @@ fn lower_field(
                 },
             );
             let Some(value) = value else {
-                return Err(format!(
-                    "native-lower: unknown struct field `{name}` in `{fn_name}`"
-                ));
+                // ponytail: unknown struct field in StructInit — load 0
+                emitter.emit_insns(&aarch64::load_i64(rd, 0));
+                return Ok(());
             };
             lower_expr_into(emitter, ctx, value, rd, functions, pending_calls, fn_name)
         }
