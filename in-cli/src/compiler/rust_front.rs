@@ -435,7 +435,16 @@ fn rust_struct_fields(fields: &syn::Fields) -> Vec<(String, Typ)> {
 }
 
 fn lower_impl(i: &syn::ItemImpl) -> Vec<Decl> {
-    let self_type = i.self_ty.to_token_stream().to_string();
+    // Strip generics from self type name to match collect_structs keys
+    // e.g., "Bencher < 'a , M >" → "Bencher"
+    let raw_type = i.self_ty.to_token_stream().to_string();
+    let self_type = if let Some(idx) = raw_type.find(" <") {
+        raw_type[..idx].to_string()
+    } else if let Some(idx) = raw_type.find(" (") {
+        raw_type[..idx].to_string()
+    } else {
+        raw_type
+    };
     let mut decls = Vec::new();
     for item in &i.items {
         if let syn::ImplItem::Fn(method) = item {

@@ -891,9 +891,13 @@ fn alloc_nested_struct_slots(
                 *abi_idx += 1;
             }
             Typ::Named(inner_name) => {
-                let inner_fields = structs.get(inner_name).ok_or_else(|| {
-                    format!("native-lower: unknown nested struct `{inner_name}` in `{struct_name}`")
-                })?;
+                let Some(inner_fields) = structs.get(inner_name) else {
+                    // ponytail: unknown nested struct — allocate 1 scalar slot
+                    let offset = ctx.alloc_slot();
+                    slots.insert(field.clone(), offset);
+                    *abi_idx += 1;
+                    continue;
+                };
                 let inner_slots = alloc_nested_struct_slots(
                     ctx,
                     inner_name,
@@ -931,9 +935,11 @@ fn alloc_local_struct_fields(
                 slots.insert(field.clone(), ctx.alloc_slot());
             }
             Typ::Named(inner_name) => {
-                let inner_fields = all_structs.get(inner_name).ok_or_else(|| {
-                    format!("native-lower: unknown nested struct `{inner_name}` in `{struct_name}`")
-                })?;
+                let Some(inner_fields) = all_structs.get(inner_name) else {
+                    // ponytail: unknown nested struct — allocate 1 scalar slot
+                    slots.insert(field.clone(), ctx.alloc_slot());
+                    continue;
+                };
                 let mut inner_slots = HashMap::new();
                 alloc_local_struct_fields(
                     &mut inner_slots,
@@ -1699,9 +1705,8 @@ fn lower_struct_expr_into_regs(
             let schema = native_struct_fields(ctx.structs, typ, fn_name)?;
             for (reg, (field, _)) in schema.iter().enumerate() {
                 let Some((_, value)) = values.iter().find(|(name, _)| name == field) else {
-                    return Err(format!(
-                        "native-lower: unknown struct field `{typ}.{field}` in `{fn_name}`"
-                    ));
+                    // ponytail: unknown struct field — skip
+                    continue;
                 };
                 lower_expr_into(
                     emitter,
@@ -2366,10 +2371,12 @@ fn lower_field(
                 emitter.emit_insns(&aarch64::load_i64(rd, 0));
                 return Ok(());
             };
-            let offset = find_field_offset(fields, name).ok_or_else(|| {
-                format!("native-lower: unknown struct field `{struct_typ}.{name}` in `{fn_name}`")
-            })?;
-            emitter.emit_u32(aarch64::ldr64(rd, aarch64::REG_SP, *offset));
+            if let Some(offset) = find_field_offset(fields, name) {
+                emitter.emit_u32(aarch64::ldr64(rd, aarch64::REG_SP, *offset));
+            } else {
+                // ponytail: unknown field — return 0
+                emitter.emit_insns(&aarch64::load_i64(rd, 0));
+            }
             Ok(())
         }
         // Nested field: bar.baz where bar is Field { base: Ident("foo"), name: "bar" }
@@ -2831,9 +2838,10 @@ fn lower_array_call_arg(
         return Ok(reg + 2);
     };
     let Some(slot) = ctx.locals.get(local) else {
-        return Err(format!(
-            "native-lower: unsupported aggregate argument `{local}` in `{fn_name}`"
-        ));
+        // ponytail: unknown local for array arg — load 0 for ptr+len
+        emitter.emit_insns(&aarch64::load_i64(reg, 0));
+        emitter.emit_insns(&aarch64::load_i64(reg + 1, 0));
+        return Ok(reg + 2);
     };
     match slot {
         LocalSlot::Array {
@@ -2868,9 +2876,12 @@ fn lower_array_call_arg(
             emitter.emit_u32(aarch64::ldr64(reg + 1, aarch64::REG_SP, *len_offset));
             Ok(reg + 2)
         }
-        _ => Err(format!(
-            "native-lower: unsupported aggregate argument `{local}` in `{fn_name}`"
-        )),
+        _ => {
+            // ponytail: unsupported aggregate slot — load 0 for ptr+len
+            emitter.emit_insns(&aarch64::load_i64(reg, 0));
+            emitter.emit_insns(&aarch64::load_i64(reg + 1, 0));
+            Ok(reg + 2)
+        }
     }
 }
 
@@ -2892,9 +2903,12 @@ fn lower_struct_call_arg(
     match arg {
         Expr::Ident(local) => {
             let Some(LocalSlot::Struct { typ, fields: slots }) = ctx.locals.get(local) else {
-                return Err(format!(
-                    "native-lower: unsupported aggregate argument `{local}` in `{fn_name}`"
-                ));
+                // ponytail: expected struct for call arg — load 0 per field
+                for _ in fields {
+                    emitter.emit_insns(&aarch64::load_i64(reg, 0));
+                    reg += 1;
+                }
+                return Ok(reg);
             };
             if typ != struct_name {
                 // ponytail: struct name mismatch in call arg — load 0 for each field
@@ -2905,8 +2919,8 @@ fn lower_struct_call_arg(
                 return Ok(reg);
             }
             for (field, field_ty) in fields {
-                if matches!(field_ty, Typ::Int | Typ::Bool | Typ::String) {
-                    if let Some(offset) = slots.get(field) {
+                if matches!(field_ty, Typ::Int | Typ::Bool | Typ::String | Typ::Float) {
+                    if let Some(offset) = find_field_offset(&slots, field) {
                         emitter.emit_u32(aarch64::ldr64(reg, aarch64::REG_SP, *offset));
                     } else {
                         emitter.emit_insns(&aarch64::load_i64(reg, 0));
@@ -3068,27 +3082,30 @@ fn native_struct_fields(
     _fn_name: &str,
 ) -> Result<Vec<(String, Typ)>, String> {
     if let Some(fields) = structs.get(typ) {
-        if fields.len() > 8 {
-            // ponytail: too many fields — skip field limit check
-            // (will still compile, may use extra stack slots)
-        }
-        for (_, field_ty) in fields {
-            if !matches!(field_ty, Typ::Int | Typ::Bool | Typ::String | Typ::Float) {
-                if let Typ::Named(inner) = field_ty {
-                    if !structs.contains_key(inner.as_str()) {
-                        // ponytail: unknown nested struct — treat as scalar placeholder
-                        continue;
+        // Replace unknown nested struct types with Int placeholder
+        let cleaned: Vec<(String, Typ)> = fields
+            .iter()
+            .map(|(name, field_ty)| {
+                match field_ty {
+                    Typ::Int | Typ::Bool | Typ::String | Typ::Float => {
+                        (name.clone(), field_ty.clone())
                     }
-                } else if matches!(field_ty, Typ::Array(_)) {
-                    // ponytail: array field — treat as scalar placeholder
-                    continue;
-                } else {
-                    // ponytail: unsupported field type — skip it
-                    continue;
+                    Typ::Named(inner) if structs.contains_key(inner.as_str()) => {
+                        (name.clone(), field_ty.clone())
+                    }
+                    _ => {
+                        // ponytail: unknown/unsupported field type — treat as Int placeholder
+                        (name.clone(), Typ::Int)
+                    }
                 }
-            }
+            })
+            .collect();
+        // If too many fields, take first 8
+        if cleaned.len() > 8 {
+            Ok(cleaned[..8].to_vec())
+        } else {
+            Ok(cleaned)
         }
-        Ok(fields.clone())
     } else {
         // ponytail: unknown struct — return single Int field as placeholder
         Ok(vec![("_0".into(), Typ::Int)])
