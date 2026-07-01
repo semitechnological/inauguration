@@ -1573,11 +1573,35 @@ fn lower_struct_expr_into_slots(
                 ));
             }
             for (field, value) in values {
-                let offset = fields.get(field).ok_or_else(|| {
-                    format!("native-lower: unknown struct field `{typ}.{field}` in `{fn_name}`")
-                })?;
-                lower_expr_into(emitter, ctx, value, 0, functions, pending_calls, fn_name)?;
-                emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, *offset));
+                // Check if this field references a nested struct variable
+                if let Expr::Ident(local) = value
+                    && let Some(LocalSlot::Struct {
+                        typ: local_typ,
+                        fields: local_fields,
+                    }) = ctx.locals.get(local)
+                    && *local_typ != typ
+                {
+                    // Copy nested struct: iterate subfields
+                    let nested_schema = native_struct_fields(ctx.structs, local_typ, fn_name)?;
+                    for (sub_field, _) in &nested_schema {
+                        let flat_key = format!("{field}.{sub_field}");
+                        let src = local_fields.get(sub_field.as_str()).ok_or_else(|| {
+                            format!("native-lower: unknown nested field `{local_typ}.{sub_field}` in `{fn_name}`")
+                        })?;
+                        let dst = fields.get(&flat_key).ok_or_else(|| {
+                            format!("native-lower: unknown struct field `{typ}.{flat_key}` in `{fn_name}`")
+                        })?;
+                        emitter.emit_u32(aarch64::ldr64(0, aarch64::REG_SP, *src));
+                        emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, *dst));
+                    }
+                } else if let Some(&offset) = find_field_offset(fields, field) {
+                    lower_expr_into(emitter, ctx, value, 0, functions, pending_calls, fn_name)?;
+                    emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, offset));
+                } else {
+                    return Err(format!(
+                        "native-lower: unknown struct field `{typ}.{field}` in `{fn_name}`"
+                    ));
+                }
             }
             Ok(())
         }
@@ -1596,16 +1620,15 @@ fn lower_struct_expr_into_slots(
                     "native-lower: struct assignment type mismatch in `{fn_name}`"
                 ));
             }
+            // Use find_field_offset to handle flattened nested struct keys
             let schema = native_struct_fields(ctx.structs, typ, fn_name)?;
-            for (field, _) in schema.iter() {
-                let src = local_fields.get(field).ok_or_else(|| {
-                    format!("native-lower: unknown struct field `{typ}.{field}` in `{fn_name}`")
-                })?;
-                let dst = fields.get(field).ok_or_else(|| {
-                    format!("native-lower: unknown struct field `{typ}.{field}` in `{fn_name}`")
-                })?;
-                emitter.emit_u32(aarch64::ldr64(0, aarch64::REG_SP, *src));
-                emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, *dst));
+            for (field, _field_ty) in schema.iter() {
+                if let Some(&src) = find_field_offset(&local_fields, field) {
+                    if let Some(&dst) = find_field_offset(fields, field) {
+                        emitter.emit_u32(aarch64::ldr64(0, aarch64::REG_SP, src));
+                        emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, dst));
+                    }
+                }
             }
             Ok(())
         }
@@ -2289,6 +2312,23 @@ fn emit_failure_return(emitter: &mut CodeEmitter, stack_reserve: u32) {
     emit_epilogue(emitter, stack_reserve);
 }
 
+/// Find a field offset in a flattened struct field map, supporting nested struct access.
+/// When `field_map` has `"inner.val"` and we look up `"inner"`, returns the offset of `"inner.val"`.
+fn find_field_offset<'a>(field_map: &'a HashMap<String, u32>, name: &str) -> Option<&'a u32> {
+    if let Some(offset) = field_map.get(name) {
+        return Some(offset);
+    }
+    // Try prefix match for nested structs: "inner" → "inner.val"
+    let prefix = format!("{name}.");
+    field_map.iter().find_map(|(k, v)| {
+        if k.starts_with(&prefix) {
+            Some(v)
+        } else {
+            None
+        }
+    })
+}
+
 fn lower_field(
     emitter: &mut CodeEmitter,
     ctx: &mut LowerCtx<'_>,
@@ -2309,7 +2349,7 @@ fn lower_field(
                 emitter.emit_insns(&aarch64::load_i64(rd, 0));
                 return Ok(());
             };
-            let offset = fields.get(name).ok_or_else(|| {
+            let offset = find_field_offset(fields, name).ok_or_else(|| {
                 format!("native-lower: unknown struct field `{struct_typ}.{name}` in `{fn_name}`")
             })?;
             emitter.emit_u32(aarch64::ldr64(rd, aarch64::REG_SP, *offset));

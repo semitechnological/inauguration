@@ -1962,10 +1962,25 @@ fn lower_struct_init(
     pending_calls: &mut Vec<PendingCall>,
 ) -> Result<(), String> {
     let field_offsets: Vec<(String, u32)> = match ctx.locals.get(name) {
-        Some(StackSlot::Struct { fields: field_map }) => fields
-            .iter()
-            .filter_map(|(fn_, _)| field_map.get(fn_).map(|off| (fn_.clone(), *off)))
-            .collect(),
+        Some(StackSlot::Struct { fields: field_map }) => {
+            fields
+                .iter()
+                .filter_map(|(fn_, _)| {
+                    if let Some(&off) = field_map.get(fn_.as_str()) {
+                        Some((fn_.clone(), off))
+                    } else {
+                        let prefix = format!("{fn_}.");
+                        field_map.iter().find_map(|(k, &v)| {
+                            if k.starts_with(&prefix) {
+                                Some((fn_.clone(), v))
+                            } else {
+                                None
+                            }
+                        })
+                    }
+                })
+                .collect()
+        }
         _ => Vec::new(),
     };
     for (field_name, field_offset) in &field_offsets {
@@ -1990,7 +2005,21 @@ fn lower_field_access(
     };
     match ctx.locals.get(base_name) {
         Some(StackSlot::Struct { fields }) => {
-            if let Some(field_offset) = fields.get(name) {
+            let field_key = if fields.contains_key(name) {
+                name.to_string()
+            } else {
+                // Check for nested struct prefix: "inner" → "inner.val"
+                let prefix = format!("{name}.");
+                if let Some(match_key) = fields.keys().find(|k| k.starts_with(&prefix)) {
+                    match_key.clone()
+                } else {
+                    return Err(format!(
+                        "x86_64-lower: unknown field `{name}` in `{}`",
+                        ctx.fn_name
+                    ));
+                }
+            };
+            if let Some(field_offset) = fields.get(&field_key) {
                 emitter.emit_insns(&x86_64::ldr64(RAX, *field_offset as u16));
                 if target_reg != RAX {
                     emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
