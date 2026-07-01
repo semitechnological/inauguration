@@ -458,18 +458,8 @@ fn lower_impl(i: &syn::ItemImpl) -> Vec<Decl> {
                             .unwrap_or_else(|| format!("arg"));
                         (pname, map_type(&pat_ty.ty))
                     }
-                    syn::FnArg::Receiver(recv) => {
-                        let self_kind = if recv.reference.is_some() {
-                            if recv.mutability.is_some() {
-                                "&mut self"
-                            } else {
-                                "&self"
-                            }
-                        } else {
-                            "self"
-        
-                        };
-                        ("self".to_string(), Typ::Named(self_kind.to_string()))
+                    syn::FnArg::Receiver(_recv) => {
+                        ("self".to_string(), Typ::Named(self_type.clone()))
                     }
                 })
                 .collect();
@@ -863,6 +853,19 @@ fn lower_expr(expr: &syn::Expr) -> Expr {
             // `expr?` → lower expr, skip the ? for now (ponytail: full try lowering later)
             lower_expr(&t.expr)
         }
+        syn::Expr::Struct(s) => Expr::StructInit {
+            name: s.path.to_token_stream().to_string(),
+            fields: s
+                .fields
+                .iter()
+                .map(|f| {
+                    (
+                        f.member.to_token_stream().to_string(),
+                        lower_expr(&f.expr),
+                    )
+                })
+                .collect(),
+        },
         _ => Expr::Ident(expr.to_token_stream().to_string()),
     }
 }
