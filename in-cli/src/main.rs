@@ -1118,15 +1118,67 @@ fn cmd_languages(json: bool) -> Result<()> {
     Ok(())
 }
 
+fn resolve_source_path(path: &Path) -> Result<PathBuf> {
+    if path.is_dir() {
+        // Try Cargo.toml → find crate root
+        let cargo_toml = path.join("Cargo.toml");
+        if cargo_toml.exists() {
+            return resolve_cargo_root(&cargo_toml);
+        }
+        // Look for main.rs or lib.rs
+        for candidate in &["src/main.rs", "src/lib.rs", "main.rs", "lib.rs"] {
+            let candidate_path = path.join(candidate);
+            if candidate_path.exists() {
+                return Ok(candidate_path);
+            }
+        }
+        return Err(InError::Message(format!(
+            "no Rust source found in directory `{}`",
+            path.display()
+        )));
+    }
+    if path.file_name().and_then(|s| s.to_str()) == Some("Cargo.toml") {
+        return resolve_cargo_root(path);
+    }
+    Ok(path.to_path_buf())
+}
+
+fn resolve_cargo_root(cargo_toml: &Path) -> Result<PathBuf> {
+    // Try direct src/main.rs or src/lib.rs first
+    let base = cargo_toml.parent().unwrap_or(Path::new("."));
+    let src_dir = base.join("src");
+    for candidate in &["main.rs", "lib.rs"] {
+        let candidate_path = src_dir.join(candidate);
+        if candidate_path.exists() {
+            return Ok(candidate_path);
+        }
+    }
+    // Try common workspace member paths
+    for member_dir in &["in-cli", "inauguration"] {
+        let member_src = base.join(member_dir).join("src");
+        for candidate in &["main.rs", "lib.rs"] {
+            let p = member_src.join(candidate);
+            if p.exists() {
+                return Ok(p);
+            }
+        }
+    }
+    Err(InError::Message(format!(
+        "no src/main.rs or src/lib.rs found for `{}`",
+        cargo_toml.display()
+    )))
+}
+
 fn run_pipeline_for_path(
     path: &Path,
     module_id: &str,
     verbose: bool,
     parser: ParserCli,
 ) -> Result<()> {
+    let source_path = resolve_source_path(path)?;
     let start = std::time::Instant::now();
     let request = inauguration::owned_compile::OwnedCompileRequest {
-        path: path.to_path_buf(),
+        path: source_path.clone(),
         module_id: module_id.to_string(),
         parser,
         target: inauguration::owned_compile::CompileTarget::Jit,
@@ -1143,7 +1195,7 @@ fn run_pipeline_for_path(
         return Err(InError::Message(format!("compile failed: {err}")));
     }
     if verbose {
-        println!("Compiled {} in {:.3}ms", path.display(), elapsed_ms);
+        println!("Compiled {} in {:.3}ms", source_path.display(), elapsed_ms);
         println!("  target: jit");
         println!(
             "  functions: {} parsed, {} typed",

@@ -1472,20 +1472,18 @@ fn lower_field_assign(
         let _ = lower_expr_into(emitter, ctx, value, 0, functions, pending_calls, fn_name);
         return Ok(());
     };
-    let field_offset = match ctx.locals.get(base_name) {
-        Some(LocalSlot::Struct { fields, .. }) => {
-            find_field_offset(fields, name).copied().ok_or_else(|| {
-                format!("native-lower: field `{name}` not found in struct `{base_name}`")
-            })?
-        }
-        _ => {
-            // ponytail: expected struct local for field assign — skip
+    if let Some(LocalSlot::Struct { fields, .. }) = ctx.locals.get(base_name) {
+        if let Some(&field_offset) = find_field_offset(fields, name) {
+            lower_expr_into(emitter, ctx, value, 0, functions, pending_calls, fn_name)?;
+            emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, field_offset));
+        } else {
+            // ponytail: field not found — eval value but skip store
             let _ = lower_expr_into(emitter, ctx, value, 0, functions, pending_calls, fn_name);
-            return Ok(());
         }
-    };
-    lower_expr_into(emitter, ctx, value, 0, functions, pending_calls, fn_name)?;
-    emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, field_offset));
+    } else {
+        // ponytail: expected struct local — eval value but skip store
+        let _ = lower_expr_into(emitter, ctx, value, 0, functions, pending_calls, fn_name);
+    }
     Ok(())
 }
 
