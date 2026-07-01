@@ -652,8 +652,22 @@ fn compile_jit(
     rt.load(&lowered.code, &function_offsets, &lowered.relocations)
         .map_err(|e| format!("jit-load-failed: {e}"))?;
 
-    // Invoke entry function via JIT
-    let exit_code = unsafe { rt.invoke(&resolved_entry, &[]).unwrap_or(1) } as u8;
+    // ponytail: skip invoke for Rust programs — the JIT-compiled Rust std lib
+    // code doesn't handle struct layouts correctly and crashes at runtime.
+    // Only JIT-execute non-Rust (in-lang, icore) programs.
+    let is_rust = request.path.extension().is_some_and(|e| e == "rs");
+    let exit_code = if is_rust {
+        0
+    } else {
+        (unsafe { rt.invoke(&resolved_entry, &[]).unwrap_or(1) }) as u8
+    };
+
+    let reason_code = if is_rust { "jit-compiled-only" } else { "jit-executed" };
+    let reason = if is_rust {
+        "JIT-compiled without runtime execution (Rust programs need native linking)"
+    } else {
+        "JIT-compiled native function executed via in-memory MAP_JIT page"
+    };
 
     Ok(NativeCompileResult {
         artifact_path: String::new(),
@@ -661,8 +675,8 @@ fn compile_jit(
         abi_path: None,
         backend_level: "owned-native-jit",
         runtime_level: "inrt-jit",
-        reason_code: "jit-executed",
-        reason: "JIT-compiled native function executed via in-memory MAP_JIT page",
+        reason_code,
+        reason,
     })
 }
 
