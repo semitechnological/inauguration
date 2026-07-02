@@ -1206,71 +1206,44 @@ fn run_pipeline_for_path(
         };
 
         if is_rust {
-            // For Rust sources, parse for stats + cargo build for final binary
-            let parse_start = std::time::Instant::now();
-            let parse_result = inauguration::compiler::rust_front::parse_rust_file(&source_path);
-            let parse_ms = parse_start.elapsed().as_secs_f64() * 1000.0;
-            let (func_count, parse_ok) = match &parse_result {
-                Ok(m) => {
+            if verbose {
+                // Quick parse for function count
+                let parse_result = inauguration::compiler::rust_front::parse_rust_file(&source_path);
+                if let Ok(m) = &parse_result {
                     let n = m.decls.iter()
                         .filter(|d| matches!(d, inauguration::core_ir::Decl::Function { .. }))
                         .count();
-                    (n, true)
+                    eprintln!("  in parse: {n} functions");
                 }
-                Err(e) => {
-                    if verbose { eprintln!("  in parse: {e}"); }
-                    (0, false)
-                }
-            };
-
-            // Find Cargo.toml and run cargo build
-            let cargo_dir = find_cargo_dir(&source_path)
-                .ok_or_else(|| InError::Message("no Cargo.toml found for Rust source".to_string()))?;
-            let cargo_build_start = std::time::Instant::now();
-            // Get the actual bin name from Cargo.toml (default-run or package name)
-            let cargo_toml_path = cargo_dir.join("Cargo.toml");
-            let bin_name = cargo_bin_name(&cargo_toml_path, &source_path);
-            let mut cmd = std::process::Command::new("cargo");
-            cmd.arg("build").arg("--manifest-path").arg(&cargo_toml_path);
-            if release {
-                cmd.arg("--release");
             }
-            cmd.arg("--bin").arg(&bin_name);
-            let cargo_status = cmd
-                .stdout(std::process::Stdio::inherit())
-                .stderr(std::process::Stdio::inherit())
-                .status()
-                .map_err(|e| InError::Message(format!("cargo build failed: {e}")))?;
-            if !cargo_status.success() {
-                return Err(InError::Message("cargo build failed".to_string()));
-            }
-
-            // Copy the binary from cargo's output dir
-            let profile_dir = if release { "release" } else { "debug" };
-            let cargo_bin = cargo_dir
-                .join("target")
-                .join(profile_dir)
-                .join(&bin_name);
-            if cargo_bin.exists() {
-                std::fs::copy(&cargo_bin, &out_path)
-                    .map_err(|e| InError::Message(format!("copy binary: {e}")))?;
-            } else if verbose {
-                eprintln!("  note: expected binary at {}, not found", cargo_bin.display());
-            }
-
-            let cargo_elapsed = cargo_build_start.elapsed().as_secs_f64() * 1000.0;
-            if verbose {
-                let total_ms = parse_ms + cargo_elapsed;
-                println!("in built {} in {:.1}ms total", out_path.display(), total_ms);
-                if parse_ok {
-                    println!("  in parse: {:.1}ms ({} functions)", parse_ms, func_count);
-                }
-                println!("  cargo build: {:.1}ms", cargo_elapsed);
-            }
-            return Ok(());
         }
 
-        // Non-Rust sources: use native compilation directly
+        // Use native compilation for all source types (no cargo delegation)
+        let start = std::time::Instant::now();
+        let request = inauguration::owned_compile::OwnedCompileRequest {
+            path: source_path.clone(),
+            module_id: module_id.to_string(),
+            parser,
+            target: inauguration::owned_compile::CompileTarget::Native,
+            entry: Some("main".to_string()),
+            out: Some(out_path.clone()),
+            linkage: inauguration::native_emit::NativeLinkage::Executable,
+            target_triple: None,
+            jobs: 1,
+        };
+        let report = inauguration::owned_compile::compile_owned(&request);
+        let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+        if !report.success {
+            let reason = report.reason_code.as_deref().unwrap_or("unknown");
+            return Err(InError::Message(format!(
+                "in build: native compilation failed ({reason})"
+            )));
+        }
+        if verbose {
+            println!("in built {} in {:.1}ms", out_path.display(), elapsed_ms);
+            println!("  backend: {}", report.backend_level);
+        }
+        return Ok(());
         let start = std::time::Instant::now();
         let request = inauguration::owned_compile::OwnedCompileRequest {
             path: source_path.clone(),
