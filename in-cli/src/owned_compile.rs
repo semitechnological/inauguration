@@ -344,13 +344,26 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         }
     }
 
-    // ponytail: link cargo dependencies for Rust sources
+    // ponytail: link cargo dependencies + crate root for Rust sources
     let is_rust_source = request.path.extension().is_some_and(|e| e == "rs");
     if is_rust_source {
         let project_dir = request.path.parent().unwrap_or(Path::new("."));
         let deps = crate::cargo_linker::compile_cargo_dependencies(project_dir);
         if !deps.is_empty() {
             crate::cargo_linker::merge_dependency_modules(&mut module, deps);
+        }
+        // Also compile the crate's library root (lib.rs) to make crate-local
+        // functions available (e.g. inauguration::agent_mode::analyze_path)
+        let crate_root = crate::cargo_linker::find_crate_root(project_dir);
+        if let Ok(ref root) = crate_root {
+            if root != &request.path {
+                if let Ok(crate_module) = crate::compiler::rust_front::parse_rust_file(root) {
+                    let crate_name = project_dir.file_stem()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    crate::cargo_linker::merge_dependency_modules(&mut module, vec![(crate_name, crate_module)]);
+                }
+            }
         }
     }
 
@@ -1188,7 +1201,7 @@ fn native_entry_module(module: &UnifiedModule, entry: &str) -> UnifiedModule {
             let Decl::Function { name, body, .. } = decl else {
                 continue;
             };
-            if reachable.contains(name) {
+            if reachable.contains(name) || reachable.iter().any(|r| r.ends_with(&format!("::{name}"))) {
                 collect_stmt_calls(body, &mut next);
             }
         }
@@ -1197,21 +1210,17 @@ fn native_entry_module(module: &UnifiedModule, entry: &str) -> UnifiedModule {
         }
         reachable = next;
     }
-    let filtered: Vec<Decl> = module
-        .decls
-        .iter()
-        .filter(|decl| match decl {
-            Decl::Function { name, .. } => reachable.contains(name),
-            _ => true,
-        })
-        .cloned()
-        .collect();
-    for d in &filtered {
-        if let Decl::Function { name, .. } = d {
-            eprintln!("  fn: {}", name);
-        }
-    }
-    UnifiedModule::new(filtered)
+    UnifiedModule::new(
+        module
+            .decls
+            .iter()
+            .filter(|decl| match decl {
+                Decl::Function { name, .. } => reachable.contains(name) || reachable.iter().any(|r| r.ends_with(&format!("::{name}"))),
+                _ => true,
+            })
+            .cloned()
+            .collect(),
+    )
 }
 
 fn try_const_answer_entry(module: &UnifiedModule, entry: &str) -> Option<u8> {

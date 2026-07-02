@@ -117,7 +117,14 @@ pub fn native_link_name(name: &str) -> String {
         "std::io::_print" | "print" => "_printf".to_string(),
         _ => {
             // Replace :: with . for valid assembly symbol names (Mach-O accepts dots)
-            let asm_safe = cleaned.replace("::", ".");
+            // Strip angle-bracket generic params: serde_json.from_str.<BenchMetric> → serde_json.from_str
+            let no_generics: String = cleaned.chars().filter(|&c| c != '<' && c != '>').collect();
+            // Remove trailing dots
+            let trimmed = no_generics.trim_end_matches('.');
+            let asm_safe = trimmed.replace("::", ".");
+            if asm_safe.is_empty() {
+                return "_unknown".to_string();
+            }
             if asm_safe.starts_with('_') {
                 asm_safe
             } else {
@@ -2910,6 +2917,22 @@ fn lower_call(
         return lower_inrt_call(emitter, ctx, target, args, rd, fn_name);
     }
     if !functions.contains_key(target) {
+        // ponytail: try the bare function name from a module-qualified path
+        // e.g., "inauguration::agent_mode::analyze_path" → try "analyze_path"
+        let bare_name = if let Some(idx) = target.rfind("::") {
+            let last = &target[idx + 2..];
+            if functions.contains_key(last) {
+                Some(last)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        if let Some(name) = bare_name {
+            // Re-invoke with the bare function name
+            return lower_call(emitter, ctx, &Expr::Ident(name.to_string()), args, rd, functions, pending_calls, fn_name);
+        }
         // Load args into registers
         for (i, arg) in args.iter().enumerate() {
             if i > 7 { break; }
@@ -3300,10 +3323,17 @@ fn call_return_type<'a>(
             "native-lower: unsupported call callee in `{fn_name}`"
         ));
     };
-    Ok(functions
-        .get(target)
-        .map(|func| &func.ret)
-        .unwrap_or(&UNKNOWN_FN_RET_TY))
+    // ponytail: try bare function name from module-qualified path
+    if let Some(func) = functions.get(target) {
+        return Ok(&func.ret);
+    }
+    if let Some(idx) = target.rfind("::") {
+        let last = &target[idx + 2..];
+        if let Some(func) = functions.get(last) {
+            return Ok(&func.ret);
+        }
+    }
+    Ok(&UNKNOWN_FN_RET_TY)
 }
 
 static UNKNOWN_FN_RET_TY: Typ = Typ::Int;

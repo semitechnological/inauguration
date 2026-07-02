@@ -118,6 +118,40 @@ pub fn compile_cargo_dependencies(project_dir: &Path) -> Vec<(String, UnifiedMod
 /// Merge dependency modules into the main module.
 /// All function and struct declarations from dependencies are added.
 /// Also creates aliases for common re-export patterns.
+/// Find the crate root file (lib.rs or main.rs) from a project directory.
+pub fn find_crate_root(project_dir: &Path) -> Result<PathBuf, String> {
+    // Check for Cargo.toml
+    let cargo_toml = project_dir.join("Cargo.toml");
+    if cargo_toml.exists() {
+        if let Ok(content) = std::fs::read_to_string(&cargo_toml) {
+            let lines: Vec<&str> = content.lines().collect();
+            // Find [lib] section and look for path = ... within it
+            for i in 0..lines.len() {
+                if lines[i].trim() == "[lib]" {
+                    // Scan subsequent lines until next section
+                    for j in (i + 1)..lines.len().min(i + 20) {
+                        let trimmed = lines[j].trim();
+                        if trimmed.starts_with('[') { break; } // next section
+                        if let Some(val) = trimmed
+                            .strip_prefix("path")
+                            .and_then(|s| s.split('=').nth(1).map(|v| v.trim().trim_matches('"').to_string()))
+                        {
+                            let lib_rs = project_dir.join(&val);
+                            if lib_rs.exists() { return Ok(lib_rs); }
+                        }
+                    }
+                }
+            }
+            // Default: src/lib.rs
+            let default_lib = project_dir.join("src").join("lib.rs");
+            if default_lib.exists() {
+                return Ok(default_lib);
+            }
+        }
+    }
+    Err("no crate root found".to_string())
+}
+
 pub fn merge_dependency_modules(main: &mut UnifiedModule, deps: Vec<(String, UnifiedModule)>) {
     for (crate_name, mut dep_module) in deps {
         // Prefix function names with crate name to avoid duplicates across crates
