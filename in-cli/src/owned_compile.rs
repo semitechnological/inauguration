@@ -1078,11 +1078,16 @@ fn native_entry_module(module: &UnifiedModule, entry: &str) -> UnifiedModule {
     use crate::core_ir::{Expr, Stmt};
     use std::collections::HashSet;
 
+    /// Normalize a name by removing spaces around :: separators
+    fn normalize_name(name: &str) -> String {
+        name.chars().filter(|&c| c != ' ').collect()
+    }
+
     fn collect_expr_calls(expr: &Expr, out: &mut HashSet<String>) {
         match expr {
             Expr::Call { callee, args, .. } => {
                 if let Expr::Ident(name) = callee.as_ref() {
-                    out.insert(name.clone());
+                    out.insert(normalize_name(name));
                 } else {
                     collect_expr_calls(callee, out);
                 }
@@ -1114,7 +1119,7 @@ fn native_entry_module(module: &UnifiedModule, entry: &str) -> UnifiedModule {
             Expr::Ident(name) => {
                 // Also track function names used as values (address references)
                 // The caller will filter these against module function names.
-                out.insert(name.clone());
+                out.insert(normalize_name(name));
             }
             Expr::IntLit(_) | Expr::FloatLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => {}
         }
@@ -1192,18 +1197,21 @@ fn native_entry_module(module: &UnifiedModule, entry: &str) -> UnifiedModule {
         }
         reachable = next;
     }
-
-    UnifiedModule::new(
-        module
-            .decls
-            .iter()
-            .filter(|decl| match decl {
-                Decl::Function { name, .. } => reachable.contains(name),
-                _ => true,
-            })
-            .cloned()
-            .collect(),
-    )
+    let filtered: Vec<Decl> = module
+        .decls
+        .iter()
+        .filter(|decl| match decl {
+            Decl::Function { name, .. } => reachable.contains(name),
+            _ => true,
+        })
+        .cloned()
+        .collect();
+    for d in &filtered {
+        if let Decl::Function { name, .. } = d {
+            eprintln!("  fn: {}", name);
+        }
+    }
+    UnifiedModule::new(filtered)
 }
 
 fn try_const_answer_entry(module: &UnifiedModule, entry: &str) -> Option<u8> {
