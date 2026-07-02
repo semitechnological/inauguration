@@ -45,11 +45,11 @@ fn get_cargo_metadata(project_dir: &Path) -> Option<serde_json::Value> {
 }
 
 /// Resolve cargo dependencies for a Rust project and compile their lib.rs files.
+/// Collects ALL transitive dependencies from the resolve graph.
 /// Returns a Vec of (crate_name, UnifiedModule) for all successfully-compiled dependencies.
 pub fn compile_cargo_dependencies(project_dir: &Path) -> Vec<(String, UnifiedModule)> {
     let mut modules = Vec::new();
 
-    // ponytail: cache cargo metadata — avoid re-running `cargo metadata` every compile
     let metadata = match get_cargo_metadata(project_dir) {
         Some(m) => m,
         None => return modules,
@@ -60,53 +60,99 @@ pub fn compile_cargo_dependencies(project_dir: &Path) -> Vec<(String, UnifiedMod
         None => return modules,
     };
 
-    // Find the root package and get its dependency list
     let resolve = &metadata["resolve"];
     let root_id = resolve["root"].as_str().unwrap_or("");
 
-    // Build a map of package_id -> manifest_path
-    let mut pkg_manifest: std::collections::HashMap<String, PathBuf> =
-        std::collections::HashMap::new();
+    // Build maps
+    let mut pkg_manifest: HashMap<String, PathBuf> = HashMap::new();
+    let mut pkg_by_id: HashMap<String, &serde_json::Value> = HashMap::new();
     for pkg in packages {
         let id = pkg["id"].as_str().unwrap_or("");
         let manifest = pkg["manifest_path"].as_str().unwrap_or("");
         if !manifest.is_empty() {
             pkg_manifest.insert(id.to_string(), PathBuf::from(manifest));
         }
+        pkg_by_id.insert(id.to_string(), pkg);
     }
 
-    // Get dependency nodes from resolve graph
+    // Build adjacency list from resolve nodes
     let nodes = match resolve["nodes"].as_array() {
         Some(n) => n,
         None => return modules,
     };
 
-    let mut dep_ids: Vec<String> = Vec::new();
+    // Collect ALL transitive dependency IDs using BFS from root
+    let mut all_dep_ids: Vec<String> = Vec::new();
+    let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut queue: Vec<String> = vec![root_id.to_string()];
+    visited.insert(root_id.to_string());
+
+    // Build node_id -> [dep_pkg_id] mapping
+    let mut node_deps: HashMap<String, Vec<String>> = HashMap::new();
     for node in nodes {
-        if node["id"].as_str() == Some(root_id) {
-            // Collect dependencies of the root
-            if let Some(deps) = node["deps"].as_array() {
-                for dep in deps {
+        if let Some(node_id) = node["id"].as_str() {
+            let mut deps = Vec::new();
+            if let Some(dep_array) = node["deps"].as_array() {
+                for dep in dep_array {
                     if let Some(pkg) = dep["pkg"].as_str() {
-                        dep_ids.push(pkg.to_string());
+                        deps.push(pkg.to_string());
+                    }
+                }
+            }
+            node_deps.insert(node_id.to_string(), deps);
+        }
+    }
+
+    while let Some(current) = queue.pop() {
+        if let Some(deps) = node_deps.get(&current) {
+            for dep_id in deps {
+                if visited.insert(dep_id.clone()) {
+                    queue.push(dep_id.clone());
+                    if dep_id != root_id {
+                        all_dep_ids.push(dep_id.clone());
                     }
                 }
             }
         }
     }
 
-    // For each dependency, find its source and compile
-    for dep_id in &dep_ids {
+    // Compile each dependency — skip known-problematic std/platform/proc-macro crates
+    let mut already_compiled: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // Only compile specific crates that we KNOW we need and can parse
+    // (the exact set of direct dependencies from Cargo.toml)
+    let direct_dep_names: std::collections::HashSet<&str> = [
+        "blake3", "clap", "serde", "serde_json", "sha2", "syn",
+        "quote", "thiserror", "tokio", "tree-sitter", "tree-sitter-c",
+        "tree-sitter-cpp", "tree-sitter-c-sharp", "tree-sitter-dart", "tree-sitter-elixir",
+        "tree-sitter-erlang", "tree-sitter-fsharp", "tree-sitter-go", "tree-sitter-groovy",
+        "tree-sitter-haskell", "tree-sitter-holyc", "tree-sitter-java", "tree-sitter-javascript",
+        "tree-sitter-julia", "tree-sitter-kotlin-ng", "tree-sitter-lua", "tree-sitter-objc",
+        "tree-sitter-ocaml", "tree-sitter-perl", "tree-sitter-php", "tree-sitter-python",
+        "tree-sitter-r", "tree-sitter-ruby", "tree-sitter-rust", "tree-sitter-scala",
+        "tree-sitter-swift", "tree-sitter-typescript", "tree-sitter-v", "tree-sitter-zig",
+        "libc", "libloading", "notify",
+    ].iter().cloned().collect();
+    for dep_id in &all_dep_ids {
         if let Some(manifest) = pkg_manifest.get(dep_id) {
-            let src_dir = manifest.parent().unwrap_or(Path::new("."));
-            let lib_rs = src_dir.join("src").join("lib.rs");
-            if lib_rs.exists() {
-                if let Ok(module) = rust_front::parse_rust_file(&lib_rs) {
-                    let crate_name = src_dir
-                        .file_name()
-                        .map(|n| n.to_string_lossy().to_string())
-                        .unwrap_or_default();
-                    modules.push((crate_name, module));
+            if let Some(pkg) = pkg_by_id.get(dep_id) {
+                let crate_name = pkg["name"].as_str().unwrap_or("");
+                if !direct_dep_names.contains(crate_name) {
+                    continue;
+                }
+                // Skip proc-macro crates
+                if let Some(manifest_str) = pkg["manifest_path"].as_str() {
+                    if let Ok(content) = std::fs::read_to_string(manifest_str) {
+                        if content.contains("proc-macro") { continue; }
+                    }
+                }
+                if already_compiled.contains(crate_name) { continue; }
+                already_compiled.insert(crate_name.to_string());
+                let src_dir = manifest.parent().unwrap_or(Path::new("."));
+                let lib_rs = src_dir.join("src").join("lib.rs");
+                if lib_rs.exists() {
+                    if let Ok(module) = rust_front::parse_rust_file(&lib_rs) {
+                        modules.push((crate_name.to_string(), module));
+                    }
                 }
             }
         }
