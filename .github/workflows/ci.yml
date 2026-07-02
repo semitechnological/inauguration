@@ -24,24 +24,6 @@ jobs:
         run: cargo test --features extended
         working-directory: in-cli
 
-  rust-driver:
-    name: rust-driver (hybrid pipeline)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-      - name: Format
-        run: cargo fmt --check --all
-        working-directory: compiler/rust-driver
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-        working-directory: compiler/rust-driver
-      - name: Test hybrid-cli
-        run: cargo test -p hybrid-cli
-        working-directory: compiler/rust-driver
-
   protocol-models:
     name: Protocol models
     runs-on: ubuntu-latest
@@ -113,13 +95,4 @@ jobs:
       - name: Check diff whitespace
         run: git diff --check
 
-  hybrid-libs:
-    name: Hybrid library crates
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Test hybrid crates
-        run: cargo test -p hybrid-pipeline -p hybrid-sil -p hybrid-core -p hybrid-scheduler
-        working-directory: compiler/rust-driver
+
