@@ -116,10 +116,12 @@ pub fn native_link_name(name: &str) -> String {
         "std::process::exit" | "std::process::abort" => "_exit".to_string(),
         "std::io::_print" | "print" => "_printf".to_string(),
         _ => {
-            if cleaned.starts_with('_') {
-                cleaned
+            // Replace :: with . for valid assembly symbol names (Mach-O accepts dots)
+            let asm_safe = cleaned.replace("::", ".");
+            if asm_safe.starts_with('_') {
+                asm_safe
             } else {
-                format!("_{}", cleaned)
+                format!("_{}", asm_safe)
             }
         }
     }
@@ -360,6 +362,12 @@ pub fn lower_module(
 ) -> Result<LoweredModule, String> {
     // Clear any stale external refs from previous invocations
     TL_EXTERNAL_REFS.with(|refs| refs.borrow_mut().clear());
+    for d in &module.decls {
+        if let Decl::Function { name, .. } = d {
+        }
+        if let Decl::Struct { name, .. } = d {
+        }
+    }
     let functions = collect_functions(module)?;
     let structs = collect_structs(module);
     let strings = collect_strings(module);
