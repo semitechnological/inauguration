@@ -16,6 +16,8 @@ const LC_BUILD_VERSION: u32 = 0x32;
 const PLATFORM_MACOS: u32 = 1;
 const N_SECT: u8 = 0x0e;
 const N_EXT: u8 = 0x01;
+const N_UNDF: u8 = 0x00;
+const ARM64_RELOC_BRANCH26: u32 = 2;
 
 const VM_PROT_NONE: i32 = 0;
 const VM_PROT_READ: i32 = 1;
@@ -44,6 +46,8 @@ pub struct MachOImage {
     pub code: Vec<u8>,
     pub entry_offset: Option<u32>,
     pub exports: Vec<ExportSymbol>,
+    /// External symbol references: (instruction_offset_in_code, symbol_name)
+    pub external_refs: Vec<(u32, String)>,
 }
 
 #[cfg(test)]
@@ -58,6 +62,7 @@ pub fn write_executable(exe: &MachOExecutable, out: &mut Vec<u8>) {
         code: exe.code.clone(),
         entry_offset: Some(exe.entry_offset),
         exports: Vec::new(),
+        external_refs: Vec::new(),
     };
     write_image(&image, MachOLinkage::Executable, "", out);
 }
@@ -447,6 +452,156 @@ fn write_fixed_name(out: &mut Vec<u8>, name: &str) {
     out.extend_from_slice(&buf);
 }
 
+/// Write a Mach-O relocatable object (.o) suitable for linking with `ld`.
+/// Includes proper ARM64_RELOC_BRANCH26 relocation entries for external symbols.
+pub fn write_relocatable_object(image: &MachOImage) -> Vec<u8> {
+    let mut out = Vec::new();
+    let code = &image.code;
+    let code_size = code.len();
+
+    let num_def_syms = image.exports.len();
+
+    // Build string table
+    let mut strtab = vec![0u8];
+    let mut str_offsets: Vec<(String, u32)> = Vec::new();
+    let mut exports_sorted = image.exports.clone();
+    exports_sorted.sort_by(|a, b| a.name.cmp(&b.name));
+    for export in &exports_sorted {
+        let off = strtab.len() as u32;
+        strtab.extend_from_slice(export.name.as_bytes());
+        strtab.push(0);
+        str_offsets.push((export.name.clone(), off));
+    }
+
+    let mut ext_str_offsets: Vec<(String, u32)> = Vec::new();
+    for (_, name) in &image.external_refs {
+        if !ext_str_offsets.iter().any(|(n, _)| n == name) {
+            let off = strtab.len() as u32;
+            strtab.extend_from_slice(name.as_bytes());
+            strtab.push(0);
+            ext_str_offsets.push((name.clone(), off));
+        }
+    }
+
+    let num_syms: u32 = 1 + num_def_syms as u32 + ext_str_offsets.len() as u32;
+    let num_cmds: u32 = 3; // segment + symtab + build_version
+
+    // Calculate layout
+    let segment_cmd_size: u32 = 72 + 80; // seg + 1 section
+    let symtab_cmd_size: u32 = 24;
+    let build_version_cmd_size: u32 = 24;
+    let header_size: u32 = 32; // mach_header_64
+    let sizeofcmds = segment_cmd_size + symtab_cmd_size + build_version_cmd_size;
+    let text_fileoff = header_size + sizeofcmds; // header + load commands, already 4-byte aligned
+    let text_vmsize = ((code_size as u32) + 3) & !3u32; // align to 4
+    let strtab_off = text_fileoff + text_vmsize;
+    const NLIST64_SIZE: u32 = 16; // n_strx(4) + n_type(1) + n_sect(1) + n_desc(2) + n_value(8)
+    let nlist_off = strtab_off + strtab.len() as u32;
+    let file_size = nlist_off + num_syms * NLIST64_SIZE;
+
+    // Relocation entries
+    let reloc_data: Vec<(u32, u32)> = image.external_refs.iter().map(|(site, name)| {
+        let undef_idx = 1 + num_def_syms as u32
+            + ext_str_offsets.iter().position(|(n, _)| n == name).unwrap_or(0) as u32;
+        (*site, undef_idx)
+    }).collect();
+    let reloc_off = file_size;
+    let reloc_count = reloc_data.len() as u32;
+
+    // Mach-O 64 header: magic + cputype + cpusubtype + filetype + ncmds + sizeofcmds + flags + reserved = 32 bytes
+    out.extend_from_slice(&MH_MAGIC_64.to_le_bytes());
+    out.extend_from_slice(&CPU_TYPE_ARM64.to_le_bytes());
+    out.extend_from_slice(&CPU_SUBTYPE_ARM64_ALL.to_le_bytes());
+    out.extend_from_slice(&MH_OBJECT.to_le_bytes());
+    out.extend_from_slice(&num_cmds.to_le_bytes());
+    out.extend_from_slice(&sizeofcmds.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes()); // flags
+    out.extend_from_slice(&0u32.to_le_bytes()); // reserved
+
+    // Segment __TEXT (MH_OBJECT)
+    // fileoff/filesize must match section's offset/size range
+    out.extend_from_slice(&LC_SEGMENT_64.to_le_bytes());
+    out.extend_from_slice(&segment_cmd_size.to_le_bytes());
+    write_fixed_name(&mut out, "__TEXT");
+    out.extend_from_slice(&0u64.to_le_bytes()); // vmaddr (0 for .o)
+    out.extend_from_slice(&(text_vmsize as u64).to_le_bytes()); // vmsize
+    out.extend_from_slice(&(text_fileoff as u64).to_le_bytes()); // fileoff = section offset
+    out.extend_from_slice(&(text_vmsize as u64).to_le_bytes()); // filesize = section size
+    out.extend_from_slice(&(TEXT_PROT | 0x2).to_le_bytes()); // maxprot rwx (for ld compat)
+    out.extend_from_slice(&(TEXT_PROT | 0x2).to_le_bytes()); // initprot rwx
+    out.extend_from_slice(&1u32.to_le_bytes()); // nsects
+    out.extend_from_slice(&0u32.to_le_bytes()); // flags
+
+    // Section __TEXT,__text
+    write_fixed_name(&mut out, "__text");  // sectname
+    write_fixed_name(&mut out, "__TEXT");  // segname
+    out.extend_from_slice(&0u64.to_le_bytes()); // addr (0 for .o)
+    out.extend_from_slice(&(text_vmsize as u64).to_le_bytes()); // size
+    out.extend_from_slice(&text_fileoff.to_le_bytes()); // offset
+    out.extend_from_slice(&2u32.to_le_bytes()); // align (2^2 = 4)
+    out.extend_from_slice(&reloc_off.to_le_bytes()); // reloff
+    out.extend_from_slice(&reloc_count.to_le_bytes()); // nreloc
+    out.extend_from_slice(&0x8000_0400u32.to_le_bytes()); // flags: S_REGULAR | ATTR_PURE_INSTRUCTIONS | ATTR_SOME_INSTRUCTIONS
+    out.extend_from_slice(&0u32.to_le_bytes()); // reserved1
+    out.extend_from_slice(&0u32.to_le_bytes()); // reserved2
+    out.extend_from_slice(&0u32.to_le_bytes()); // reserved3
+
+    // LC_SYMTAB
+    out.extend_from_slice(&LC_SYMTAB.to_le_bytes());
+    out.extend_from_slice(&symtab_cmd_size.to_le_bytes());
+    out.extend_from_slice(&nlist_off.to_le_bytes());
+    out.extend_from_slice(&num_syms.to_le_bytes());
+    out.extend_from_slice(&strtab_off.to_le_bytes());
+    out.extend_from_slice(&(strtab.len() as u32).to_le_bytes());
+
+    // LC_BUILD_VERSION
+    out.extend_from_slice(&LC_BUILD_VERSION.to_le_bytes());
+    out.extend_from_slice(&build_version_cmd_size.to_le_bytes());
+    out.extend_from_slice(&PLATFORM_MACOS.to_le_bytes());
+    out.extend_from_slice(&0x000E_0000u32.to_le_bytes()); // minos 14.0
+    out.extend_from_slice(&0x000E_0000u32.to_le_bytes()); // sdk 14.0
+    out.extend_from_slice(&0u32.to_le_bytes()); // ntools
+
+    // Code
+    out.extend_from_slice(code);
+    let pad = text_vmsize as usize - code.len();
+    if pad > 0 { out.extend_from_slice(&vec![0u8; pad]); }
+
+    // String table
+    out.extend_from_slice(&strtab);
+
+    // Symbol table — each nlist_64 entry is 16 bytes: n_strx(4) + n_type(1) + n_sect(1) + n_desc(2) + n_value(8)
+    // sym 0: local __text start
+    out.extend_from_slice(&0u32.to_le_bytes()); // n_strx
+    out.extend_from_slice(&[N_SECT, 1u8, 0u8, 0u8]); // n_type, n_sect, n_desc (2 bytes)
+    out.extend_from_slice(&0u64.to_le_bytes()); // n_value
+
+    // Defined exports
+    for export in &exports_sorted {
+        let &s_off = str_offsets.iter().find(|(n, _)| n == &export.name).map(|(_, o)| o).unwrap_or(&0u32);
+        out.extend_from_slice(&s_off.to_le_bytes()); // n_strx
+        out.extend_from_slice(&[N_SECT | N_EXT, 1u8, 0u8, 0u8]); // n_type, n_sect, n_desc
+        out.extend_from_slice(&(export.offset as u64).to_le_bytes()); // n_value
+    }
+
+    // Undefined externals
+    for (_, s_off) in &ext_str_offsets {
+        out.extend_from_slice(&s_off.to_le_bytes()); // n_strx
+        out.extend_from_slice(&[N_UNDF | N_EXT, 0u8, 0u8, 0u8]); // n_type, n_sect, n_desc
+        out.extend_from_slice(&0u64.to_le_bytes()); // n_value
+    }
+
+    // Relocation entries (generic relocation_info format)
+    // r_symbolnum(24), r_pcrel(1), r_length(2), r_extern(1), r_type(4)
+    for &(site, sym_idx) in &reloc_data {
+        out.extend_from_slice(&site.to_le_bytes());
+        let info = sym_idx | (1 << 24) | (2 << 25) | (1 << 27) | (ARM64_RELOC_BRANCH26 << 28);
+        out.extend_from_slice(&info.to_le_bytes());
+    }
+
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -459,6 +614,7 @@ mod tests {
                 name: "answer".into(),
                 offset: 0,
             }],
+            external_refs: Vec::new(),
         }
     }
 

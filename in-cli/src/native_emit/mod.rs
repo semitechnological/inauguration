@@ -22,7 +22,7 @@ pub use lower::{
     NativeLinkage, TARGET_TRIPLE, compile_native_artifact, compile_native_artifact_for_host,
     compile_native_executable, compile_native_executable_for_host, host_supports_native_subset,
 };
-pub use macho::{ExportSymbol, MachOLinkage};
+pub use macho::{ExportSymbol, MachOLinkage, write_relocatable_object};
 pub use object::{
     NATIVE_OBJECT_SUBSET as NATIVE_OBJECT_REASON, NativeObjectArtifact, NativeObjectRequest,
     emit_native_object,

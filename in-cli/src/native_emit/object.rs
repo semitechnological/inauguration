@@ -177,6 +177,7 @@ fn emit_aarch64_macho_archive(request: &NativeObjectRequest<'_>) -> NativeObject
             name: request.entry.to_string(),
             offset: 0,
         }],
+        external_refs: Vec::new(),
     };
     let mut bytes = Vec::new();
     write_image(&image, MachOLinkage::StaticLib, request.entry, &mut bytes);

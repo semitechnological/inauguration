@@ -624,6 +624,7 @@ fn compile_jit(
                 .into_iter()
                 .map(|o| (o, result.codegen_base))
                 .collect(),
+            external_refs: Vec::new(),
         }
     } else {
         lower_module(expanded_module, &resolved_entry, NativeLinkage::Executable)
