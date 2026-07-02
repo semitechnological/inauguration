@@ -109,7 +109,7 @@ pub fn adr(rd: u8, offset_bytes: i32) -> u32 {
 
 pub fn stp_pre(rt: u8, rt2: u8, offset: i32) -> u32 {
     let imm7 = ((-offset / 8) as u32) & 0x7F;
-    0xA980_0000 | (imm7 << 15) | ((rt2 as u32) << 10) | (REG_SP as u32) << 5 | (rt as u32)
+    0xA9C0_0000 | (imm7 << 15) | ((rt2 as u32) << 10) | (REG_SP as u32) << 5 | (rt as u32)
 }
 
 pub fn ldp_post(rt: u8, rt2: u8, offset: i32) -> u32 {
