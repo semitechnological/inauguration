@@ -3955,6 +3955,8 @@ mod tests {
         match cli.command {
             Commands::Build {
                 path,
+                out,
+                release,
                 module_id,
                 verbose,
                 swiftpm,
@@ -3962,6 +3964,8 @@ mod tests {
                 parser,
             } => {
                 assert_eq!(path, "Foo.swift");
+                assert_eq!(out, None);
+                assert!(!release);
                 assert_eq!(module_id, "Foo");
                 assert!(!verbose);
                 assert!(!swiftpm);

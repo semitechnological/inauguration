@@ -401,10 +401,25 @@ mod tests {
     #[test]
     fn compiler_creates_from_spec() {
         let compiler = Compiler::new(test_spec()).unwrap();
-        assert!(
-            compiler.backend == BackendKind::AArch64MachO
-                || compiler.backend == BackendKind::RawBinary,
-        );
+        // The host backend must match the actual host triple: macOS (arm64)
+        // selects Mach-O, Linux (x86_64/aarch64) selects ELF, anything else
+        // (e.g. an unrecognized arch) falls back to RawBinary. This mirrors
+        // `select_backend`/`ComponentSpec::host_triple` so the assertion
+        // stays correct on every CI/host platform instead of only macOS.
+        let expected = if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
+            BackendKind::AArch64MachO
+        } else if cfg!(target_os = "linux") && cfg!(target_arch = "x86_64") {
+            BackendKind::X86_64Elf
+        } else if cfg!(target_os = "linux") && cfg!(target_arch = "aarch64") {
+            BackendKind::AArch64Elf
+        } else if cfg!(target_os = "windows") && cfg!(target_arch = "x86_64") {
+            BackendKind::X86_64Coff
+        } else if cfg!(target_os = "windows") && cfg!(target_arch = "aarch64") {
+            BackendKind::AArch64Coff
+        } else {
+            BackendKind::RawBinary
+        };
+        assert_eq!(compiler.backend, expected);
     }
 
     #[test]
