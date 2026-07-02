@@ -935,6 +935,7 @@ fn lower_function(
         &func.name,
     )?;
     alloc_declared_locals(&mut ctx, &func.body, &func.name)?;
+    ctx.binop_temp = ctx.alloc_slot();
     ctx.saved_flag_offset = ctx.stack_size + 8;
     ctx.stack_size += 16;
     if ctx.stack_size > 0 {
@@ -1062,6 +1063,8 @@ struct LowerCtx<'a> {
     _params_src: &'a [(String, Typ)],
     saved_flag_offset: u32,
     prologue_stack_reserve: u32,
+    /// Stack offset for saving binary operation lhs (preserved across rhs eval)
+    binop_temp: u32,
 }
 
 fn alloc_slot_for_ctx(ctx: &mut LowerCtx<'_>) -> u32 {
@@ -1186,6 +1189,7 @@ impl<'a> LowerCtx<'a> {
             _params_src: params,
             saved_flag_offset: 0,
             prologue_stack_reserve: 0,
+            binop_temp: 0,
         };
         let mut abi_idx = 0usize;
         for (name, typ) in params {
@@ -2712,6 +2716,12 @@ fn lower_binary(
     lower_expr_into(emitter, ctx, lhs, rd, functions, pending_calls, fn_name)?;
     let lhs_reg = rd;
     let rhs_reg = if rd == 1 { 2 } else { 1 };
+    // ponytail: if rhs contains a function call, its arg loading overwrites
+    // the lhs result. Save lhs to the fixed binop_temp stack slot.
+    let rhs_has_call = contains_call(rhs);
+    if rhs_has_call {
+        emitter.emit_u32(aarch64::str64(lhs_reg, aarch64::REG_SP, ctx.binop_temp));
+    }
     lower_expr_into(
         emitter,
         ctx,
@@ -2721,6 +2731,9 @@ fn lower_binary(
         pending_calls,
         fn_name,
     )?;
+    if rhs_has_call {
+        emitter.emit_u32(aarch64::ldr64(lhs_reg, aarch64::REG_SP, ctx.binop_temp));
+    }
     let insn = match op {
         "+" => aarch64::add_reg64(rd, lhs_reg, rhs_reg),
         "-" => aarch64::sub_reg64(rd, lhs_reg, rhs_reg),
@@ -3299,6 +3312,19 @@ fn native_struct_fields(
     } else {
         // ponytail: unknown struct — return single Int field as placeholder
         Ok(vec![("_0".into(), Typ::Int)])
+    }
+}
+
+/// Check if an expression tree contains a function call.
+fn contains_call(expr: &Expr) -> bool {
+    match expr {
+        Expr::Call { .. } => true,
+        Expr::Binary { lhs, rhs, .. } => contains_call(lhs) || contains_call(rhs),
+        Expr::Unary { expr: inner, .. } => contains_call(inner),
+        Expr::Field { base, .. } => contains_call(base),
+        Expr::StructInit { fields, .. } => fields.iter().any(|(_, e)| contains_call(e)),
+        Expr::ArrayLit(items) => items.iter().any(contains_call),
+        _ => false,
     }
 }
 

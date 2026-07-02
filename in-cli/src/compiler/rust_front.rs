@@ -716,7 +716,7 @@ fn lower_expr_stmt(expr: &syn::Expr, out: &mut Vec<Stmt>) {
                 out.push(Stmt::Match { scrutinee, arms });
             } else {
                 let cond = lower_expr(&eif.cond);
-                let then_body = lower_block(&eif.then_branch);
+                let then_body = lower_block_no_implicit_return(&eif.then_branch);
                 let else_body = eif
                     .else_branch
                     .as_ref()
@@ -734,7 +734,7 @@ fn lower_expr_stmt(expr: &syn::Expr, out: &mut Vec<Stmt>) {
                 "for_pat:{}",
                 f.pat.to_token_stream()
             )))];
-            body.extend(lower_block(&f.body));
+            body.extend(lower_block_no_implicit_return(&f.body));
             out.push(Stmt::Loop {
                 kind: LoopKind::For,
                 cond: Some(lower_expr(&f.expr)),
@@ -745,14 +745,14 @@ fn lower_expr_stmt(expr: &syn::Expr, out: &mut Vec<Stmt>) {
             out.push(Stmt::Loop {
                 kind: LoopKind::While,
                 cond: Some(lower_expr(&w.cond)),
-                body: lower_block(&w.body),
+                body: lower_block_no_implicit_return(&w.body),
             });
         }
         syn::Expr::Loop(l) => {
             out.push(Stmt::Loop {
                 kind: LoopKind::Infinite,
                 cond: None,
-                body: lower_block(&l.body),
+                body: lower_block_no_implicit_return(&l.body),
             });
         }
         syn::Expr::Match(m) => {
@@ -858,6 +858,10 @@ fn lower_expr(expr: &syn::Expr) -> Expr {
             base: Box::new(lower_expr(&ef.base)),
             name: ef.member.to_token_stream().to_string(),
         },
+        syn::Expr::Cast(cast) => {
+            // ponytail: ignore integer casts, types all match at register width
+            lower_expr(&cast.expr)
+        }
         syn::Expr::Try(t) => {
             // `expr?` → lower expr, skip the ? for now (ponytail: full try lowering later)
             lower_expr(&t.expr)
