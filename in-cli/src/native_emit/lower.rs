@@ -957,6 +957,30 @@ fn lower_function(
     for (reg, offset) in &ctx.param_stores {
         emitter.emit_u32(aarch64::str64(*reg, aarch64::REG_SP, *offset));
     }
+    // ponytail: for &self parameters, the register holds a pointer, not field value.
+    // Dereference the stored pointer to load actual field values into the slots.
+    // Load the pointer ONCE into x15, then use it for all field loads.
+    for (name, typ) in &func.params {
+        if let Typ::Named(struct_name) = typ {
+            if name == "self" || name.starts_with("self:") {
+                if let Some(LocalSlot::Struct { fields: field_map, .. }) = ctx.locals.get(name) {
+                    let pointer_slot = ctx.param_stores.iter().find_map(|(_, off)| {
+                        if field_map.values().any(|v| v == off) { Some(*off) } else { None }
+                    });
+                    if let Some(ptr_slot) = pointer_slot {
+                        emitter.emit_u32(aarch64::ldr64(15, aarch64::REG_SP, ptr_slot));
+                        let schema = native_struct_fields(structs, struct_name, &func.name).unwrap_or_default();
+                        for (i, (field, _)) in schema.iter().enumerate() {
+                            if let Some(&off) = find_field_offset(field_map, field) {
+                                emitter.emit_u32(aarch64::ldr64(14, 15, (i * 8) as u32));
+                                emitter.emit_u32(aarch64::str64(14, aarch64::REG_SP, off));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
     // Load stack-based params (>8) from caller's stack area
     let stack_base = ctx.stack_reserve() + 16;
     for (arg_idx, local_off) in &ctx.stack_params {
@@ -1444,6 +1468,22 @@ fn lower_stmt(
         }
         Stmt::Let(name, typ, expr) => {
             ctx.alloc_let_local(name, typ.as_ref(), expr, fn_name)?;
+            // ponytail: if the local was allocated as Scalar but expr returns a struct,
+            // we need to re-allocate as Struct. Check call return types.
+            if let Expr::Call { callee, .. } = expr {
+                if let Expr::Ident(target) = callee.as_ref() {
+                    if let Some(func) = functions.get(target) {
+                        if let Typ::Named(struct_name) = &func.ret {
+                            // Re-check allocation: if currently Scalar but should be Struct
+                            if let Some(LocalSlot::Scalar(_)) = ctx.locals.get(name) {
+                                // Remove the Scalar allocation and re-allocate as Struct
+                                ctx.locals.remove(name);
+                                ctx.alloc_let_local(name, Some(&func.ret), expr, fn_name)?;
+                            }
+                        }
+                    }
+                }
+            }
             lower_store_local(emitter, ctx, name, expr, functions, pending_calls, fn_name)
         }
         Stmt::If {
@@ -2907,7 +2947,7 @@ fn lower_call(
     let _ = abi_arg_count;
 
     let mut reg = 0u8;
-    for (arg, (_, typ)) in args.iter().zip(&target_info.params) {
+    for (arg, (param_name, typ)) in args.iter().zip(&target_info.params) {
         reg = lower_call_arg(
             emitter,
             ctx,
@@ -2917,6 +2957,7 @@ fn lower_call(
             functions,
             pending_calls,
             fn_name,
+            param_name,
         )?;
     }
 
@@ -3003,22 +3044,31 @@ fn lower_call_arg(
     functions: &HashMap<String, FunctionInfo>,
     pending_calls: &mut Vec<PendingCall>,
     fn_name: &str,
+    param_name: &str,
 ) -> Result<u8, String> {
     match typ {
         Typ::Int | Typ::Bool | Typ::String | Typ::Float => {
             lower_expr_into(emitter, ctx, arg, reg, functions, pending_calls, fn_name)?;
             Ok(reg + 1)
         }
-        Typ::Named(struct_name) => lower_struct_call_arg(
-            emitter,
-            ctx,
-            arg,
-            struct_name,
-            reg,
-            functions,
-            pending_calls,
-            fn_name,
-        ),
+        Typ::Named(struct_name) => {
+            // ponytail: "self" parameter in impl methods is always &self (reference)
+            if param_name == "self" {
+                // Pass pointer to struct by emitting address of first field into reg
+                lower_struct_ptr_arg(emitter, ctx, arg, struct_name, functions, pending_calls, fn_name, reg)
+            } else {
+                lower_struct_call_arg(
+                    emitter,
+                    ctx,
+                    arg,
+                    struct_name,
+                    reg,
+                    functions,
+                    pending_calls,
+                    fn_name,
+                )
+            }
+        },
         Typ::Array(elem) => lower_array_call_arg(emitter, ctx, arg, elem, reg, fn_name),
         _ => {
             // ponytail: generic/void arg — load 0 and skip
@@ -3026,6 +3076,36 @@ fn lower_call_arg(
             Ok(reg + 1)
         }
     }
+}
+
+fn lower_struct_ptr_arg(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    arg: &Expr,
+    struct_name: &str,
+    functions: &HashMap<String, FunctionInfo>,
+    pending_calls: &mut Vec<PendingCall>,
+    fn_name: &str,
+    reg: u8,
+) -> Result<u8, String> {
+    let Expr::Ident(local) = arg else {
+        // ponytail: non-ident struct ptr arg — load 0
+        emitter.emit_insns(&aarch64::load_i64(reg, 0));
+        return Ok(reg + 1);
+    };
+    let Some(LocalSlot::Struct { fields: slots, .. }) = ctx.locals.get(local) else {
+        // ponytail: expected struct local — load 0
+        emitter.emit_insns(&aarch64::load_i64(reg, 0));
+        return Ok(reg + 1);
+    };
+    // Get the first field's offset to compute sp + offset
+    if let Some(&first_off) = slots.values().min() {
+        // add reg, sp, first_off
+        emitter.emit_u32(aarch64::add_imm64(reg, aarch64::REG_SP, first_off as u16));
+    } else {
+        emitter.emit_insns(&aarch64::load_i64(reg, 0));
+    }
+    Ok(reg + 1)
 }
 
 fn lower_array_call_arg(
