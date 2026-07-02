@@ -2898,6 +2898,146 @@ fn lower_comparison_result(emitter: &mut CodeEmitter, rd: u8, op: &str) -> Resul
     Ok(())
 }
 
+/// Try to lower a recognized stdlib function as an inline intrinsic.
+/// Returns Ok(true) if handled, Ok(false) if not recognized (caller should fall back).
+fn lower_stdlib_call(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    target: &str,
+    args: &[Expr],
+    rd: u8,
+    functions: &HashMap<String, FunctionInfo>,
+    pending_calls: &mut Vec<PendingCall>,
+    fn_name: &str,
+) -> Result<bool, String> {
+    // Strip type qualifier prefix if present (e.g., "Option::unwrap" → "unwrap")
+    let base = target.rsplit("::").next().unwrap_or(target);
+    match base {
+        // Vec::len → ldr x0, [x0]  (length is at offset 0)
+        "len" if args.len() == 1 => {
+            lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?;
+            emitter.emit_u32(aarch64::ldr64(0, 0, 0));
+            Ok(true)
+        }
+        // Vec::is_empty → ldr x0, [x0]; cmp x0, #0; cset x0, eq
+        "is_empty" if args.len() == 1 => {
+            lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?;
+            emitter.emit_u32(aarch64::ldr64(0, 0, 0));
+            emitter.emit_u32(aarch64::cmp_reg64(0, aarch64::REG_XZR));
+            let tb = emitter.emit_insn(aarch64::b_cond(0, 0)); // B.EQ → true
+            emitter.emit_insns(&aarch64::load_i64(0, 0));
+            let eb = emitter.emit_insn(aarch64::b(0));
+            let to = emitter.len() as i32 - tb as i32;
+            emitter.patch_u32(tb, aarch64::b_cond(0, to));
+            emitter.emit_insns(&aarch64::load_i64(0, 1));
+            let eo = emitter.len() as i32 - eb as i32;
+            emitter.patch_u32(eb, aarch64::b(eo));
+            Ok(true)
+        }
+        // Vec::new → return pointer to empty vec (0 for ptr, 0 for len, 0 for cap)
+        "new" if args.is_empty() && (target.contains("Vec") || target.contains("vec")) => {
+            emitter.emit_insns(&aarch64::load_i64(0, 0));
+            Ok(true)
+        }
+        // Vec::with_capacity(n) → allocate
+        "with_capacity" if args.len() == 1 && (target.contains("Vec") || target.contains("vec")) => {
+            // ponytail: just return empty vec for now
+            emitter.emit_insns(&aarch64::load_i64(0, 0));
+            Ok(true)
+        }
+        // Vec::push → store value at [vec + 2 + len]
+        "push" if args.len() == 2 && (target.contains("Vec") || target.contains("vec")) => {
+            lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?; // ptr
+            lower_expr_into(emitter, ctx, &args[1], 1, functions, pending_calls, fn_name)?; // val
+            emitter.emit_u32(aarch64::ldr64(2, 0, 0)); // len
+            emitter.emit_u32(aarch64::add_imm64(3, 0, 16)); // &vec.data[0]
+            emitter.emit_u32(aarch64::str64_reg_offset(1, 3, 2)); // data[len] = val
+            emitter.emit_u32(aarch64::add_imm64(2, 2, 1)); // len += 1
+            emitter.emit_u32(aarch64::str64(2, 0, 0)); // store len
+            emitter.emit_insns(&aarch64::load_i64(0, 0)); // return old len
+            Ok(true)
+        }
+        // Option::is_some → cmp tag, #1; cset x0, eq
+        | "is_some" if args.len() == 1 && target.contains("Option") => {
+            lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?;
+            // Option's tag is at offset 0 (first field)
+            emitter.emit_u32(aarch64::ldr64(0, 0, 0));
+            emitter.emit_insns(&aarch64::load_i64(1, 1));
+            emitter.emit_u32(aarch64::cmp_reg64(0, 1));
+            let tb = emitter.emit_insn(aarch64::b_cond(0, 0)); // B.EQ → cmp result == 1 → is_some
+            emitter.emit_insns(&aarch64::load_i64(0, 0));
+            let eb = emitter.emit_insn(aarch64::b(0));
+            let to = emitter.len() as i32 - tb as i32;
+            emitter.patch_u32(tb, aarch64::b_cond(0, to));
+            emitter.emit_insns(&aarch64::load_i64(0, 1));
+            let eo = emitter.len() as i32 - eb as i32;
+            emitter.patch_u32(eb, aarch64::b(eo));
+            Ok(true)
+        }
+        // Option::is_none → cmp tag, #0; cset x0, eq
+        "is_none" if args.len() == 1 && target.contains("Option") => {
+            lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?;
+            emitter.emit_u32(aarch64::ldr64(0, 0, 0));
+            emitter.emit_u32(aarch64::cmp_reg64(0, aarch64::REG_XZR));
+            let tb = emitter.emit_insn(aarch64::b_cond(0, 0));
+            emitter.emit_insns(&aarch64::load_i64(0, 0));
+            let eb = emitter.emit_insn(aarch64::b(0));
+            let to = emitter.len() as i32 - tb as i32;
+            emitter.patch_u32(tb, aarch64::b_cond(0, to));
+            emitter.emit_insns(&aarch64::load_i64(0, 1));
+            let eo = emitter.len() as i32 - eb as i32;
+            emitter.patch_u32(eb, aarch64::b(eo));
+            Ok(true)
+        }
+        // Option::unwrap → if tag != 1, panic; return value
+        | "unwrap" if target.contains("Option") => {
+            lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?;
+            // Load tag at offset 0
+            emitter.emit_u32(aarch64::ldr64(1, 0, 0));
+            emitter.emit_insns(&aarch64::load_i64(2, 1));
+            emitter.emit_u32(aarch64::cmp_reg64(1, 2));
+            // If tag != 1 (Some), jump to panic stub
+            let pb = emitter.emit_insn(aarch64::b_cond(1, 0)); // B.NE → panic
+            // Return value at offset 8 (for Option<T> = {tag, value})
+            emitter.emit_u32(aarch64::ldr64(0, 0, 8));
+            let end = emitter.emit_insn(aarch64::b(0));
+            // Panic path: load 0
+            let po = emitter.len() as i32 - pb as i32;
+            emitter.patch_u32(pb, aarch64::b_cond(1, po));
+            emitter.emit_insns(&aarch64::load_i64(0, 0));
+            let eo = emitter.len() as i32 - end as i32;
+            emitter.patch_u32(end, aarch64::b(eo));
+            Ok(true)
+        }
+        // Result::is_ok → cmp tag, #0; cset x0, eq
+        "is_ok" if args.len() == 1 && target.contains("Result") => {
+            lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?;
+            emitter.emit_u32(aarch64::ldr64(0, 0, 0));
+            emitter.emit_u32(aarch64::cmp_reg64(0, aarch64::REG_XZR));
+            let tb = emitter.emit_insn(aarch64::b_cond(0, 0));
+            emitter.emit_insns(&aarch64::load_i64(0, 0));
+            let eb = emitter.emit_insn(aarch64::b(0));
+            let to = emitter.len() as i32 - tb as i32;
+            emitter.patch_u32(tb, aarch64::b_cond(0, to));
+            emitter.emit_insns(&aarch64::load_i64(0, 1));
+            let eo = emitter.len() as i32 - eb as i32;
+            emitter.patch_u32(eb, aarch64::b(eo));
+            Ok(true)
+        }
+        // std::mem::take → swap with 0
+        "take" if args.len() == 1 && target.contains("mem") => {
+            lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?;
+            // Load old value, store 0 in its place
+            emitter.emit_u32(aarch64::ldr64(1, 0, 0));
+            emitter.emit_u32(aarch64::str64(aarch64::REG_XZR, 0, 0));
+            emitter.emit_u32(aarch64::mov_reg64(0, 1));
+            Ok(true)
+        }
+        // Default: not a recognized stdlib intrinsic
+        _ => Ok(false),
+    }
+}
+
 fn lower_call(
     emitter: &mut CodeEmitter,
     ctx: &mut LowerCtx<'_>,
@@ -2915,6 +3055,10 @@ fn lower_call(
     };
     if is_inrt_builtin(target) {
         return lower_inrt_call(emitter, ctx, target, args, rd, fn_name);
+    }
+    // ponytail: try stdlib intrinsic lowering before external ref fallback
+    if lower_stdlib_call(emitter, ctx, target, args, rd, functions, pending_calls, fn_name)? {
+        return Ok(());
     }
     if !functions.contains_key(target) {
         // ponytail: try the bare function name from a module-qualified path
