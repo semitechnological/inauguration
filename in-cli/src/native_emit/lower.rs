@@ -12,10 +12,73 @@ use crate::inrt::INRT_BUILTINS;
 use crate::inrt::{inrt_builtin_param_slots, is_inrt_builtin};
 use crate::native_emit::aarch64::{self, CodeEmitter, REG_FP};
 use crate::native_emit::macho::{self, ExportSymbol, MachOImage, MachOLinkage};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+/// Thread-local collector for external symbol references during lowering.
+/// `lower_call` pushes (instruction_offset, symbol_name) when a function
+/// is not in the table. Cleared before and after each `lower_module` call.
+thread_local! {
+    /// Collector for external symbol references during lowering.
+    /// `lower_call` pushes (instruction_offset, symbol_name) when a function
+    /// is not in the table and native mode is active.
+    pub(crate) static TL_EXTERNAL_REFS: RefCell<Vec<(u32, String)>> = const { RefCell::new(Vec::new()) };
+    /// Set true before native binary compilation (false for JIT).
+    /// Controls whether unknown functions emit external symbol references
+    /// or use dlsym.
+    static TL_NATIVE_MODE: RefCell<bool> = const { RefCell::new(false) };
+}
+
 pub const TARGET_TRIPLE: &str = "aarch64-apple-darwin";
+
+/// Map a Rust function name to the linker-visible symbol name.
+/// Handles `std::process::exit` → `_exit` (C ABI in libSystem) and
+/// `_main` → `_main` (macOS entry convention). For unknown symbols,
+/// adds a leading underscore (C ABI convention on macOS).
+pub fn native_link_name(name: &str) -> String {
+    // Clean up spaces (rust_front may produce "std :: process :: exit" instead of "std::process::exit")
+    let cleaned: String = name.chars().filter(|&c| c != ' ').collect();
+    match cleaned.as_str() {
+        "std::process::exit" | "std::process::abort" => "_exit".to_string(),
+        "std::io::_print" | "print" => "_printf".to_string(),
+        _ => {
+            if cleaned.starts_with('_') {
+                cleaned
+            } else {
+                format!("_{}", cleaned)
+            }
+        }
+    }
+}
+
+/// Find the macOS SDK root for the system linker.
+fn find_sdk_root() -> Option<String> {
+    // Try xcrun --show-sdk-path first
+    if let Ok(output) = std::process::Command::new("xcrun")
+        .arg("--show-sdk-path")
+        .output()
+    {
+        if output.status.success() {
+            if let Ok(path) = String::from_utf8(output.stdout) {
+                let trimmed = path.trim().to_string();
+                if !trimmed.is_empty() {
+                    return Some(trimmed);
+                }
+            }
+        }
+    }
+    // Fallback: common SDK paths
+    for path in &[
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+    ] {
+        if std::path::Path::new(path).exists() {
+            return Some(path.to_string());
+        }
+    }
+    None
+}
 
 const ENTRY_STUB_SIZE: u32 = 32; // 16 bytes entry stub + 16 bytes global error flag/value
 const ERROR_FLAG_OFFSET: u32 = 16;
@@ -48,6 +111,9 @@ pub struct LoweredModule {
     /// (offset, codegen_base) — absolute address relocations to patch at JIT load time.
     /// Empty for AArch64 (position-independent code).
     pub relocations: Vec<(u32, u64)>,
+    /// External symbol names referenced by the code (for native linking).
+    /// Each entry is (instruction_offset, symbol_name).
+    pub external_refs: Vec<(u32, String)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -110,7 +176,53 @@ pub fn compile_native_artifact(
     linkage: NativeLinkage,
     out_path: &Path,
 ) -> Result<Option<PathBuf>, String> {
+    TL_NATIVE_MODE.with(|m| *m.borrow_mut() = true);
     let lowered = lower_module(module, entry, linkage)?;
+
+    if linkage == NativeLinkage::Executable && !lowered.external_refs.is_empty() {
+        // Write a relocatable .o and link with system ld
+        // Map internal function names to linker-visible names (add leading underscore)
+        let mapped_exports: Vec<macho::ExportSymbol> = lowered.exports.iter().map(|e| {
+            macho::ExportSymbol {
+                name: native_link_name(&e.name),
+                offset: e.offset,
+            }
+        }).collect();
+        let mapped_external_refs: Vec<(u32, String)> = lowered.external_refs.iter().map(|(site, name)| {
+            (*site, native_link_name(name))
+        }).collect();
+        let image = MachOImage {
+            code: lowered.code,
+            entry_offset: lowered.entry_offset,
+            exports: mapped_exports,
+            external_refs: mapped_external_refs,
+        };
+        let object_bytes = macho::write_relocatable_object(&image);
+        let obj_path = out_path.with_extension("o");
+        std::fs::write(&obj_path, &object_bytes)
+            .map_err(|e| format!("write object: {e}"))?;
+        // Invoke ld to link against libSystem
+        let sdk_root = find_sdk_root().unwrap_or_else(|| "/".to_string());
+        let entry_name = native_link_name(entry);
+        let mut ld_cmd = std::process::Command::new("ld");
+        ld_cmd.arg("-o").arg(out_path)
+            .arg(&obj_path)
+            .arg("-lSystem")
+            .arg("-syslibroot").arg(&sdk_root)
+            .arg("-arch").arg("arm64")
+            .arg("-platform_version").arg("macos").arg("14.0").arg("14.0")
+            .arg("-e").arg(&entry_name);
+        let ld_status = ld_cmd.status()
+            .map_err(|e| format!("ld invocation failed: {e}"))?;
+        if !ld_status.success() {
+            return Err("ld link failed".to_string());
+        }
+        // Clean up the .o file
+        let _ = std::fs::remove_file(&obj_path);
+        return Ok(None);
+    }
+
+    // No external refs: write standalone Mach-O executable
     let exports = match linkage {
         NativeLinkage::Executable => Vec::new(),
         NativeLinkage::Dylib | NativeLinkage::StaticLib => lowered.exports.clone(),
@@ -119,6 +231,7 @@ pub fn compile_native_artifact(
         code: lowered.code,
         entry_offset: lowered.entry_offset,
         exports,
+        external_refs: lowered.external_refs,
     };
     let install_name = out_path
         .file_name()
@@ -162,6 +275,8 @@ pub fn lower_module(
     entry: &str,
     linkage: NativeLinkage,
 ) -> Result<LoweredModule, String> {
+    // Clear any stale external refs from previous invocations
+    TL_EXTERNAL_REFS.with(|refs| refs.borrow_mut().clear());
     let functions = collect_functions(module)?;
     let structs = collect_structs(module);
     let strings = collect_strings(module);
@@ -269,12 +384,14 @@ pub fn lower_module(
         })
         .collect();
 
+    let external_refs = TL_EXTERNAL_REFS.with(|refs| std::mem::take(&mut *refs.borrow_mut()));
     Ok(LoweredModule {
         code: emitter.bytes,
         entry_offset,
         exports,
         function_offsets,
         relocations: Vec::new(), // AArch64 uses position-independent code
+        external_refs,
     })
 }
 
@@ -2649,33 +2766,31 @@ fn lower_call(
         return lower_inrt_call(emitter, ctx, target, args, rd, fn_name);
     }
     if !functions.contains_key(target) {
-        // Try to resolve native symbol at compile time
-        if let Some(native_ptr) = super::native_link::resolve_native_fn(target) {
-            // Load args into registers first
-            for (i, arg) in args.iter().enumerate() {
-                if i > 7 {
-                    break;
-                } // max 8 reg args
-                lower_expr_into(
-                    emitter,
-                    ctx,
-                    arg,
-                    i as u8,
-                    functions,
-                    pending_calls,
-                    fn_name,
-                )?;
-            }
-            // Emit BLR to native function via X15
+        // Load args into registers
+        for (i, arg) in args.iter().enumerate() {
+            if i > 7 { break; }
+            lower_expr_into(emitter, ctx, arg, i as u8, functions, pending_calls, fn_name)?;
+        }
+        let is_native = TL_NATIVE_MODE.with(|m| *m.borrow());
+        if is_native {
+            // Native mode: emit BL 0 + record external symbol reference
+            // Map Rust function names to C/mangled linker names
+            let link_name = native_link_name(target);
+            let call_site = emitter.len() as u32;
+            emitter.emit_u32(aarch64::bl(0));
+            TL_EXTERNAL_REFS.with(|refs| refs.borrow_mut().push((call_site, link_name)));
+        } else if let Some(native_ptr) = super::native_link::resolve_native_fn(target) {
+            // JIT mode: use dlsym'd address
             emitter.emit_insns(&aarch64::load_i64(15, native_ptr as usize as i64));
             emitter.emit_u32(0xD63F_01E0u32 | (15 << 5)); // BLR X15
-            if rd != 0 {
-                emitter.emit_u32(aarch64::mov_reg64(rd, 0));
-            }
+        } else {
+            // ponytail: unknown external function — return 0 as stub
+            emitter.emit_insns(&aarch64::load_i64(rd, 0));
             return Ok(());
         }
-        // ponytail: unknown external function — return 0 as stub
-        emitter.emit_insns(&aarch64::load_i64(rd, 0));
+        if rd != 0 {
+            emitter.emit_u32(aarch64::mov_reg64(rd, 0));
+        }
         return Ok(());
     }
     let Some(target_info) = functions.get(target) else {
