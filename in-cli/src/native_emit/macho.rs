@@ -484,15 +484,18 @@ pub fn write_relocatable_object(image: &MachOImage) -> Vec<u8> {
     }
 
     let num_syms: u32 = 1 + num_def_syms as u32 + ext_str_offsets.len() as u32;
-    let num_cmds: u32 = 3; // segment + symtab + build_version
+    let num_def_syms_u32 = num_def_syms as u32;
+    let num_undef_syms = ext_str_offsets.len() as u32;
+    let num_cmds: u32 = 4; // segment + symtab + build_version + dysymtab
 
     // Calculate layout
     let segment_cmd_size: u32 = 72 + 80; // seg + 1 section
     let symtab_cmd_size: u32 = 24;
     let build_version_cmd_size: u32 = 24;
+    let dysymtab_cmd_size: u32 = 80;
     let header_size: u32 = 32; // mach_header_64
-    let sizeofcmds = segment_cmd_size + symtab_cmd_size + build_version_cmd_size;
-    let text_fileoff = header_size + sizeofcmds; // header + load commands, already 4-byte aligned
+    let sizeofcmds = segment_cmd_size + symtab_cmd_size + build_version_cmd_size + dysymtab_cmd_size;
+    let text_fileoff = header_size + sizeofcmds; // header + load commands
     let text_vmsize = ((code_size as u32) + 3) & !3u32; // align to 4
     let strtab_off = text_fileoff + text_vmsize;
     const NLIST64_SIZE: u32 = 16; // n_strx(4) + n_type(1) + n_sect(1) + n_desc(2) + n_value(8)
@@ -501,7 +504,7 @@ pub fn write_relocatable_object(image: &MachOImage) -> Vec<u8> {
 
     // Relocation entries
     let reloc_data: Vec<(u32, u32)> = image.external_refs.iter().map(|(site, name)| {
-        let undef_idx = 1 + num_def_syms as u32
+        let undef_idx = 1 + num_def_syms_u32
             + ext_str_offsets.iter().position(|(n, _)| n == name).unwrap_or(0) as u32;
         (*site, undef_idx)
     }).collect();
@@ -515,14 +518,13 @@ pub fn write_relocatable_object(image: &MachOImage) -> Vec<u8> {
     out.extend_from_slice(&MH_OBJECT.to_le_bytes());
     out.extend_from_slice(&num_cmds.to_le_bytes());
     out.extend_from_slice(&sizeofcmds.to_le_bytes());
-    out.extend_from_slice(&0u32.to_le_bytes()); // flags
+    out.extend_from_slice(&0x2000u32.to_le_bytes()); // flags: MH_SUBSECT_VIA_SYMBOLS
     out.extend_from_slice(&0u32.to_le_bytes()); // reserved
 
-    // Segment __TEXT (MH_OBJECT)
-    // fileoff/filesize must match section's offset/size range
+    // Segment (MH_OBJECT: segname should be empty, only section has segname)
     out.extend_from_slice(&LC_SEGMENT_64.to_le_bytes());
     out.extend_from_slice(&segment_cmd_size.to_le_bytes());
-    write_fixed_name(&mut out, "__TEXT");
+    out.extend_from_slice(&[0u8; 16]); // segname = empty for MH_OBJECT
     out.extend_from_slice(&0u64.to_le_bytes()); // vmaddr (0 for .o)
     out.extend_from_slice(&(text_vmsize as u64).to_le_bytes()); // vmsize
     out.extend_from_slice(&(text_fileoff as u64).to_le_bytes()); // fileoff = section offset
@@ -532,7 +534,7 @@ pub fn write_relocatable_object(image: &MachOImage) -> Vec<u8> {
     out.extend_from_slice(&1u32.to_le_bytes()); // nsects
     out.extend_from_slice(&0u32.to_le_bytes()); // flags
 
-    // Section __TEXT,__text
+    // Section __TEXT,__text (segment name = __TEXT, section name = __text)
     write_fixed_name(&mut out, "__text");  // sectname
     write_fixed_name(&mut out, "__TEXT");  // segname
     out.extend_from_slice(&0u64.to_le_bytes()); // addr (0 for .o)
@@ -546,6 +548,14 @@ pub fn write_relocatable_object(image: &MachOImage) -> Vec<u8> {
     out.extend_from_slice(&0u32.to_le_bytes()); // reserved2
     out.extend_from_slice(&0u32.to_le_bytes()); // reserved3
 
+    // LC_BUILD_VERSION (must come before SYMTAB per Apple linker convention)
+    out.extend_from_slice(&LC_BUILD_VERSION.to_le_bytes());
+    out.extend_from_slice(&build_version_cmd_size.to_le_bytes());
+    out.extend_from_slice(&PLATFORM_MACOS.to_le_bytes());
+    out.extend_from_slice(&0x000E_0000u32.to_le_bytes()); // minos 14.0
+    out.extend_from_slice(&0x000E_0000u32.to_le_bytes()); // sdk 14.0
+    out.extend_from_slice(&0u32.to_le_bytes()); // ntools
+
     // LC_SYMTAB
     out.extend_from_slice(&LC_SYMTAB.to_le_bytes());
     out.extend_from_slice(&symtab_cmd_size.to_le_bytes());
@@ -554,13 +564,33 @@ pub fn write_relocatable_object(image: &MachOImage) -> Vec<u8> {
     out.extend_from_slice(&strtab_off.to_le_bytes());
     out.extend_from_slice(&(strtab.len() as u32).to_le_bytes());
 
-    // LC_BUILD_VERSION
-    out.extend_from_slice(&LC_BUILD_VERSION.to_le_bytes());
-    out.extend_from_slice(&build_version_cmd_size.to_le_bytes());
-    out.extend_from_slice(&PLATFORM_MACOS.to_le_bytes());
-    out.extend_from_slice(&0x000E_0000u32.to_le_bytes()); // minos 14.0
-    out.extend_from_slice(&0x000E_0000u32.to_le_bytes()); // sdk 14.0
-    out.extend_from_slice(&0u32.to_le_bytes()); // ntools
+    // LC_DYSYMTAB — tells linker symbol counts and relocation layout
+    // Symbol counts: sym 0=local, 1..num_def_syms=defined, rest=undefined
+    let nlocalsym: u32 = 1;
+    let iextdefsym: u32 = nlocalsym;
+    let iundefsym: u32 = nlocalsym + num_def_syms_u32;
+    out.extend_from_slice(&LC_DYSYMTAB.to_le_bytes());
+    out.extend_from_slice(&dysymtab_cmd_size.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes()); // ilocalsym
+    out.extend_from_slice(&nlocalsym.to_le_bytes()); // nlocalsym
+    out.extend_from_slice(&iextdefsym.to_le_bytes()); // iextdefsym
+    out.extend_from_slice(&num_def_syms_u32.to_le_bytes()); // nextdefsym
+    out.extend_from_slice(&iundefsym.to_le_bytes()); // iundefsym
+    out.extend_from_slice(&num_undef_syms.to_le_bytes()); // nundefsym
+    // Zero out the rest (tocoff, ntoc, modtaboff, nmodtab, extrefsymoff, nextrefsyms,
+    // indirectsymoff, nindirectsyms, extreloff, nextrel, locreloff, nlocrel)
+    out.extend_from_slice(&0u32.to_le_bytes()); // tocoff
+    out.extend_from_slice(&0u32.to_le_bytes()); // ntoc
+    out.extend_from_slice(&0u32.to_le_bytes()); // modtaboff
+    out.extend_from_slice(&0u32.to_le_bytes()); // nmodtab
+    out.extend_from_slice(&0u32.to_le_bytes()); // extrefsymoff
+    out.extend_from_slice(&0u32.to_le_bytes()); // nextrefsyms
+    out.extend_from_slice(&0u32.to_le_bytes()); // indirectsymoff
+    out.extend_from_slice(&0u32.to_le_bytes()); // nindirectsyms
+    out.extend_from_slice(&reloc_off.to_le_bytes()); // extreloff (all relocs are external)
+    out.extend_from_slice(&reloc_count.to_le_bytes()); // nextrel
+    out.extend_from_slice(&0u32.to_le_bytes()); // locreloff
+    out.extend_from_slice(&0u32.to_le_bytes()); // nlocrel
 
     // Code
     out.extend_from_slice(code);
