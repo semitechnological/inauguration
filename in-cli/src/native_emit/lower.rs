@@ -2898,6 +2898,43 @@ fn lower_comparison_result(emitter: &mut CodeEmitter, rd: u8, op: &str) -> Resul
     Ok(())
 }
 
+/// Emit a call to a C-ABI stdlib wrapper registered in `native_link`.
+/// Lowers up to two arguments into X0 and X1, then branches to the wrapper.
+/// For native mode records an external symbol reference; for JIT mode uses
+/// the pre-registered function pointer via BLR.
+fn emit_stdlib_wrapper_call(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    wrapper: &str,
+    args: &[Expr],
+    rd: u8,
+    functions: &HashMap<String, FunctionInfo>,
+    pending_calls: &mut Vec<PendingCall>,
+    fn_name: &str,
+) -> Result<(), String> {
+    for (i, arg) in args.iter().enumerate() {
+        if i > 1 {
+            break;
+        }
+        lower_expr_into(emitter, ctx, arg, i as u8, functions, pending_calls, fn_name)?;
+    }
+    let is_native = TL_NATIVE_MODE.with(|m| *m.borrow());
+    if is_native {
+        let call_site = emitter.len() as u32;
+        emitter.emit_u32(aarch64::bl(0));
+        TL_EXTERNAL_REFS.with(|refs| refs.borrow_mut().push((call_site, wrapper.to_string())));
+    } else if let Some(native_ptr) = super::native_link::resolve_native_fn(wrapper) {
+        emitter.emit_insns(&aarch64::load_i64(15, native_ptr as usize as i64));
+        emitter.emit_u32(0xD63F_01E0u32 | (15 << 5)); // BLR X15
+    } else {
+        emitter.emit_insns(&aarch64::load_i64(0, 0));
+    }
+    if rd != 0 {
+        emitter.emit_u32(aarch64::mov_reg64(rd, 0));
+    }
+    Ok(())
+}
+
 /// Try to lower a recognized stdlib function as an inline intrinsic.
 /// Returns Ok(true) if handled, Ok(false) if not recognized (caller should fall back).
 fn lower_stdlib_call(
@@ -2910,6 +2947,42 @@ fn lower_stdlib_call(
     pending_calls: &mut Vec<PendingCall>,
     fn_name: &str,
 ) -> Result<bool, String> {
+    // Recognize std::env / std::fs wrappers first, before generic suffix matching.
+    let cleaned: String = target.chars().filter(|&c| c != ' ').collect();
+    match cleaned.as_str() {
+        "std::env::var" if args.len() == 1 => {
+            emit_stdlib_wrapper_call(
+                emitter, ctx, "in_env_var", args, rd, functions, pending_calls, fn_name,
+            )?;
+            return Ok(true);
+        }
+        "std::env::temp_dir" if args.is_empty() => {
+            emit_stdlib_wrapper_call(
+                emitter, ctx, "in_env_temp_dir", args, rd, functions, pending_calls, fn_name,
+            )?;
+            return Ok(true);
+        }
+        "std::env::current_dir" if args.is_empty() => {
+            emit_stdlib_wrapper_call(
+                emitter, ctx, "in_env_current_dir", args, rd, functions, pending_calls, fn_name,
+            )?;
+            return Ok(true);
+        }
+        "std::fs::read_to_string" if args.len() == 1 => {
+            emit_stdlib_wrapper_call(
+                emitter, ctx, "in_fs_read_to_string", args, rd, functions, pending_calls, fn_name,
+            )?;
+            return Ok(true);
+        }
+        "std::fs::exists" if args.len() == 1 => {
+            emit_stdlib_wrapper_call(
+                emitter, ctx, "in_fs_exists", args, rd, functions, pending_calls, fn_name,
+            )?;
+            return Ok(true);
+        }
+        _ => {}
+    }
+
     // Strip type qualifier prefix if present (e.g., "Option::unwrap" → "unwrap")
     let base = target.rsplit("::").next().unwrap_or(target);
     match base {
