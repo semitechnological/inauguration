@@ -139,6 +139,10 @@ pub fn svc(imm16: u16) -> u32 {
     0xD400_0001 | ((imm16 as u32) << 5)
 }
 
+pub fn brk(imm16: u16) -> u32 {
+    0xD420_0000 | ((imm16 as u32) << 5)
+}
+
 pub fn strb(rt: u8, rn: u8, offset: u32) -> u32 {
     assert!(offset < 4096);
     0x3900_0000 | (offset << 10) | ((rn as u32) << 5) | (rt as u32)
