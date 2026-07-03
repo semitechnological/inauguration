@@ -2898,6 +2898,57 @@ fn lower_comparison_result(emitter: &mut CodeEmitter, rd: u8, op: &str) -> Resul
     Ok(())
 }
 
+fn resolve_function_name(
+    name: &str,
+    functions: &HashMap<String, FunctionInfo>,
+) -> Option<String> {
+    if functions.contains_key(name) {
+        return Some(name.to_string());
+    }
+    name.rfind("::").and_then(|idx| {
+        let last = name[idx + 2..].to_string();
+        if functions.contains_key(&last) {
+            Some(last)
+        } else {
+            None
+        }
+    })
+}
+
+fn is_resolvable_function_ref(
+    expr: &Expr,
+    functions: &HashMap<String, FunctionInfo>,
+) -> bool {
+    let Expr::Ident(name) = expr else {
+        return false;
+    };
+    resolve_function_name(name, functions).is_some()
+}
+
+fn try_emit_closure_call(
+    emitter: &mut CodeEmitter,
+    functions: &HashMap<String, FunctionInfo>,
+    pending_calls: &mut Vec<PendingCall>,
+    closure_expr: &Expr,
+    arg_reg: Option<u8>,
+) -> Result<bool, String> {
+    let Expr::Ident(name) = closure_expr else {
+        return Ok(false);
+    };
+    let Some(target) = resolve_function_name(name, functions) else {
+        return Ok(false);
+    };
+    if let Some(arg) = arg_reg {
+        if arg != 0 {
+            emitter.emit_u32(aarch64::mov_reg64(0, arg));
+        }
+    }
+    let site = emitter.len();
+    emitter.emit_u32(aarch64::bl(0));
+    pending_calls.push(PendingCall { site, target });
+    Ok(true)
+}
+
 /// Try to lower a recognized stdlib function as an inline intrinsic.
 /// Returns Ok(true) if handled, Ok(false) if not recognized (caller should fall back).
 fn lower_stdlib_call(
@@ -3022,6 +3073,276 @@ fn lower_stdlib_call(
             emitter.emit_insns(&aarch64::load_i64(0, 1));
             let eo = emitter.len() as i32 - eb as i32;
             emitter.patch_u32(eb, aarch64::b(eo));
+            Ok(true)
+        }
+        // Option::map → if Some, apply closure to value and wrap in Some; else None
+        "map" if args.len() == 2 && target.contains("Option") => {
+            if !is_resolvable_function_ref(&args[1], functions) {
+                return Ok(false);
+            }
+            lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?;
+            emitter.emit_u32(aarch64::ldr64(1, 0, 0));
+            emitter.emit_insns(&aarch64::load_i64(2, 1));
+            emitter.emit_u32(aarch64::cmp_reg64(1, 2));
+            let none_branch = emitter.emit_insn(aarch64::b_cond(1, 0)); // B.NE
+            // Some path
+            emitter.emit_u32(aarch64::ldr64(3, 0, 8)); // value
+            emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, ctx.binop_temp)); // save pointer
+            if !try_emit_closure_call(emitter, functions, pending_calls, &args[1], Some(3))? {
+                return Ok(false);
+            }
+            emitter.emit_u32(aarch64::ldr64(2, aarch64::REG_SP, ctx.binop_temp)); // load pointer
+            emitter.emit_u32(aarch64::str64(0, 2, 8)); // store result
+            emitter.emit_insns(&aarch64::load_i64(1, 1));
+            emitter.emit_u32(aarch64::str64(1, 2, 0)); // tag = Some
+            emitter.emit_u32(aarch64::mov_reg64(0, 2));
+            let end_branch = emitter.emit_insn(aarch64::b(0));
+            let none_offset = emitter.len() as i32 - none_branch as i32;
+            emitter.patch_u32(none_branch, aarch64::b_cond(1, none_offset));
+            // None path
+            emitter.emit_insns(&aarch64::load_i64(1, 0));
+            emitter.emit_u32(aarch64::str64(1, 0, 0)); // tag = None
+            let end_offset = emitter.len() as i32 - end_branch as i32;
+            emitter.patch_u32(end_branch, aarch64::b(end_offset));
+            Ok(true)
+        }
+        // Option::and_then → if Some, call closure with value and return its result; else None
+        "and_then" if args.len() == 2 && target.contains("Option") => {
+            if !is_resolvable_function_ref(&args[1], functions) {
+                return Ok(false);
+            }
+            lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?;
+            emitter.emit_u32(aarch64::ldr64(1, 0, 0));
+            emitter.emit_insns(&aarch64::load_i64(2, 1));
+            emitter.emit_u32(aarch64::cmp_reg64(1, 2));
+            let none_branch = emitter.emit_insn(aarch64::b_cond(1, 0)); // B.NE
+            // Some path
+            emitter.emit_u32(aarch64::ldr64(0, 0, 8)); // value
+            if !try_emit_closure_call(emitter, functions, pending_calls, &args[1], Some(0))? {
+                return Ok(false);
+            }
+            let end_branch = emitter.emit_insn(aarch64::b(0));
+            let none_offset = emitter.len() as i32 - none_branch as i32;
+            emitter.patch_u32(none_branch, aarch64::b_cond(1, none_offset));
+            // None path: X0 is already the original pointer
+            let end_offset = emitter.len() as i32 - end_branch as i32;
+            emitter.patch_u32(end_branch, aarch64::b(end_offset));
+            Ok(true)
+        }
+        // Option::unwrap_or → return value if Some, else default
+        "unwrap_or" if args.len() == 2 && target.contains("Option") => {
+            lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?;
+            emitter.emit_u32(aarch64::ldr64(1, 0, 0));
+            emitter.emit_insns(&aarch64::load_i64(2, 1));
+            emitter.emit_u32(aarch64::cmp_reg64(1, 2));
+            let none_branch = emitter.emit_insn(aarch64::b_cond(1, 0)); // B.NE
+            // Some path
+            emitter.emit_u32(aarch64::ldr64(0, 0, 8));
+            let end_branch = emitter.emit_insn(aarch64::b(0));
+            let none_offset = emitter.len() as i32 - none_branch as i32;
+            emitter.patch_u32(none_branch, aarch64::b_cond(1, none_offset));
+            // None path
+            lower_expr_into(emitter, ctx, &args[1], 0, functions, pending_calls, fn_name)?;
+            let end_offset = emitter.len() as i32 - end_branch as i32;
+            emitter.patch_u32(end_branch, aarch64::b(end_offset));
+            Ok(true)
+        }
+        // Option::unwrap_or_else → return value if Some, else call closure
+        "unwrap_or_else" if args.len() == 2 && target.contains("Option") => {
+            if !is_resolvable_function_ref(&args[1], functions) {
+                return Ok(false);
+            }
+            lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?;
+            emitter.emit_u32(aarch64::ldr64(1, 0, 0));
+            emitter.emit_insns(&aarch64::load_i64(2, 1));
+            emitter.emit_u32(aarch64::cmp_reg64(1, 2));
+            let none_branch = emitter.emit_insn(aarch64::b_cond(1, 0)); // B.NE
+            // Some path
+            emitter.emit_u32(aarch64::ldr64(0, 0, 8));
+            let end_branch = emitter.emit_insn(aarch64::b(0));
+            let none_offset = emitter.len() as i32 - none_branch as i32;
+            emitter.patch_u32(none_branch, aarch64::b_cond(1, none_offset));
+            // None path
+            if !try_emit_closure_call(emitter, functions, pending_calls, &args[1], None)? {
+                return Ok(false);
+            }
+            let end_offset = emitter.len() as i32 - end_branch as i32;
+            emitter.patch_u32(end_branch, aarch64::b(end_offset));
+            Ok(true)
+        }
+        // Option::ok_or_else → Some → Ok; None → Err(closure())
+        "ok_or_else" if args.len() == 2 && target.contains("Option") => {
+            if !is_resolvable_function_ref(&args[1], functions) {
+                return Ok(false);
+            }
+            lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?;
+            emitter.emit_u32(aarch64::ldr64(1, 0, 0));
+            emitter.emit_insns(&aarch64::load_i64(2, 1));
+            emitter.emit_u32(aarch64::cmp_reg64(1, 2));
+            let none_branch = emitter.emit_insn(aarch64::b_cond(1, 0)); // B.NE
+            // Some path
+            emitter.emit_u32(aarch64::str64(aarch64::REG_XZR, 0, 0)); // tag = Ok
+            let end_branch = emitter.emit_insn(aarch64::b(0));
+            let none_offset = emitter.len() as i32 - none_branch as i32;
+            emitter.patch_u32(none_branch, aarch64::b_cond(1, none_offset));
+            // None path
+            emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, ctx.binop_temp)); // save pointer
+            if !try_emit_closure_call(emitter, functions, pending_calls, &args[1], None)? {
+                return Ok(false);
+            }
+            emitter.emit_u32(aarch64::ldr64(2, aarch64::REG_SP, ctx.binop_temp)); // load pointer
+            emitter.emit_u32(aarch64::str64(0, 2, 8)); // store error
+            emitter.emit_insns(&aarch64::load_i64(1, 1));
+            emitter.emit_u32(aarch64::str64(1, 2, 0)); // tag = Err
+            emitter.emit_u32(aarch64::mov_reg64(0, 2));
+            let end_offset = emitter.len() as i32 - end_branch as i32;
+            emitter.patch_u32(end_branch, aarch64::b(end_offset));
+            Ok(true)
+        }
+        // Result::map → if Ok, apply closure to value and keep Ok; else Err
+        "map" if args.len() == 2 && target.contains("Result") => {
+            if !is_resolvable_function_ref(&args[1], functions) {
+                return Ok(false);
+            }
+            lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?;
+            emitter.emit_u32(aarch64::ldr64(1, 0, 0));
+            emitter.emit_u32(aarch64::cmp_reg64(1, aarch64::REG_XZR));
+            let err_branch = emitter.emit_insn(aarch64::b_cond(1, 0)); // B.NE
+            // Ok path
+            emitter.emit_u32(aarch64::ldr64(3, 0, 8)); // value
+            emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, ctx.binop_temp)); // save pointer
+            if !try_emit_closure_call(emitter, functions, pending_calls, &args[1], Some(3))? {
+                return Ok(false);
+            }
+            emitter.emit_u32(aarch64::ldr64(2, aarch64::REG_SP, ctx.binop_temp)); // load pointer
+            emitter.emit_u32(aarch64::str64(0, 2, 8)); // store result
+            emitter.emit_u32(aarch64::str64(aarch64::REG_XZR, 2, 0)); // tag = Ok
+            emitter.emit_u32(aarch64::mov_reg64(0, 2));
+            let end_branch = emitter.emit_insn(aarch64::b(0));
+            let err_offset = emitter.len() as i32 - err_branch as i32;
+            emitter.patch_u32(err_branch, aarch64::b_cond(1, err_offset));
+            // Err path
+            emitter.emit_insns(&aarch64::load_i64(1, 1));
+            emitter.emit_u32(aarch64::str64(1, 0, 0)); // tag = Err
+            let end_offset = emitter.len() as i32 - end_branch as i32;
+            emitter.patch_u32(end_branch, aarch64::b(end_offset));
+            Ok(true)
+        }
+        // Result::map_err → if Err, apply closure to error and keep Err; else Ok
+        "map_err" if args.len() == 2 && target.contains("Result") => {
+            if !is_resolvable_function_ref(&args[1], functions) {
+                return Ok(false);
+            }
+            lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?;
+            emitter.emit_u32(aarch64::ldr64(1, 0, 0));
+            emitter.emit_insns(&aarch64::load_i64(2, 1));
+            emitter.emit_u32(aarch64::cmp_reg64(1, 2));
+            let err_branch = emitter.emit_insn(aarch64::b_cond(0, 0)); // B.EQ
+            // Ok path
+            emitter.emit_u32(aarch64::str64(aarch64::REG_XZR, 0, 0)); // tag = Ok
+            let end_branch = emitter.emit_insn(aarch64::b(0));
+            let err_offset = emitter.len() as i32 - err_branch as i32;
+            emitter.patch_u32(err_branch, aarch64::b_cond(0, err_offset));
+            // Err path
+            emitter.emit_u32(aarch64::ldr64(3, 0, 8)); // error value
+            emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, ctx.binop_temp)); // save pointer
+            if !try_emit_closure_call(emitter, functions, pending_calls, &args[1], Some(3))? {
+                return Ok(false);
+            }
+            emitter.emit_u32(aarch64::ldr64(2, aarch64::REG_SP, ctx.binop_temp)); // load pointer
+            emitter.emit_u32(aarch64::str64(0, 2, 8)); // store error
+            emitter.emit_insns(&aarch64::load_i64(1, 1));
+            emitter.emit_u32(aarch64::str64(1, 2, 0)); // tag = Err
+            emitter.emit_u32(aarch64::mov_reg64(0, 2));
+            let end_offset = emitter.len() as i32 - end_branch as i32;
+            emitter.patch_u32(end_branch, aarch64::b(end_offset));
+            Ok(true)
+        }
+        // Result::and_then → if Ok, call closure with value and return its result; else Err
+        "and_then" if args.len() == 2 && target.contains("Result") => {
+            if !is_resolvable_function_ref(&args[1], functions) {
+                return Ok(false);
+            }
+            lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?;
+            emitter.emit_u32(aarch64::ldr64(1, 0, 0));
+            emitter.emit_u32(aarch64::cmp_reg64(1, aarch64::REG_XZR));
+            let err_branch = emitter.emit_insn(aarch64::b_cond(1, 0)); // B.NE
+            // Ok path
+            emitter.emit_u32(aarch64::ldr64(0, 0, 8)); // value
+            if !try_emit_closure_call(emitter, functions, pending_calls, &args[1], Some(0))? {
+                return Ok(false);
+            }
+            let end_branch = emitter.emit_insn(aarch64::b(0));
+            let err_offset = emitter.len() as i32 - err_branch as i32;
+            emitter.patch_u32(err_branch, aarch64::b_cond(1, err_offset));
+            // Err path: X0 already pointer
+            let end_offset = emitter.len() as i32 - end_branch as i32;
+            emitter.patch_u32(end_branch, aarch64::b(end_offset));
+            Ok(true)
+        }
+        // Result::unwrap_or → return value if Ok, else default
+        "unwrap_or" if args.len() == 2 && target.contains("Result") => {
+            lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?;
+            emitter.emit_u32(aarch64::ldr64(1, 0, 0));
+            emitter.emit_u32(aarch64::cmp_reg64(1, aarch64::REG_XZR));
+            let err_branch = emitter.emit_insn(aarch64::b_cond(1, 0)); // B.NE
+            // Ok path
+            emitter.emit_u32(aarch64::ldr64(0, 0, 8));
+            let end_branch = emitter.emit_insn(aarch64::b(0));
+            let err_offset = emitter.len() as i32 - err_branch as i32;
+            emitter.patch_u32(err_branch, aarch64::b_cond(1, err_offset));
+            // Err path
+            lower_expr_into(emitter, ctx, &args[1], 0, functions, pending_calls, fn_name)?;
+            let end_offset = emitter.len() as i32 - end_branch as i32;
+            emitter.patch_u32(end_branch, aarch64::b(end_offset));
+            Ok(true)
+        }
+        // Result::unwrap_or_else → return value if Ok, else call closure
+        "unwrap_or_else" if args.len() == 2 && target.contains("Result") => {
+            if !is_resolvable_function_ref(&args[1], functions) {
+                return Ok(false);
+            }
+            lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?;
+            emitter.emit_u32(aarch64::ldr64(1, 0, 0));
+            emitter.emit_u32(aarch64::cmp_reg64(1, aarch64::REG_XZR));
+            let err_branch = emitter.emit_insn(aarch64::b_cond(1, 0)); // B.NE
+            // Ok path
+            emitter.emit_u32(aarch64::ldr64(0, 0, 8));
+            let end_branch = emitter.emit_insn(aarch64::b(0));
+            let err_offset = emitter.len() as i32 - err_branch as i32;
+            emitter.patch_u32(err_branch, aarch64::b_cond(1, err_offset));
+            // Err path
+            if !try_emit_closure_call(emitter, functions, pending_calls, &args[1], None)? {
+                return Ok(false);
+            }
+            let end_offset = emitter.len() as i32 - end_branch as i32;
+            emitter.patch_u32(end_branch, aarch64::b(end_offset));
+            Ok(true)
+        }
+        // Result::ok_or_else → if Ok, keep Ok; else call closure() and wrap as Ok
+        "ok_or_else" if args.len() == 2 && target.contains("Result") => {
+            if !is_resolvable_function_ref(&args[1], functions) {
+                return Ok(false);
+            }
+            lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?;
+            emitter.emit_u32(aarch64::ldr64(1, 0, 0));
+            emitter.emit_u32(aarch64::cmp_reg64(1, aarch64::REG_XZR));
+            let err_branch = emitter.emit_insn(aarch64::b_cond(1, 0)); // B.NE
+            // Ok path
+            let end_branch = emitter.emit_insn(aarch64::b(0));
+            let err_offset = emitter.len() as i32 - err_branch as i32;
+            emitter.patch_u32(err_branch, aarch64::b_cond(1, err_offset));
+            // Err path
+            emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, ctx.binop_temp)); // save pointer
+            if !try_emit_closure_call(emitter, functions, pending_calls, &args[1], None)? {
+                return Ok(false);
+            }
+            emitter.emit_u32(aarch64::ldr64(2, aarch64::REG_SP, ctx.binop_temp)); // load pointer
+            emitter.emit_u32(aarch64::str64(0, 2, 8)); // store Ok value
+            emitter.emit_u32(aarch64::str64(aarch64::REG_XZR, 2, 0)); // tag = Ok
+            emitter.emit_u32(aarch64::mov_reg64(0, 2));
+            let end_offset = emitter.len() as i32 - end_branch as i32;
+            emitter.patch_u32(end_branch, aarch64::b(end_offset));
             Ok(true)
         }
         // std::mem::take → swap with 0
@@ -5163,5 +5484,31 @@ fn main() -> Int {
         let lowered = lower_module(&module, "main", NativeLinkage::Executable)
             .expect("float div should lower");
         assert!(code_contains_insn(&lowered.code, aarch64::fdiv_s(0, 0, 1)));
+    }
+
+    #[test]
+    fn lowers_option_unwrap_or_none_to_default_inline() {
+        let module = UnifiedModule {
+            identity: Default::default(),
+            decls: vec![Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![Stmt::Return(Some(Expr::Call {
+                    callee: Box::new(Expr::Ident("Option::unwrap_or".into())),
+                    args: vec![Expr::IntLit(0), Expr::IntLit(42)],
+                }))],
+                type_params: vec![],
+            }],
+        };
+        let lowered = lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
+        assert!(
+            lowered.external_refs.is_empty(),
+            "Option::unwrap_or should be lowered inline"
+        );
+        assert!(code_contains_insn(
+            &lowered.code,
+            aarch64::cmp_reg64(1, 2)
+        ));
     }
 }
