@@ -7,8 +7,15 @@
 //! string builtins. The JIT runtime does not currently free these blobs;
 //! they are intentionally leaked for the lifetime of the process, matching
 //! the existing behaviour of the in-runtime string helpers.
+//!
+//! # Safety
+//!
+//! Every exported function takes at least one raw pointer from JIT code.
+//! The caller must ensure the pointer is valid, properly aligned for the
+//! in-string header, and not aliased while the wrapper runs. All exported
+//! functions are therefore `unsafe extern "C"`.
 
-use std::ffi::OsStr;
+#[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
 
 /// In-runtime string layout: `len` (u64) followed by the UTF-8 bytes.
@@ -45,8 +52,14 @@ unsafe fn instring_from_bytes(data: &[u8]) -> *const u8 {
     ptr
 }
 
-unsafe fn instring_from_os_str(s: &OsStr) -> *const u8 {
+#[cfg(unix)]
+unsafe fn instring_from_os_str(s: &std::ffi::OsStr) -> *const u8 {
     unsafe { instring_from_bytes(s.as_bytes()) }
+}
+
+#[cfg(not(unix))]
+unsafe fn instring_from_os_str(s: &std::ffi::OsStr) -> *const u8 {
+    unsafe { instring_from_bytes(s.to_str().unwrap_or("").as_bytes()) }
 }
 
 unsafe fn instring_from_string(s: String) -> *const u8 {
@@ -60,8 +73,12 @@ unsafe fn instring_empty() -> *const u8 {
 /// `std::env::var(key)` -> `Option<String>`
 /// C-ABI: takes an instring pointer in X0, returns an instring pointer in X0
 /// (empty string when the variable is missing, matching a `None` placeholder).
+///
+/// # Safety
+/// `key_ptr` must be a valid, non-aliased instring pointer (8-byte aligned
+/// header followed by `len` bytes) or null.
 #[unsafe(no_mangle)]
-pub extern "C" fn in_env_var(key_ptr: *const u8) -> *const u8 {
+pub unsafe extern "C" fn in_env_var(key_ptr: *const u8) -> *const u8 {
     unsafe {
         let Some(key) = instring_from_ptr(key_ptr) else {
             return instring_empty();
@@ -78,14 +95,20 @@ pub extern "C" fn in_env_var(key_ptr: *const u8) -> *const u8 {
 }
 
 /// `std::env::temp_dir()` -> `PathBuf`
+///
+/// # Safety
+/// No raw pointer arguments; safe to call from JIT with the standard C ABI.
 #[unsafe(no_mangle)]
-pub extern "C" fn in_env_temp_dir() -> *const u8 {
+pub unsafe extern "C" fn in_env_temp_dir() -> *const u8 {
     unsafe { instring_from_os_str(std::env::temp_dir().as_os_str()) }
 }
 
 /// `std::env::current_dir()` -> `io::Result<PathBuf>`
+///
+/// # Safety
+/// No raw pointer arguments; safe to call from JIT with the standard C ABI.
 #[unsafe(no_mangle)]
-pub extern "C" fn in_env_current_dir() -> *const u8 {
+pub unsafe extern "C" fn in_env_current_dir() -> *const u8 {
     unsafe {
         match std::env::current_dir() {
             Ok(path) => instring_from_os_str(path.as_os_str()),
@@ -95,8 +118,11 @@ pub extern "C" fn in_env_current_dir() -> *const u8 {
 }
 
 /// `std::fs::read_to_string(path)` -> `io::Result<String>`
+///
+/// # Safety
+/// `path_ptr` must be a valid, non-aliased instring pointer or null.
 #[unsafe(no_mangle)]
-pub extern "C" fn in_fs_read_to_string(path_ptr: *const u8) -> *const u8 {
+pub unsafe extern "C" fn in_fs_read_to_string(path_ptr: *const u8) -> *const u8 {
     unsafe {
         let Some(path_bytes) = instring_from_ptr(path_ptr) else {
             return instring_empty();
@@ -113,8 +139,11 @@ pub extern "C" fn in_fs_read_to_string(path_ptr: *const u8) -> *const u8 {
 }
 
 /// `std::fs::exists(path)` -> `bool`
+///
+/// # Safety
+/// `path_ptr` must be a valid, non-aliased instring pointer or null.
 #[unsafe(no_mangle)]
-pub extern "C" fn in_fs_exists(path_ptr: *const u8) -> i64 {
+pub unsafe extern "C" fn in_fs_exists(path_ptr: *const u8) -> i64 {
     unsafe {
         let Some(path_bytes) = instring_from_ptr(path_ptr) else {
             return 0;

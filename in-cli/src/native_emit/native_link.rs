@@ -21,12 +21,21 @@ fn cache() -> &'static Mutex<HashMap<String, NativePtr>> {
     C.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Symbols that may be resolved via dlsym. Everything else is rejected to
+/// prevent JIT-compiled code from calling arbitrary libc functions.
+const DLSYM_ALLOWLIST: &[&str] = &["exit", "abort", "puts", "putchar", "printf"];
+
 pub fn resolve_native_fn(name: &str) -> Option<*const u8> {
     let c = cache().lock().unwrap();
     if let Some(np) = c.get(name) {
         return Some(np.0);
     }
     drop(c);
+
+    // Only symbols on the explicit allowlist may be looked up dynamically.
+    if !DLSYM_ALLOWLIST.contains(&name) && !name.starts_with("in_") {
+        return None;
+    }
 
     let ptr = dlsym_exact(name);
     if ptr.is_none() {

@@ -2966,7 +2966,7 @@ fn lower_string_push_str(
     emitter.emit_u32(aarch64::ldr64(arg_len, arg_reg, 8));
     emitter.emit_u32(aarch64::add_reg64(new_len, self_len, arg_len));
     emitter.emit_u32(aarch64::cmp_reg64(new_len, self_cap));
-    let skip_branch = emitter.emit_insn(aarch64::b_cond(12, 0));
+    let overflow_branch = emitter.emit_insn(aarch64::b_cond(12, 0)); // B.GT -> overflow
     emitter.emit_insns(&aarch64::load_i64(i, 0));
     let loop_head = emitter.len();
     emitter.emit_u32(aarch64::cmp_reg64(i, arg_len));
@@ -2982,8 +2982,12 @@ fn lower_string_push_str(
     let end_offset = emitter.len() as i32 - end_branch as i32;
     emitter.patch_u32(end_branch, aarch64::b_cond(0, end_offset));
     emitter.emit_u32(aarch64::str64(new_len, self_reg, 8));
-    let skip_offset = emitter.len() as i32 - skip_branch as i32;
-    emitter.patch_u32(skip_branch, aarch64::b_cond(12, skip_offset));
+    let end_branch = emitter.emit_insn(aarch64::b(0)); // jump to epilogue
+    let overflow_offset = emitter.len() as i32 - overflow_branch as i32;
+    emitter.patch_u32(overflow_branch, aarch64::b_cond(12, overflow_offset));
+    emitter.emit_u32(aarch64::brk(0)); // overflow trap
+    let end_offset = emitter.len() as i32 - end_branch as i32;
+    emitter.patch_u32(end_branch, aarch64::b(end_offset));
     emitter.emit_insns(&aarch64::load_i64(rd, 0));
     Ok(())
 }
@@ -3501,32 +3505,6 @@ fn lower_stdlib_call(
             if !try_emit_closure_call(emitter, functions, pending_calls, &args[1], None)? {
                 return Ok(false);
             }
-            let end_offset = emitter.len() as i32 - end_branch as i32;
-            emitter.patch_u32(end_branch, aarch64::b(end_offset));
-            Ok(true)
-        }
-        // Result::ok_or_else → if Ok, keep Ok; else call closure() and wrap as Ok
-        "ok_or_else" if args.len() == 2 && target.contains("Result") => {
-            if !is_resolvable_function_ref(&args[1], functions) {
-                return Ok(false);
-            }
-            lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?;
-            emitter.emit_u32(aarch64::ldr64(1, 0, 0));
-            emitter.emit_u32(aarch64::cmp_reg64(1, aarch64::REG_XZR));
-            let err_branch = emitter.emit_insn(aarch64::b_cond(1, 0)); // B.NE
-            // Ok path
-            let end_branch = emitter.emit_insn(aarch64::b(0));
-            let err_offset = emitter.len() as i32 - err_branch as i32;
-            emitter.patch_u32(err_branch, aarch64::b_cond(1, err_offset));
-            // Err path
-            emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, ctx.binop_temp)); // save pointer
-            if !try_emit_closure_call(emitter, functions, pending_calls, &args[1], None)? {
-                return Ok(false);
-            }
-            emitter.emit_u32(aarch64::ldr64(2, aarch64::REG_SP, ctx.binop_temp)); // load pointer
-            emitter.emit_u32(aarch64::str64(0, 2, 8)); // store Ok value
-            emitter.emit_u32(aarch64::str64(aarch64::REG_XZR, 2, 0)); // tag = Ok
-            emitter.emit_u32(aarch64::mov_reg64(0, 2));
             let end_offset = emitter.len() as i32 - end_branch as i32;
             emitter.patch_u32(end_branch, aarch64::b(end_offset));
             Ok(true)
