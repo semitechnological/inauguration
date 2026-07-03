@@ -6,7 +6,7 @@
 //! `system` is deliberately excluded to prevent shell injection through JIT code.
 
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{OnceLock, RwLock};
 
 #[derive(Clone, Copy)]
 struct NativePtr(*const u8);
@@ -16,24 +16,36 @@ unsafe impl Send for NativePtr {}
 // SAFETY: Same as Send — the pointer is immutable after cache insertion.
 unsafe impl Sync for NativePtr {}
 
-fn cache() -> &'static Mutex<HashMap<String, NativePtr>> {
-    static C: OnceLock<Mutex<HashMap<String, NativePtr>>> = OnceLock::new();
-    C.get_or_init(|| Mutex::new(HashMap::new()))
+fn cache() -> &'static RwLock<HashMap<String, NativePtr>> {
+    static C: OnceLock<RwLock<HashMap<String, NativePtr>>> = OnceLock::new();
+    C.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
 /// Symbols that may be resolved via dlsym. Everything else is rejected to
 /// prevent JIT-compiled code from calling arbitrary libc functions.
-const DLSYM_ALLOWLIST: &[&str] = &["exit", "abort", "puts", "putchar", "printf"];
+const DLSYM_ALLOWLIST: &[&str] = &[
+    "exit",
+    "abort",
+    "puts",
+    "putchar",
+    "printf",
+    "in_env_var",
+    "in_env_temp_dir",
+    "in_env_current_dir",
+    "in_fs_read_to_string",
+    "in_fs_exists",
+];
 
 pub fn resolve_native_fn(name: &str) -> Option<*const u8> {
-    let c = cache().lock().unwrap();
-    if let Some(np) = c.get(name) {
-        return Some(np.0);
+    {
+        let c = cache().read().unwrap();
+        if let Some(np) = c.get(name) {
+            return Some(np.0);
+        }
     }
-    drop(c);
 
     // Only symbols on the explicit allowlist may be looked up dynamically.
-    if !DLSYM_ALLOWLIST.contains(&name) && !name.starts_with("in_") {
+    if !DLSYM_ALLOWLIST.contains(&name) {
         return None;
     }
 
@@ -43,7 +55,7 @@ pub fn resolve_native_fn(name: &str) -> Option<*const u8> {
         let u = format!("_{name}");
         if let Some(p) = dlsym_exact(&u) {
             cache()
-                .lock()
+                .write()
                 .unwrap()
                 .insert(name.to_string(), NativePtr(p));
             return Some(p);
@@ -51,7 +63,7 @@ pub fn resolve_native_fn(name: &str) -> Option<*const u8> {
     }
     if let Some(p) = ptr {
         cache()
-            .lock()
+            .write()
             .unwrap()
             .insert(name.to_string(), NativePtr(p));
     }
@@ -67,17 +79,14 @@ pub fn resolve_native_fn(name: &str) -> Option<*const u8> {
 pub fn bootstrap_jit_native() {
     // ponytail: only exit for termination, puts/putchar/printf for debug I/O.
     // No shell-execution symbols. Add mmap/bzero if JIT runtime needs them.
+    let mut c = cache().write().unwrap();
     for name in &["exit", "puts", "putchar", "printf"] {
         if let Some(ptr) = dlsym_exact(name) {
-            cache()
-                .lock()
-                .unwrap()
-                .insert(name.to_string(), NativePtr(ptr));
+            c.insert(name.to_string(), NativePtr(ptr));
         }
     }
     // Pre-register in-cli stdlib wrappers so the JIT can call std::env and
     // std::fs helpers without external libc references.
-    let mut c = cache().lock().unwrap();
     c.insert(
         "in_env_var".to_string(),
         NativePtr(crate::native_stdlib::in_env_var as *const u8),

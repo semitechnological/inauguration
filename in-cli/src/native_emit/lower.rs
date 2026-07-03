@@ -111,7 +111,7 @@ fn build_assembly(code: &[u8], exports: &[(String, u32)], external_refs: &[(u32,
 /// adds a leading underscore (C ABI convention on macOS).
 pub fn native_link_name(name: &str) -> String {
     // Clean up spaces (rust_front may produce "std :: process :: exit" instead of "std::process::exit")
-    let cleaned: String = name.chars().filter(|&c| c != ' ').collect();
+    let cleaned = name.replace(' ', "");
     match cleaned.as_str() {
         "std::process::exit" | "std::process::abort" => "_exit".to_string(),
         "std::io::_print" | "print" => "_printf".to_string(),
@@ -315,16 +315,6 @@ pub fn compile_native_artifact(
     }
 
     // No external refs: write standalone Mach-O executable
-    let exports = match linkage {
-        NativeLinkage::Executable => Vec::new(),
-        NativeLinkage::Dylib | NativeLinkage::StaticLib => lowered.exports.clone(),
-    };
-    let image = MachOImage {
-        code: lowered.code,
-        entry_offset: lowered.entry_offset,
-        exports,
-        external_refs: lowered.external_refs,
-    };
     let install_name = out_path
         .file_name()
         .and_then(|name| name.to_str())
@@ -333,10 +323,6 @@ pub fn compile_native_artifact(
         NativeLinkage::Dylib => format!("@rpath/{install_name}"),
         NativeLinkage::Executable | NativeLinkage::StaticLib => install_name.to_string(),
     };
-    let mut file_bytes = Vec::new();
-    macho::write_image(&image, linkage.into(), &install, &mut file_bytes);
-    std::fs::write(out_path, &file_bytes)
-        .map_err(|err| format!("write native artifact `{}`: {err}", out_path.display()))?;
     let abi_path = match linkage {
         NativeLinkage::Dylib | NativeLinkage::StaticLib => {
             let boundary = boundary_from_module(module, module_id, &lowered.exports);
@@ -351,6 +337,19 @@ pub fn compile_native_artifact(
         }
         NativeLinkage::Executable => None,
     };
+    let image = MachOImage {
+        code: lowered.code,
+        entry_offset: lowered.entry_offset,
+        exports: match linkage {
+            NativeLinkage::Executable => Vec::new(),
+            NativeLinkage::Dylib | NativeLinkage::StaticLib => lowered.exports,
+        },
+        external_refs: lowered.external_refs,
+    };
+    let mut file_bytes = Vec::new();
+    macho::write_image(&image, linkage.into(), &install, &mut file_bytes);
+    std::fs::write(out_path, &file_bytes)
+        .map_err(|err| format!("write native artifact `{}`: {err}", out_path.display()))?;
     Ok(abi_path)
 }
 
@@ -369,12 +368,6 @@ pub fn lower_module(
 ) -> Result<LoweredModule, String> {
     // Clear any stale external refs from previous invocations
     TL_EXTERNAL_REFS.with(|refs| refs.borrow_mut().clear());
-    for d in &module.decls {
-        if let Decl::Function { name, .. } = d {
-        }
-        if let Decl::Struct { name, .. } = d {
-        }
-    }
     let functions = collect_functions(module)?;
     let structs = collect_structs(module);
     let strings = collect_strings(module);
