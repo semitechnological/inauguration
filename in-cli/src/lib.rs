@@ -64,6 +64,7 @@ pub mod module_resolver;
 pub mod native_backend;
 pub mod native_emit;
 pub mod native_runtime;
+pub mod native_stdlib;
 pub mod owned_compile;
 pub mod package_discover;
 pub mod package_extern;

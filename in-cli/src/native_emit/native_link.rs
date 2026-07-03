@@ -66,6 +66,29 @@ pub fn bootstrap_jit_native() {
                 .insert(name.to_string(), NativePtr(ptr));
         }
     }
+    // Pre-register in-cli stdlib wrappers so the JIT can call std::env and
+    // std::fs helpers without external libc references.
+    let mut c = cache().lock().unwrap();
+    c.insert(
+        "in_env_var".to_string(),
+        NativePtr(crate::native_stdlib::in_env_var as *const u8),
+    );
+    c.insert(
+        "in_env_temp_dir".to_string(),
+        NativePtr(crate::native_stdlib::in_env_temp_dir as *const u8),
+    );
+    c.insert(
+        "in_env_current_dir".to_string(),
+        NativePtr(crate::native_stdlib::in_env_current_dir as *const u8),
+    );
+    c.insert(
+        "in_fs_read_to_string".to_string(),
+        NativePtr(crate::native_stdlib::in_fs_read_to_string as *const u8),
+    );
+    c.insert(
+        "in_fs_exists".to_string(),
+        NativePtr(crate::native_stdlib::in_fs_exists as *const u8),
+    );
 }
 
 fn dlsym_exact(name: &str) -> Option<*const u8> {
