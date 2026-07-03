@@ -3925,19 +3925,34 @@ fn cwd() -> Result<PathBuf> {
 }
 
 fn workspace_root(start: PathBuf) -> Result<PathBuf> {
+    fn has_in_cli(path: &std::path::Path) -> bool {
+        path.join("in-cli").is_dir() && path.join("in-cli").join("Cargo.toml").is_file()
+    }
+
     let mut current = start.as_path();
     loop {
-        let has_rust_driver = current.join("compiler").join("rust-driver").is_dir();
-        let has_in_cli = current.join("in-cli").is_dir();
-        if has_rust_driver && has_in_cli {
+        if has_in_cli(current) {
             return Ok(current.to_path_buf());
         }
         match current.parent() {
             Some(parent) => current = parent,
             None => {
-                return Err(InError::Message(
-                    "could not locate inauguration workspace root (expected compiler/rust-driver and in-cli)".to_string(),
-                ))
+                // Fallback to the build-time location of in-cli/Cargo.toml.
+                let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+                let mut current = manifest_dir.as_path();
+                loop {
+                    if has_in_cli(current) {
+                        return Ok(current.to_path_buf());
+                    }
+                    match current.parent() {
+                        Some(parent) => current = parent,
+                        None => {
+                            return Err(InError::Message(
+                                "could not locate inauguration workspace root (expected in-cli/Cargo.toml)".to_string(),
+                            ))
+                        }
+                    }
+                }
             }
         }
     }
