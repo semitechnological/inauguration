@@ -2935,6 +2935,59 @@ fn emit_stdlib_wrapper_call(
     Ok(())
 }
 
+fn lower_string_push_str(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    args: &[Expr],
+    rd: u8,
+    functions: &HashMap<String, FunctionInfo>,
+    pending_calls: &mut Vec<PendingCall>,
+    fn_name: &str,
+) -> Result<(), String> {
+    lower_expr_into(emitter, ctx, &args[0], rd, functions, pending_calls, fn_name)?;
+    lower_expr_into(emitter, ctx, &args[1], rd + 1, functions, pending_calls, fn_name)?;
+
+    let self_reg = rd;
+    let arg_reg = rd + 1;
+    let self_ptr = pick_scratch(&[self_reg, arg_reg]);
+    let self_len = pick_scratch(&[self_reg, arg_reg, self_ptr]);
+    let self_cap = pick_scratch(&[self_reg, arg_reg, self_ptr, self_len]);
+    let arg_ptr = pick_scratch(&[self_reg, arg_reg, self_ptr, self_len, self_cap]);
+    let arg_len = pick_scratch(&[self_reg, arg_reg, self_ptr, self_len, self_cap, arg_ptr]);
+    let new_len = pick_scratch(&[self_reg, arg_reg, self_ptr, self_len, self_cap, arg_ptr, arg_len]);
+    let i = pick_scratch(&[self_reg, arg_reg, self_ptr, self_len, self_cap, arg_ptr, arg_len, new_len]);
+    let byte = pick_scratch(&[self_reg, arg_reg, self_ptr, self_len, self_cap, arg_ptr, arg_len, new_len, i]);
+    let dst_addr = pick_scratch(&[self_reg, arg_reg, self_ptr, self_len, self_cap, arg_ptr, arg_len, new_len, i, byte]);
+
+    emitter.emit_u32(aarch64::ldr64(self_ptr, self_reg, 0));
+    emitter.emit_u32(aarch64::ldr64(self_len, self_reg, 8));
+    emitter.emit_u32(aarch64::ldr64(self_cap, self_reg, 16));
+    emitter.emit_u32(aarch64::ldr64(arg_ptr, arg_reg, 0));
+    emitter.emit_u32(aarch64::ldr64(arg_len, arg_reg, 8));
+    emitter.emit_u32(aarch64::add_reg64(new_len, self_len, arg_len));
+    emitter.emit_u32(aarch64::cmp_reg64(new_len, self_cap));
+    let skip_branch = emitter.emit_insn(aarch64::b_cond(12, 0));
+    emitter.emit_insns(&aarch64::load_i64(i, 0));
+    let loop_head = emitter.len();
+    emitter.emit_u32(aarch64::cmp_reg64(i, arg_len));
+    let end_branch = emitter.emit_insn(aarch64::b_cond(0, 0));
+    emitter.emit_u32(aarch64::add_reg64(dst_addr, arg_ptr, i));
+    emitter.emit_u32(aarch64::ldrb(byte, dst_addr, 0));
+    emitter.emit_u32(aarch64::add_reg64(dst_addr, self_ptr, self_len));
+    emitter.emit_u32(aarch64::add_reg64(dst_addr, dst_addr, i));
+    emitter.emit_u32(aarch64::strb(byte, dst_addr, 0));
+    emitter.emit_u32(aarch64::add_imm64(i, i, 1));
+    let back_offset = loop_head as i32 - emitter.len() as i32;
+    emitter.emit_u32(aarch64::b(back_offset));
+    let end_offset = emitter.len() as i32 - end_branch as i32;
+    emitter.patch_u32(end_branch, aarch64::b_cond(0, end_offset));
+    emitter.emit_u32(aarch64::str64(new_len, self_reg, 8));
+    let skip_offset = emitter.len() as i32 - skip_branch as i32;
+    emitter.patch_u32(skip_branch, aarch64::b_cond(12, skip_offset));
+    emitter.emit_insns(&aarch64::load_i64(rd, 0));
+    Ok(())
+}
+
 /// Try to lower a recognized stdlib function as an inline intrinsic.
 /// Returns Ok(true) if handled, Ok(false) if not recognized (caller should fall back).
 fn lower_stdlib_call(
@@ -2986,6 +3039,66 @@ fn lower_stdlib_call(
     // Strip type qualifier prefix if present (e.g., "Option::unwrap" → "unwrap")
     let base = target.rsplit("::").next().unwrap_or(target);
     match base {
+        // String/Path/str::len → length is at offset 8 (after ptr at offset 0)
+        "len" if args.len() == 1
+            && (target.contains("String") || target.contains("Path") || target.contains("str")) =>
+        {
+            lower_expr_into(emitter, ctx, &args[0], rd, functions, pending_calls, fn_name)?;
+            emitter.emit_u32(aarch64::ldr64(rd, rd, 8));
+            Ok(true)
+        }
+        // String/Path/str::is_empty → compare len at offset 8 with 0
+        "is_empty" if args.len() == 1
+            && (target.contains("String") || target.contains("Path") || target.contains("str")) =>
+        {
+            lower_expr_into(emitter, ctx, &args[0], rd, functions, pending_calls, fn_name)?;
+            emitter.emit_u32(aarch64::ldr64(rd, rd, 8));
+            emitter.emit_u32(aarch64::cmp_reg64(rd, aarch64::REG_XZR));
+            lower_comparison_result(emitter, rd, "==")?;
+            Ok(true)
+        }
+        // String/Path/str::to_string → return the receiver as a slice
+        "to_string" if args.len() == 1
+            && (target.contains("String") || target.contains("Path") || target.contains("str")) =>
+        {
+            lower_expr_into(emitter, ctx, &args[0], rd, functions, pending_calls, fn_name)?;
+            emitter.emit_u32(aarch64::ldr64(rd + 1, rd, 8));
+            emitter.emit_u32(aarch64::ldr64(rd, rd, 0));
+            Ok(true)
+        }
+        // String/str::as_str → return slice {ptr, len}
+        "as_str" if args.len() == 1 && (target.contains("String") || target.contains("str")) => {
+            lower_expr_into(emitter, ctx, &args[0], rd, functions, pending_calls, fn_name)?;
+            emitter.emit_u32(aarch64::ldr64(rd + 1, rd, 8));
+            emitter.emit_u32(aarch64::ldr64(rd, rd, 0));
+            Ok(true)
+        }
+        // PathBuf::as_path / Path::as_path → return slice {ptr, len}
+        "as_path" if args.len() == 1 && target.contains("Path") => {
+            lower_expr_into(emitter, ctx, &args[0], rd, functions, pending_calls, fn_name)?;
+            emitter.emit_u32(aarch64::ldr64(rd + 1, rd, 8));
+            emitter.emit_u32(aarch64::ldr64(rd, rd, 0));
+            Ok(true)
+        }
+        // Path::to_string_lossy → return slice {ptr, len} as a Cow<str> pass-through
+        "to_string_lossy" if args.len() == 1 && target.contains("Path") => {
+            lower_expr_into(emitter, ctx, &args[0], rd, functions, pending_calls, fn_name)?;
+            emitter.emit_u32(aarch64::ldr64(rd + 1, rd, 8));
+            emitter.emit_u32(aarch64::ldr64(rd, rd, 0));
+            Ok(true)
+        }
+        // String::from_utf8_lossy → return slice {ptr, len} as a Cow<str> pass-through
+        "from_utf8_lossy" if args.len() == 1 && target.contains("String") => {
+            lower_expr_into(emitter, ctx, &args[0], rd, functions, pending_calls, fn_name)?;
+            emitter.emit_u32(aarch64::ldr64(rd + 1, rd, 8));
+            emitter.emit_u32(aarch64::ldr64(rd, rd, 0));
+            Ok(true)
+        }
+        // String::push_str → fast-path append when len + arg_len <= cap
+        "push_str" if args.len() == 2 && target.contains("String") => {
+            lower_string_push_str(emitter, ctx, args, rd, functions, pending_calls, fn_name)?;
+            Ok(true)
+        }
         // Vec::len → ldr x0, [x0]  (length is at offset 0)
         "len" if args.len() == 1 => {
             lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?;
@@ -3983,6 +4096,38 @@ mod tests {
         let lowered = lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
 
         assert_contains_divide_failure_path(&lowered.code, 16);
+    }
+
+    #[test]
+    fn lowers_string_len_to_aarch64_ldr_offset_8() {
+        let mut emitter = CodeEmitter::new();
+        let structs = HashMap::new();
+        let strings = HashMap::new();
+        let mut pending_static_arrays = Vec::new();
+        let mut pending_inrt_calls = Vec::new();
+        let mut ctx = LowerCtx::new(
+            &[],
+            &structs,
+            &strings,
+            &mut pending_static_arrays,
+            &mut pending_inrt_calls,
+            "test",
+        )
+        .unwrap();
+        let functions = HashMap::new();
+        let mut pending_calls = Vec::new();
+        let result = lower_stdlib_call(
+            &mut emitter,
+            &mut ctx,
+            "String::len",
+            &[Expr::IntLit(0)],
+            0,
+            &functions,
+            &mut pending_calls,
+            "test",
+        );
+        assert!(result.unwrap());
+        assert!(code_contains_insn(&emitter.bytes, aarch64::ldr64(0, 0, 8)));
     }
 
     #[test]
