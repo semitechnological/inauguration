@@ -9,7 +9,6 @@ use crate::core_ir::{Decl, Expr, FloatVal, Stmt, Typ, UnifiedModule};
 use crate::inrt;
 #[cfg(test)]
 use crate::inrt::INRT_BUILTINS;
-use crate::inrt::{inrt_builtin_param_slots, is_inrt_builtin};
 use crate::native_emit::aarch64::{self, CodeEmitter, REG_FP};
 use crate::native_emit::macho::{self, ExportSymbol, MachOImage, MachOLinkage};
 use std::cell::RefCell;
@@ -27,6 +26,7 @@ thread_local! {
     pub(crate) static TL_NATIVE_MODE: RefCell<bool> = const { RefCell::new(false) };
 }
 
+mod lower_call;
 mod lower_stdlib;
 
 pub const TARGET_TRIPLE: &str = "aarch64-apple-darwin";
@@ -1914,7 +1914,7 @@ fn lower_struct_expr_into_slots(
                 }
                 return Ok(());
             }
-            lower_call(
+            lower_call::lower_call(
                 emitter,
                 ctx,
                 callee,
@@ -2011,7 +2011,7 @@ fn lower_struct_expr_into_regs(
         Expr::Call { callee, args, .. } => {
             // ponytail: allow any return type for struct returns — call
             // and assume X0..X7 hold the struct
-            lower_call(
+            lower_call::lower_call(
                 emitter,
                 ctx,
                 callee,
@@ -2078,7 +2078,7 @@ fn lower_array_expr_into_regs(
                     "native-lower: array return type mismatch in `{fn_name}`"
                 ));
             }
-            lower_call(
+            lower_call::lower_call(
                 emitter,
                 ctx,
                 callee,
@@ -2457,7 +2457,7 @@ pub(crate) fn lower_expr_into(
             pending_calls,
             fn_name,
         ),
-        Expr::Call { callee, args, .. } => lower_call(
+        Expr::Call { callee, args, .. } => lower_call::lower_call(
             emitter,
             ctx,
             callee,
@@ -2588,7 +2588,7 @@ pub(crate) fn pick_scratch(exclude: &[u8]) -> u8 {
     (2..=15).find(|reg| !exclude.contains(reg)).unwrap_or(15)
 }
 
-fn emit_failure_return(emitter: &mut CodeEmitter, stack_reserve: u32) {
+pub(crate) fn emit_failure_return(emitter: &mut CodeEmitter, stack_reserve: u32) {
     emitter.emit_insns(&aarch64::load_i64(0, 1));
     emit_epilogue(emitter, stack_reserve);
 }
@@ -2906,429 +2906,7 @@ pub(crate) fn lower_comparison_result(
     Ok(())
 }
 
-fn lower_call(
-    emitter: &mut CodeEmitter,
-    ctx: &mut LowerCtx<'_>,
-    callee: &Expr,
-    args: &[Expr],
-    rd: u8,
-    functions: &HashMap<String, FunctionInfo>,
-    pending_calls: &mut Vec<PendingCall>,
-    fn_name: &str,
-) -> Result<(), String> {
-    let Expr::Ident(target) = callee else {
-        return Err(format!(
-            "native-lower: unsupported call callee in `{fn_name}`"
-        ));
-    };
-    if is_inrt_builtin(target) {
-        return lower_inrt_call(emitter, ctx, target, args, rd, fn_name);
-    }
-    // ponytail: try stdlib intrinsic lowering before external ref fallback
-    if lower_stdlib::lower_stdlib_call(
-        emitter,
-        ctx,
-        target,
-        args,
-        rd,
-        functions,
-        pending_calls,
-        fn_name,
-    )? {
-        return Ok(());
-    }
-    if !functions.contains_key(target) {
-        // ponytail: try the bare function name from a module-qualified path
-        // e.g., "inauguration::agent_mode::analyze_path" → try "analyze_path"
-        let bare_name = if let Some(idx) = target.rfind("::") {
-            let last = &target[idx + 2..];
-            if functions.contains_key(last) {
-                Some(last)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-        if let Some(name) = bare_name {
-            // Re-invoke with the bare function name
-            return lower_call(
-                emitter,
-                ctx,
-                &Expr::Ident(name.to_string()),
-                args,
-                rd,
-                functions,
-                pending_calls,
-                fn_name,
-            );
-        }
-        // Load args into registers
-        for (i, arg) in args.iter().enumerate() {
-            if i > 7 {
-                break;
-            }
-            lower_expr_into(
-                emitter,
-                ctx,
-                arg,
-                i as u8,
-                functions,
-                pending_calls,
-                fn_name,
-            )?;
-        }
-        let is_native = TL_NATIVE_MODE.with(|m| *m.borrow());
-        if is_native {
-            // Native mode: emit BL 0 + record external symbol reference
-            // Map Rust function names to C/mangled linker names
-            let link_name = native_link_name(target);
-            let call_site = emitter.len() as u32;
-            emitter.emit_u32(aarch64::bl(0));
-            TL_EXTERNAL_REFS.with(|refs| refs.borrow_mut().push((call_site, link_name)));
-        } else if let Some(native_ptr) = super::native_link::resolve_native_fn(target) {
-            // JIT mode: use dlsym'd address
-            emitter.emit_insns(&aarch64::load_i64(15, native_ptr as usize as i64));
-            emitter.emit_u32(0xD63F_01E0u32 | (15 << 5)); // BLR X15
-        } else {
-            return Err(format!(
-                "native-lower: unsupported external call `{target}` in JIT mode"
-            ));
-        }
-        if rd != 0 {
-            emitter.emit_u32(aarch64::mov_reg64(rd, 0));
-        }
-        return Ok(());
-    }
-    let Some(target_info) = functions.get(target) else {
-        unreachable!();
-    };
-    // ponytail: allow arity mismatch — pass what we can, skip extras
-    let abi_arg_count = native_param_abi_slots(&target_info.params, ctx.structs, target)?;
-    // ponytail: skip args beyond 8 ABI slots instead of erroring
-    let _ = abi_arg_count;
-
-    let mut reg = 0u8;
-    for (arg, (param_name, typ)) in args.iter().zip(&target_info.params) {
-        reg = lower_call_arg(
-            emitter,
-            ctx,
-            arg,
-            typ,
-            reg,
-            functions,
-            pending_calls,
-            fn_name,
-            param_name,
-        )?;
-    }
-
-    let call_site = emitter.len();
-    emitter.emit_u32(aarch64::bl(0));
-    pending_calls.push(PendingCall {
-        site: call_site,
-        target: target.clone(),
-    });
-
-    if rd != 0 {
-        emitter.emit_u32(aarch64::mov_reg64(rd, 0));
-    }
-    Ok(())
-}
-
-fn lower_inrt_call(
-    emitter: &mut CodeEmitter,
-    ctx: &mut LowerCtx<'_>,
-    target: &str,
-    args: &[Expr],
-    rd: u8,
-    fn_name: &str,
-) -> Result<(), String> {
-    let expected = inrt_builtin_param_slots(target)
-        .ok_or_else(|| format!("native-lower: unknown inrt builtin `{target}` in `{fn_name}`"))?;
-    if args.len() != expected {
-        return Err(format!(
-            "native-lower: inrt call arity mismatch for `{target}` in `{fn_name}` (expected {expected} arg(s), got {})",
-            args.len()
-        ));
-    }
-
-    for (i, arg) in args.iter().enumerate() {
-        let reg = i as u8;
-        match arg {
-            Expr::IntLit(v) => {
-                emitter.emit_insns(&aarch64::load_i64(reg, *v));
-            }
-            Expr::BoolLit(v) => {
-                emitter.emit_insns(&aarch64::load_i64(reg, i64::from(*v)));
-            }
-            Expr::StringLit(v) => {
-                let id = ctx.string_id(v);
-                emitter.emit_insns(&aarch64::load_i64(reg, id));
-            }
-            Expr::Ident(name) => {
-                if let Some(offset) = ctx.params.get(name) {
-                    emitter.emit_u32(aarch64::ldr64(reg, aarch64::REG_SP, *offset));
-                } else if let Some(LocalSlot::Scalar(offset)) = ctx.locals.get(name) {
-                    emitter.emit_u32(aarch64::ldr64(reg, aarch64::REG_SP, *offset));
-                } else {
-                    // ponytail: unknown param/local — load 0
-                    emitter.emit_insns(&aarch64::load_i64(reg, 0));
-                }
-            }
-            _ => {
-                return Err(format!(
-                    "native-lower: unsupported inrt call arg expression in `{fn_name}`"
-                ));
-            }
-        }
-    }
-
-    let call_site = emitter.len();
-    emitter.emit_u32(aarch64::bl(0));
-    ctx.pending_inrt_calls.push(PendingInrtCall {
-        site: call_site,
-        target: target.to_string(),
-    });
-
-    if rd != 0 {
-        emitter.emit_u32(aarch64::mov_reg64(rd, 0));
-    }
-    Ok(())
-}
-
-fn lower_call_arg(
-    emitter: &mut CodeEmitter,
-    ctx: &mut LowerCtx<'_>,
-    arg: &Expr,
-    typ: &Typ,
-    reg: u8,
-    functions: &HashMap<String, FunctionInfo>,
-    pending_calls: &mut Vec<PendingCall>,
-    fn_name: &str,
-    param_name: &str,
-) -> Result<u8, String> {
-    match typ {
-        Typ::Int | Typ::Bool | Typ::String | Typ::Float => {
-            lower_expr_into(emitter, ctx, arg, reg, functions, pending_calls, fn_name)?;
-            Ok(reg + 1)
-        }
-        Typ::Named(struct_name) => {
-            // ponytail: "self" parameter in impl methods is always &self (reference)
-            if param_name == "self" {
-                // Pass pointer to struct by emitting address of first field into reg
-                lower_struct_ptr_arg(emitter, ctx, arg, reg)
-            } else {
-                lower_struct_call_arg(
-                    emitter,
-                    ctx,
-                    arg,
-                    struct_name,
-                    reg,
-                    functions,
-                    pending_calls,
-                    fn_name,
-                )
-            }
-        }
-        Typ::Array(elem) => lower_array_call_arg(emitter, ctx, arg, elem, reg, fn_name),
-        _ => {
-            // ponytail: generic/void arg — load 0 and skip
-            emitter.emit_insns(&aarch64::load_i64(reg, 0));
-            Ok(reg + 1)
-        }
-    }
-}
-
-fn lower_struct_ptr_arg(
-    emitter: &mut CodeEmitter,
-    ctx: &mut LowerCtx<'_>,
-    arg: &Expr,
-    reg: u8,
-) -> Result<u8, String> {
-    let Expr::Ident(local) = arg else {
-        // ponytail: non-ident struct ptr arg — load 0
-        emitter.emit_insns(&aarch64::load_i64(reg, 0));
-        return Ok(reg + 1);
-    };
-    let Some(LocalSlot::Struct { fields: slots, .. }) = ctx.locals.get(local) else {
-        // ponytail: expected struct local — load 0
-        emitter.emit_insns(&aarch64::load_i64(reg, 0));
-        return Ok(reg + 1);
-    };
-    // Get the first field's offset to compute sp + offset
-    if let Some(&first_off) = slots.values().min() {
-        // add reg, sp, first_off
-        emitter.emit_u32(aarch64::add_imm64(reg, aarch64::REG_SP, first_off as u16));
-    } else {
-        emitter.emit_insns(&aarch64::load_i64(reg, 0));
-    }
-    Ok(reg + 1)
-}
-
-fn lower_array_call_arg(
-    emitter: &mut CodeEmitter,
-    ctx: &mut LowerCtx<'_>,
-    arg: &Expr,
-    elem: &Typ,
-    reg: u8,
-    fn_name: &str,
-) -> Result<u8, String> {
-    if !is_native_scalar_type(elem) {
-        // ponytail: non-scalar array element — skip (load 0 for ptr+len)
-        emitter.emit_insns(&aarch64::load_i64(reg, 0));
-        emitter.emit_insns(&aarch64::load_i64(reg + 1, 0));
-        return Ok(reg + 2);
-    }
-    let Expr::Ident(local) = arg else {
-        // ponytail: non-ident array arg — load 0 for ptr+len
-        emitter.emit_insns(&aarch64::load_i64(reg, 0));
-        emitter.emit_insns(&aarch64::load_i64(reg + 1, 0));
-        return Ok(reg + 2);
-    };
-    let Some(slot) = ctx.locals.get(local) else {
-        // ponytail: unknown local for array arg — load 0 for ptr+len
-        emitter.emit_insns(&aarch64::load_i64(reg, 0));
-        emitter.emit_insns(&aarch64::load_i64(reg + 1, 0));
-        return Ok(reg + 2);
-    };
-    match slot {
-        LocalSlot::Array {
-            elem: actual,
-            offsets,
-        } => {
-            if actual != elem {
-                return Err(format!(
-                    "native-lower: array argument type mismatch in `{fn_name}`"
-                ));
-            }
-            if offsets.is_empty() {
-                return Err(format!(
-                    "native-lower: unsupported empty array argument in `{fn_name}`"
-                ));
-            }
-            emitter.emit_u32(aarch64::add_imm64(reg, aarch64::REG_SP, offsets[0] as u16));
-            emitter.emit_insns(&aarch64::load_i64(reg + 1, offsets.len() as i64));
-            Ok(reg + 2)
-        }
-        LocalSlot::ArrayParam {
-            elem: actual,
-            ptr_offset,
-            len_offset,
-        } => {
-            if actual != elem {
-                return Err(format!(
-                    "native-lower: array argument type mismatch in `{fn_name}`"
-                ));
-            }
-            emitter.emit_u32(aarch64::ldr64(reg, aarch64::REG_SP, *ptr_offset));
-            emitter.emit_u32(aarch64::ldr64(reg + 1, aarch64::REG_SP, *len_offset));
-            Ok(reg + 2)
-        }
-        _ => {
-            // ponytail: unsupported aggregate slot — load 0 for ptr+len
-            emitter.emit_insns(&aarch64::load_i64(reg, 0));
-            emitter.emit_insns(&aarch64::load_i64(reg + 1, 0));
-            Ok(reg + 2)
-        }
-    }
-}
-
-fn lower_struct_call_arg(
-    emitter: &mut CodeEmitter,
-    ctx: &mut LowerCtx<'_>,
-    arg: &Expr,
-    struct_name: &str,
-    mut reg: u8,
-    functions: &HashMap<String, FunctionInfo>,
-    pending_calls: &mut Vec<PendingCall>,
-    fn_name: &str,
-) -> Result<u8, String> {
-    let Some(fields) = ctx.structs.get(struct_name) else {
-        // ponytail: unknown struct type in call arg — treat as single scalar (load 0)
-        emitter.emit_insns(&aarch64::load_i64(reg, 0));
-        return Ok(reg + 1);
-    };
-    match arg {
-        Expr::Ident(local) => {
-            let Some(LocalSlot::Struct { typ, fields: slots }) = ctx.locals.get(local) else {
-                // ponytail: expected struct for call arg — load 0 per field
-                for _ in fields {
-                    emitter.emit_insns(&aarch64::load_i64(reg, 0));
-                    reg += 1;
-                }
-                return Ok(reg);
-            };
-            if typ != struct_name {
-                // ponytail: struct name mismatch in call arg — load 0 for each field
-                for _ in fields {
-                    emitter.emit_insns(&aarch64::load_i64(reg, 0));
-                    reg += 1;
-                }
-                return Ok(reg);
-            }
-            for (field, field_ty) in fields {
-                if matches!(field_ty, Typ::Int | Typ::Bool | Typ::String | Typ::Float) {
-                    if let Some(offset) = find_field_offset(slots, field) {
-                        emitter.emit_u32(aarch64::ldr64(reg, aarch64::REG_SP, *offset));
-                    } else {
-                        emitter.emit_insns(&aarch64::load_i64(reg, 0));
-                    }
-                } else {
-                    // ponytail: non-scalar field in struct arg — load 0 placeholder
-                    emitter.emit_insns(&aarch64::load_i64(reg, 0));
-                }
-                reg += 1;
-            }
-            Ok(reg)
-        }
-        Expr::StructInit {
-            name,
-            fields: values,
-        } => {
-            if name != struct_name {
-                // ponytail: struct init name mismatch in call arg — load 0 for each field
-                for _ in fields {
-                    emitter.emit_insns(&aarch64::load_i64(reg, 0));
-                    reg += 1;
-                }
-                return Ok(reg);
-            }
-            for (field, field_ty) in fields {
-                if matches!(field_ty, Typ::Int | Typ::Bool | Typ::String) {
-                    if let Some((_, value)) = values.iter().find(|(n, _)| n == field) {
-                        lower_expr_into(
-                            emitter,
-                            ctx,
-                            value,
-                            reg,
-                            functions,
-                            pending_calls,
-                            fn_name,
-                        )?;
-                    } else {
-                        emitter.emit_insns(&aarch64::load_i64(reg, 0));
-                    }
-                } else {
-                    // ponytail: non-scalar field in struct init arg — load 0
-                    emitter.emit_insns(&aarch64::load_i64(reg, 0));
-                }
-                reg += 1;
-            }
-            Ok(reg)
-        }
-        _ => {
-            // ponytail: unsupported arg pattern — load 0 for each field register
-            for _ in fields {
-                emitter.emit_insns(&aarch64::load_i64(reg, 0));
-                reg += 1;
-            }
-            Ok(reg)
-        }
-    }
-}
-
-fn emit_epilogue(emitter: &mut CodeEmitter, stack_reserve: u32) {
+pub(crate) fn emit_epilogue(emitter: &mut CodeEmitter, stack_reserve: u32) {
     if stack_reserve > 0 {
         emitter.emit_u32(aarch64::add_imm64(
             aarch64::REG_SP,
@@ -3340,7 +2918,7 @@ fn emit_epilogue(emitter: &mut CodeEmitter, stack_reserve: u32) {
     emitter.emit_u32(aarch64::ret());
 }
 
-fn ensure_return_type(
+pub(crate) fn ensure_return_type(
     ret: &Typ,
     fn_name: &str,
     structs: &HashMap<String, Vec<(String, Typ)>>,
@@ -3356,7 +2934,7 @@ fn ensure_return_type(
     }
 }
 
-fn call_return_type<'a>(
+pub(crate) fn call_return_type<'a>(
     callee: &Expr,
     functions: &'a HashMap<String, FunctionInfo>,
     fn_name: &str,
@@ -3381,7 +2959,7 @@ fn call_return_type<'a>(
 
 static UNKNOWN_FN_RET_TY: Typ = Typ::Int;
 
-fn reject_unsupported_function(
+pub(crate) fn reject_unsupported_function(
     func: &FunctionInfo,
     structs: &HashMap<String, Vec<(String, Typ)>>,
 ) -> Result<(), String> {
@@ -3394,7 +2972,7 @@ fn reject_unsupported_function(
     Ok(())
 }
 
-fn native_param_abi_slots(
+pub(crate) fn native_param_abi_slots(
     params: &[(String, Typ)],
     structs: &HashMap<String, Vec<(String, Typ)>>,
     fn_name: &str,
@@ -3440,7 +3018,7 @@ fn native_param_abi_slots(
     Ok(slots)
 }
 
-fn native_struct_fields(
+pub(crate) fn native_struct_fields(
     structs: &HashMap<String, Vec<(String, Typ)>>,
     typ: &str,
     _fn_name: &str,
@@ -3477,7 +3055,7 @@ fn native_struct_fields(
 }
 
 /// Check if an expression tree contains a function call.
-fn contains_call(expr: &Expr) -> bool {
+pub(crate) fn contains_call(expr: &Expr) -> bool {
     match expr {
         Expr::Call { .. } => true,
         Expr::Binary { lhs, rhs, .. } => contains_call(lhs) || contains_call(rhs),
@@ -3489,11 +3067,15 @@ fn contains_call(expr: &Expr) -> bool {
     }
 }
 
-fn is_native_scalar_type(typ: &Typ) -> bool {
+pub(crate) fn is_native_scalar_type(typ: &Typ) -> bool {
     matches!(canonical_type(typ), Typ::Int | Typ::Bool | Typ::String)
 }
 
-fn ensure_native_array_element(elem: &Typ, fn_name: &str, context: &str) -> Result<(), String> {
+pub(crate) fn ensure_native_array_element(
+    elem: &Typ,
+    fn_name: &str,
+    context: &str,
+) -> Result<(), String> {
     match canonical_type(elem) {
         Typ::Int | Typ::Bool | Typ::String => Ok(()),
         Typ::Array(_) => Err(format!(
@@ -3508,13 +3090,13 @@ fn ensure_native_array_element(elem: &Typ, fn_name: &str, context: &str) -> Resu
     }
 }
 
-fn array_item_matches(expected: &Typ, actual: &Typ) -> bool {
+pub(crate) fn array_item_matches(expected: &Typ, actual: &Typ) -> bool {
     let expected = canonical_type(expected);
     let actual = canonical_type(actual);
     expected == actual || matches!((&expected, &actual), (Typ::Int, Typ::Bool))
 }
 
-fn expr_type(expr: &Expr) -> Option<Typ> {
+pub(crate) fn expr_type(expr: &Expr) -> Option<Typ> {
     match expr {
         Expr::IntLit(_) => Some(Typ::Int),
         Expr::FloatLit(_) => Some(Typ::Float),
@@ -3528,7 +3110,7 @@ fn expr_type(expr: &Expr) -> Option<Typ> {
     }
 }
 
-fn expr_contains_call(expr: &Expr) -> bool {
+pub(crate) fn expr_contains_call(expr: &Expr) -> bool {
     match expr {
         Expr::Call { .. } => true,
         Expr::Unary { expr, .. } => expr_contains_call(expr),
