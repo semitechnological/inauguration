@@ -513,13 +513,13 @@ pub(crate) fn lower_stdlib_call(
             emitter.emit_insns(&aarch64::load_i64(0, 0));
             Ok(true)
         }
-        // Vec::with_capacity(n) → allocate
+        // Vec::with_capacity(n) → not yet implemented in native lowering
         "with_capacity"
             if args.len() == 1 && (target.contains("Vec") || target.contains("vec")) =>
         {
-            // ponytail: just return empty vec for now
-            emitter.emit_insns(&aarch64::load_i64(0, 0));
-            Ok(true)
+            return Err(format!(
+                "native-lower: Vec::with_capacity not yet supported in native lowering in `{fn_name}`"
+            ));
         }
         // Vec::push → store value at [vec + 2 + len]
         "push" if args.len() == 2 && (target.contains("Vec") || target.contains("vec")) => {
