@@ -26,7 +26,7 @@ TRAMPOLINE="$BUILD_DIR/trampoline.bin"
 python3 - "$TRAMPOLINE" <<'PY'
 import struct, sys
 path = sys.argv[1]
-buf = bytearray(8192)
+buf = bytearray(4096)
 magic = 0x1BADB002
 flags = 0
 checksum = (-(magic + flags)) & 0xffffffff
@@ -56,7 +56,7 @@ EOF
 check "boot image produced" "$([ -f "$BUILD_DIR/test.bin" ] && echo true)"
 
 SIZE=$(stat -f%z "$BUILD_DIR/test.bin" 2>/dev/null || stat -c%s "$BUILD_DIR/test.bin" 2>/dev/null || echo 0)
-check "boot image is >= 8192 bytes" "$([ "$SIZE" -ge 8192 ] && echo true)"
+check "boot image is >= 4096 bytes" "$([ "$SIZE" -ge 4096 ] && echo true)"
 
 echo "[2/3] Checking multiboot header..."
 # The multiboot header is at offset 0, magic 0x1BADB002 (little-endian: 02 b0 ad 1b)
@@ -64,11 +64,13 @@ MB_MAGIC=$(xxd -p -l4 -s 0 "$BUILD_DIR/test.bin" 2>/dev/null || od -A n -t x1 -N
 check "multiboot magic present" "$(echo "$MB_MAGIC" | grep -qi "02b0ad1b" && echo true)"
 
 echo "[3/3] Checking kernel code..."
-SCI_MAGIC=$(xxd -p -l8 -s 8200 "$BUILD_DIR/test.bin" 2>/dev/null || od -A n -t x1 -j 8200 -N8 "$BUILD_DIR/test.bin" 2>/dev/null | tr -d ' ')
-SCI_CODE_OFFSET=$(python3 - "$BUILD_DIR/test.bin" <<'PY'
+KERNEL_OFFSET=4096
+SCI_MAGIC_OFFSET=$((KERNEL_OFFSET + 8))
+SCI_MAGIC=$(xxd -p -l8 -s $SCI_MAGIC_OFFSET "$BUILD_DIR/test.bin" 2>/dev/null || od -A n -t x1 -j $SCI_MAGIC_OFFSET -N8 "$BUILD_DIR/test.bin" 2>/dev/null | tr -d ' ')
+SCI_CODE_OFFSET=$(python3 - "$BUILD_DIR/test.bin" <<PY
 import struct, sys
 with open(sys.argv[1], "rb") as f:
-    f.seek(8192 + 24)
+    f.seek($KERNEL_OFFSET + 24)
     print(struct.unpack("<Q", f.read(8))[0])
 PY
 )
