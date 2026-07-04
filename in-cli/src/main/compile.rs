@@ -1,0 +1,499 @@
+use crate::CompileTargetCli;
+use crate::util::{
+    compile_linkage_cli_to_owned, compile_target_cli_to_owned, extract_cargo_bin_path,
+    resolve_invocation_path,
+};
+use crate::{EmitKindCli, InError, NativeLinkageCli, Result};
+use inauguration::owned_compile::{OwnedCompileRequest, compile_owned, report_to_json};
+use inauguration::parser_registry::ParserCli;
+use std::fs;
+use std::path::Path;
+use std::time::Instant;
+
+pub(crate) fn cmd_compile(
+    cwd: &Path,
+    path: &str,
+    target: CompileTargetCli,
+    out: &str,
+    module_id: &str,
+    parser: ParserCli,
+    entry: Option<&str>,
+    target_triple: Option<&str>,
+    linkage: NativeLinkageCli,
+    jobs: usize,
+    json: bool,
+    emit: Option<EmitKindCli>,
+    trampoline: Option<&str>,
+    _base: Option<&str>,
+    metadata: Option<&str>,
+) -> Result<()> {
+    let source_path = resolve_invocation_path(cwd, path);
+    let out_path = resolve_invocation_path(cwd, out);
+    let source_path = if source_path.is_dir() {
+        let cargo_toml = source_path.join("Cargo.toml");
+        if cargo_toml.exists() {
+            let contents = fs::read_to_string(&cargo_toml)
+                .map_err(|e| InError::Message(format!("read Cargo.toml: {e}")))?;
+            extract_cargo_bin_path(&contents, &source_path)?
+        } else {
+            source_path
+        }
+    } else {
+        source_path
+    };
+    let auto_module_id = if module_id == "App" {
+        source_path
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string()
+    } else {
+        module_id.to_string()
+    };
+    if !source_path.exists() {
+        return Err(InError::Message(format!(
+            "file not found: {}",
+            source_path.display()
+        )));
+    }
+
+    if matches!(emit, Some(EmitKindCli::Boot)) {
+        return cmd_emit_boot(cwd, &source_path, &out_path, entry, trampoline, metadata);
+    }
+    let request = OwnedCompileRequest {
+        path: source_path,
+        module_id: auto_module_id,
+        parser,
+        target: compile_target_cli_to_owned(target),
+        entry: entry.map(str::to_string),
+        out: Some(out_path),
+        linkage: compile_linkage_cli_to_owned(linkage),
+        target_triple: target_triple.map(str::to_string),
+        jobs: jobs.max(1),
+    };
+    let report = compile_owned(&request);
+
+    if json {
+        let raw = report_to_json(&report)
+            .map_err(|err| InError::Message(format!("owned compile json: {err}")))?;
+        println!("{raw}");
+    } else {
+        println!("owned: {}", report.owned);
+        println!("success: {}", report.success);
+        if let Some(code) = &report.reason_code {
+            println!("reason_code: {code}");
+        }
+        if let Some(reason) = &report.reason {
+            println!("reason: {reason}");
+        }
+        println!("path: {}", report.path);
+        println!("module_id: {}", report.module_id);
+        if let Some(identity) = &report.module_identity {
+            if let Some(package) = &identity.package {
+                println!("package: {package}");
+            }
+            if let Some(module) = &identity.module {
+                println!("module: {module}");
+            }
+            if identity.effective_module_id != report.module_id {
+                println!("effective_module_id: {}", identity.effective_module_id);
+            }
+        }
+        println!("target: {}", report.target);
+        if let Some(target_triple) = &report.target_triple {
+            println!("target_triple: {target_triple}");
+        }
+        if let Some(entry) = &report.entry {
+            println!("entry: {entry}");
+        }
+        println!("linkage: {}", report.linkage);
+        println!("frontend_level: {}", report.frontend_level);
+        println!("semantic_level: {}", report.semantic_level);
+        println!("backend_level: {}", report.backend_level);
+        println!("runtime_level: {}", report.runtime_level);
+        if !report.external_invocations.is_empty() {
+            println!(
+                "external_invocations: {}",
+                report.external_invocations.join(", ")
+            );
+        }
+        if let Some(path) = &report.artifact_path {
+            println!("artifact_path: {path}");
+        }
+        if let Some(path) = &report.executable_path {
+            println!("executable_path: {path}");
+        }
+        if let Some(path) = &report.abi_path {
+            println!("abi_path: {path}");
+        }
+        println!("parsed_function_count: {}", report.parsed_function_count);
+        println!("typed_function_count: {}", report.typed_function_count);
+        println!("call_edge_count: {}", report.call_edge_count);
+        println!("jobs: {}", report.jobs);
+        println!("timing.total_us={}", report.timing_micros);
+        if let Some(waves) = &report.timing_waves_us {
+            println!("timing.waves_us={waves:?}");
+        }
+        if report.cache_hit {
+            println!("cache_hit: true");
+        }
+        if let Some(hash) = &report.frontend_hash {
+            println!("frontend_hash: {hash}");
+        }
+    }
+
+    if !report.success && !json {
+        return Err(InError::Message(
+            report
+                .reason
+                .unwrap_or_else(|| "owned compile failed".to_string()),
+        ));
+    }
+    Ok(())
+}
+
+fn cmd_emit_boot(
+    cwd: &Path,
+    source_path: &Path,
+    out_path: &Path,
+    entry: Option<&str>,
+    trampoline: Option<&str>,
+    _metadata: Option<&str>,
+) -> Result<()> {
+    let trampoline_path = trampoline
+        .map(|t| resolve_invocation_path(cwd, t))
+        .ok_or_else(|| InError::Message("--trampoline is required for --emit boot".to_string()))?;
+    let entry_name =
+        entry.ok_or_else(|| InError::Message("--entry is required for --emit boot".to_string()))?;
+
+    let trampoline_bytes = fs::read(&trampoline_path)
+        .map_err(|e| InError::Message(format!("read trampoline: {e}")))?;
+
+    let mut module = inauguration::in_lang_parse::parse_in_library_file(source_path)
+        .map_err(|e| InError::Message(format!("parse {}: {e}", source_path.display())))?;
+
+    inauguration::core_opt::optimize(&mut module.decls);
+
+    let (_mir, code) = inauguration::compiler::mir_lower::lower_boot_image(&module, entry_name)
+        .map_err(|e| InError::Message(format!("lower: {e}")))?;
+    let result = inauguration::native_emit::x86_64_lower::X86_64CompileResult {
+        code,
+        entry_offset: 0,
+        exports: vec![],
+        relocations: vec![],
+        codegen_base: 0x101100,
+    };
+
+    let tramp_size = trampoline_bytes.len();
+    if tramp_size != 0x1000 {
+        return Err(InError::Message(format!(
+            "trampoline size {tramp_size} != expected 4096 (0x1000)"
+        )));
+    }
+
+    let code = result.code;
+    const SCI_HEADER_SIZE: usize = 256;
+    const SCI_CODE_OFFSET: usize = 0x100;
+    let mut sci_header = vec![0u8; SCI_HEADER_SIZE];
+    let jmp_disp = SCI_CODE_OFFSET as i32 - 5;
+    sci_header[0] = 0xE9;
+    sci_header[1..5].copy_from_slice(&jmp_disp.to_le_bytes());
+    sci_header[8..16].copy_from_slice(b"SCI\0\0\0\0\x01");
+    sci_header[16..24].copy_from_slice(&1u64.to_le_bytes());
+    sci_header[24..32].copy_from_slice(&(SCI_CODE_OFFSET as u64).to_le_bytes());
+    sci_header[32..40].copy_from_slice(&(code.len() as u64).to_le_bytes());
+    sci_header[40..48].copy_from_slice(&0u64.to_le_bytes());
+    let mut flags = 0u64;
+    for decl in &module.decls {
+        if let inauguration::core_ir::Decl::Component {
+            deterministic: true,
+            ..
+        } = decl
+        {
+            flags |= 1;
+        }
+    }
+    sci_header[48..56].copy_from_slice(&flags.to_le_bytes());
+    let mut caps_mask = 0u64;
+    let mut ci = 0u64;
+    for decl in &module.decls {
+        if let inauguration::core_ir::Decl::Component { capabilities, .. } = decl {
+            for _ in capabilities {
+                caps_mask |= 1u64 << ci;
+                ci += 1;
+            }
+        }
+    }
+    sci_header[56..64].copy_from_slice(&caps_mask.to_le_bytes());
+
+    let mut image = Vec::with_capacity(tramp_size + SCI_HEADER_SIZE + code.len());
+    image.extend_from_slice(&trampoline_bytes);
+    image.extend_from_slice(&sci_header);
+    image.extend_from_slice(&code);
+
+    if let Some(parent) = out_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| InError::Message(format!("create output dir: {e}")))?;
+    }
+    fs::write(out_path, &image).map_err(|e| InError::Message(format!("write boot image: {e}")))?;
+
+    let meta_path = out_path.with_extension("component-metadata.json");
+    let mut schemas: Vec<serde_json::Value> = Vec::new();
+    let mut component = serde_json::json!(null);
+    let mut target = serde_json::json!(null);
+    let mut deterministic = serde_json::json!(null);
+    let mut checkpoint = serde_json::json!(null);
+    let mut imports = serde_json::json!([]);
+    let mut exports = serde_json::json!([]);
+    let mut caps = serde_json::json!([]);
+    for decl in &module.decls {
+        match decl {
+            inauguration::core_ir::Decl::Component {
+                name,
+                target: t,
+                deterministic: det,
+                checkpoint: chk,
+                imports: imps,
+                exports: exps,
+                capabilities: capabs,
+                ..
+            } => {
+                component = serde_json::json!(name);
+                target = serde_json::json!(t);
+                deterministic = serde_json::json!(det);
+                checkpoint = serde_json::json!(chk);
+                imports = serde_json::json!(
+                    imps.iter()
+                        .map(|i| { serde_json::json!({"name": i.name, "interface": i.interface}) })
+                        .collect::<Vec<_>>()
+                );
+                exports = serde_json::json!(
+                    exps.iter()
+                        .map(|e| { serde_json::json!({"name": e.name, "interface": e.interface}) })
+                        .collect::<Vec<_>>()
+                );
+                caps = serde_json::json!(
+                    capabs
+                        .iter()
+                        .map(|c| {
+                            serde_json::json!({
+                                "name": c.name,
+                                "capability_type": c.capability_type,
+                                "args": c.args,
+                            })
+                        })
+                        .collect::<Vec<_>>()
+                );
+            }
+            inauguration::core_ir::Decl::Struct { name, fields, .. } => {
+                let schema_fields: Vec<serde_json::Value> = fields
+                    .iter()
+                    .map(
+                        |(fn_, typ)| serde_json::json!({"name": fn_, "type": format!("{:?}", typ)}),
+                    )
+                    .collect();
+                schemas.push(serde_json::json!({
+                    "name": name,
+                    "fields": schema_fields,
+                }));
+            }
+            _ => {}
+        }
+    }
+    let meta = serde_json::json!({
+        "component": component,
+        "target": target,
+        "entry": entry_name,
+        "imports": imports,
+        "exports": exports,
+        "capabilities_required": caps,
+        "object_schemas": schemas,
+        "deterministic": deterministic,
+        "checkpoint": checkpoint,
+        "code_size": code.len(),
+        "provenance": {
+            "compiler": "inauguration",
+            "compiler_version": env!("CARGO_PKG_VERSION"),
+        }
+    });
+    if let Err(e) = fs::write(
+        &meta_path,
+        serde_json::to_string_pretty(&meta).unwrap_or_else(|_| "{}".to_string()),
+    ) {
+        eprintln!(
+            "[metadata] warning: failed to write {}: {e}",
+            meta_path.display()
+        );
+    }
+
+    eprintln!(
+        "boot image: {} bytes (trampoline: {} + kernel: {})",
+        image.len(),
+        tramp_size,
+        code.len()
+    );
+    Ok(())
+}
+
+pub(crate) fn cmd_compile_bytecode(
+    cwd: &Path,
+    path: &str,
+    module_id: &str,
+    parser: ParserCli,
+    out: &str,
+    verbose: bool,
+) -> Result<()> {
+    let start = Instant::now();
+    let source_path = resolve_invocation_path(cwd, path);
+    let out_path = resolve_invocation_path(cwd, out);
+    if !source_path.exists() {
+        return Err(InError::Message(format!(
+            "file not found: {}",
+            source_path.display()
+        )));
+    }
+
+    let output =
+        inauguration::bytecode_compiler::compile_source_path(&source_path, module_id, parser)
+            .map_err(|e| InError::Message(format!("bytecode compile: {e}")))?;
+    inauguration::bytecode_compiler::write_bytecode_module(&output.module, &out_path)
+        .map_err(|e| InError::Message(format!("bytecode write: {e}")))?;
+
+    if verbose {
+        eprintln!("[bytecode] Generated SIL ({} bytes)", output.sil.len());
+        eprintln!(
+            "[bytecode] Generated {} functions",
+            output.module.functions.len()
+        );
+        eprintln!("[bytecode] Wrote {}", out_path.display());
+    }
+
+    let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+    println!(
+        "[bytecode] Compiled {} -> {} in {:.3}ms",
+        source_path.display(),
+        out_path.display(),
+        elapsed_ms
+    );
+    Ok(())
+}
+
+pub(crate) fn cmd_run_bytecode(cwd: &Path, path: &str, verbose: bool) -> Result<()> {
+    let start = Instant::now();
+    let bytecode_path = resolve_invocation_path(cwd, path);
+    if !bytecode_path.exists() {
+        return Err(InError::Message(format!(
+            "file not found: {}",
+            bytecode_path.display()
+        )));
+    }
+
+    let module = inauguration::bytecode_compiler::read_bytecode_module(&bytecode_path)
+        .map_err(|e| InError::Message(format!("bytecode read: {e}")))?;
+    if verbose {
+        eprintln!("[bytecode] Executing entry point: @{}", module.entry_point);
+    }
+    let result = inauguration::bytecode_compiler::run_bytecode_module(module)
+        .map_err(|e| InError::Message(format!("bytecode execution: {e}")))?;
+    if verbose {
+        eprintln!("[bytecode] Execution completed with result: {:?}", result);
+    }
+
+    let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+    println!("[bytecode] Finished execution in {:.3}ms", elapsed_ms);
+    Ok(())
+}
+
+pub(crate) struct SourceExecution {
+    pub(crate) output: inauguration::bytecode_compiler::BytecodeCompileOutput,
+    pub(crate) result: inauguration::bytecode::Value,
+}
+
+pub(crate) fn compile_and_run_source_path(
+    source_path: &Path,
+    module_id: &str,
+    parser: ParserCli,
+) -> Result<SourceExecution> {
+    let output =
+        inauguration::bytecode_compiler::compile_source_path(source_path, module_id, parser)
+            .map_err(|e| InError::Message(format!("bytecode compile: {e}")))?;
+    let result = inauguration::bytecode_compiler::run_bytecode_module(output.module.clone())
+        .map_err(|e| InError::Message(format!("bytecode execution: {e}")))?;
+    Ok(SourceExecution { output, result })
+}
+
+pub(crate) fn cmd_execute_bytecode(
+    cwd: &Path,
+    path: &str,
+    module_id: &str,
+    verbose: bool,
+) -> Result<()> {
+    let start = Instant::now();
+    let source_path = resolve_invocation_path(cwd, path);
+
+    if !source_path.exists() {
+        return Err(InError::Message(format!(
+            "file not found: {}",
+            source_path.display()
+        )));
+    }
+
+    if let Some(ext) = source_path.extension().and_then(|s| s.to_str()) {
+        if verbose {
+            eprintln!("[bytecode] Detected file extension: {}", ext);
+        }
+    } else {
+        return Err(InError::Message(
+            "unable to determine file type (no extension)".into(),
+        ));
+    }
+
+    let execution = compile_and_run_source_path(&source_path, module_id, ParserCli::Auto)?;
+    let output = execution.output;
+
+    if verbose {
+        eprintln!("[bytecode] Generated SIL ({} bytes)", output.sil.len());
+    }
+
+    let artifact = inauguration::hybrid_sil::parse_textual_sil(&output.sil);
+
+    if verbose {
+        eprintln!(
+            "[bytecode] Parsed {} instructions in function @{}",
+            artifact.instructions.len(),
+            artifact.function_id
+        );
+    }
+
+    if verbose {
+        eprintln!(
+            "[bytecode] Generated {} functions",
+            output.module.functions.len()
+        );
+        for func in &output.module.functions {
+            eprintln!(
+                "  - @{} ({} instructions)",
+                func.name,
+                func.instructions.len()
+            );
+        }
+    }
+
+    if verbose {
+        eprintln!(
+            "[bytecode] Executing entry point: @{}",
+            output.module.entry_point
+        );
+    }
+
+    let result = execution.result;
+
+    if verbose {
+        eprintln!("[bytecode] Execution completed with result: {:?}", result);
+    }
+
+    let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+    println!("[bytecode] Finished execution in {:.3}ms", elapsed_ms);
+
+    Ok(())
+}
