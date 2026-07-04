@@ -32,15 +32,15 @@ pub(crate) fn lower_expr_into(
             Ok(())
         }
         Expr::StringLit(value) => {
-            let id = ctx.string_id(value);
+            let id = ctx.string_id(value)?;
             emitter.emit_insns(&aarch64::load_i64(rd, id));
             Ok(())
         }
         Expr::Ident(name) => {
-            // ponytail: identifiers with spaces/dots are probably match pattern remnants
             if name.contains(' ') || name.contains("..") {
-                emitter.emit_insns(&aarch64::load_i64(rd, 0));
-                return Ok(());
+                return Err(format!(
+                    "native-lower: malformed identifier `{name}` in expression in `{fn_name}`"
+                ));
             }
             if let Some(offset) = ctx.params.get(name) {
                 emitter.emit_u32(aarch64::ldr64(rd, aarch64::REG_SP, *offset));
@@ -52,15 +52,15 @@ pub(crate) fn lower_expr_into(
                     LocalSlot::Array { .. }
                     | LocalSlot::ArrayParam { .. }
                     | LocalSlot::Struct { .. } => {
-                        emitter.emit_insns(&aarch64::load_i64(rd, 0));
+                        return Err(format!(
+                            "native-lower: aggregate local `{name}` used as scalar value in `{fn_name}`"
+                        ));
                     }
                 }
             } else {
-                // ponytail: auto-create local for unknown identifier
-                let offset = ctx.alloc_slot();
-                ctx.locals
-                    .insert(name.to_string(), LocalSlot::Scalar(offset));
-                emitter.emit_insns(&aarch64::load_i64(rd, 0));
+                return Err(format!(
+                    "native-lower: unknown identifier `{name}` in expression in `{fn_name}`"
+                ));
             }
             Ok(())
         }
@@ -252,15 +252,14 @@ pub(crate) fn lower_field(
             )
         }
         Expr::StructInit { fields, .. } => {
-            let value = fields.iter().find_map(
+            let Some(value) = fields.iter().find_map(
                 |(field, expr)| {
                     if field == name { Some(expr) } else { None }
                 },
-            );
-            let Some(value) = value else {
-                // ponytail: unknown struct field in StructInit — load 0
-                emitter.emit_insns(&aarch64::load_i64(rd, 0));
-                return Ok(());
+            ) else {
+                return Err(format!(
+                    "native-lower: field `{name}` not found in struct initializer in `{fn_name}`"
+                ));
             };
             lower_expr_into(emitter, ctx, value, rd, functions, pending_calls, fn_name)
         }

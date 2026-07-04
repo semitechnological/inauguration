@@ -241,6 +241,7 @@ fn collect_body_strings(body: &[Stmt], values: &mut Vec<String>) {
                 collect_expr_strings(scrutinee, values);
                 for arm in arms {
                     collect_body_strings(&arm.body, values);
+                    collect_pattern_strings(&arm.pattern, values);
                 }
             }
             Stmt::Return(None) => {}
@@ -254,6 +255,15 @@ fn collect_body_strings(body: &[Stmt], values: &mut Vec<String>) {
             }
             Stmt::Break => {}
         }
+    }
+}
+
+fn collect_pattern_strings(pattern: &str, values: &mut Vec<String>) {
+    let trimmed = pattern.trim().trim_end_matches(':').trim();
+    let trimmed = trimmed.strip_prefix("case ").unwrap_or(trimmed).trim();
+    if trimmed.len() >= 2 && trimmed.starts_with('"') && trimmed.ends_with('"') {
+        let content = &trimmed[1..trimmed.len() - 1];
+        values.push(content.to_string());
     }
 }
 
