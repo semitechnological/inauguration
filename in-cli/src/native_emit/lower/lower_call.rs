@@ -110,10 +110,19 @@ pub(crate) fn lower_call(
     let Some(target_info) = functions.get(target) else {
         unreachable!();
     };
-    // ponytail: allow arity mismatch — pass what we can, skip extras
     let abi_arg_count = native_param_abi_slots(&target_info.params, ctx.structs, target)?;
-    // ponytail: skip args beyond 8 ABI slots instead of erroring
-    let _ = abi_arg_count;
+    if abi_arg_count > 8 {
+        return Err(format!(
+            "native-lower: function `{target}` requires {abi_arg_count} ABI argument slots, only 8 are supported"
+        ));
+    }
+    if args.len() != target_info.params.len() {
+        return Err(format!(
+            "native-lower: function `{target}` expects {} arguments, got {} in `{fn_name}`",
+            target_info.params.len(),
+            args.len()
+        ));
+    }
 
     let mut reg = 0u8;
     for (arg, (param_name, typ)) in args.iter().zip(&target_info.params) {
@@ -170,7 +179,7 @@ pub(crate) fn lower_inrt_call(
                 emitter.emit_insns(&aarch64::load_i64(reg, i64::from(*v)));
             }
             Expr::StringLit(v) => {
-                let id = ctx.string_id(v);
+                let id = ctx.string_id(v)?;
                 emitter.emit_insns(&aarch64::load_i64(reg, id));
             }
             Expr::Ident(name) => {
@@ -179,8 +188,9 @@ pub(crate) fn lower_inrt_call(
                 } else if let Some(LocalSlot::Scalar(offset)) = ctx.locals.get(name) {
                     emitter.emit_u32(aarch64::ldr64(reg, aarch64::REG_SP, *offset));
                 } else {
-                    // ponytail: unknown param/local — load 0
-                    emitter.emit_insns(&aarch64::load_i64(reg, 0));
+                    return Err(format!(
+                        "native-lower: inrt call references unknown param/local `{name}` in `{fn_name}`"
+                    ));
                 }
             }
             _ => {
@@ -239,11 +249,9 @@ pub(crate) fn lower_call_arg(
             }
         }
         Typ::Array(elem) => lower_array_call_arg(emitter, ctx, arg, elem, reg, fn_name),
-        _ => {
-            // ponytail: generic/void arg — load 0 and skip
-            emitter.emit_insns(&aarch64::load_i64(reg, 0));
-            Ok(reg + 1)
-        }
+        _ => Err(format!(
+            "native-lower: unsupported parameter type `{typ:?}` for argument `{param_name}` in `{fn_name}`"
+        )),
     }
 }
 
@@ -254,22 +262,22 @@ pub(crate) fn lower_struct_ptr_arg(
     reg: u8,
 ) -> Result<u8, String> {
     let Expr::Ident(local) = arg else {
-        // ponytail: non-ident struct ptr arg — load 0
-        emitter.emit_insns(&aarch64::load_i64(reg, 0));
-        return Ok(reg + 1);
+        return Err(format!(
+            "native-lower: `self` argument must be a local identifier, got `{arg:?}`"
+        ));
     };
     let Some(LocalSlot::Struct { fields: slots, .. }) = ctx.locals.get(local) else {
-        // ponytail: expected struct local — load 0
-        emitter.emit_insns(&aarch64::load_i64(reg, 0));
-        return Ok(reg + 1);
+        return Err(format!(
+            "native-lower: `self` argument `{local}` is not a struct local"
+        ));
     };
-    // Get the first field's offset to compute sp + offset
-    if let Some(&first_off) = slots.values().min() {
-        // add reg, sp, first_off
-        emitter.emit_u32(aarch64::add_imm64(reg, aarch64::REG_SP, first_off as u16));
-    } else {
-        emitter.emit_insns(&aarch64::load_i64(reg, 0));
-    }
+    let Some(&first_off) = slots.values().min() else {
+        return Err(format!(
+            "native-lower: `self` argument `{local}` has no fields to take address of"
+        ));
+    };
+    // add reg, sp, first_off
+    emitter.emit_u32(aarch64::add_imm64(reg, aarch64::REG_SP, first_off as u16));
     Ok(reg + 1)
 }
 
@@ -282,22 +290,19 @@ pub(crate) fn lower_array_call_arg(
     fn_name: &str,
 ) -> Result<u8, String> {
     if !is_native_scalar_type(elem) {
-        // ponytail: non-scalar array element — skip (load 0 for ptr+len)
-        emitter.emit_insns(&aarch64::load_i64(reg, 0));
-        emitter.emit_insns(&aarch64::load_i64(reg + 1, 0));
-        return Ok(reg + 2);
+        return Err(format!(
+            "native-lower: array argument must have scalar element type, got `{elem:?}` in `{fn_name}`"
+        ));
     }
     let Expr::Ident(local) = arg else {
-        // ponytail: non-ident array arg — load 0 for ptr+len
-        emitter.emit_insns(&aarch64::load_i64(reg, 0));
-        emitter.emit_insns(&aarch64::load_i64(reg + 1, 0));
-        return Ok(reg + 2);
+        return Err(format!(
+            "native-lower: array argument must be a local identifier, got `{arg:?}` in `{fn_name}`"
+        ));
     };
     let Some(slot) = ctx.locals.get(local) else {
-        // ponytail: unknown local for array arg — load 0 for ptr+len
-        emitter.emit_insns(&aarch64::load_i64(reg, 0));
-        emitter.emit_insns(&aarch64::load_i64(reg + 1, 0));
-        return Ok(reg + 2);
+        return Err(format!(
+            "native-lower: array argument references unknown local `{local}` in `{fn_name}`"
+        ));
     };
     match slot {
         LocalSlot::Array {
@@ -332,12 +337,9 @@ pub(crate) fn lower_array_call_arg(
             emitter.emit_u32(aarch64::ldr64(reg + 1, aarch64::REG_SP, *len_offset));
             Ok(reg + 2)
         }
-        _ => {
-            // ponytail: unsupported aggregate slot — load 0 for ptr+len
-            emitter.emit_insns(&aarch64::load_i64(reg, 0));
-            emitter.emit_insns(&aarch64::load_i64(reg + 1, 0));
-            Ok(reg + 2)
-        }
+        _ => Err(format!(
+            "native-lower: array argument `{local}` is not an array slot in `{fn_name}`"
+        )),
     }
 }
 
@@ -352,38 +354,34 @@ pub(crate) fn lower_struct_call_arg(
     fn_name: &str,
 ) -> Result<u8, String> {
     let Some(fields) = ctx.structs.get(struct_name) else {
-        // ponytail: unknown struct type in call arg — treat as single scalar (load 0)
-        emitter.emit_insns(&aarch64::load_i64(reg, 0));
-        return Ok(reg + 1);
+        return Err(format!(
+            "native-lower: call references unknown struct type `{struct_name}` in `{fn_name}`"
+        ));
     };
     match arg {
         Expr::Ident(local) => {
             let Some(LocalSlot::Struct { typ, fields: slots }) = ctx.locals.get(local) else {
-                // ponytail: expected struct for call arg — load 0 per field
-                for _ in fields {
-                    emitter.emit_insns(&aarch64::load_i64(reg, 0));
-                    reg += 1;
-                }
-                return Ok(reg);
+                return Err(format!(
+                    "native-lower: expected struct `{struct_name}` argument, found non-struct local `{local}` in `{fn_name}`"
+                ));
             };
             if typ != struct_name {
-                // ponytail: struct name mismatch in call arg — load 0 for each field
-                for _ in fields {
-                    emitter.emit_insns(&aarch64::load_i64(reg, 0));
-                    reg += 1;
-                }
-                return Ok(reg);
+                return Err(format!(
+                    "native-lower: struct argument type mismatch: expected `{struct_name}`, found `{typ}` in `{fn_name}`"
+                ));
             }
             for (field, field_ty) in fields {
                 if matches!(field_ty, Typ::Int | Typ::Bool | Typ::String | Typ::Float) {
-                    if let Some(offset) = find_field_offset(slots, field) {
-                        emitter.emit_u32(aarch64::ldr64(reg, aarch64::REG_SP, *offset));
-                    } else {
-                        emitter.emit_insns(&aarch64::load_i64(reg, 0));
-                    }
+                    let Some(offset) = find_field_offset(slots, field) else {
+                        return Err(format!(
+                            "native-lower: struct `{struct_name}` missing field `{field}` in `{fn_name}`"
+                        ));
+                    };
+                    emitter.emit_u32(aarch64::ldr64(reg, aarch64::REG_SP, *offset));
                 } else {
-                    // ponytail: non-scalar field in struct arg — load 0 placeholder
-                    emitter.emit_insns(&aarch64::load_i64(reg, 0));
+                    return Err(format!(
+                        "native-lower: non-scalar field `{field}` in struct `{struct_name}` argument is not supported in `{fn_name}`"
+                    ));
                 }
                 reg += 1;
             }
@@ -394,43 +392,29 @@ pub(crate) fn lower_struct_call_arg(
             fields: values,
         } => {
             if name != struct_name {
-                // ponytail: struct init name mismatch in call arg — load 0 for each field
-                for _ in fields {
-                    emitter.emit_insns(&aarch64::load_i64(reg, 0));
-                    reg += 1;
-                }
-                return Ok(reg);
+                return Err(format!(
+                    "native-lower: struct initializer type mismatch: expected `{struct_name}`, found `{name}` in `{fn_name}`"
+                ));
             }
             for (field, field_ty) in fields {
-                if matches!(field_ty, Typ::Int | Typ::Bool | Typ::String) {
-                    if let Some((_, value)) = values.iter().find(|(n, _)| n == field) {
-                        lower_expr_into(
-                            emitter,
-                            ctx,
-                            value,
-                            reg,
-                            functions,
-                            pending_calls,
-                            fn_name,
-                        )?;
-                    } else {
-                        emitter.emit_insns(&aarch64::load_i64(reg, 0));
-                    }
+                if matches!(field_ty, Typ::Int | Typ::Bool | Typ::String | Typ::Float) {
+                    let Some((_, value)) = values.iter().find(|(n, _)| n == field) else {
+                        return Err(format!(
+                            "native-lower: struct initializer `{struct_name}` missing field `{field}` in `{fn_name}`"
+                        ));
+                    };
+                    lower_expr_into(emitter, ctx, value, reg, functions, pending_calls, fn_name)?;
                 } else {
-                    // ponytail: non-scalar field in struct init arg — load 0
-                    emitter.emit_insns(&aarch64::load_i64(reg, 0));
+                    return Err(format!(
+                        "native-lower: non-scalar field `{field}` in struct `{struct_name}` initializer is not supported in `{fn_name}`"
+                    ));
                 }
                 reg += 1;
             }
             Ok(reg)
         }
-        _ => {
-            // ponytail: unsupported arg pattern — load 0 for each field register
-            for _ in fields {
-                emitter.emit_insns(&aarch64::load_i64(reg, 0));
-                reg += 1;
-            }
-            Ok(reg)
-        }
+        _ => Err(format!(
+            "native-lower: unsupported struct argument expression `{arg:?}` for `{struct_name}` in `{fn_name}`"
+        )),
     }
 }

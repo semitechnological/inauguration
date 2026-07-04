@@ -125,11 +125,9 @@ pub(crate) fn alloc_nested_struct_slots(
             }
             Typ::Named(inner_name) => {
                 let Some(inner_fields) = structs.get(inner_name) else {
-                    // ponytail: unknown nested struct — allocate 1 scalar slot
-                    let offset = ctx.alloc_slot();
-                    slots.insert(field.clone(), offset);
-                    *abi_idx += 1;
-                    continue;
+                    return Err(format!(
+                        "native-lower: unknown nested struct type `{inner_name}` in struct `{struct_name}` for `{fn_name}`"
+                    ));
                 };
                 let inner_slots = alloc_nested_struct_slots(
                     ctx,
@@ -146,10 +144,13 @@ pub(crate) fn alloc_nested_struct_slots(
             }
             _ => {
                 return Err(format!(
-                    "native-lower: unsupported field type in struct `{struct_name}` field `{field}`"
+                    "native-lower: unsupported field type in struct `{struct_name}` field `{field}` for `{fn_name}`"
                 ));
             }
         }
+    }
+    if slots.is_empty() {
+        slots.insert("__base".to_string(), ctx.alloc_slot());
     }
     Ok(slots)
 }
@@ -169,9 +170,9 @@ pub(crate) fn alloc_local_struct_fields(
             }
             Typ::Named(inner_name) => {
                 let Some(inner_fields) = all_structs.get(inner_name) else {
-                    // ponytail: unknown nested struct — allocate 1 scalar slot
-                    slots.insert(field.clone(), ctx.alloc_slot());
-                    continue;
+                    return Err(format!(
+                        "native-lower: unknown nested struct type `{inner_name}` in struct `{struct_name}` for `{fn_name}`"
+                    ));
                 };
                 let mut inner_slots = HashMap::new();
                 alloc_local_struct_fields(
@@ -192,6 +193,9 @@ pub(crate) fn alloc_local_struct_fields(
                 ));
             }
         }
+    }
+    if slots.is_empty() {
+        slots.insert("__base".to_string(), ctx.alloc_slot());
     }
     Ok(())
 }
@@ -236,17 +240,44 @@ impl<'a> LowerCtx<'a> {
                     abi_idx += 1;
                 }
                 Typ::Named(struct_name) => {
-                    let fields = match structs.get(struct_name) {
-                        Some(f) => f.clone(),
-                        None => {
-                            // ponytail: unknown struct param — treat as single Int
-                            vec![("_0".into(), Typ::Int)]
+                    if struct_name == "String[]" {
+                        // Java `String[] args` is emitted as a named type by the Java front.
+                        let elem = Typ::String;
+                        ensure_native_array_element(&elem, fn_name, "parameter")?;
+                        let ptr_offset = ctx.alloc_slot();
+                        let len_offset = ctx.alloc_slot();
+                        if abi_idx + 1 < 8 {
+                            ctx.param_stores.push((abi_idx as u8, ptr_offset));
+                            ctx.param_stores.push(((abi_idx + 1) as u8, len_offset));
+                        } else if abi_idx >= 8 {
+                            ctx.stack_params.push(((abi_idx - 8) as u32, ptr_offset));
+                            ctx.stack_params
+                                .push(((abi_idx + 1 - 8) as u32, len_offset));
+                        } else {
+                            return Err(format!(
+                                "native-lower: array param straddles register/stack boundary in `{fn_name}`"
+                            ));
                         }
+                        ctx.locals.insert(
+                            name.clone(),
+                            LocalSlot::ArrayParam {
+                                elem,
+                                ptr_offset,
+                                len_offset,
+                            },
+                        );
+                        abi_idx += 2;
+                        continue;
+                    }
+                    let Some(fields) = structs.get(struct_name) else {
+                        return Err(format!(
+                            "native-lower: unknown struct parameter type `{struct_name}` in `{fn_name}`"
+                        ));
                     };
                     let slots = alloc_nested_struct_slots(
                         &mut ctx,
                         struct_name,
-                        &fields,
+                        fields,
                         structs,
                         &mut abi_idx,
                         fn_name,
@@ -286,10 +317,9 @@ impl<'a> LowerCtx<'a> {
                     abi_idx += 2;
                 }
                 _ => {
-                    // ponytail: unsupported parameter type — allocate scalar slot
-                    let offset = ctx.alloc_slot();
-                    ctx.locals.insert(name.clone(), LocalSlot::Scalar(offset));
-                    abi_idx += 1;
+                    return Err(format!(
+                        "native-lower: unsupported parameter type `{typ:?}` for `{name}` in `{fn_name}`"
+                    ));
                 }
             }
         }
@@ -322,29 +352,27 @@ impl<'a> LowerCtx<'a> {
                 "native-lower: unsupported let binding type in `{fn_name}` (array locals require literal initializers)"
             )),
             Some(Typ::Named(struct_name)) => {
-                if let Some(fields) = self.structs.get(struct_name) {
-                    let mut slots = HashMap::new();
-                    alloc_local_struct_fields(
-                        &mut slots,
-                        struct_name,
-                        fields,
-                        self.structs,
-                        self,
-                        fn_name,
-                    )?;
-                    self.locals.insert(
-                        name.to_string(),
-                        LocalSlot::Struct {
-                            typ: struct_name.clone(),
-                            fields: slots,
-                        },
-                    );
-                } else {
-                    // ponytail: unknown struct type — treat as scalar
-                    let offset = self.alloc_slot();
-                    self.locals
-                        .insert(name.to_string(), LocalSlot::Scalar(offset));
-                }
+                let Some(fields) = self.structs.get(struct_name) else {
+                    return Err(format!(
+                        "native-lower: unknown struct type `{struct_name}` for local `{name}` in `{fn_name}`"
+                    ));
+                };
+                let mut slots = HashMap::new();
+                alloc_local_struct_fields(
+                    &mut slots,
+                    struct_name,
+                    fields,
+                    self.structs,
+                    self,
+                    fn_name,
+                )?;
+                self.locals.insert(
+                    name.to_string(),
+                    LocalSlot::Struct {
+                        typ: struct_name.clone(),
+                        fields: slots,
+                    },
+                );
                 Ok(())
             }
             _ => Err(format!(
@@ -412,10 +440,12 @@ impl<'a> LowerCtx<'a> {
         self.stack_size.next_multiple_of(16)
     }
 
-    pub(crate) fn string_id(&self, value: &str) -> i64 {
+    pub(crate) fn string_id(&self, value: &str) -> Result<i64, String> {
         if value.is_empty() {
-            return 0;
+            return Ok(0);
         }
-        self.strings.get(value).copied().unwrap_or(0)
+        self.strings.get(value).copied().ok_or_else(|| {
+            format!("native-lower: string literal not found in constant pool: `{value}`")
+        })
     }
 }

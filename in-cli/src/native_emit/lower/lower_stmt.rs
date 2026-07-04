@@ -324,32 +324,22 @@ pub(crate) fn lower_field_assign(
     fn_name: &str,
 ) -> Result<(), String> {
     let Expr::Ident(base_name) = base else {
-        // ponytail: unsupported field assign base — skip
-        let _ =
-            lower_expr::lower_expr_into(emitter, ctx, value, 0, functions, pending_calls, fn_name);
-        return Ok(());
+        return Err(format!(
+            "native-lower: field assignment base must be a local identifier, got `{base:?}` in `{fn_name}`"
+        ));
     };
-    if let Some(LocalSlot::Struct { fields, .. }) = ctx.locals.get(base_name) {
-        if let Some(&field_offset) = find_field_offset(fields, name) {
-            lower_expr::lower_expr_into(emitter, ctx, value, 0, functions, pending_calls, fn_name)?;
-            emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, field_offset));
-        } else {
-            // ponytail: field not found — eval value but skip store
-            let _ = lower_expr::lower_expr_into(
-                emitter,
-                ctx,
-                value,
-                0,
-                functions,
-                pending_calls,
-                fn_name,
-            );
-        }
-    } else {
-        // ponytail: expected struct local — eval value but skip store
-        let _ =
-            lower_expr::lower_expr_into(emitter, ctx, value, 0, functions, pending_calls, fn_name);
-    }
+    let Some(LocalSlot::Struct { fields, .. }) = ctx.locals.get(base_name) else {
+        return Err(format!(
+            "native-lower: field assignment base `{base_name}` is not a struct local in `{fn_name}`"
+        ));
+    };
+    let Some(&field_offset) = find_field_offset(fields, name) else {
+        return Err(format!(
+            "native-lower: field `{name}` not found on struct `{base_name}` in `{fn_name}`"
+        ));
+    };
+    lower_expr::lower_expr_into(emitter, ctx, value, 0, functions, pending_calls, fn_name)?;
+    emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, field_offset));
     Ok(())
 }
 
@@ -442,10 +432,17 @@ pub(crate) fn lower_struct_expr_into_slots(
             fields: values,
         } => {
             if init != typ {
-                // ponytail: struct name mismatch — skip, don't error
-                return Ok(());
+                return Err(format!(
+                    "native-lower: struct initializer type mismatch: expected `{typ}`, found `{init}` in `{fn_name}`"
+                ));
             }
+            let schema = native_struct_fields(ctx.structs, typ, fn_name)?;
             for (field, value) in values {
+                if !schema.iter().any(|(n, _)| n == field) {
+                    return Err(format!(
+                        "native-lower: unknown field `{field}` in struct initializer `{typ}` in `{fn_name}`"
+                    ));
+                }
                 // Check if this field references a nested struct variable
                 if let Expr::Ident(local) = value
                     && let Some(LocalSlot::Struct {
@@ -458,14 +455,25 @@ pub(crate) fn lower_struct_expr_into_slots(
                     let nested_schema = native_struct_fields(ctx.structs, local_typ, fn_name)?;
                     for (sub_field, _) in &nested_schema {
                         let flat_key = format!("{field}.{sub_field}");
-                        if let Some(&src) = find_field_offset(local_fields, sub_field) {
-                            if let Some(&dst) = find_field_offset(fields, &flat_key) {
-                                emitter.emit_u32(aarch64::ldr64(0, aarch64::REG_SP, src));
-                                emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, dst));
-                            }
-                        }
+                        let Some(&src) = find_field_offset(local_fields, sub_field) else {
+                            return Err(format!(
+                                "native-lower: nested struct field `{sub_field}` missing on `{local_typ}` in `{fn_name}`"
+                            ));
+                        };
+                        let Some(&dst) = find_field_offset(fields, &flat_key) else {
+                            return Err(format!(
+                                "native-lower: flattened field `{flat_key}` missing on `{typ}` in `{fn_name}`"
+                            ));
+                        };
+                        emitter.emit_u32(aarch64::ldr64(0, aarch64::REG_SP, src));
+                        emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, dst));
                     }
-                } else if let Some(&offset) = find_field_offset(fields, field) {
+                } else {
+                    let Some(&offset) = find_field_offset(fields, field) else {
+                        return Err(format!(
+                            "native-lower: field `{field}` missing on struct `{typ}` in `{fn_name}`"
+                        ));
+                    };
                     lower_expr::lower_expr_into(
                         emitter,
                         ctx,
@@ -476,8 +484,6 @@ pub(crate) fn lower_struct_expr_into_slots(
                         fn_name,
                     )?;
                     emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, offset));
-                } else {
-                    // ponytail: unknown struct field in StructInit — skip
                 }
             }
             Ok(())
@@ -488,38 +494,42 @@ pub(crate) fn lower_struct_expr_into_slots(
                 fields: local_fields,
             }) = ctx.locals.get(local).cloned()
             else {
-                // ponytail: expected struct local — skip
-                return Ok(());
+                return Err(format!(
+                    "native-lower: expected struct `{typ}` local, found non-struct `{local}` in `{fn_name}`"
+                ));
             };
             if local_typ != typ {
-                // ponytail: struct name mismatch — skip copy
-                return Ok(());
+                return Err(format!(
+                    "native-lower: struct assignment type mismatch: expected `{typ}`, found `{local_typ}` in `{fn_name}`"
+                ));
             }
             // Use find_field_offset to handle flattened nested struct keys
             let schema = native_struct_fields(ctx.structs, typ, fn_name)?;
             for (field, _field_ty) in schema.iter() {
-                if let Some(&src) = find_field_offset(&local_fields, field) {
-                    if let Some(&dst) = find_field_offset(fields, field) {
-                        emitter.emit_u32(aarch64::ldr64(0, aarch64::REG_SP, src));
-                        emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, dst));
-                    }
-                }
+                let Some(&src) = find_field_offset(&local_fields, field) else {
+                    return Err(format!(
+                        "native-lower: field `{field}` missing on source struct `{local_typ}` in `{fn_name}`"
+                    ));
+                };
+                let Some(&dst) = find_field_offset(fields, field) else {
+                    return Err(format!(
+                        "native-lower: field `{field}` missing on destination struct `{typ}` in `{fn_name}`"
+                    ));
+                };
+                emitter.emit_u32(aarch64::ldr64(0, aarch64::REG_SP, src));
+                emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, dst));
             }
             Ok(())
         }
         Expr::Call { callee, args, .. } => {
-            let return_typ = super::lower_util::call_return_type(callee, functions, fn_name)?;
-            if return_typ != &Typ::Named(typ.to_string()) {
-                // ponytail: return type mismatch — store 0 for each field
-                if let Ok(schema) = native_struct_fields(ctx.structs, typ, fn_name) {
-                    for (reg, (field, _)) in schema.iter().enumerate() {
-                        if let Some(offset) = fields.get(field) {
-                            emitter.emit_insns(&aarch64::load_i64(reg as u8, 0));
-                            emitter.emit_u32(aarch64::str64(reg as u8, aarch64::REG_SP, *offset));
-                        }
-                    }
+            if let Some(return_typ) =
+                super::lower_util::call_return_type(callee, functions, fn_name)?
+            {
+                if return_typ != &Typ::Named(typ.to_string()) {
+                    return Err(format!(
+                        "native-lower: struct assignment return type mismatch: expected `{typ}`, got `{return_typ:?}` in `{fn_name}`"
+                    ));
                 }
-                return Ok(());
             }
             super::lower_call::lower_call(
                 emitter,
@@ -533,16 +543,18 @@ pub(crate) fn lower_struct_expr_into_slots(
             )?;
             let schema = native_struct_fields(ctx.structs, typ, fn_name)?;
             for (reg, (field, _)) in schema.iter().enumerate() {
-                if let Some(&offset) = find_field_offset(fields, field) {
-                    emitter.emit_u32(aarch64::str64(reg as u8, aarch64::REG_SP, offset));
-                }
+                let Some(&offset) = find_field_offset(fields, field) else {
+                    return Err(format!(
+                        "native-lower: field `{field}` missing on struct `{typ}` in `{fn_name}`"
+                    ));
+                };
+                emitter.emit_u32(aarch64::str64(reg as u8, aarch64::REG_SP, offset));
             }
             Ok(())
         }
-        _ => {
-            // ponytail: unsupported struct assignment expression — skip
-            Ok(())
-        }
+        _ => Err(format!(
+            "native-lower: unsupported struct assignment expression `{expr:?}` for `{typ}` in `{fn_name}`"
+        )),
     }
 }
 
@@ -561,19 +573,16 @@ pub(crate) fn lower_struct_expr_into_regs(
             fields: values,
         } => {
             if init != typ {
-                // ponytail: struct name mismatch — return 0 for each reg slot
-                if let Ok(schema) = native_struct_fields(ctx.structs, typ, fn_name) {
-                    for (reg, _) in schema.iter().enumerate() {
-                        emitter.emit_insns(&aarch64::load_i64(reg as u8, 0));
-                    }
-                }
-                return Ok(());
+                return Err(format!(
+                    "native-lower: struct return type mismatch: expected `{typ}`, found `{init}` in `{fn_name}`"
+                ));
             }
             let schema = native_struct_fields(ctx.structs, typ, fn_name)?;
             for (reg, (field, _)) in schema.iter().enumerate() {
                 let Some((_, value)) = values.iter().find(|(name, _)| name == field) else {
-                    // ponytail: unknown struct field — skip
-                    continue;
+                    return Err(format!(
+                        "native-lower: struct return initializer `{typ}` missing field `{field}` in `{fn_name}`"
+                    ));
                 };
                 lower_expr::lower_expr_into(
                     emitter,
@@ -593,31 +602,36 @@ pub(crate) fn lower_struct_expr_into_regs(
                 fields,
             }) = ctx.locals.get(local).cloned()
             else {
-                // ponytail: non-struct return through struct path — treat as void
-                emit_epilogue(emitter, ctx.prologue_stack_reserve);
-                ctx.emitted_return = true;
-                return Ok(());
+                return Err(format!(
+                    "native-lower: expected struct `{typ}` return value, found non-struct local `{local}` in `{fn_name}`"
+                ));
             };
             if local_typ != typ {
-                // ponytail: struct name mismatch — return 0 for each reg slot
-                if let Ok(schema) = native_struct_fields(ctx.structs, typ, fn_name) {
-                    for (reg, _) in schema.iter().enumerate() {
-                        emitter.emit_insns(&aarch64::load_i64(reg as u8, 0));
-                    }
-                }
-                return Ok(());
+                return Err(format!(
+                    "native-lower: struct return type mismatch: expected `{typ}`, found `{local_typ}` in `{fn_name}`"
+                ));
             }
             let schema = native_struct_fields(ctx.structs, typ, fn_name)?;
             for (reg, (field, _)) in schema.iter().enumerate() {
-                if let Some(&offset) = find_field_offset(&fields, field) {
-                    emitter.emit_u32(aarch64::ldr64(reg as u8, aarch64::REG_SP, offset));
-                }
+                let Some(&offset) = find_field_offset(&fields, field) else {
+                    return Err(format!(
+                        "native-lower: field `{field}` missing on struct return `{local}` in `{fn_name}`"
+                    ));
+                };
+                emitter.emit_u32(aarch64::ldr64(reg as u8, aarch64::REG_SP, offset));
             }
             Ok(())
         }
         Expr::Call { callee, args, .. } => {
-            // ponytail: allow any return type for struct returns — call
-            // and assume X0..X7 hold the struct
+            if let Some(return_typ) =
+                super::lower_util::call_return_type(callee, functions, fn_name)?
+            {
+                if return_typ != &Typ::Named(typ.to_string()) {
+                    return Err(format!(
+                        "native-lower: struct return call type mismatch: expected `{typ}`, got `{return_typ:?}` in `{fn_name}`"
+                    ));
+                }
+            }
             super::lower_call::lower_call(
                 emitter,
                 ctx,
@@ -629,11 +643,9 @@ pub(crate) fn lower_struct_expr_into_regs(
                 fn_name,
             )
         }
-        _ => {
-            emit_epilogue(emitter, ctx.prologue_stack_reserve);
-            ctx.emitted_return = true;
-            Ok(())
-        }
+        _ => Err(format!(
+            "native-lower: unsupported struct return expression `{expr:?}` for `{typ}` in `{fn_name}`"
+        )),
     }
 }
 
@@ -679,11 +691,14 @@ pub(crate) fn lower_array_expr_into_regs(
             }
         }
         Expr::Call { callee, args, .. } => {
-            let return_typ = super::lower_util::call_return_type(callee, functions, fn_name)?;
-            if return_typ != &Typ::Array(Box::new(elem.clone())) {
-                return Err(format!(
-                    "native-lower: array return type mismatch in `{fn_name}`"
-                ));
+            if let Some(return_typ) =
+                super::lower_util::call_return_type(callee, functions, fn_name)?
+            {
+                if return_typ != &Typ::Array(Box::new(elem.clone())) {
+                    return Err(format!(
+                        "native-lower: array return type mismatch in `{fn_name}`"
+                    ));
+                }
             }
             super::lower_call::lower_call(
                 emitter,
@@ -733,7 +748,7 @@ pub(crate) fn static_array_values(
         let value = match (elem, item) {
             (Typ::Int, Expr::IntLit(value)) => *value,
             (Typ::Bool, Expr::BoolLit(value)) => i64::from(*value),
-            (Typ::String, Expr::StringLit(value)) => ctx.string_id(value),
+            (Typ::String, Expr::StringLit(value)) => ctx.string_id(value)?,
             _ => {
                 return Err(format!(
                     "native-lower: unsupported array return in `{fn_name}`"
@@ -923,7 +938,7 @@ pub(crate) fn lower_match(
             default_body = Some(arm.body.as_slice());
             continue;
         }
-        // Try integer pattern first
+        // Try integer pattern first, then string literal pattern.
         if let Some(value) = parse_int_match_pattern(&arm.pattern) {
             emitter.emit_insns(&aarch64::load_i64(1, value));
             emitter.emit_u32(aarch64::cmp_reg64(2, 1));
@@ -942,17 +957,30 @@ pub(crate) fn lower_match(
             end_branches.push(emitter.emit_insn(aarch64::b(0)));
             let next_offset = emitter.len() as i32 - next_branch as i32;
             emitter.patch_u32(next_branch, aarch64::b_cond(1, next_offset));
-        } else {
-            // ponytail: non-int pattern (string, enum variant, range) — skip entirely
-            // to avoid cascading crashes on string comparisons and partial matches.
-            // Extract vars so they exist if referenced, but don't execute body.
-            let vars = extract_pattern_vars(&arm.pattern);
-            for var in &vars {
-                if !ctx.locals.contains_key(var) {
-                    let offset = ctx.alloc_slot();
-                    ctx.locals.insert(var.clone(), LocalSlot::Scalar(offset));
-                }
+        } else if let Some(value) = parse_string_match_pattern(&arm.pattern) {
+            let id = ctx.string_id(&value)?;
+            emitter.emit_insns(&aarch64::load_i64(1, id));
+            emitter.emit_u32(aarch64::cmp_reg64(2, 1));
+            let next_branch = emitter.emit_insn(aarch64::b_cond(1, 0));
+            for stmt in &arm.body {
+                lower_stmt(
+                    emitter,
+                    ctx,
+                    stmt,
+                    functions,
+                    pending_calls,
+                    fn_name,
+                    ret_typ,
+                )?;
             }
+            end_branches.push(emitter.emit_insn(aarch64::b(0)));
+            let next_offset = emitter.len() as i32 - next_branch as i32;
+            emitter.patch_u32(next_branch, aarch64::b_cond(1, next_offset));
+        } else {
+            return Err(format!(
+                "native-lower: unsupported match pattern `{}` in `{fn_name}`",
+                arm.pattern.trim()
+            ));
         }
     }
     if let Some(body) = default_body {
@@ -986,4 +1014,14 @@ pub(crate) fn parse_int_match_pattern(pattern: &str) -> Option<i64> {
     let trimmed = pattern.trim().trim_end_matches(':').trim();
     let trimmed = trimmed.strip_prefix("case ").unwrap_or(trimmed).trim();
     trimmed.parse::<i64>().ok()
+}
+
+pub(crate) fn parse_string_match_pattern(pattern: &str) -> Option<String> {
+    let trimmed = pattern.trim().trim_end_matches(':').trim();
+    let trimmed = trimmed.strip_prefix("case ").unwrap_or(trimmed).trim();
+    if trimmed.len() >= 2 && trimmed.starts_with('"') && trimmed.ends_with('"') {
+        Some(trimmed[1..trimmed.len() - 1].to_string())
+    } else {
+        None
+    }
 }

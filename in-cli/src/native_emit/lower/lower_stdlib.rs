@@ -517,9 +517,9 @@ pub(crate) fn lower_stdlib_call(
         "with_capacity"
             if args.len() == 1 && (target.contains("Vec") || target.contains("vec")) =>
         {
-            return Err(format!(
+            Err(format!(
                 "native-lower: Vec::with_capacity not yet supported in native lowering in `{fn_name}`"
-            ));
+            ))
         }
         // Vec::push → store value at [vec + 2 + len]
         "push" if args.len() == 2 && (target.contains("Vec") || target.contains("vec")) => {

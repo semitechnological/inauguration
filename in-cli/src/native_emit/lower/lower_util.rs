@@ -97,26 +97,23 @@ pub(crate) fn call_return_type<'a>(
     callee: &Expr,
     functions: &'a HashMap<String, FunctionInfo>,
     fn_name: &str,
-) -> Result<&'a Typ, String> {
+) -> Result<Option<&'a Typ>, String> {
     let Expr::Ident(target) = callee else {
         return Err(format!(
             "native-lower: unsupported call callee in `{fn_name}`"
         ));
     };
-    // ponytail: try bare function name from module-qualified path
     if let Some(func) = functions.get(target) {
-        return Ok(&func.ret);
+        return Ok(Some(&func.ret));
     }
     if let Some(idx) = target.rfind("::") {
         let last = &target[idx + 2..];
         if let Some(func) = functions.get(last) {
-            return Ok(&func.ret);
+            return Ok(Some(&func.ret));
         }
     }
-    Ok(&UNKNOWN_FN_RET_TY)
+    Ok(None)
 }
-
-static UNKNOWN_FN_RET_TY: Typ = Typ::Int;
 
 pub(crate) fn reject_unsupported_function(
     func: &FunctionInfo,
@@ -144,31 +141,35 @@ pub(crate) fn native_param_abi_slots(
         depth: u32,
     ) -> Result<usize, String> {
         if depth > 10 {
-            // ponytail: recursive struct — treat as 1 scalar slot
-            return Ok(1);
+            return Err(format!(
+                "native-lower: recursive struct type detected in `{fn_name}`"
+            ));
         }
         match typ {
             Typ::Int | Typ::Bool | Typ::String | Typ::Float => Ok(1),
             Typ::Void => Ok(0),
             Typ::Named(struct_name) => {
-                if let Some(fields) = structs.get(struct_name) {
-                    let mut total = 0usize;
-                    for (_, field_ty) in fields {
-                        total += count_type_slots(field_ty, structs, fn_name, depth + 1)?;
-                    }
-                    Ok(total)
-                } else {
-                    Ok(1) // ponytail: unknown struct — count as 1 scalar
+                if struct_name == "String[]" {
+                    return Ok(2);
                 }
+                let Some(fields) = structs.get(struct_name) else {
+                    return Err(format!(
+                        "native-lower: unknown struct type `{struct_name}` in `{fn_name}`"
+                    ));
+                };
+                let mut total = 0usize;
+                for (_, field_ty) in fields {
+                    total += count_type_slots(field_ty, structs, fn_name, depth + 1)?;
+                }
+                Ok(total)
             }
             Typ::Array(elem) => {
                 ensure_native_array_element(elem, fn_name, "parameter")?;
                 Ok(2)
             }
-            _ => {
-                // ponytail: unsupported type — treat as 1 scalar slot
-                Ok(1)
-            }
+            _ => Err(format!(
+                "native-lower: unsupported parameter type `{typ:?}` in `{fn_name}`"
+            )),
         }
     }
     for (_, typ) in params {
@@ -180,37 +181,33 @@ pub(crate) fn native_param_abi_slots(
 pub(crate) fn native_struct_fields(
     structs: &HashMap<String, Vec<(String, Typ)>>,
     typ: &str,
-    _fn_name: &str,
+    fn_name: &str,
 ) -> Result<Vec<(String, Typ)>, String> {
-    if let Some(fields) = structs.get(typ) {
-        // Replace unknown nested struct types with Int placeholder
-        let cleaned: Vec<(String, Typ)> = fields
-            .iter()
-            .map(|(name, field_ty)| {
-                match field_ty {
-                    Typ::Int | Typ::Bool | Typ::String | Typ::Float => {
-                        (name.clone(), field_ty.clone())
-                    }
-                    Typ::Named(inner) if structs.contains_key(inner.as_str()) => {
-                        (name.clone(), field_ty.clone())
-                    }
-                    _ => {
-                        // ponytail: unknown/unsupported field type — treat as Int placeholder
-                        (name.clone(), Typ::Int)
-                    }
-                }
-            })
-            .collect();
-        // If too many fields, take first 8
-        if cleaned.len() > 8 {
-            Ok(cleaned[..8].to_vec())
-        } else {
-            Ok(cleaned)
-        }
-    } else {
-        // ponytail: unknown struct — return single Int field as placeholder
-        Ok(vec![("_0".into(), Typ::Int)])
+    let fields = structs
+        .get(typ)
+        .ok_or_else(|| format!("native-lower: unknown struct type `{typ}` in `{fn_name}`"))?;
+    let cleaned: Vec<(String, Typ)> = fields
+        .iter()
+        .map(|(name, field_ty)| match field_ty {
+            Typ::Int | Typ::Bool | Typ::String | Typ::Float => {
+                Ok((name.clone(), field_ty.clone()))
+            }
+            Typ::Named(inner) if structs.contains_key(inner.as_str()) => {
+                Ok((name.clone(), field_ty.clone()))
+            }
+            _ => {
+                Err(format!(
+                    "native-lower: unsupported field type `{field_ty:?}` for `{name}` in struct `{typ}` in `{fn_name}`"
+                ))
+            }
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    if cleaned.len() > 8 {
+        return Err(format!(
+            "native-lower: struct `{typ}` has too many fields (>8) in `{fn_name}`"
+        ));
     }
+    Ok(cleaned)
 }
 
 /// Check if an expression tree contains a function call.
