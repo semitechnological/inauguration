@@ -7,7 +7,7 @@ cd "$ROOT"
 echo "abi-layouts check: boundary verify + icore v3 sample"
 (
   cd in-cli
-  cargo test -q boundary -- --nocapture
+  cargo test -q --features extended boundary -- --nocapture
 )
 python3 - "$ROOT/apps/icore-sample/boundary-v3.icore" <<'PY'
 import json
