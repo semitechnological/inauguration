@@ -156,6 +156,118 @@ pub unsafe extern "C" fn in_fs_exists(path_ptr: *const u8) -> i64 {
     }
 }
 
+/// `std::fs::write(path, contents)` -> success flag
+/// Returns 1 on success, 0 on error.
+///
+/// # Safety
+/// Both pointers must be valid, non-aliased instring pointers or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn in_fs_write(path_ptr: *const u8, contents_ptr: *const u8) -> i64 {
+    unsafe {
+        let Some(path_bytes) = instring_from_ptr(path_ptr) else {
+            return 0;
+        };
+        let Some(contents) = instring_from_ptr(contents_ptr) else {
+            return 0;
+        };
+        let path_str = match std::str::from_utf8(path_bytes) {
+            Ok(s) => s,
+            Err(_) => return 0,
+        };
+        match std::fs::write(path_str, contents) {
+            Ok(()) => 1,
+            Err(_) => 0,
+        }
+    }
+}
+
+/// `std::fs::create_dir(path)` -> success flag
+/// Returns 1 on success, 0 on error.
+///
+/// # Safety
+/// `path_ptr` must be a valid, non-aliased instring pointer or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn in_fs_create_dir(path_ptr: *const u8) -> i64 {
+    unsafe {
+        let Some(path_bytes) = instring_from_ptr(path_ptr) else {
+            return 0;
+        };
+        let path_str = match std::str::from_utf8(path_bytes) {
+            Ok(s) => s,
+            Err(_) => return 0,
+        };
+        match std::fs::create_dir(path_str) {
+            Ok(()) => 1,
+            Err(_) => 0,
+        }
+    }
+}
+
+/// `std::fs::remove_file(path)` -> success flag
+/// Returns 1 on success, 0 on error.
+///
+/// # Safety
+/// `path_ptr` must be a valid, non-aliased instring pointer or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn in_fs_remove_file(path_ptr: *const u8) -> i64 {
+    unsafe {
+        let Some(path_bytes) = instring_from_ptr(path_ptr) else {
+            return 0;
+        };
+        let path_str = match std::str::from_utf8(path_bytes) {
+            Ok(s) => s,
+            Err(_) => return 0,
+        };
+        match std::fs::remove_file(path_str) {
+            Ok(()) => 1,
+            Err(_) => 0,
+        }
+    }
+}
+
+/// `std::env::set_var(key, value)`
+///
+/// # Safety
+/// Both pointers must be valid, non-aliased instring pointers or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn in_env_set_var(key_ptr: *const u8, value_ptr: *const u8) {
+    unsafe {
+        let Some(key) = instring_from_ptr(key_ptr) else {
+            return;
+        };
+        let Some(value) = instring_from_ptr(value_ptr) else {
+            return;
+        };
+        let key_str = match std::str::from_utf8(key) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let value_str = match std::str::from_utf8(value) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        std::env::set_var(key_str, value_str);
+    }
+}
+
+/// `std::env::remove_var(key)`
+///
+/// # Safety
+/// `key_ptr` must be a valid, non-aliased instring pointer or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn in_env_remove_var(key_ptr: *const u8) {
+    unsafe {
+        let Some(key) = instring_from_ptr(key_ptr) else {
+            return;
+        };
+        let key_str = match std::str::from_utf8(key) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        std::env::remove_var(key_str);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,6 +287,66 @@ mod tests {
             assert!(!p.is_null());
             let s = instring_from_ptr(p).unwrap();
             assert!(!s.is_empty());
+        }
+    }
+
+    #[test]
+    fn in_fs_write_and_remove_roundtrip() {
+        unsafe {
+            let dir = std::env::temp_dir();
+            let path = dir.join(format!(
+                "inauguration-stdlib-write-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::UNIX_EPOCH
+                    .elapsed()
+                    .unwrap()
+                    .as_nanos()
+            ));
+            let path_str = path.to_str().unwrap();
+            let path_ptr = instring_from_bytes(path_str.as_bytes());
+            let contents_ptr = instring_from_bytes(b"hello inauguration");
+            let written = in_fs_write(path_ptr, contents_ptr);
+            assert_eq!(written, 1);
+            assert!(path.exists());
+            let read = in_fs_read_to_string(path_ptr);
+            assert_eq!(instring_from_ptr(read).unwrap(), b"hello inauguration");
+            let removed = in_fs_remove_file(path_ptr);
+            assert_eq!(removed, 1);
+            assert!(!path.exists());
+        }
+    }
+
+    #[test]
+    fn in_fs_create_dir_roundtrip() {
+        unsafe {
+            let dir = std::env::temp_dir();
+            let path = dir.join(format!(
+                "inauguration-stdlib-dir-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::UNIX_EPOCH
+                    .elapsed()
+                    .unwrap()
+                    .as_nanos()
+            ));
+            let path_str = path.to_str().unwrap();
+            let path_ptr = instring_from_bytes(path_str.as_bytes());
+            let created = in_fs_create_dir(path_ptr);
+            assert_eq!(created, 1);
+            assert!(path.exists());
+            let _ = std::fs::remove_dir(&path);
+        }
+    }
+
+    #[test]
+    fn in_env_set_and_remove_var_roundtrip() {
+        unsafe {
+            let key = format!("IN_TEST_VAR_{}", std::process::id());
+            let key_ptr = instring_from_bytes(key.as_bytes());
+            let value_ptr = instring_from_bytes(b"test-value");
+            in_env_set_var(key_ptr, value_ptr);
+            assert_eq!(std::env::var(&key).unwrap(), "test-value");
+            in_env_remove_var(key_ptr);
+            assert!(std::env::var(&key).is_err());
         }
     }
 }

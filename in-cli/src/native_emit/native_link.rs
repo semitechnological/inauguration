@@ -32,8 +32,13 @@ const DLSYM_ALLOWLIST: &[&str] = &[
     "in_env_var",
     "in_env_temp_dir",
     "in_env_current_dir",
+    "in_env_set_var",
+    "in_env_remove_var",
     "in_fs_read_to_string",
     "in_fs_exists",
+    "in_fs_write",
+    "in_fs_create_dir",
+    "in_fs_remove_file",
 ];
 
 pub fn resolve_native_fn(name: &str) -> Option<*const u8> {
@@ -106,6 +111,26 @@ pub fn bootstrap_jit_native() {
     c.insert(
         "in_fs_exists".to_string(),
         NativePtr(crate::native_stdlib::in_fs_exists as *const u8),
+    );
+    c.insert(
+        "in_fs_write".to_string(),
+        NativePtr(crate::native_stdlib::in_fs_write as *const u8),
+    );
+    c.insert(
+        "in_fs_create_dir".to_string(),
+        NativePtr(crate::native_stdlib::in_fs_create_dir as *const u8),
+    );
+    c.insert(
+        "in_fs_remove_file".to_string(),
+        NativePtr(crate::native_stdlib::in_fs_remove_file as *const u8),
+    );
+    c.insert(
+        "in_env_set_var".to_string(),
+        NativePtr(crate::native_stdlib::in_env_set_var as *const u8),
+    );
+    c.insert(
+        "in_env_remove_var".to_string(),
+        NativePtr(crate::native_stdlib::in_env_remove_var as *const u8),
     );
 }
 
