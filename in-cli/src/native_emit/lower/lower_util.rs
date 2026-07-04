@@ -1,0 +1,304 @@
+use super::FunctionInfo;
+use crate::core_ir::{Expr, Typ};
+use crate::native_emit::aarch64::{self, CodeEmitter};
+use std::collections::HashMap;
+
+pub(crate) fn canonical_type(typ: &Typ) -> Typ {
+    typ.canonical()
+}
+
+pub(crate) fn pick_scratch(exclude: &[u8]) -> u8 {
+    (2..=15).find(|reg| !exclude.contains(reg)).unwrap_or(15)
+}
+
+pub(crate) fn emit_failure_return(emitter: &mut CodeEmitter, stack_reserve: u32) {
+    emitter.emit_insns(&aarch64::load_i64(0, 1));
+    emit_epilogue(emitter, stack_reserve);
+}
+
+/// Find a field offset in a flattened struct field map, supporting nested struct access.
+/// When `field_map` has `"inner.val"` and we look up `"inner"`, returns the offset of `"inner.val"`.
+pub(crate) fn find_field_offset<'a>(
+    field_map: &'a HashMap<String, u32>,
+    name: &str,
+) -> Option<&'a u32> {
+    if let Some(offset) = field_map.get(name) {
+        return Some(offset);
+    }
+    // Try prefix match for nested structs: "inner" → "inner.val"
+    let prefix = format!("{name}.");
+    field_map.iter().find_map(|(k, v)| {
+        if k.starts_with(&prefix) {
+            Some(v)
+        } else {
+            None
+        }
+    })
+}
+
+pub(crate) fn lower_comparison_result(
+    emitter: &mut CodeEmitter,
+    rd: u8,
+    op: &str,
+) -> Result<(), String> {
+    let cond = match op {
+        "==" => 0,
+        "!=" => 1,
+        "<" => 11,
+        ">" => 12,
+        "<=" => 13,
+        ">=" => 10,
+        _ => {
+            return Err(format!(
+                "native-lower: unsupported comparison operator `{op}`"
+            ));
+        }
+    };
+    let true_branch = emitter.emit_insn(aarch64::b_cond(cond, 0));
+    emitter.emit_insns(&aarch64::load_i64(rd, 0));
+    let end_branch = emitter.emit_insn(aarch64::b(0));
+    let true_offset = emitter.len() as i32 - true_branch as i32;
+    emitter.patch_u32(true_branch, aarch64::b_cond(cond, true_offset));
+    emitter.emit_insns(&aarch64::load_i64(rd, 1));
+    let end_offset = emitter.len() as i32 - end_branch as i32;
+    emitter.patch_u32(end_branch, aarch64::b(end_offset));
+    Ok(())
+}
+
+pub(crate) fn emit_epilogue(emitter: &mut CodeEmitter, stack_reserve: u32) {
+    if stack_reserve > 0 {
+        emitter.emit_u32(aarch64::add_imm64(
+            aarch64::REG_SP,
+            aarch64::REG_SP,
+            stack_reserve as u16,
+        ));
+    }
+    emitter.emit_u32(0xA8C1_7BFD);
+    emitter.emit_u32(aarch64::ret());
+}
+
+pub(crate) fn ensure_return_type(
+    ret: &Typ,
+    fn_name: &str,
+    structs: &HashMap<String, Vec<(String, Typ)>>,
+) -> Result<(), String> {
+    match ret {
+        Typ::Int | Typ::Float | Typ::Bool | Typ::String | Typ::Void => Ok(()),
+        Typ::Named(struct_name) => {
+            native_struct_fields(structs, struct_name, fn_name)?;
+            Ok(())
+        }
+        Typ::Array(elem) => ensure_native_array_element(elem, fn_name, "return"),
+        Typ::Generic(_) => Ok(()),
+    }
+}
+
+pub(crate) fn call_return_type<'a>(
+    callee: &Expr,
+    functions: &'a HashMap<String, FunctionInfo>,
+    fn_name: &str,
+) -> Result<&'a Typ, String> {
+    let Expr::Ident(target) = callee else {
+        return Err(format!(
+            "native-lower: unsupported call callee in `{fn_name}`"
+        ));
+    };
+    // ponytail: try bare function name from module-qualified path
+    if let Some(func) = functions.get(target) {
+        return Ok(&func.ret);
+    }
+    if let Some(idx) = target.rfind("::") {
+        let last = &target[idx + 2..];
+        if let Some(func) = functions.get(last) {
+            return Ok(&func.ret);
+        }
+    }
+    Ok(&UNKNOWN_FN_RET_TY)
+}
+
+static UNKNOWN_FN_RET_TY: Typ = Typ::Int;
+
+pub(crate) fn reject_unsupported_function(
+    func: &FunctionInfo,
+    structs: &HashMap<String, Vec<(String, Typ)>>,
+) -> Result<(), String> {
+    if native_param_abi_slots(&func.params, structs, &func.name)? > 128 {
+        return Err(format!(
+            "native-lower: too many parameters in `{}`",
+            func.name
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn native_param_abi_slots(
+    params: &[(String, Typ)],
+    structs: &HashMap<String, Vec<(String, Typ)>>,
+    fn_name: &str,
+) -> Result<usize, String> {
+    let mut slots = 0usize;
+    fn count_type_slots(
+        typ: &Typ,
+        structs: &HashMap<String, Vec<(String, Typ)>>,
+        fn_name: &str,
+        depth: u32,
+    ) -> Result<usize, String> {
+        if depth > 10 {
+            // ponytail: recursive struct — treat as 1 scalar slot
+            return Ok(1);
+        }
+        match typ {
+            Typ::Int | Typ::Bool | Typ::String | Typ::Float => Ok(1),
+            Typ::Void => Ok(0),
+            Typ::Named(struct_name) => {
+                if let Some(fields) = structs.get(struct_name) {
+                    let mut total = 0usize;
+                    for (_, field_ty) in fields {
+                        total += count_type_slots(field_ty, structs, fn_name, depth + 1)?;
+                    }
+                    Ok(total)
+                } else {
+                    Ok(1) // ponytail: unknown struct — count as 1 scalar
+                }
+            }
+            Typ::Array(elem) => {
+                ensure_native_array_element(elem, fn_name, "parameter")?;
+                Ok(2)
+            }
+            _ => {
+                // ponytail: unsupported type — treat as 1 scalar slot
+                Ok(1)
+            }
+        }
+    }
+    for (_, typ) in params {
+        slots += count_type_slots(typ, structs, fn_name, 0)?;
+    }
+    Ok(slots)
+}
+
+pub(crate) fn native_struct_fields(
+    structs: &HashMap<String, Vec<(String, Typ)>>,
+    typ: &str,
+    _fn_name: &str,
+) -> Result<Vec<(String, Typ)>, String> {
+    if let Some(fields) = structs.get(typ) {
+        // Replace unknown nested struct types with Int placeholder
+        let cleaned: Vec<(String, Typ)> = fields
+            .iter()
+            .map(|(name, field_ty)| {
+                match field_ty {
+                    Typ::Int | Typ::Bool | Typ::String | Typ::Float => {
+                        (name.clone(), field_ty.clone())
+                    }
+                    Typ::Named(inner) if structs.contains_key(inner.as_str()) => {
+                        (name.clone(), field_ty.clone())
+                    }
+                    _ => {
+                        // ponytail: unknown/unsupported field type — treat as Int placeholder
+                        (name.clone(), Typ::Int)
+                    }
+                }
+            })
+            .collect();
+        // If too many fields, take first 8
+        if cleaned.len() > 8 {
+            Ok(cleaned[..8].to_vec())
+        } else {
+            Ok(cleaned)
+        }
+    } else {
+        // ponytail: unknown struct — return single Int field as placeholder
+        Ok(vec![("_0".into(), Typ::Int)])
+    }
+}
+
+/// Check if an expression tree contains a function call.
+pub(crate) fn contains_call(expr: &Expr) -> bool {
+    match expr {
+        Expr::Call { .. } => true,
+        Expr::Binary { lhs, rhs, .. } => contains_call(lhs) || contains_call(rhs),
+        Expr::Unary { expr: inner, .. } => contains_call(inner),
+        Expr::Field { base, .. } => contains_call(base),
+        Expr::StructInit { fields, .. } => fields.iter().any(|(_, e)| contains_call(e)),
+        Expr::ArrayLit(items) => items.iter().any(contains_call),
+        _ => false,
+    }
+}
+
+pub(crate) fn is_native_scalar_type(typ: &Typ) -> bool {
+    matches!(canonical_type(typ), Typ::Int | Typ::Bool | Typ::String)
+}
+
+pub(crate) fn ensure_native_array_element(
+    elem: &Typ,
+    fn_name: &str,
+    context: &str,
+) -> Result<(), String> {
+    match canonical_type(elem) {
+        Typ::Int | Typ::Bool | Typ::String => Ok(()),
+        Typ::Array(_) => Err(format!(
+            "native-lower[native-array-nested-unsupported]: unsupported {context} array element type in `{fn_name}` (nested arrays are not supported)"
+        )),
+        Typ::Named(_) => Err(format!(
+            "native-lower[native-array-aggregate-unsupported]: unsupported {context} array element type in `{fn_name}` (aggregate array elements are not supported)"
+        )),
+        _ => Err(format!(
+            "native-lower[native-array-element-unsupported]: unsupported {context} array element type in `{fn_name}` (only Int/Bool/String elements)"
+        )),
+    }
+}
+
+pub(crate) fn array_item_matches(expected: &Typ, actual: &Typ) -> bool {
+    let expected = canonical_type(expected);
+    let actual = canonical_type(actual);
+    expected == actual || matches!((&expected, &actual), (Typ::Int, Typ::Bool))
+}
+
+pub(crate) fn expr_type(expr: &Expr) -> Option<Typ> {
+    match expr {
+        Expr::IntLit(_) => Some(Typ::Int),
+        Expr::FloatLit(_) => Some(Typ::Float),
+        Expr::BoolLit(_) => Some(Typ::Bool),
+        Expr::StringLit(_) => Some(Typ::String),
+        Expr::ArrayLit(items) => Some(Typ::Array(Box::new(
+            items.iter().find_map(expr_type).unwrap_or(Typ::Void),
+        ))),
+        Expr::StructInit { name, .. } => Some(Typ::Named(name.clone())),
+        _ => None,
+    }
+}
+
+pub(crate) fn expr_contains_call(expr: &Expr) -> bool {
+    match expr {
+        Expr::Call { .. } => true,
+        Expr::Unary { expr, .. } => expr_contains_call(expr),
+        Expr::Binary { lhs, rhs, .. } => expr_contains_call(lhs) || expr_contains_call(rhs),
+        Expr::StructInit { fields, .. } => fields.iter().any(|(_, expr)| expr_contains_call(expr)),
+        Expr::Field { base, .. } => expr_contains_call(base),
+        Expr::ArrayLit(items) => items.iter().any(expr_contains_call),
+        Expr::Index { base, index, .. } => expr_contains_call(base) || expr_contains_call(index),
+        Expr::IntLit(_)
+        | Expr::FloatLit(_)
+        | Expr::StringLit(_)
+        | Expr::BoolLit(_)
+        | Expr::Ident(_)
+        | Expr::Closure { .. } => false,
+    }
+}
+
+pub(crate) fn value_to_i64(expr: &Expr) -> Option<i64> {
+    match expr {
+        Expr::IntLit(v) => Some(*v),
+        Expr::BoolLit(v) => Some(i64::from(*v)),
+        Expr::StringLit(v) if v.is_empty() => Some(0),
+        _ => None,
+    }
+}
+
+pub(crate) fn method_call_name(callee: &Expr) -> Option<String> {
+    match callee {
+        Expr::Ident(name) => Some(name.clone()),
+        _ => None,
+    }
+}
