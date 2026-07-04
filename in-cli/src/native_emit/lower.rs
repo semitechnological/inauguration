@@ -2487,11 +2487,9 @@ pub(crate) fn lower_expr_into(
             pending_calls,
             fn_name,
         ),
-        Expr::StructInit { .. } | Expr::ArrayLit(_) | Expr::Closure { .. } => {
-            // ponytail: ArrayLit/Closure not supported in expr context — return 0
-            emitter.emit_insns(&aarch64::load_i64(rd, 0));
-            Ok(())
-        }
+        Expr::StructInit { .. } | Expr::ArrayLit(_) | Expr::Closure { .. } => Err(format!(
+            "native-lower: unsupported expression in `{fn_name}` (struct init, array literal, or closure in value context)"
+        )),
     }
 }
 
@@ -2626,12 +2624,12 @@ fn lower_field(
                 emitter.emit_insns(&aarch64::load_i64(rd, 0));
                 return Ok(());
             };
-            if let Some(offset) = find_field_offset(fields, name) {
-                emitter.emit_u32(aarch64::ldr64(rd, aarch64::REG_SP, *offset));
-            } else {
-                // ponytail: unknown field — return 0
-                emitter.emit_insns(&aarch64::load_i64(rd, 0));
-            }
+            let Some(offset) = find_field_offset(fields, name) else {
+                return Err(format!(
+                    "native-lower: unknown field `{name}` in `{fn_name}`"
+                ));
+            };
+            emitter.emit_u32(aarch64::ldr64(rd, aarch64::REG_SP, *offset));
             Ok(())
         }
         // Nested field: bar.baz where bar is Field { base: Ident("foo"), name: "bar" }
@@ -2664,11 +2662,9 @@ fn lower_field(
             };
             lower_expr_into(emitter, ctx, value, rd, functions, pending_calls, fn_name)
         }
-        _ => {
-            // ponytail: unsupported field base — return 0
-            emitter.emit_insns(&aarch64::load_i64(rd, 0));
-            Ok(())
-        }
+        _ => Err(format!(
+            "native-lower: unsupported field access in `{fn_name}`"
+        )),
     }
 }
 
