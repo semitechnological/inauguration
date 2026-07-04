@@ -121,17 +121,52 @@ pub fn compile_cargo_dependencies(project_dir: &Path) -> Vec<(String, UnifiedMod
     // Only compile specific crates that we KNOW we need and can parse
     // (the exact set of direct dependencies from Cargo.toml)
     let direct_dep_names: std::collections::HashSet<&str> = [
-        "blake3", "clap", "serde", "serde_json", "sha2", "syn",
-        "quote", "thiserror", "tokio", "tree-sitter", "tree-sitter-c",
-        "tree-sitter-cpp", "tree-sitter-c-sharp", "tree-sitter-dart", "tree-sitter-elixir",
-        "tree-sitter-erlang", "tree-sitter-fsharp", "tree-sitter-go", "tree-sitter-groovy",
-        "tree-sitter-haskell", "tree-sitter-holyc", "tree-sitter-java", "tree-sitter-javascript",
-        "tree-sitter-julia", "tree-sitter-kotlin-ng", "tree-sitter-lua", "tree-sitter-objc",
-        "tree-sitter-ocaml", "tree-sitter-perl", "tree-sitter-php", "tree-sitter-python",
-        "tree-sitter-r", "tree-sitter-ruby", "tree-sitter-rust", "tree-sitter-scala",
-        "tree-sitter-swift", "tree-sitter-typescript", "tree-sitter-v", "tree-sitter-zig",
-        "libc", "libloading", "notify",
-    ].iter().cloned().collect();
+        "blake3",
+        "clap",
+        "serde",
+        "serde_json",
+        "sha2",
+        "syn",
+        "quote",
+        "thiserror",
+        "tokio",
+        "tree-sitter",
+        "tree-sitter-c",
+        "tree-sitter-cpp",
+        "tree-sitter-c-sharp",
+        "tree-sitter-dart",
+        "tree-sitter-elixir",
+        "tree-sitter-erlang",
+        "tree-sitter-fsharp",
+        "tree-sitter-go",
+        "tree-sitter-groovy",
+        "tree-sitter-haskell",
+        "tree-sitter-holyc",
+        "tree-sitter-java",
+        "tree-sitter-javascript",
+        "tree-sitter-julia",
+        "tree-sitter-kotlin-ng",
+        "tree-sitter-lua",
+        "tree-sitter-objc",
+        "tree-sitter-ocaml",
+        "tree-sitter-perl",
+        "tree-sitter-php",
+        "tree-sitter-python",
+        "tree-sitter-r",
+        "tree-sitter-ruby",
+        "tree-sitter-rust",
+        "tree-sitter-scala",
+        "tree-sitter-swift",
+        "tree-sitter-typescript",
+        "tree-sitter-v",
+        "tree-sitter-zig",
+        "libc",
+        "libloading",
+        "notify",
+    ]
+    .iter()
+    .cloned()
+    .collect();
     for dep_id in &all_dep_ids {
         if let Some(manifest) = pkg_manifest.get(dep_id) {
             if let Some(pkg) = pkg_by_id.get(dep_id) {
@@ -142,10 +177,14 @@ pub fn compile_cargo_dependencies(project_dir: &Path) -> Vec<(String, UnifiedMod
                 // Skip proc-macro crates
                 if let Some(manifest_str) = pkg["manifest_path"].as_str() {
                     if let Ok(content) = std::fs::read_to_string(manifest_str) {
-                        if content.contains("proc-macro") { continue; }
+                        if content.contains("proc-macro") {
+                            continue;
+                        }
                     }
                 }
-                if already_compiled.contains(crate_name) { continue; }
+                if already_compiled.contains(crate_name) {
+                    continue;
+                }
                 already_compiled.insert(crate_name.to_string());
                 let src_dir = manifest.parent().unwrap_or(Path::new("."));
                 let lib_rs = src_dir.join("src").join("lib.rs");
@@ -177,13 +216,18 @@ pub fn find_crate_root(project_dir: &Path) -> Result<PathBuf, String> {
                     // Scan subsequent lines until next section
                     for j in (i + 1)..lines.len().min(i + 20) {
                         let trimmed = lines[j].trim();
-                        if trimmed.starts_with('[') { break; } // next section
-                        if let Some(val) = trimmed
-                            .strip_prefix("path")
-                            .and_then(|s| s.split('=').nth(1).map(|v| v.trim().trim_matches('"').to_string()))
-                        {
+                        if trimmed.starts_with('[') {
+                            break;
+                        } // next section
+                        if let Some(val) = trimmed.strip_prefix("path").and_then(|s| {
+                            s.split('=')
+                                .nth(1)
+                                .map(|v| v.trim().trim_matches('"').to_string())
+                        }) {
                             let lib_rs = project_dir.join(&val);
-                            if lib_rs.exists() { return Ok(lib_rs); }
+                            if lib_rs.exists() {
+                                return Ok(lib_rs);
+                            }
                         }
                     }
                 }

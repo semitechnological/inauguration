@@ -911,7 +911,8 @@ fn lower_stmt(
             // s.x = value → compute addr = &s + field_offset, store value
             let Expr::Ident(base_name) = base else {
                 return Err(format!(
-                    "x86_64-lower: unsupported field assign base in `{}`", ctx.fn_name
+                    "x86_64-lower: unsupported field assign base in `{}`",
+                    ctx.fn_name
                 ));
             };
             if !ctx.locals.contains_key(base_name) {
@@ -920,12 +921,15 @@ fn lower_stmt(
                 ));
             }
             let field_offset = match ctx.locals.get(base_name) {
-                Some(StackSlot::Struct { fields, .. }) => {
-                    fields.get(name).copied().ok_or_else(|| {
-                        format!("field `{name}` not found in struct")
-                    })?
+                Some(StackSlot::Struct { fields, .. }) => fields
+                    .get(name)
+                    .copied()
+                    .ok_or_else(|| format!("field `{name}` not found in struct"))?,
+                _ => {
+                    return Err(format!(
+                        "expected struct for field assign `{base_name}.{name}`"
+                    ));
                 }
-                _ => return Err(format!("expected struct for field assign `{base_name}.{name}`")),
             };
             lower_expr_into(emitter, ctx, value, RAX, pending_calls)?;
             emitter.emit_insns(&x86_64::str64(RAX, field_offset as u16));
@@ -1962,25 +1966,23 @@ fn lower_struct_init(
     pending_calls: &mut Vec<PendingCall>,
 ) -> Result<(), String> {
     let field_offsets: Vec<(String, u32)> = match ctx.locals.get(name) {
-        Some(StackSlot::Struct { fields: field_map }) => {
-            fields
-                .iter()
-                .filter_map(|(fn_, _)| {
-                    if let Some(&off) = field_map.get(fn_.as_str()) {
-                        Some((fn_.clone(), off))
-                    } else {
-                        let prefix = format!("{fn_}.");
-                        field_map.iter().find_map(|(k, &v)| {
-                            if k.starts_with(&prefix) {
-                                Some((fn_.clone(), v))
-                            } else {
-                                None
-                            }
-                        })
-                    }
-                })
-                .collect()
-        }
+        Some(StackSlot::Struct { fields: field_map }) => fields
+            .iter()
+            .filter_map(|(fn_, _)| {
+                if let Some(&off) = field_map.get(fn_.as_str()) {
+                    Some((fn_.clone(), off))
+                } else {
+                    let prefix = format!("{fn_}.");
+                    field_map.iter().find_map(|(k, &v)| {
+                        if k.starts_with(&prefix) {
+                            Some((fn_.clone(), v))
+                        } else {
+                            None
+                        }
+                    })
+                }
+            })
+            .collect(),
         _ => Vec::new(),
     };
     for (field_name, field_offset) in &field_offsets {

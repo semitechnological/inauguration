@@ -16,9 +16,6 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-/// Thread-local collector for external symbol references during lowering.
-/// `lower_call` pushes (instruction_offset, symbol_name) when a function
-/// is not in the table. Cleared before and after each `lower_module` call.
 thread_local! {
     /// Collector for external symbol references during lowering.
     /// `lower_call` pushes (instruction_offset, symbol_name) when a function
@@ -35,7 +32,12 @@ pub const TARGET_TRIPLE: &str = "aarch64-apple-darwin";
 /// Build ARM64 assembly source from lowered code bytes.
 /// Each external call site (BL 0 placeholder) is replaced with a proper
 /// `bl _symbol` instruction so the assembler+linker resolve it.
-fn build_assembly(code: &[u8], exports: &[(String, u32)], external_refs: &[(u32, String)], entry: &str) -> String {
+fn build_assembly(
+    code: &[u8],
+    exports: &[(String, u32)],
+    external_refs: &[(u32, String)],
+    entry: &str,
+) -> String {
     // Sort external refs by site for sequential processing
     let mut ext_refs = external_refs.to_vec();
     ext_refs.sort_by_key(|(site, _)| *site);
@@ -45,7 +47,8 @@ fn build_assembly(code: &[u8], exports: &[(String, u32)], external_refs: &[(u32,
     asm.push_str(".text\n");
 
     // Build a set of function start positions for labels
-    let mut fn_starts: std::collections::HashMap<u32, &str> = exports.iter().map(|(n, o)| (*o, n.as_str())).collect();
+    let mut fn_starts: std::collections::HashMap<u32, &str> =
+        exports.iter().map(|(n, o)| (*o, n.as_str())).collect();
     // Remove entry and any matching the entry name from fn_starts (we emit them via the entry stub)
     fn_starts.remove(&0);
     // Also remove the entry point function (it's the same symbol)
@@ -76,7 +79,7 @@ fn build_assembly(code: &[u8], exports: &[(String, u32)], external_refs: &[(u32,
 
         // Check if this position has an external call
         if ext_idx < ext_refs.len() && (pos as u32) == ext_refs[ext_idx].0 {
-            let (site, name) = &ext_refs[ext_idx];
+            let (_, name) = &ext_refs[ext_idx];
             // Emit the external call as assembly instruction
             // First emit any args setup (the code before BL is setup)
             // The BL is 4 bytes, we replace it with assembly
@@ -92,11 +95,11 @@ fn build_assembly(code: &[u8], exports: &[(String, u32)], external_refs: &[(u32,
         let remaining = code.len() - pos;
         let chunk = if remaining >= 4 { 4 } else { remaining };
         if chunk == 4 {
-            let val = u32::from_le_bytes(code[pos..pos+4].try_into().unwrap());
+            let val = u32::from_le_bytes(code[pos..pos + 4].try_into().unwrap());
             asm.push_str(&format!("\t.4byte\t0x{val:08x}\n"));
         } else {
             for i in 0..chunk {
-                asm.push_str(&format!("\t.byte\t0x{:02x}\n", code[pos+i]));
+                asm.push_str(&format!("\t.byte\t0x{:02x}\n", code[pos + i]));
             }
         }
         pos += chunk;
@@ -262,30 +265,38 @@ pub fn compile_native_artifact(
     let lowered = lower_module(module, entry, linkage)?;
 
     if linkage == NativeLinkage::Executable && !lowered.external_refs.is_empty() {
-        eprintln!("[native] as+ld path: {} external refs", lowered.external_refs.len());
+        eprintln!(
+            "[native] as+ld path: {} external refs",
+            lowered.external_refs.len()
+        );
         for (site, name) in &lowered.external_refs {
             let link_name = native_link_name(name);
             eprintln!("[native]   ref at offset {site}: '{name}' → '{link_name}'");
         }
         // Write assembly source and assemble+link with system tools
-        let mapped_exports: Vec<(String, u32)> = lowered.exports.iter().map(|e| {
-            (native_link_name(&e.name), e.offset)
-        }).collect();
-        let mapped_external_refs: Vec<(u32, String)> = lowered.external_refs.iter().map(|(site, name)| {
-            (*site, native_link_name(name))
-        }).collect();
+        let mapped_exports: Vec<(String, u32)> = lowered
+            .exports
+            .iter()
+            .map(|e| (native_link_name(&e.name), e.offset))
+            .collect();
+        let mapped_external_refs: Vec<(u32, String)> = lowered
+            .external_refs
+            .iter()
+            .map(|(site, name)| (*site, native_link_name(name)))
+            .collect();
 
         // Build assembly source from lowered code
         let asm = build_assembly(&lowered.code, &mapped_exports, &mapped_external_refs, entry);
         let asm_path = out_path.with_extension("s");
-        std::fs::write(&asm_path, &asm)
-            .map_err(|e| format!("write assembly: {e}"))?;
+        std::fs::write(&asm_path, &asm).map_err(|e| format!("write assembly: {e}"))?;
 
         // Assemble with system assembler
         let obj_path = out_path.with_extension("o");
         let as_status = std::process::Command::new("as")
-            .arg("-arch").arg("arm64")
-            .arg("-o").arg(&obj_path)
+            .arg("-arch")
+            .arg("arm64")
+            .arg("-o")
+            .arg(&obj_path)
             .arg(&asm_path)
             .status()
             .map_err(|e| format!("as invocation failed: {e}"))?;
@@ -297,13 +308,18 @@ pub fn compile_native_artifact(
         let sdk_root = find_sdk_root().unwrap_or_else(|| "/".to_string());
         let entry_name = native_link_name(entry);
         let ld_status = std::process::Command::new("ld")
-            .arg("-o").arg(out_path)
+            .arg("-o")
+            .arg(out_path)
             .arg(&obj_path)
             .arg("-lSystem")
-            .arg("-L").arg(format!("{sdk_root}/usr/lib"))
-            .arg("-arch").arg("arm64")
-            .arg("-macos_version_min").arg("14.0")
-            .arg("-e").arg(&entry_name)
+            .arg("-L")
+            .arg(format!("{sdk_root}/usr/lib"))
+            .arg("-arch")
+            .arg("arm64")
+            .arg("-macos_version_min")
+            .arg("14.0")
+            .arg("-e")
+            .arg(&entry_name)
             .status()
             .map_err(|e| format!("ld invocation failed: {e}"))?;
         if !ld_status.success() {
@@ -666,7 +682,9 @@ fn rename_calls(stmts: &mut [Stmt], name_map: &HashMap<String, String>) {
     for stmt in stmts {
         match stmt {
             Stmt::Expr(expr) | Stmt::Return(Some(expr)) => rename_call_expr(expr, name_map),
-            Stmt::Let(_, _, expr) | Stmt::Assign(_, expr) | Stmt::FieldAssign { value: expr, .. } => rename_call_expr(expr, name_map),
+            Stmt::Let(_, _, expr)
+            | Stmt::Assign(_, expr)
+            | Stmt::FieldAssign { value: expr, .. } => rename_call_expr(expr, name_map),
             Stmt::If {
                 then_body,
                 else_body,
@@ -963,13 +981,21 @@ fn lower_function(
     for (name, typ) in &func.params {
         if let Typ::Named(struct_name) = typ {
             if name == "self" || name.starts_with("self:") {
-                if let Some(LocalSlot::Struct { fields: field_map, .. }) = ctx.locals.get(name) {
+                if let Some(LocalSlot::Struct {
+                    fields: field_map, ..
+                }) = ctx.locals.get(name)
+                {
                     let pointer_slot = ctx.param_stores.iter().find_map(|(_, off)| {
-                        if field_map.values().any(|v| v == off) { Some(*off) } else { None }
+                        if field_map.values().any(|v| v == off) {
+                            Some(*off)
+                        } else {
+                            None
+                        }
                     });
                     if let Some(ptr_slot) = pointer_slot {
                         emitter.emit_u32(aarch64::ldr64(15, aarch64::REG_SP, ptr_slot));
-                        let schema = native_struct_fields(structs, struct_name, &func.name).unwrap_or_default();
+                        let schema = native_struct_fields(structs, struct_name, &func.name)
+                            .unwrap_or_default();
                         for (i, (field, _)) in schema.iter().enumerate() {
                             if let Some(&off) = find_field_offset(field_map, field) {
                                 emitter.emit_u32(aarch64::ldr64(14, 15, (i * 8) as u32));
@@ -1047,7 +1073,11 @@ fn alloc_declared_locals(
                     alloc_declared_locals(ctx, &arm.body, fn_name)?;
                 }
             }
-            Stmt::Return(_) | Stmt::Assign(_, _) | Stmt::IndexAssign { .. } | Stmt::FieldAssign { .. } | Stmt::Expr(_) => {}
+            Stmt::Return(_)
+            | Stmt::Assign(_, _)
+            | Stmt::IndexAssign { .. }
+            | Stmt::FieldAssign { .. }
+            | Stmt::Expr(_) => {}
             Stmt::Throw(_) => {}
             Stmt::Try { body, catches, .. } => {
                 alloc_declared_locals(ctx, body, fn_name)?;
@@ -1290,10 +1320,7 @@ impl<'a> LowerCtx<'a> {
                 _ => {
                     // ponytail: unsupported parameter type — allocate scalar slot
                     let offset = ctx.alloc_slot();
-                    ctx.locals.insert(
-                        name.clone(),
-                        LocalSlot::Scalar(offset),
-                    );
+                    ctx.locals.insert(name.clone(), LocalSlot::Scalar(offset));
                     abi_idx += 1;
                 }
             }
@@ -1473,7 +1500,7 @@ fn lower_stmt(
             if let Expr::Call { callee, .. } = expr {
                 if let Expr::Ident(target) = callee.as_ref() {
                     if let Some(func) = functions.get(target) {
-                        if let Typ::Named(struct_name) = &func.ret {
+                        if let Typ::Named(_) = &func.ret {
                             // Re-check allocation: if currently Scalar but should be Struct
                             if let Some(LocalSlot::Scalar(_)) = ctx.locals.get(name) {
                                 // Remove the Scalar allocation and re-allocate as Struct
@@ -1844,7 +1871,7 @@ fn lower_struct_expr_into_slots(
                     let nested_schema = native_struct_fields(ctx.structs, local_typ, fn_name)?;
                     for (sub_field, _) in &nested_schema {
                         let flat_key = format!("{field}.{sub_field}");
-                        if let Some(&src) = find_field_offset(&local_fields, sub_field) {
+                        if let Some(&src) = find_field_offset(local_fields, sub_field) {
                             if let Some(&dst) = find_field_offset(fields, &flat_key) {
                                 emitter.emit_u32(aarch64::ldr64(0, aarch64::REG_SP, src));
                                 emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, dst));
@@ -1911,7 +1938,7 @@ fn lower_struct_expr_into_slots(
             )?;
             let schema = native_struct_fields(ctx.structs, typ, fn_name)?;
             for (reg, (field, _)) in schema.iter().enumerate() {
-                if let Some(&offset) = find_field_offset(&fields, field) {
+                if let Some(&offset) = find_field_offset(fields, field) {
                     emitter.emit_u32(aarch64::str64(reg as u8, aarch64::REG_SP, offset));
                 }
             }
@@ -2607,11 +2634,7 @@ fn lower_field(
 ) -> Result<(), String> {
     match base {
         Expr::Ident(local) => {
-            let Some(LocalSlot::Struct {
-                typ: struct_typ,
-                fields,
-            }) = ctx.locals.get(local)
-            else {
+            let Some(LocalSlot::Struct { typ: _, fields }) = ctx.locals.get(local) else {
                 emitter.emit_insns(&aarch64::load_i64(rd, 0));
                 return Ok(());
             };
@@ -2909,7 +2932,15 @@ fn emit_stdlib_wrapper_call(
         if i > 1 {
             break;
         }
-        lower_expr_into(emitter, ctx, arg, i as u8, functions, pending_calls, fn_name)?;
+        lower_expr_into(
+            emitter,
+            ctx,
+            arg,
+            i as u8,
+            functions,
+            pending_calls,
+            fn_name,
+        )?;
     }
     let is_native = TL_NATIVE_MODE.with(|m| *m.borrow());
     if is_native {
@@ -2937,8 +2968,24 @@ fn lower_string_push_str(
     pending_calls: &mut Vec<PendingCall>,
     fn_name: &str,
 ) -> Result<(), String> {
-    lower_expr_into(emitter, ctx, &args[0], rd, functions, pending_calls, fn_name)?;
-    lower_expr_into(emitter, ctx, &args[1], rd + 1, functions, pending_calls, fn_name)?;
+    lower_expr_into(
+        emitter,
+        ctx,
+        &args[0],
+        rd,
+        functions,
+        pending_calls,
+        fn_name,
+    )?;
+    lower_expr_into(
+        emitter,
+        ctx,
+        &args[1],
+        rd + 1,
+        functions,
+        pending_calls,
+        fn_name,
+    )?;
 
     let self_reg = rd;
     let arg_reg = rd + 1;
@@ -2947,10 +2994,18 @@ fn lower_string_push_str(
     let self_cap = pick_scratch(&[self_reg, arg_reg, self_ptr, self_len]);
     let arg_ptr = pick_scratch(&[self_reg, arg_reg, self_ptr, self_len, self_cap]);
     let arg_len = pick_scratch(&[self_reg, arg_reg, self_ptr, self_len, self_cap, arg_ptr]);
-    let new_len = pick_scratch(&[self_reg, arg_reg, self_ptr, self_len, self_cap, arg_ptr, arg_len]);
-    let i = pick_scratch(&[self_reg, arg_reg, self_ptr, self_len, self_cap, arg_ptr, arg_len, new_len]);
-    let byte = pick_scratch(&[self_reg, arg_reg, self_ptr, self_len, self_cap, arg_ptr, arg_len, new_len, i]);
-    let dst_addr = pick_scratch(&[self_reg, arg_reg, self_ptr, self_len, self_cap, arg_ptr, arg_len, new_len, i, byte]);
+    let new_len = pick_scratch(&[
+        self_reg, arg_reg, self_ptr, self_len, self_cap, arg_ptr, arg_len,
+    ]);
+    let i = pick_scratch(&[
+        self_reg, arg_reg, self_ptr, self_len, self_cap, arg_ptr, arg_len, new_len,
+    ]);
+    let byte = pick_scratch(&[
+        self_reg, arg_reg, self_ptr, self_len, self_cap, arg_ptr, arg_len, new_len, i,
+    ]);
+    let dst_addr = pick_scratch(&[
+        self_reg, arg_reg, self_ptr, self_len, self_cap, arg_ptr, arg_len, new_len, i, byte,
+    ]);
 
     emitter.emit_u32(aarch64::ldr64(self_ptr, self_reg, 0));
     emitter.emit_u32(aarch64::ldr64(self_len, self_reg, 8));
@@ -2985,10 +3040,7 @@ fn lower_string_push_str(
     Ok(())
 }
 
-fn resolve_function_name(
-    name: &str,
-    functions: &HashMap<String, FunctionInfo>,
-) -> Option<String> {
+fn resolve_function_name(name: &str, functions: &HashMap<String, FunctionInfo>) -> Option<String> {
     if functions.contains_key(name) {
         return Some(name.to_string());
     }
@@ -3002,10 +3054,7 @@ fn resolve_function_name(
     })
 }
 
-fn is_resolvable_function_ref(
-    expr: &Expr,
-    functions: &HashMap<String, FunctionInfo>,
-) -> bool {
+fn is_resolvable_function_ref(expr: &Expr, functions: &HashMap<String, FunctionInfo>) -> bool {
     let Expr::Ident(name) = expr else {
         return false;
     };
@@ -3053,31 +3102,66 @@ fn lower_stdlib_call(
     match cleaned.as_str() {
         "std::env::var" if args.len() == 1 => {
             emit_stdlib_wrapper_call(
-                emitter, ctx, "in_env_var", args, rd, functions, pending_calls, fn_name,
+                emitter,
+                ctx,
+                "in_env_var",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
             )?;
             return Ok(true);
         }
         "std::env::temp_dir" if args.is_empty() => {
             emit_stdlib_wrapper_call(
-                emitter, ctx, "in_env_temp_dir", args, rd, functions, pending_calls, fn_name,
+                emitter,
+                ctx,
+                "in_env_temp_dir",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
             )?;
             return Ok(true);
         }
         "std::env::current_dir" if args.is_empty() => {
             emit_stdlib_wrapper_call(
-                emitter, ctx, "in_env_current_dir", args, rd, functions, pending_calls, fn_name,
+                emitter,
+                ctx,
+                "in_env_current_dir",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
             )?;
             return Ok(true);
         }
         "std::fs::read_to_string" if args.len() == 1 => {
             emit_stdlib_wrapper_call(
-                emitter, ctx, "in_fs_read_to_string", args, rd, functions, pending_calls, fn_name,
+                emitter,
+                ctx,
+                "in_fs_read_to_string",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
             )?;
             return Ok(true);
         }
         "std::fs::exists" if args.len() == 1 => {
             emit_stdlib_wrapper_call(
-                emitter, ctx, "in_fs_exists", args, rd, functions, pending_calls, fn_name,
+                emitter,
+                ctx,
+                "in_fs_exists",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
             )?;
             return Ok(true);
         }
@@ -3088,56 +3172,121 @@ fn lower_stdlib_call(
     let base = target.rsplit("::").next().unwrap_or(target);
     match base {
         // String/Path/str::len → length is at offset 8 (after ptr at offset 0)
-        "len" if args.len() == 1
-            && (target.contains("String") || target.contains("Path") || target.contains("str")) =>
+        "len"
+            if args.len() == 1
+                && (target.contains("String")
+                    || target.contains("Path")
+                    || target.contains("str")) =>
         {
-            lower_expr_into(emitter, ctx, &args[0], rd, functions, pending_calls, fn_name)?;
+            lower_expr_into(
+                emitter,
+                ctx,
+                &args[0],
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
             emitter.emit_u32(aarch64::ldr64(rd, rd, 8));
             Ok(true)
         }
         // String/Path/str::is_empty → compare len at offset 8 with 0
-        "is_empty" if args.len() == 1
-            && (target.contains("String") || target.contains("Path") || target.contains("str")) =>
+        "is_empty"
+            if args.len() == 1
+                && (target.contains("String")
+                    || target.contains("Path")
+                    || target.contains("str")) =>
         {
-            lower_expr_into(emitter, ctx, &args[0], rd, functions, pending_calls, fn_name)?;
+            lower_expr_into(
+                emitter,
+                ctx,
+                &args[0],
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
             emitter.emit_u32(aarch64::ldr64(rd, rd, 8));
             emitter.emit_u32(aarch64::cmp_reg64(rd, aarch64::REG_XZR));
             lower_comparison_result(emitter, rd, "==")?;
             Ok(true)
         }
         // String/Path/str::to_string → return the receiver as a slice
-        "to_string" if args.len() == 1
-            && (target.contains("String") || target.contains("Path") || target.contains("str")) =>
+        "to_string"
+            if args.len() == 1
+                && (target.contains("String")
+                    || target.contains("Path")
+                    || target.contains("str")) =>
         {
-            lower_expr_into(emitter, ctx, &args[0], rd, functions, pending_calls, fn_name)?;
+            lower_expr_into(
+                emitter,
+                ctx,
+                &args[0],
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
             emitter.emit_u32(aarch64::ldr64(rd + 1, rd, 8));
             emitter.emit_u32(aarch64::ldr64(rd, rd, 0));
             Ok(true)
         }
         // String/str::as_str → return slice {ptr, len}
         "as_str" if args.len() == 1 && (target.contains("String") || target.contains("str")) => {
-            lower_expr_into(emitter, ctx, &args[0], rd, functions, pending_calls, fn_name)?;
+            lower_expr_into(
+                emitter,
+                ctx,
+                &args[0],
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
             emitter.emit_u32(aarch64::ldr64(rd + 1, rd, 8));
             emitter.emit_u32(aarch64::ldr64(rd, rd, 0));
             Ok(true)
         }
         // PathBuf::as_path / Path::as_path → return slice {ptr, len}
         "as_path" if args.len() == 1 && target.contains("Path") => {
-            lower_expr_into(emitter, ctx, &args[0], rd, functions, pending_calls, fn_name)?;
+            lower_expr_into(
+                emitter,
+                ctx,
+                &args[0],
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
             emitter.emit_u32(aarch64::ldr64(rd + 1, rd, 8));
             emitter.emit_u32(aarch64::ldr64(rd, rd, 0));
             Ok(true)
         }
         // Path::to_string_lossy → return slice {ptr, len} as a Cow<str> pass-through
         "to_string_lossy" if args.len() == 1 && target.contains("Path") => {
-            lower_expr_into(emitter, ctx, &args[0], rd, functions, pending_calls, fn_name)?;
+            lower_expr_into(
+                emitter,
+                ctx,
+                &args[0],
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
             emitter.emit_u32(aarch64::ldr64(rd + 1, rd, 8));
             emitter.emit_u32(aarch64::ldr64(rd, rd, 0));
             Ok(true)
         }
         // String::from_utf8_lossy → return slice {ptr, len} as a Cow<str> pass-through
         "from_utf8_lossy" if args.len() == 1 && target.contains("String") => {
-            lower_expr_into(emitter, ctx, &args[0], rd, functions, pending_calls, fn_name)?;
+            lower_expr_into(
+                emitter,
+                ctx,
+                &args[0],
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
             emitter.emit_u32(aarch64::ldr64(rd + 1, rd, 8));
             emitter.emit_u32(aarch64::ldr64(rd, rd, 0));
             Ok(true)
@@ -3174,7 +3323,9 @@ fn lower_stdlib_call(
             Ok(true)
         }
         // Vec::with_capacity(n) → allocate
-        "with_capacity" if args.len() == 1 && (target.contains("Vec") || target.contains("vec")) => {
+        "with_capacity"
+            if args.len() == 1 && (target.contains("Vec") || target.contains("vec")) =>
+        {
             // ponytail: just return empty vec for now
             emitter.emit_insns(&aarch64::load_i64(0, 0));
             Ok(true)
@@ -3192,7 +3343,7 @@ fn lower_stdlib_call(
             Ok(true)
         }
         // Option::is_some → cmp tag, #1; cset x0, eq
-        | "is_some" if args.len() == 1 && target.contains("Option") => {
+        "is_some" if args.len() == 1 && target.contains("Option") => {
             lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?;
             // Option's tag is at offset 0 (first field)
             emitter.emit_u32(aarch64::ldr64(0, 0, 0));
@@ -3224,7 +3375,7 @@ fn lower_stdlib_call(
             Ok(true)
         }
         // Option::unwrap → if tag != 1, panic; return value
-        | "unwrap" if target.contains("Option") => {
+        "unwrap" if target.contains("Option") => {
             lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?;
             // Load tag at offset 0
             emitter.emit_u32(aarch64::ldr64(1, 0, 0));
@@ -3535,7 +3686,16 @@ fn lower_call(
         return lower_inrt_call(emitter, ctx, target, args, rd, fn_name);
     }
     // ponytail: try stdlib intrinsic lowering before external ref fallback
-    if lower_stdlib_call(emitter, ctx, target, args, rd, functions, pending_calls, fn_name)? {
+    if lower_stdlib_call(
+        emitter,
+        ctx,
+        target,
+        args,
+        rd,
+        functions,
+        pending_calls,
+        fn_name,
+    )? {
         return Ok(());
     }
     if !functions.contains_key(target) {
@@ -3553,12 +3713,31 @@ fn lower_call(
         };
         if let Some(name) = bare_name {
             // Re-invoke with the bare function name
-            return lower_call(emitter, ctx, &Expr::Ident(name.to_string()), args, rd, functions, pending_calls, fn_name);
+            return lower_call(
+                emitter,
+                ctx,
+                &Expr::Ident(name.to_string()),
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            );
         }
         // Load args into registers
         for (i, arg) in args.iter().enumerate() {
-            if i > 7 { break; }
-            lower_expr_into(emitter, ctx, arg, i as u8, functions, pending_calls, fn_name)?;
+            if i > 7 {
+                break;
+            }
+            lower_expr_into(
+                emitter,
+                ctx,
+                arg,
+                i as u8,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
         }
         let is_native = TL_NATIVE_MODE.with(|m| *m.borrow());
         if is_native {
@@ -3586,7 +3765,6 @@ fn lower_call(
         unreachable!();
     };
     // ponytail: allow arity mismatch — pass what we can, skip extras
-    let param_count = target_info.params.len().min(args.len());
     let abi_arg_count = native_param_abi_slots(&target_info.params, ctx.structs, target)?;
     // ponytail: skip args beyond 8 ABI slots instead of erroring
     let _ = abi_arg_count;
@@ -3700,7 +3878,7 @@ fn lower_call_arg(
             // ponytail: "self" parameter in impl methods is always &self (reference)
             if param_name == "self" {
                 // Pass pointer to struct by emitting address of first field into reg
-                lower_struct_ptr_arg(emitter, ctx, arg, struct_name, functions, pending_calls, fn_name, reg)
+                lower_struct_ptr_arg(emitter, ctx, arg, reg)
             } else {
                 lower_struct_call_arg(
                     emitter,
@@ -3713,7 +3891,7 @@ fn lower_call_arg(
                     fn_name,
                 )
             }
-        },
+        }
         Typ::Array(elem) => lower_array_call_arg(emitter, ctx, arg, elem, reg, fn_name),
         _ => {
             // ponytail: generic/void arg — load 0 and skip
@@ -3727,10 +3905,6 @@ fn lower_struct_ptr_arg(
     emitter: &mut CodeEmitter,
     ctx: &mut LowerCtx<'_>,
     arg: &Expr,
-    struct_name: &str,
-    functions: &HashMap<String, FunctionInfo>,
-    pending_calls: &mut Vec<PendingCall>,
-    fn_name: &str,
     reg: u8,
 ) -> Result<u8, String> {
     let Expr::Ident(local) = arg else {
@@ -3856,7 +4030,7 @@ fn lower_struct_call_arg(
             }
             for (field, field_ty) in fields {
                 if matches!(field_ty, Typ::Int | Typ::Bool | Typ::String | Typ::Float) {
-                    if let Some(offset) = find_field_offset(&slots, field) {
+                    if let Some(offset) = find_field_offset(slots, field) {
                         emitter.emit_u32(aarch64::ldr64(reg, aarch64::REG_SP, *offset));
                     } else {
                         emitter.emit_insns(&aarch64::load_i64(reg, 0));
@@ -3884,7 +4058,15 @@ fn lower_struct_call_arg(
             for (field, field_ty) in fields {
                 if matches!(field_ty, Typ::Int | Typ::Bool | Typ::String) {
                     if let Some((_, value)) = values.iter().find(|(n, _)| n == field) {
-                        lower_expr_into(emitter, ctx, value, reg, functions, pending_calls, fn_name)?;
+                        lower_expr_into(
+                            emitter,
+                            ctx,
+                            value,
+                            reg,
+                            functions,
+                            pending_calls,
+                            fn_name,
+                        )?;
                     } else {
                         emitter.emit_insns(&aarch64::load_i64(reg, 0));
                     }
@@ -5695,9 +5877,6 @@ fn main() -> Int {
             lowered.external_refs.is_empty(),
             "Option::unwrap_or should be lowered inline"
         );
-        assert!(code_contains_insn(
-            &lowered.code,
-            aarch64::cmp_reg64(1, 2)
-        ));
+        assert!(code_contains_insn(&lowered.code, aarch64::cmp_reg64(1, 2)));
     }
 }

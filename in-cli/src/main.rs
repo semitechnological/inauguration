@@ -1189,7 +1189,7 @@ fn resolve_cargo_root(cargo_toml: &Path) -> Result<PathBuf> {
 fn run_pipeline_for_path(
     path: &Path,
     out: Option<String>,
-    release: bool,
+    _release: bool,
     module_id: &str,
     verbose: bool,
     parser: ParserCli,
@@ -1202,19 +1202,21 @@ fn run_pipeline_for_path(
         let out_path = if Path::new(&out_path_str).is_absolute() {
             PathBuf::from(&out_path_str)
         } else {
-            std::env::current_dir().unwrap_or_default().join(&out_path_str)
+            std::env::current_dir()
+                .unwrap_or_default()
+                .join(&out_path_str)
         };
 
-        if is_rust {
-            if verbose {
-                // Quick parse for function count
-                let parse_result = inauguration::compiler::rust_front::parse_rust_file(&source_path);
-                if let Ok(m) = &parse_result {
-                    let n = m.decls.iter()
-                        .filter(|d| matches!(d, inauguration::core_ir::Decl::Function { .. }))
-                        .count();
-                    eprintln!("  in parse: {n} functions");
-                }
+        if is_rust && verbose {
+            // Quick parse for function count
+            let parse_result = inauguration::compiler::rust_front::parse_rust_file(&source_path);
+            if let Ok(m) = &parse_result {
+                let n = m
+                    .decls
+                    .iter()
+                    .filter(|d| matches!(d, inauguration::core_ir::Decl::Function { .. }))
+                    .count();
+                eprintln!("  in parse: {n} functions");
             }
         }
 
@@ -1242,32 +1244,6 @@ fn run_pipeline_for_path(
         if verbose {
             println!("in built {} in {:.1}ms", out_path.display(), elapsed_ms);
             println!("  backend: {}", report.backend_level);
-        }
-        return Ok(());
-        let start = std::time::Instant::now();
-        let request = inauguration::owned_compile::OwnedCompileRequest {
-            path: source_path.clone(),
-            module_id: module_id.to_string(),
-            parser,
-            target: inauguration::owned_compile::CompileTarget::Native,
-            entry: Some("main".to_string()),
-            out: Some(out_path.clone()),
-            linkage: inauguration::native_emit::NativeLinkage::Executable,
-            target_triple: None,
-            jobs: 1,
-        };
-        let report = inauguration::owned_compile::compile_owned(&request);
-        let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
-        if !report.success {
-            let err = report.error.unwrap_or_else(|| "unknown error".into());
-            return Err(InError::Message(format!("compile failed: {err}")));
-        }
-        if verbose {
-            println!("Compiled {} → {} in {:.3}ms", source_path.display(), out_path.display(), elapsed_ms);
-            println!(
-                "  functions: {} parsed, {} typed",
-                report.parsed_function_count, report.typed_function_count
-            );
         }
         return Ok(());
     }
@@ -1334,59 +1310,6 @@ fn run_pipeline_for_path(
         );
     }
     Ok(())
-}
-
-fn find_cargo_dir(source_path: &Path) -> Option<PathBuf> {
-    let mut dir = source_path.parent()?;
-    loop {
-        if dir.join("Cargo.toml").exists() {
-            return Some(dir.to_path_buf());
-        }
-        dir = dir.parent()?;
-    }
-}
-
-/// Extract the cargo bin name from Cargo.toml matching the given source path.
-fn cargo_bin_name(cargo_toml: &Path, source_path: &Path) -> String {
-    let source_str = source_path.to_string_lossy();
-    if let Ok(content) = std::fs::read_to_string(cargo_toml) {
-        let mut in_bin = false;
-        let mut bin_name = String::new();
-        let mut bin_path = String::new();
-        for line in content.lines() {
-            let trimmed = line.trim();
-            if trimmed == "[[bin]]" {
-                if !bin_name.is_empty() && (bin_path.is_empty() || source_str.contains(&bin_path)) {
-                    return bin_name;
-                }
-                in_bin = true;
-                bin_name.clear();
-                bin_path.clear();
-                continue;
-            }
-            if in_bin {
-                if trimmed.starts_with("[[") || trimmed.starts_with('[') {
-                    if !bin_name.is_empty() && (bin_path.is_empty() || source_str.contains(&bin_path)) {
-                        return bin_name;
-                    }
-                    in_bin = false;
-                } else if let Some(n) = trimmed.strip_prefix("name = \"") {
-                    if let Some(end) = n.find('"') {
-                        bin_name = n[..end].to_string();
-                    }
-                } else if let Some(p) = trimmed.strip_prefix("path = \"") {
-                    if let Some(end) = p.find('"') {
-                        bin_path = p[..end].to_string();
-                    }
-                }
-            }
-        }
-        if !bin_name.is_empty() && (bin_path.is_empty() || source_str.contains(&bin_path)) {
-            return bin_name;
-        }
-    }
-    // Fallback: use file stem
-    source_path.file_stem().unwrap_or_default().to_string_lossy().to_string()
 }
 
 fn find_package_root(path: &Path) -> Option<PathBuf> {

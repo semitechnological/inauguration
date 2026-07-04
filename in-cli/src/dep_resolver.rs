@@ -41,7 +41,9 @@ fn walk_stmts(stmts: &[Stmt], locals: &HashSet<String>, out: &mut Vec<String>) {
     for stmt in stmts {
         match stmt {
             Stmt::Expr(e) | Stmt::Return(Some(e)) => walk_expr(e, locals, out),
-            Stmt::Let(_, _, e) | Stmt::Assign(_, e) | Stmt::FieldAssign { value: e, .. } => walk_expr(e, locals, out),
+            Stmt::Let(_, _, e) | Stmt::Assign(_, e) | Stmt::FieldAssign { value: e, .. } => {
+                walk_expr(e, locals, out)
+            }
             Stmt::If {
                 cond,
                 then_body,

@@ -2765,9 +2765,7 @@ fn validate_stmt_types(
             validate_expr_shapes(fn_name, struct_fields, index)?;
             validate_expr_shapes(fn_name, struct_fields, value)?;
         }
-        Stmt::FieldAssign {
-            base, value, ..
-        } => {
+        Stmt::FieldAssign { base, value, .. } => {
             validate_expr_shapes(fn_name, struct_fields, base)?;
             validate_expr_shapes(fn_name, struct_fields, value)?;
         }
@@ -2872,9 +2870,7 @@ fn desugar_method_calls_in_body(
             Stmt::Assign(_, expr) | Stmt::Return(Some(expr)) | Stmt::Expr(expr) => {
                 desugar_method_calls_in_expr(expr, env, structs, fn_rets);
             }
-            Stmt::FieldAssign {
-                base, value, ..
-            } => {
+            Stmt::FieldAssign { base, value, .. } => {
                 desugar_method_calls_in_expr(base, env, structs, fn_rets);
                 desugar_method_calls_in_expr(value, env, structs, fn_rets);
             }
@@ -3175,9 +3171,7 @@ pub fn inline_const_values(module: &mut UnifiedModule) {
             | Stmt::Return(Some(expr))
             | Stmt::Expr(expr)
             | Stmt::Throw(expr) => replace_idents(expr, consts),
-            Stmt::FieldAssign {
-                base, value, ..
-            } => {
+            Stmt::FieldAssign { base, value, .. } => {
                 replace_idents(base, consts);
                 replace_idents(value, consts);
             }
