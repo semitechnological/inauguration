@@ -3422,6 +3422,46 @@ mod tests {
     }
 
     #[test]
+    fn lowers_string_contains_to_native_wrapper_call() {
+        let mut emitter = CodeEmitter::new();
+        let structs = HashMap::new();
+        let strings = HashMap::new();
+        let mut pending_static_arrays = Vec::new();
+        let mut pending_inrt_calls = Vec::new();
+        let mut ctx = LowerCtx::new(
+            &[],
+            &structs,
+            &strings,
+            &mut pending_static_arrays,
+            &mut pending_inrt_calls,
+            "test",
+        )
+        .unwrap();
+        let functions = HashMap::new();
+        let mut pending_calls = Vec::new();
+        let result = lower_stdlib::lower_stdlib_call(
+            &mut emitter,
+            &mut ctx,
+            "String::contains",
+            &[Expr::IntLit(0), Expr::IntLit(0)],
+            0,
+            &functions,
+            &mut pending_calls,
+            "test",
+        );
+        assert!(result.unwrap());
+        let words: Vec<u32> = emitter
+            .bytes
+            .chunks_exact(4)
+            .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+            .collect();
+        let has_bl_or_blr = words
+            .iter()
+            .any(|w| (*w >> 26) == 0b100101 || (*w == 0xD63F_01E0u32 | (15 << 5)));
+        assert!(has_bl_or_blr, "expected a call to the native wrapper");
+    }
+
+    #[test]
     fn lowers_bool_literals_as_scalar_values() {
         let module = UnifiedModule {
             identity: Default::default(),

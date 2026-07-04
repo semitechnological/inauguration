@@ -268,6 +268,90 @@ pub unsafe extern "C" fn in_env_remove_var(key_ptr: *const u8) {
     }
 }
 
+/// `String::contains(&self, pattern)` -> `bool`
+/// Returns 1 if `self` contains `pattern`, 0 otherwise.
+///
+/// # Safety
+/// Both pointers must be valid, non-aliased instring pointers or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn in_str_contains(self_ptr: *const u8, pattern_ptr: *const u8) -> i64 {
+    unsafe {
+        let Some(self_bytes) = instring_from_ptr(self_ptr) else {
+            return 0;
+        };
+        let Some(pattern_bytes) = instring_from_ptr(pattern_ptr) else {
+            return 0;
+        };
+        let self_str = match std::str::from_utf8(self_bytes) {
+            Ok(s) => s,
+            Err(_) => return 0,
+        };
+        let pattern_str = match std::str::from_utf8(pattern_bytes) {
+            Ok(s) => s,
+            Err(_) => return 0,
+        };
+        if self_str.contains(pattern_str) { 1 } else { 0 }
+    }
+}
+
+/// `String::starts_with(&self, pattern)` -> `bool`
+///
+/// # Safety
+/// Both pointers must be valid, non-aliased instring pointers or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn in_str_starts_with(self_ptr: *const u8, pattern_ptr: *const u8) -> i64 {
+    unsafe {
+        let Some(self_bytes) = instring_from_ptr(self_ptr) else {
+            return 0;
+        };
+        let Some(pattern_bytes) = instring_from_ptr(pattern_ptr) else {
+            return 0;
+        };
+        let self_str = match std::str::from_utf8(self_bytes) {
+            Ok(s) => s,
+            Err(_) => return 0,
+        };
+        let pattern_str = match std::str::from_utf8(pattern_bytes) {
+            Ok(s) => s,
+            Err(_) => return 0,
+        };
+        if self_str.starts_with(pattern_str) {
+            1
+        } else {
+            0
+        }
+    }
+}
+
+/// `String::ends_with(&self, pattern)` -> `bool`
+///
+/// # Safety
+/// Both pointers must be valid, non-aliased instring pointers or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn in_str_ends_with(self_ptr: *const u8, pattern_ptr: *const u8) -> i64 {
+    unsafe {
+        let Some(self_bytes) = instring_from_ptr(self_ptr) else {
+            return 0;
+        };
+        let Some(pattern_bytes) = instring_from_ptr(pattern_ptr) else {
+            return 0;
+        };
+        let self_str = match std::str::from_utf8(self_bytes) {
+            Ok(s) => s,
+            Err(_) => return 0,
+        };
+        let pattern_str = match std::str::from_utf8(pattern_bytes) {
+            Ok(s) => s,
+            Err(_) => return 0,
+        };
+        if self_str.ends_with(pattern_str) {
+            1
+        } else {
+            0
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -347,6 +431,34 @@ mod tests {
             assert_eq!(std::env::var(&key).unwrap(), "test-value");
             in_env_remove_var(key_ptr);
             assert!(std::env::var(&key).is_err());
+        }
+    }
+
+    #[test]
+    fn in_str_contains_basic() {
+        unsafe {
+            let self_ptr = instring_from_bytes(b"hello world");
+            let pattern_ptr = instring_from_bytes(b"world");
+            assert_eq!(in_str_contains(self_ptr, pattern_ptr), 1);
+            let missing_ptr = instring_from_bytes(b"nope");
+            assert_eq!(in_str_contains(self_ptr, missing_ptr), 0);
+        }
+    }
+
+    #[test]
+    fn in_str_starts_and_ends_with_basic() {
+        unsafe {
+            let self_ptr = instring_from_bytes(b"hello world");
+            assert_eq!(
+                in_str_starts_with(self_ptr, instring_from_bytes(b"hello")),
+                1
+            );
+            assert_eq!(
+                in_str_starts_with(self_ptr, instring_from_bytes(b"world")),
+                0
+            );
+            assert_eq!(in_str_ends_with(self_ptr, instring_from_bytes(b"world")), 1);
+            assert_eq!(in_str_ends_with(self_ptr, instring_from_bytes(b"hello")), 0);
         }
     }
 }
