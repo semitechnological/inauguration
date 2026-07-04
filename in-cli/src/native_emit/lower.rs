@@ -433,10 +433,7 @@ pub fn lower_module(
             &mut pending_static_arrays,
             offset,
         ) {
-            // ponytail: emit stub that returns 0, truncate partial code
-            emitter.bytes.truncate(offset as usize);
-            lower_stub_function(&mut emitter, func);
-            eprintln!("JIT stub `{name}`: {e}");
+            return Err(format!("native-lower: function `{name}` unsupported: {e}"));
         }
     }
 
@@ -743,17 +740,6 @@ fn rename_call_expr(expr: &mut Expr, name_map: &HashMap<String, String>) {
         }
         _ => {}
     }
-}
-
-fn lower_stub_function(emitter: &mut CodeEmitter, func: &FunctionInfo) {
-    // Minimal function prologue
-    emitter.emit_u32(0xA9BF_7BFD); // stp x29, x30, [sp, #-16]!
-    emitter.emit_u32(aarch64::mov_reg64(aarch64::REG_FP, aarch64::REG_SP)); // mov x29, sp
-    // Return 0 for non-void, or just return for void
-    if func.ret != Typ::Void {
-        emitter.emit_insns(&aarch64::load_i64(0, 0));
-    }
-    emitter.emit_u32(aarch64::ret());
 }
 
 fn entry_return_kind(ret: &Typ) -> EntryReturn {
@@ -3005,9 +2991,9 @@ fn lower_call(
             emitter.emit_insns(&aarch64::load_i64(15, native_ptr as usize as i64));
             emitter.emit_u32(0xD63F_01E0u32 | (15 << 5)); // BLR X15
         } else {
-            // ponytail: unknown external function — return 0 as stub
-            emitter.emit_insns(&aarch64::load_i64(rd, 0));
-            return Ok(());
+            return Err(format!(
+                "native-lower: unsupported external call `{target}` in JIT mode"
+            ));
         }
         if rd != 0 {
             emitter.emit_u32(aarch64::mov_reg64(rd, 0));
@@ -4929,10 +4915,11 @@ fn main() -> Int {
             vec![Expr::IntLit(1), Expr::IntLit(2)],
             Typ::Int,
         );
-        let lowered = lower_module(&m, "main", NativeLinkage::Executable).expect("stub created");
-        // Stub generated because inrt call has wrong arity
+        let err = lower_module(&m, "main", NativeLinkage::Executable)
+            .expect_err("should fail on wrong arity");
         assert!(
-            lowered.function_offsets.len() == 1 || lowered.function_offsets.contains_key("main")
+            err.contains("inrt call arity mismatch"),
+            "unexpected error: {err}"
         );
     }
 
