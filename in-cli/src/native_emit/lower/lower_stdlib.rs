@@ -464,6 +464,28 @@ pub(crate) fn lower_stdlib_call(
             lower_string_push_str(emitter, ctx, args, rd, functions, pending_calls, fn_name)?;
             Ok(true)
         }
+        // String::contains / starts_with / ends_with → delegate to native_stdlib wrapper
+        "contains" | "starts_with" | "ends_with"
+            if args.len() == 2 && target.contains("String") =>
+        {
+            let wrapper = match base {
+                "contains" => "in_str_contains",
+                "starts_with" => "in_str_starts_with",
+                "ends_with" => "in_str_ends_with",
+                _ => unreachable!(),
+            };
+            emit_stdlib_wrapper_call(
+                emitter,
+                ctx,
+                wrapper,
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            Ok(true)
+        }
         // Vec::len → ldr x0, [x0]  (length is at offset 0)
         "len" if args.len() == 1 => {
             lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?;

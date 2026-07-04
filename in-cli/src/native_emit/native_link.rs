@@ -39,6 +39,9 @@ const DLSYM_ALLOWLIST: &[&str] = &[
     "in_fs_write",
     "in_fs_create_dir",
     "in_fs_remove_file",
+    "in_str_contains",
+    "in_str_starts_with",
+    "in_str_ends_with",
 ];
 
 pub fn resolve_native_fn(name: &str) -> Option<*const u8> {
@@ -131,6 +134,18 @@ pub fn bootstrap_jit_native() {
     c.insert(
         "in_env_remove_var".to_string(),
         NativePtr(crate::native_stdlib::in_env_remove_var as *const u8),
+    );
+    c.insert(
+        "in_str_contains".to_string(),
+        NativePtr(crate::native_stdlib::in_str_contains as *const u8),
+    );
+    c.insert(
+        "in_str_starts_with".to_string(),
+        NativePtr(crate::native_stdlib::in_str_starts_with as *const u8),
+    );
+    c.insert(
+        "in_str_ends_with".to_string(),
+        NativePtr(crate::native_stdlib::in_str_ends_with as *const u8),
     );
 }
 
