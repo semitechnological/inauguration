@@ -334,9 +334,7 @@ fn check_stmt(
             }
             Ok(())
         }
-        Stmt::FieldAssign {
-            base, value, ..
-        } => {
+        Stmt::FieldAssign { base, value, .. } => {
             check_expr(fn_name, base, facts, env, call_edges)?;
             check_expr(fn_name, value, facts, env, call_edges)?;
             Ok(())

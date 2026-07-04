@@ -43,11 +43,7 @@ unsafe fn instring_from_bytes(data: &[u8]) -> *const u8 {
     }
     unsafe {
         *(ptr as *mut u64) = data.len() as u64;
-        std::ptr::copy_nonoverlapping(
-            data.as_ptr(),
-            ptr.add(INSTRING_LEN_SIZE),
-            data.len(),
-        );
+        std::ptr::copy_nonoverlapping(data.as_ptr(), ptr.add(INSTRING_LEN_SIZE), data.len());
     }
     ptr
 }

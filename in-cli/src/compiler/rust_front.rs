@@ -11,7 +11,6 @@ use crate::core_ir::{Decl, UnifiedModule};
 use crate::core_ir::{Expr, LoopKind, MatchArm, Stmt, Typ};
 use quote::ToTokens;
 use std::collections::HashMap;
-use std::collections::hash_map::Entry;
 use std::path::{Path, PathBuf};
 
 type RustLayoutSpecs = HashMap<String, (BoundaryRepr, Vec<(String, syn::Type)>)>;
@@ -438,7 +437,13 @@ fn rust_struct_fields(fields: &syn::Fields) -> Vec<(String, Typ)> {
 fn lower_impl(i: &syn::ItemImpl) -> Vec<Decl> {
     // Strip generics from self type name to match collect_structs keys
     // e.g., "Bencher < 'a , M >" → "Bencher"
-    let raw_type: String = i.self_ty.to_token_stream().to_string().chars().filter(|&c| c != ' ').collect();
+    let raw_type: String = i
+        .self_ty
+        .to_token_stream()
+        .to_string()
+        .chars()
+        .filter(|&c| c != ' ')
+        .collect();
     let self_type = if let Some(idx) = raw_type.find(" <") {
         raw_type[..idx].to_string()
     } else if let Some(idx) = raw_type.find(" (") {
@@ -464,8 +469,7 @@ fn lower_impl(i: &syn::ItemImpl) -> Vec<Decl> {
                 .iter()
                 .map(|arg| match arg {
                     syn::FnArg::Typed(pat_ty) => {
-                        let pname = pattern_name(&pat_ty.pat)
-                            .unwrap_or_else(|| format!("arg"));
+                        let pname = pattern_name(&pat_ty.pat).unwrap_or_else(|| format!("arg"));
                         (pname, map_type(&pat_ty.ty))
                     }
                     syn::FnArg::Receiver(_recv) => {
@@ -498,28 +502,20 @@ fn lower_impl(i: &syn::ItemImpl) -> Vec<Decl> {
 fn lower_enum(e: &syn::ItemEnum) -> Option<Decl> {
     // Lower enum to a struct with a discriminant field
     let enum_name = e.ident.to_string();
-    let mut fields = vec![
-        ("__discriminant".to_string(), Typ::Int),
-    ];
+    let mut fields = vec![("__discriminant".to_string(), Typ::Int)];
     for variant in &e.variants {
         let variant_name = variant.ident.to_string();
         match &variant.fields {
             syn::Fields::Named(named) => {
                 for f in &named.named {
                     if let Some(ident) = &f.ident {
-                        fields.push((
-                            format!("{variant_name}_{}", ident),
-                            map_type(&f.ty),
-                        ));
+                        fields.push((format!("{variant_name}_{}", ident), map_type(&f.ty)));
                     }
                 }
             }
             syn::Fields::Unnamed(unnamed) => {
                 for (i, f) in unnamed.unnamed.iter().enumerate() {
-                    fields.push((
-                        format!("{variant_name}_{i}"),
-                        map_type(&f.ty),
-                    ));
+                    fields.push((format!("{variant_name}_{i}"), map_type(&f.ty)));
                 }
             }
             syn::Fields::Unit => {}
@@ -627,11 +623,17 @@ fn lower_block_no_implicit_return(block: &syn::Block) -> Vec<Stmt> {
     lower_block_inner(block, false)
 }
 
-fn lower_block_with_types(block: &syn::Block, local_types: &mut HashMap<String, String>) -> Vec<Stmt> {
+fn lower_block_with_types(
+    block: &syn::Block,
+    local_types: &mut HashMap<String, String>,
+) -> Vec<Stmt> {
     lower_block_inner_with_types(block, true, local_types)
 }
 
-fn lower_block_no_implicit_return_with_types(block: &syn::Block, local_types: &mut HashMap<String, String>) -> Vec<Stmt> {
+fn lower_block_no_implicit_return_with_types(
+    block: &syn::Block,
+    local_types: &mut HashMap<String, String>,
+) -> Vec<Stmt> {
     lower_block_inner_with_types(block, false, local_types)
 }
 
@@ -639,7 +641,11 @@ fn lower_block_inner(block: &syn::Block, wrap_implicit_return: bool) -> Vec<Stmt
     lower_block_inner_with_types(block, wrap_implicit_return, &mut HashMap::new())
 }
 
-fn lower_block_inner_with_types(block: &syn::Block, wrap_implicit_return: bool, local_types: &mut HashMap<String, String>) -> Vec<Stmt> {
+fn lower_block_inner_with_types(
+    block: &syn::Block,
+    wrap_implicit_return: bool,
+    local_types: &mut HashMap<String, String>,
+) -> Vec<Stmt> {
     let mut out = Vec::new();
     for stmt in &block.stmts {
         match stmt {
@@ -661,7 +667,13 @@ fn lower_block_inner_with_types(block: &syn::Block, wrap_implicit_return: bool, 
                         } else if let syn::Expr::Call(call) = &*init.expr {
                             // Infer from Type::constructor() pattern
                             if let syn::Expr::Path(p) = &*call.func {
-                                let path_str: String = p.path.to_token_stream().to_string().chars().filter(|&c| c != ' ').collect();
+                                let path_str: String = p
+                                    .path
+                                    .to_token_stream()
+                                    .to_string()
+                                    .chars()
+                                    .filter(|&c| c != ' ')
+                                    .collect();
                                 if let Some((prefix, _method)) = path_str.rsplit_once("::") {
                                     local_types.insert(name.clone(), prefix.to_string());
                                 }
@@ -742,16 +754,25 @@ fn stmt_ensures_return(stmt: &Stmt) -> bool {
     }
 }
 
-fn lower_expr_stmt(expr: &syn::Expr, out: &mut Vec<Stmt>, local_types: &mut HashMap<String, String>) {
+fn lower_expr_stmt(
+    expr: &syn::Expr,
+    out: &mut Vec<Stmt>,
+    local_types: &mut HashMap<String, String>,
+) {
     match expr {
-        syn::Expr::Return(ret) => out.push(Stmt::Return(ret.expr.as_ref().map(|e| lower_expr_with_types(e, local_types)))),
+        syn::Expr::Return(ret) => out.push(Stmt::Return(
+            ret.expr
+                .as_ref()
+                .map(|e| lower_expr_with_types(e, local_types)),
+        )),
         syn::Expr::If(eif) => {
             // Handle `if let` (condition is Expr::Let)
             if let syn::Expr::Let(expr_let) = &*eif.cond {
                 // `if let Pat = Expr { ... } else { ... }`
                 // Lower to: let _pat = Expr; match _pat { Pat => ..., _ => else }
                 let scrutinee = lower_expr_with_types(&expr_let.expr, local_types);
-                let then_body = lower_block_no_implicit_return_with_types(&eif.then_branch, local_types);
+                let then_body =
+                    lower_block_no_implicit_return_with_types(&eif.then_branch, local_types);
                 let else_body = eif
                     .else_branch
                     .as_ref()
@@ -770,7 +791,8 @@ fn lower_expr_stmt(expr: &syn::Expr, out: &mut Vec<Stmt>, local_types: &mut Hash
                 out.push(Stmt::Match { scrutinee, arms });
             } else {
                 let cond = lower_expr_with_types(&eif.cond, local_types);
-                let then_body = lower_block_no_implicit_return_with_types(&eif.then_branch, local_types);
+                let then_body =
+                    lower_block_no_implicit_return_with_types(&eif.then_branch, local_types);
                 let else_body = eif
                     .else_branch
                     .as_ref()
@@ -788,7 +810,10 @@ fn lower_expr_stmt(expr: &syn::Expr, out: &mut Vec<Stmt>, local_types: &mut Hash
                 "for_pat:{}",
                 f.pat.to_token_stream()
             )))];
-            body.extend(lower_block_no_implicit_return_with_types(&f.body, local_types));
+            body.extend(lower_block_no_implicit_return_with_types(
+                &f.body,
+                local_types,
+            ));
             out.push(Stmt::Loop {
                 kind: LoopKind::For,
                 cond: Some(lower_expr_with_types(&f.expr, local_types)),
@@ -829,7 +854,10 @@ fn lower_expr_stmt(expr: &syn::Expr, out: &mut Vec<Stmt>, local_types: &mut Hash
         syn::Expr::Block(b) => out.extend(lower_block_with_types(&b.block, local_types)),
         syn::Expr::Assign(a) => {
             if let Some(name) = assign_lhs_name(&a.left) {
-                out.push(Stmt::Assign(name, lower_expr_with_types(&a.right, local_types)));
+                out.push(Stmt::Assign(
+                    name,
+                    lower_expr_with_types(&a.right, local_types),
+                ));
             } else if let syn::Expr::Field(f) = &*a.left {
                 out.push(Stmt::FieldAssign {
                     base: lower_expr_with_types(&f.base, local_types),
@@ -842,7 +870,10 @@ fn lower_expr_stmt(expr: &syn::Expr, out: &mut Vec<Stmt>, local_types: &mut Hash
     }
 }
 
-fn lower_else_body_with_types(else_branch: &syn::Expr, local_types: &mut HashMap<String, String>) -> Vec<Stmt> {
+fn lower_else_body_with_types(
+    else_branch: &syn::Expr,
+    local_types: &mut HashMap<String, String>,
+) -> Vec<Stmt> {
     match else_branch {
         syn::Expr::Block(b) => lower_block_with_types(&b.block, local_types),
         syn::Expr::If(e) => {
@@ -891,12 +922,16 @@ fn lower_expr_with_types(expr: &syn::Expr, local_types: &mut HashMap<String, Str
             let path = p.path.to_token_stream().to_string();
             // Strip spaces from path (token_stream produces "Point :: new" but table has "Point::new")
             Expr::Ident(path.chars().filter(|&c| c != ' ').collect())
-        },
+        }
         syn::Expr::Reference(r) => lower_expr_with_types(&r.expr, local_types),
         syn::Expr::Paren(p) => lower_expr_with_types(&p.expr, local_types),
         syn::Expr::Call(c) => Expr::Call {
             callee: Box::new(lower_expr_with_types(&c.func, local_types)),
-            args: c.args.iter().map(|a| lower_expr_with_types(a, local_types)).collect(),
+            args: c
+                .args
+                .iter()
+                .map(|a| lower_expr_with_types(a, local_types))
+                .collect(),
         },
         syn::Expr::MethodCall(m) => {
             let mut args = Vec::with_capacity(m.args.len() + 1);

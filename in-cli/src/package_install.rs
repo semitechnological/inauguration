@@ -568,7 +568,6 @@ fn resolve_go_artifact(
     let latest = versions.last().map(|value| value.as_str());
     let version = select_version(requested_version, latest, Some(&versions))?;
     let output = Command::new("go")
-        .env_clear()
         .arg("mod")
         .arg("download")
         .arg("-json")
@@ -657,7 +656,7 @@ fn verify_archive_checksum(path: &Path, checksum: &ArtifactChecksum) -> Result<(
             "sha256",
         ),
         ArtifactChecksum::Sha512Base64(expected) => {
-            let actual = hex_encode(&sha2::Sha512::digest(&data));
+            let actual = base64_encode(&sha2::Sha512::digest(&data));
             if actual == *expected {
                 Ok(())
             } else {
@@ -677,6 +676,29 @@ fn verify_archive_checksum(path: &Path, checksum: &ArtifactChecksum) -> Result<(
             }
         }
     }
+}
+
+fn base64_encode(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0];
+        let b1 = *chunk.get(1).unwrap_or(&0);
+        let b2 = *chunk.get(2).unwrap_or(&0);
+        out.push(TABLE[(b0 >> 2) as usize] as char);
+        out.push(TABLE[(((b0 & 0b0000_0011) << 4) | (b1 >> 4)) as usize] as char);
+        if chunk.len() > 1 {
+            out.push(TABLE[(((b1 & 0b0000_1111) << 2) | (b2 >> 6)) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        if chunk.len() > 2 {
+            out.push(TABLE[(b2 & 0b0011_1111) as usize] as char);
+        } else {
+            out.push('=');
+        }
+    }
+    out
 }
 
 fn verify_hex_digest(expected: &str, actual: &str, path: &Path, label: &str) -> Result<(), String> {
@@ -942,6 +964,14 @@ mod tests {
             name: "github.com/foo/bar".to_string(),
         };
         assert_eq!(export_symbol_for(&package_ref), "go_github_com_foo_bar");
+    }
+
+    #[test]
+    fn base64_encode_pads_digest_chunks() {
+        assert_eq!(base64_encode(b""), "");
+        assert_eq!(base64_encode(b"f"), "Zg==");
+        assert_eq!(base64_encode(b"fo"), "Zm8=");
+        assert_eq!(base64_encode(b"foo"), "Zm9v");
     }
 
     #[test]

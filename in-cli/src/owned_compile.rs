@@ -358,10 +358,14 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         if let Ok(ref root) = crate_root {
             if root != &request.path {
                 if let Ok(crate_module) = crate::compiler::rust_front::parse_rust_file(root) {
-                    let crate_name = project_dir.file_stem()
+                    let crate_name = project_dir
+                        .file_stem()
                         .map(|s| s.to_string_lossy().to_string())
                         .unwrap_or_default();
-                    crate::cargo_linker::merge_dependency_modules(&mut module, vec![(crate_name, crate_module)]);
+                    crate::cargo_linker::merge_dependency_modules(
+                        &mut module,
+                        vec![(crate_name, crate_module)],
+                    );
                 }
             }
         }
@@ -676,7 +680,11 @@ fn compile_jit(
         (unsafe { rt.invoke(&resolved_entry, &[]).unwrap_or(1) }) as u8
     };
 
-    let reason_code = if is_rust { "jit-compiled-only" } else { "jit-executed" };
+    let reason_code = if is_rust {
+        "jit-compiled-only"
+    } else {
+        "jit-executed"
+    };
     let reason = if is_rust {
         "JIT-compiled without runtime execution (Rust programs need native linking)"
     } else {
@@ -1146,9 +1154,7 @@ fn native_entry_module(module: &UnifiedModule, entry: &str) -> UnifiedModule {
                 | Stmt::Return(Some(expr))
                 | Stmt::Expr(expr)
                 | Stmt::Throw(expr) => collect_expr_calls(expr, out),
-                Stmt::FieldAssign {
-                    base, value, ..
-                } => {
+                Stmt::FieldAssign { base, value, .. } => {
                     collect_expr_calls(base, out);
                     collect_expr_calls(value, out);
                 }
@@ -1201,7 +1207,9 @@ fn native_entry_module(module: &UnifiedModule, entry: &str) -> UnifiedModule {
             let Decl::Function { name, body, .. } = decl else {
                 continue;
             };
-            if reachable.contains(name) || reachable.iter().any(|r| r.ends_with(&format!("::{name}"))) {
+            if reachable.contains(name)
+                || reachable.iter().any(|r| r.ends_with(&format!("::{name}")))
+            {
                 collect_stmt_calls(body, &mut next);
             }
         }
@@ -1215,7 +1223,10 @@ fn native_entry_module(module: &UnifiedModule, entry: &str) -> UnifiedModule {
             .decls
             .iter()
             .filter(|decl| match decl {
-                Decl::Function { name, .. } => reachable.contains(name) || reachable.iter().any(|r| r.ends_with(&format!("::{name}"))),
+                Decl::Function { name, .. } => {
+                    reachable.contains(name)
+                        || reachable.iter().any(|r| r.ends_with(&format!("::{name}")))
+                }
                 _ => true,
             })
             .cloned()

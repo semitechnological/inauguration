@@ -494,7 +494,8 @@ pub fn write_relocatable_object(image: &MachOImage) -> Vec<u8> {
     let build_version_cmd_size: u32 = 24;
     let dysymtab_cmd_size: u32 = 80;
     let header_size: u32 = 32; // mach_header_64
-    let sizeofcmds = segment_cmd_size + symtab_cmd_size + build_version_cmd_size + dysymtab_cmd_size;
+    let sizeofcmds =
+        segment_cmd_size + symtab_cmd_size + build_version_cmd_size + dysymtab_cmd_size;
     let text_fileoff = header_size + sizeofcmds; // header + load commands
     let text_vmsize = ((code_size as u32) + 3) & !3u32; // align to 4
     let strtab_off = text_fileoff + text_vmsize;
@@ -503,11 +504,19 @@ pub fn write_relocatable_object(image: &MachOImage) -> Vec<u8> {
     let file_size = nlist_off + num_syms * NLIST64_SIZE;
 
     // Relocation entries
-    let reloc_data: Vec<(u32, u32)> = image.external_refs.iter().map(|(site, name)| {
-        let undef_idx = 1 + num_def_syms_u32
-            + ext_str_offsets.iter().position(|(n, _)| n == name).unwrap_or(0) as u32;
-        (*site, undef_idx)
-    }).collect();
+    let reloc_data: Vec<(u32, u32)> = image
+        .external_refs
+        .iter()
+        .map(|(site, name)| {
+            let undef_idx = 1
+                + num_def_syms_u32
+                + ext_str_offsets
+                    .iter()
+                    .position(|(n, _)| n == name)
+                    .unwrap_or(0) as u32;
+            (*site, undef_idx)
+        })
+        .collect();
     let reloc_off = file_size;
     let reloc_count = reloc_data.len() as u32;
 
@@ -535,8 +544,8 @@ pub fn write_relocatable_object(image: &MachOImage) -> Vec<u8> {
     out.extend_from_slice(&0u32.to_le_bytes()); // flags
 
     // Section __TEXT,__text (segment name = __TEXT, section name = __text)
-    write_fixed_name(&mut out, "__text");  // sectname
-    write_fixed_name(&mut out, "__TEXT");  // segname
+    write_fixed_name(&mut out, "__text"); // sectname
+    write_fixed_name(&mut out, "__TEXT"); // segname
     out.extend_from_slice(&0u64.to_le_bytes()); // addr (0 for .o)
     out.extend_from_slice(&(text_vmsize as u64).to_le_bytes()); // size
     out.extend_from_slice(&text_fileoff.to_le_bytes()); // offset
@@ -595,7 +604,9 @@ pub fn write_relocatable_object(image: &MachOImage) -> Vec<u8> {
     // Code
     out.extend_from_slice(code);
     let pad = text_vmsize as usize - code.len();
-    if pad > 0 { out.extend_from_slice(&vec![0u8; pad]); }
+    if pad > 0 {
+        out.extend_from_slice(&vec![0u8; pad]);
+    }
 
     // String table
     out.extend_from_slice(&strtab);
@@ -608,7 +619,11 @@ pub fn write_relocatable_object(image: &MachOImage) -> Vec<u8> {
 
     // Defined exports
     for export in &exports_sorted {
-        let &s_off = str_offsets.iter().find(|(n, _)| n == &export.name).map(|(_, o)| o).unwrap_or(&0u32);
+        let &s_off = str_offsets
+            .iter()
+            .find(|(n, _)| n == &export.name)
+            .map(|(_, o)| o)
+            .unwrap_or(&0u32);
         out.extend_from_slice(&s_off.to_le_bytes()); // n_strx
         out.extend_from_slice(&[N_SECT | N_EXT, 1u8, 0u8, 0u8]); // n_type, n_sect, n_desc
         out.extend_from_slice(&(export.offset as u64).to_le_bytes()); // n_value
