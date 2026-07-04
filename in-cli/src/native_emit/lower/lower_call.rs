@@ -1,9 +1,10 @@
 //! Core IR → AArch64 call lowering.
 
+use super::lower_expr::lower_expr_into;
 use super::lower_stdlib;
 use super::{
     FunctionInfo, LocalSlot, LowerCtx, PendingCall, PendingInrtCall, TL_EXTERNAL_REFS,
-    TL_NATIVE_MODE, find_field_offset, is_native_scalar_type, lower_expr_into, native_link_name,
+    TL_NATIVE_MODE, find_field_offset, is_native_scalar_type, native_link_name,
     native_param_abi_slots,
 };
 use crate::core_ir::{Expr, Typ};

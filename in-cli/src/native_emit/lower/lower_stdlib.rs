@@ -4,9 +4,10 @@
 //! helpers and emits inline AArch64 sequences or calls to the C-ABI wrappers
 //! in `native_stdlib`.
 
+use super::lower_expr::lower_expr_into;
 use super::{
     FunctionInfo, LowerCtx, PendingCall, TL_EXTERNAL_REFS, TL_NATIVE_MODE, lower_comparison_result,
-    lower_expr_into, pick_scratch,
+    pick_scratch,
 };
 use crate::core_ir::Expr;
 use crate::native_emit::aarch64::{self, CodeEmitter, REG_SP, REG_XZR};
