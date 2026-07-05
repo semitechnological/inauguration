@@ -317,9 +317,15 @@ mod tests {
 
     #[test]
     fn ir_type_is_integer() {
-        assert!(IrType::I32.is_integer());
-        assert!(IrType::U64.is_integer());
         assert!(IrType::Int(32).is_integer());
+        assert!(IrType::I8.is_integer());
+        assert!(IrType::I16.is_integer());
+        assert!(IrType::I32.is_integer());
+        assert!(IrType::I64.is_integer());
+        assert!(IrType::U8.is_integer());
+        assert!(IrType::U16.is_integer());
+        assert!(IrType::U32.is_integer());
+        assert!(IrType::U64.is_integer());
         assert!(!IrType::F32.is_float() || !IrType::F32.is_integer());
         assert!(!IrType::Bool.is_integer());
         assert!(!IrType::Void.is_integer());
@@ -327,9 +333,10 @@ mod tests {
 
     #[test]
     fn ir_type_is_float() {
+        assert!(IrType::Float(32).is_float());
+        assert!(IrType::Float(64).is_float());
         assert!(IrType::F32.is_float());
         assert!(IrType::F64.is_float());
-        assert!(IrType::Float(32).is_float());
         assert!(!IrType::I32.is_float());
         assert!(!IrType::Bool.is_float());
     }
