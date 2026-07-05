@@ -71,8 +71,12 @@ pub fn parse_simple_body(text: &str, implicit_return: bool) -> Vec<Stmt> {
             out.push(Stmt::Expr(expr));
         }
     }
-    if implicit_return && let Some(Stmt::Expr(expr)) = out.pop() {
-        out.push(Stmt::Return(Some(expr)));
+    if implicit_return {
+        if let Some(Stmt::Expr(expr)) = out.last() {
+            let expr = expr.clone();
+            out.pop();
+            out.push(Stmt::Return(Some(expr)));
+        }
     }
     out
 }

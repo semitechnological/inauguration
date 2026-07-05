@@ -36,6 +36,12 @@ fn ruby_return_type(body: &[Stmt]) -> Typ {
     if let Some(expr) = find_return_expr(body) {
         return infer_expr_type(expr);
     }
+    if let Some(last) = body.last() {
+        match last {
+            Stmt::Expr(expr) | Stmt::Return(Some(expr)) => return infer_expr_type(expr),
+            _ => {}
+        }
+    }
     Typ::Void
 }
 
@@ -70,7 +76,7 @@ fn ruby_stmt(src: &[u8], stmt: Node<'_>, locals: &mut HashSet<String>) -> Option
         "return" => ruby_return_expr(src, stmt).map(Stmt::Return),
         "assignment" => ruby_assignment(src, stmt, locals),
         "call" => ruby_expr(src, stmt).map(Stmt::Expr),
-        _ => None,
+        _ => ruby_expr(src, stmt).map(Stmt::Expr),
     }
 }
 

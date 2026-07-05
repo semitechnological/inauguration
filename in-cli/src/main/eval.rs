@@ -136,6 +136,11 @@ pub(crate) fn cmd_eval(cwd: &Path, code: &str, parser: Option<&str>, verbose: bo
         .map_err(|e| InError::Message(format!("create eval temp dir {}: {e}", dir.display())))?;
     let path = dir.join(format!("eval.{}", parser_id.default_extension()));
     let source_path = resolve_invocation_path(cwd, &path.to_string_lossy());
+    let module_id = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("App")
+        .to_string();
     let mut last_err = None;
     let mut execution = None;
     let mut print_result = false;
@@ -143,7 +148,7 @@ pub(crate) fn cmd_eval(cwd: &Path, code: &str, parser: Option<&str>, verbose: bo
     for plan in eval_plans(parser_id, code) {
         std::fs::write(&path, &plan.wrapped)
             .map_err(|e| InError::Message(format!("write eval temp: {e}")))?;
-        match compile_and_run_jit_source_path(&source_path, "App", ParserCli::Auto) {
+        match compile_and_run_jit_source_path(&source_path, &module_id, ParserCli::Auto) {
             Ok(run) => {
                 print_result = plan.print_result;
                 execution = Some(run);
@@ -441,17 +446,7 @@ pub(crate) fn normalize_eval_code(parser_id: parser_registry::ParserId, code: &s
         parser_registry::ParserId::Cpp
         | parser_registry::ParserId::ObjC
         | parser_registry::ParserId::ObjCpp => normalize_in_eval_code(code),
-        parser_registry::ParserId::HolyC => {
-            let trimmed = code.trim();
-            if let Some(inner) = trimmed
-                .strip_prefix("print(\"")
-                .and_then(|rest| rest.strip_suffix("\")"))
-            {
-                format!("\"{inner}\"")
-            } else {
-                code.to_string()
-            }
-        }
+        parser_registry::ParserId::HolyC => code.to_string(),
         parser_registry::ParserId::Php => normalize_eval_php_code(code),
         _ => code.to_string(),
     }
@@ -620,6 +615,32 @@ pub(crate) fn eval_return_type(parser_id: parser_registry::ParserId, ret: &str) 
             "Bool" => "bool".to_string(),
             _ => "int".to_string(),
         },
+        parser_registry::ParserId::Java
+        | parser_registry::ParserId::Groovy => match ret {
+            "Bool" => "boolean".to_string(),
+            "String" => "String".to_string(),
+            _ => "int".to_string(),
+        },
+        parser_registry::ParserId::CSharp => match ret {
+            "Bool" => "bool".to_string(),
+            "String" => "string".to_string(),
+            _ => "int".to_string(),
+        },
+        parser_registry::ParserId::FSharp => match ret {
+            "Bool" => "bool".to_string(),
+            "String" => "string".to_string(),
+            _ => "int".to_string(),
+        },
+        parser_registry::ParserId::VbNet => match ret {
+            "Bool" => "Boolean".to_string(),
+            "String" => "String".to_string(),
+            _ => "Integer".to_string(),
+        },
+        parser_registry::ParserId::OCaml => match ret {
+            "Bool" => "bool".to_string(),
+            "String" => "string".to_string(),
+            _ => "int".to_string(),
+        },
         _ => String::new(),
     }
 }
@@ -661,7 +682,7 @@ pub(crate) fn wrap_eval_expression(
         }
         parser_registry::ParserId::Nim => Some(format!("proc main(): {ret} =\n  return {code}")),
         parser_registry::ParserId::FSharp => {
-            Some(format!("let main _ =\n    let value = {code}\n    value"))
+            Some(format!("let main _ : {ret} = {code}"))
         }
         parser_registry::ParserId::Odin => Some(format!(
             "package main\n\nmain :: proc() -> {ret} {{\n\treturn {code}\n}}\n"
@@ -669,10 +690,10 @@ pub(crate) fn wrap_eval_expression(
         parser_registry::ParserId::D => Some(format!("{ret} main() {{ return {code}; }}")),
         parser_registry::ParserId::Crystal => Some(format!("def main : {ret}\n  {code}\nend")),
         parser_registry::ParserId::Julia => Some(format!(
-            "function main()\n    value = {code}\n    return value\nend\n"
+            "function main()\n    return {code}\nend\n"
         )),
         parser_registry::ParserId::R => Some(format!(
-            "main <- function() {{\n    value <- {code}\n    return(value)\n}}\n"
+            "main <- function() {{\n    {code}\n}}\n"
         )),
         parser_registry::ParserId::Ruby => Some(format!("def main\n  {code}\nend")),
         parser_registry::ParserId::Lua => Some(format!("function main()\n  return {code}\nend")),
@@ -681,7 +702,7 @@ pub(crate) fn wrap_eval_expression(
             "<?php\nfunction main() {{\n    return {code};\n}}\n"
         )),
         parser_registry::ParserId::Elixir => Some(format!(
-            "defmodule App do\n  def main do\n    {code}\n  end\nend\n"
+            "def main do\n  {code}\nend\n"
         )),
         parser_registry::ParserId::Erlang => Some(format!(
             "-module(app).\n-export([main/0]).\n\nmain() ->\n    {code}.\n"
@@ -689,14 +710,20 @@ pub(crate) fn wrap_eval_expression(
         parser_registry::ParserId::CSharp => Some(format!(
             "class App {{\n    static {ret} Main() {{\n        return {code};\n    }}\n}}"
         )),
+        parser_registry::ParserId::Java => Some(format!(
+            "class App {{\n  public static {ret} main(String[] args) {{\n    return {code};\n  }}\n}}"
+        )),
+        parser_registry::ParserId::Groovy => Some(format!(
+            "class App {{\n  static {ret} main(String[] args) {{\n    return {code}\n  }}\n}}"
+        )),
         parser_registry::ParserId::Kotlin => {
             Some(format!("fun main(): {ret} {{\n    return {code}\n}}"))
         }
         parser_registry::ParserId::Clojure => Some(format!("(defn main [] {code})\n")),
         parser_registry::ParserId::VbNet => Some(format!(
-            "Function main() As Integer\n    main = {code}\nEnd Function\n"
+            "Function main() As {ret}\n    main = {code}\nEnd Function\n"
         )),
-        parser_registry::ParserId::OCaml => Some(format!("let main () =\n  {code}")),
+        parser_registry::ParserId::OCaml => Some(format!("let main =\n  {code}")),
         parser_registry::ParserId::Hare => Some(format!(
             "export fn main() {ret} = {{\n\treturn {code};\n}};"
         )),
@@ -775,7 +802,7 @@ pub(crate) fn wrap_eval_statement(
             Some(format!("<?php\nfunction main() {{\n    {trimmed};\n}}\n"))
         }
         parser_registry::ParserId::Elixir => Some(format!(
-            "defmodule App do\n  def main do\n    {code}\n  end\nend\n"
+            "def main do\n  {code}\nend\n"
         )),
         parser_registry::ParserId::Erlang => Some(format!(
             "-module(app).\n-export([main/0]).\n\nmain() ->\n    {code}.\n"
@@ -792,7 +819,7 @@ pub(crate) fn wrap_eval_statement(
         parser_registry::ParserId::Kotlin => Some(format!("fun main() {{\n    {code}\n}}")),
         parser_registry::ParserId::Clojure => Some(format!("(defn main [] {code})\n")),
         parser_registry::ParserId::VbNet => Some(format!("Sub main()\n    {code}\nEnd Sub\n")),
-        parser_registry::ParserId::OCaml => Some(format!("let main () =\n  {code}")),
+        parser_registry::ParserId::OCaml => Some(format!("let main =\n  {code}")),
         parser_registry::ParserId::Hare => {
             Some(format!("export fn main() void = {{\n\t{code};\n}};"))
         }
@@ -807,37 +834,6 @@ pub(crate) fn wrap_eval_statement(
     }
 }
 
-pub(crate) fn prefers_printed_eval_expression(parser_id: parser_registry::ParserId) -> bool {
-    matches!(
-        parser_id,
-        parser_registry::ParserId::Swift
-            | parser_registry::ParserId::Go
-            | parser_registry::ParserId::V
-            | parser_registry::ParserId::Dart
-            | parser_registry::ParserId::Scala
-            | parser_registry::ParserId::Nim
-            | parser_registry::ParserId::FSharp
-            | parser_registry::ParserId::Haskell
-            | parser_registry::ParserId::Julia
-            | parser_registry::ParserId::Odin
-            | parser_registry::ParserId::D
-            | parser_registry::ParserId::Crystal
-            | parser_registry::ParserId::Ruby
-            | parser_registry::ParserId::Lua
-            | parser_registry::ParserId::Perl
-            | parser_registry::ParserId::Php
-            | parser_registry::ParserId::Elixir
-            | parser_registry::ParserId::Erlang
-            | parser_registry::ParserId::Java
-            | parser_registry::ParserId::CSharp
-            | parser_registry::ParserId::Groovy
-            | parser_registry::ParserId::Clojure
-            | parser_registry::ParserId::VbNet
-            | parser_registry::ParserId::OCaml
-            | parser_registry::ParserId::Hare
-    )
-}
-
 pub(crate) fn render_haskell_eval_expr(code: &str) -> String {
     let trimmed = code.trim();
     if let Some(inner) = trimmed
@@ -846,11 +842,7 @@ pub(crate) fn render_haskell_eval_expr(code: &str) -> String {
     {
         return format!("print {}", inner.trim());
     }
-    if trimmed.contains(' ') {
-        format!("({trimmed})")
-    } else {
-        trimmed.to_string()
-    }
+    trimmed.to_string()
 }
 
 pub(crate) struct EvalPlan {
@@ -911,14 +903,6 @@ pub(crate) fn eval_plans(parser_id: parser_registry::ParserId, code: &str) -> Ve
 
     let ret = guess_eval_type(trimmed);
     let mut plans = Vec::new();
-    if prefers_printed_eval_expression(parser_id)
-        && let Some(wrapped) = wrap_eval_statement(parser_id, &format!("print({trimmed})"))
-    {
-        plans.push(EvalPlan {
-            wrapped,
-            print_result: false,
-        });
-    }
     if let Some(wrapped) = wrap_eval_expression(parser_id, &normalized, ret) {
         plans.push(EvalPlan {
             wrapped,

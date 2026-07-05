@@ -1,6 +1,6 @@
 use super::extract::{
     AstShape, ast_body, ast_expr, collect_kinds, decl_fn, extract_fn_nodes, first_named,
-    last_named, named_descendant, node_txt, normalize_entry, simple_bounded_body,
+    infer_expr_type, last_named, named_descendant, node_txt, normalize_entry, simple_bounded_body,
 };
 use crate::core_ir::{Decl, Stmt, Typ, Visibility};
 use tree_sitter::Node;
@@ -162,14 +162,26 @@ fn julia_function_decl<'a>(src: &[u8], n: Node<'a>) -> Option<Decl> {
         .or_else(|| last_named(n).filter(|child| child.kind() != "signature"))
         .map(|b| julia_body(src, b))
         .unwrap_or_default();
+    let ret = infer_julia_ret(&body);
 
     Some(Decl::Function {
         name,
         params,
-        ret: Typ::Named("Any".into()),
+        ret,
         body,
         type_params: vec![],
     })
+}
+
+fn infer_julia_ret(body: &[Stmt]) -> Typ {
+    if let Some(Stmt::Expr(expr) | Stmt::Return(Some(expr))) = body.last() {
+        let t = infer_expr_type(expr);
+        if t.canonical() == Typ::Named("Any".into()) {
+            return Typ::Void;
+        }
+        return t;
+    }
+    Typ::Void
 }
 
 fn julia_params<'a>(src: &[u8], sig: &Node<'a>) -> Vec<(String, Typ)> {

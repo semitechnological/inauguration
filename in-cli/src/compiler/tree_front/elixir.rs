@@ -1,6 +1,6 @@
 use super::extract::{
-    AstShape, ast_body, collect_kinds, decl_fn, first_named, named_descendant, node_txt,
-    normalize_entry,
+    AstShape, ast_body, collect_kinds, decl_fn, first_named, infer_expr_type, named_descendant,
+    node_txt, normalize_entry,
 };
 use crate::core_ir::{Decl, Stmt, Typ, Visibility};
 use tree_sitter::Node;
@@ -230,7 +230,10 @@ fn elixir_function_decl<'a>(src: &[u8], c: Node<'a>) -> Option<Decl> {
     if matches!(name_n.kind(), "arguments" | "parenthesized_call") {
         let args_node = name_n;
         let mut aw = args_node.walk();
-        for ch in args_node.named_children(&mut aw) {
+        let mut children = args_node.named_children(&mut aw).peekable();
+        // First child is the function name; remaining identifiers are parameters.
+        let _ = children.next();
+        for ch in children {
             if ch.kind() == "identifier" {
                 params.push((
                     node_txt(src, ch).trim().to_string(),
@@ -250,14 +253,26 @@ fn elixir_function_decl<'a>(src: &[u8], c: Node<'a>) -> Option<Decl> {
     let body = named_descendant(c, "do_block")
         .map(|b| elixir_body(src, b))
         .unwrap_or_default();
+    let ret = infer_elixir_ret(&body);
 
     Some(Decl::Function {
         name,
         params,
-        ret: Typ::Named("Any".into()),
+        ret,
         body,
         type_params: vec![],
     })
+}
+
+fn infer_elixir_ret(body: &[Stmt]) -> Typ {
+    if let Some(Stmt::Expr(expr) | Stmt::Return(Some(expr))) = body.last() {
+        let t = infer_expr_type(expr);
+        if t.canonical() == Typ::Named("Any".into()) {
+            return Typ::Void;
+        }
+        return t;
+    }
+    Typ::Void
 }
 
 fn elixir_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
