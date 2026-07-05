@@ -1679,6 +1679,83 @@ capabilities:
     }
 
     #[test]
+    fn validates_all_capabilities_allowed() {
+        let manifest = parse_text(
+            r#"name: caps
+version: 0.1.0
+capabilities:
+  - fs.read
+  - process.stdout
+  - network.http
+"#,
+        )
+        .expect("parse manifest");
+
+        let validation = manifest.validate_capability_policy(["process.stdout", "network.http"]);
+
+        assert!(validation.valid);
+        assert_eq!(validation.allowed, vec!["fs.read", "process.stdout", "network.http"]);
+        assert_eq!(validation.required, vec!["process.stdout", "network.http"]);
+        assert_eq!(validation.missing, Vec::<String>::new());
+    }
+
+    #[test]
+    fn validates_no_required_capabilities() {
+        let manifest = parse_text(
+            r#"name: caps
+version: 0.1.0
+capabilities:
+  - fs.read
+"#,
+        )
+        .expect("parse manifest");
+
+        let validation = manifest.validate_capability_policy(Vec::<&str>::new());
+
+        assert!(validation.valid);
+        assert_eq!(validation.allowed, vec!["fs.read"]);
+        assert_eq!(validation.required, Vec::<String>::new());
+        assert_eq!(validation.missing, Vec::<String>::new());
+    }
+
+    #[test]
+    fn validates_no_allowed_capabilities_but_requires_some() {
+        let manifest = parse_text(
+            r#"name: caps
+version: 0.1.0
+"#,
+        )
+        .expect("parse manifest");
+
+        let validation = manifest.validate_capability_policy(["network.http"]);
+
+        assert!(!validation.valid);
+        assert_eq!(validation.allowed, Vec::<String>::new());
+        assert_eq!(validation.required, vec!["network.http"]);
+        assert_eq!(validation.missing, vec!["network.http"]);
+    }
+
+    #[test]
+    fn validates_capability_policy_with_duplicates() {
+        let manifest = parse_text(
+            r#"name: caps
+version: 0.1.0
+capabilities:
+  - fs.read
+  - fs.read
+"#,
+        )
+        .expect("parse manifest");
+
+        let validation = manifest.validate_capability_policy(["fs.read", "fs.read", "network.http"]);
+
+        assert!(!validation.valid);
+        assert_eq!(validation.allowed, vec!["fs.read"]);
+        assert_eq!(validation.required, vec!["fs.read", "network.http"]);
+        assert_eq!(validation.missing, vec!["network.http"]);
+    }
+
+    #[test]
     fn builds_package_report_with_graph_nodes_and_edges() {
         let temp = TempDirGuard::new();
         fs::write(
