@@ -245,6 +245,7 @@ pub(crate) struct PendingStaticArray {
 pub(crate) struct PendingString {
     pub(crate) adr_site: u32,
     pub(crate) string_index: i64,
+    pub(crate) rd: u8,
 }
 
 pub(crate) struct FunctionBuffer {
@@ -388,8 +389,7 @@ pub fn lower_module_with_jobs(
             }
             // Sort back to original name order so the buffer layout is deterministic.
             results.sort_by(|(a, _), (b, _)| a.cmp(b));
-            let buffers: Vec<FunctionBuffer> =
-                results.into_iter().map(|(_, b)| b).collect();
+            let buffers: Vec<FunctionBuffer> = results.into_iter().map(|(_, b)| b).collect();
             Result::<Vec<FunctionBuffer>, String>::Ok(buffers)
         })?
     };
@@ -427,6 +427,7 @@ pub fn lower_module_with_jobs(
         pending_strings.extend(buf.pending_strings.into_iter().map(|p| PendingString {
             adr_site: base + p.adr_site,
             string_index: p.string_index,
+            rd: p.rd,
         }));
         pending_inrt_calls.extend(buf.pending_inrt_calls.into_iter().map(|c| PendingInrtCall {
             site: base + c.site,

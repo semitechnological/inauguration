@@ -33,11 +33,17 @@ pub(crate) fn append_string_table(
     let mut ordered: Vec<(i64, &String)> = strings.iter().map(|(s, &idx)| (idx, s)).collect();
     ordered.sort_by_key(|(idx, _)| *idx);
 
-    // Build map from index -> offset of the string data (after the 8-byte length header).
+    // Build map from index -> offset of the string length header. JIT code will
+    // load this address as the instring pointer; the runtime reads the 8-byte
+    // length header and then the bytes that follow.
     let mut index_offsets: HashMap<i64, i64> = HashMap::new();
     for (idx, value) in ordered {
-        let data_offset = emitter.len() as i64;
-        index_offsets.insert(idx, data_offset + 8); // point past the length header
+        assert!(
+            emitter.len() % 8 == 0,
+            "string table entry must be 8-byte aligned"
+        );
+        let header_offset = emitter.len() as i64;
+        index_offsets.insert(idx, header_offset);
         emitter
             .bytes
             .extend_from_slice(&(value.len() as u64).to_le_bytes());
@@ -49,11 +55,11 @@ pub(crate) fn append_string_table(
     }
 
     for p in pending {
-        let Some(data_offset) = index_offsets.get(&p.string_index) else {
+        let Some(header_offset) = index_offsets.get(&p.string_index) else {
             continue;
         };
-        let adr_delta = (*data_offset - p.adr_site as i64) as i32;
-        emitter.patch_u32(p.adr_site, aarch64::adr(0, adr_delta));
+        let adr_delta = (*header_offset - p.adr_site as i64) as i32;
+        emitter.patch_u32(p.adr_site, aarch64::adr(p.rd, adr_delta));
     }
 }
 
