@@ -445,21 +445,6 @@ impl fmt::Display for ParserRegistryError {
 
 impl std::error::Error for ParserRegistryError {}
 
-/// Maps a path to core IR via the selected front.
-pub trait SourceParser {
-    fn parse_to_core(&self, path: &Path) -> Result<UnifiedModule, ParserRegistryError>;
-}
-
-/// `.in` v0 parser adapter.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct InLangParser;
-
-impl SourceParser for InLangParser {
-    fn parse_to_core(&self, path: &Path) -> Result<UnifiedModule, ParserRegistryError> {
-        in_lang_parse::parse_in_file(path).map_err(ParserRegistryError::Msg)
-    }
-}
-
 /// Dispatch by [`ResolvedBuildParser`].
 pub fn parse_with_resolved(
     resolved: ResolvedBuildParser,
@@ -467,7 +452,9 @@ pub fn parse_with_resolved(
 ) -> Result<Option<UnifiedModule>, ParserRegistryError> {
     match resolved {
         ResolvedBuildParser::Swift => Ok(None),
-        ResolvedBuildParser::CoreIr(ParserId::In) => InLangParser.parse_to_core(path).map(Some),
+        ResolvedBuildParser::CoreIr(ParserId::In) => in_lang_parse::parse_in_file(path)
+            .map_err(ParserRegistryError::Msg)
+            .map(Some),
         ResolvedBuildParser::CoreIr(ParserId::Icore) => {
             crate::compiler::icore::parse_icore_file(path)
                 .map_err(ParserRegistryError::Msg)

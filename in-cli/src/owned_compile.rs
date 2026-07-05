@@ -407,22 +407,6 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         report.call_edge_count = verify_report.call_edges.len();
     }
 
-    if std::env::var("IN_TYPECHECK").is_ok() {
-        let strict = std::env::var("IN_TYPECHECK").as_deref() == Ok("strict");
-        match crate::typecheck::TypeChecker::new().check_module(&module) {
-            Ok(()) => {}
-            Err(errors) => {
-                for err in &errors {
-                    eprintln!("[typecheck] {:?}", err);
-                }
-                if strict {
-                    report.success = false;
-                    report.reason_code = Some("typecheck-failed".to_string());
-                }
-            }
-        }
-    }
-
     report.semantic_level = "typed-subset";
     report.typed_function_count = report.parsed_function_count;
     report.call_edge_count = count_call_edges(&module, &request.module_id);
