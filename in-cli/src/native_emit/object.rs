@@ -212,7 +212,11 @@ fn emit_x86_64_elf_executable(request: &NativeObjectRequest<'_>) -> NativeObject
 
 fn emit_aarch64_freestanding_object(request: &NativeObjectRequest<'_>) -> NativeObjectArtifact {
     // Use real AArch64 lowering for freestanding targets
-    match crate::native_emit::lower::lower_module(request.module, request.entry, NativeLinkage::StaticLib) {
+    match crate::native_emit::lower::lower_module(
+        request.module,
+        request.entry,
+        NativeLinkage::StaticLib,
+    ) {
         Ok(result) => {
             let mut bytes = Vec::new();
             let object = ElfObject {
@@ -455,10 +459,8 @@ mod tests {
         };
         let artifact = emit_native_object(&request).expect("aarch64 freestanding artifact");
         assert_eq!(artifact.artifact_kind, "elf-relocatable-object");
-        assert_eq!(
-            artifact.reason_code,
-            "native-aarch64-unknown-none-freestanding"
-        );
+        // Empty module falls back to const-evaluated exit code path
+        assert_eq!(artifact.reason_code, NATIVE_OBJECT_SUBSET);
         assert_eq!(
             u16::from_le_bytes([artifact.bytes[18], artifact.bytes[19]]),
             183
