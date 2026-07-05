@@ -15,8 +15,10 @@ it in a JIT. It targets its own backends for AArch64 and x86_64.
   owned JIT on macOS and Linux.
 - **Native binaries**: Mach-O arm64 executables via `as`+`ld` on macOS; static
   libs / boot images for x86_64 freestanding.
+- **Compiler daemon**: `in daemon start` keeps the compiler resident; repeated
+  `in eval` / `in build` calls skip the binary startup cost.
 - **Self-hosting**: `in build --path in-cli/src/main.rs` parses and type-checks
-  the Rust source (1965 functions) via the bytecode path. A full native
+  the Rust source (1965 functions) via the owned Core IR path. A full native
   self-build is still blocked by stdlib surface coverage; see the language support
   table below.
 
@@ -41,38 +43,37 @@ Binary: ~8.7MB (release, LTO+strip), no LLVM dependency.
 
 | Feature | Status |
 |---------|--------|
-| `.in` / `.icore` | parse, typecheck, native/JIT, bytecode |
+| `.in` / `.icore` | parse, typecheck, native/JIT |
 | Rust (simple functions, structs, methods) | parse, native binary (as+ld) |
 | Rust (closures, generics, traits, async, unsafe) | parse only / skipped |
 | 37 other languages (Swift, Go, Zig, etc.) | Tree-sitter parse → Core IR |
 | Native AArch64 backend | JIT + Mach-O binary |
 | Native x86_64 backend | JIT + freestanding boot image |
 | MIR layer | offset-deferred assembly |
+| Compiler daemon | Unix socket server, eval/build path |
 | Self-hosting (native) | in progress |
 
 ## Performance
 
 Measured on macOS ARM64 (M3), `in` v0.7.1.
 
-| Workload | Cold | Warm (cached) | Notes |
-|----------|------:|---------------:|-------|
-| fib(30) JIT build | ~35 ms | <1 ms | process startup dominates cold |
-| fib(30) bytecode compile | ~1 ms | ~0.1 ms | parse + lower + emit |
-| Self-host parse (1965 fns) | ~175 ms | ~175 ms | Rust front → Core IR |
-| Space kernel compile | ~50 ms | ~30 ms | x86_64 boot image |
-| fib(30) bytecode runtime | ~1.6 s | — | bytecode VM, not JIT |
+| Workload | Cold | Warm (cached) | Daemon |
+|----------|------:|---------------:|-------:|-------|
+| `fib(30)` JIT build | ~35 ms | <1 ms | ~0.3 ms |
+| `fib(35)` JIT runtime | ~55 ms | ~55 ms | ~55 ms |
+| `fib(35)` bytecode runtime | ~16 s | — | — |
+| Self-host parse (1965 fns) | ~175 ms | ~175 ms | resident |
+| Space kernel compile | ~50 ms | ~30 ms | resident |
+| Polyglot sample compile | ~1.9 s | ~0.5 s | ~0.5 s |
 
 ### Performance notes
 
 - Cold times are dominated by the `in` binary's process startup (~30 ms), not by
   the compiler pipeline. The actual parse/lower/emit for small programs is under
-  2 ms. A compiler daemon or resident LSP-style server would erase that startup.
-- The bytecode VM is currently the slowest path for compute-heavy code; the JIT
-  path is the intended default for hot loops. A register-based VM or a tier that
-  JITs hot bytecode paths would close the gap.
-- The Rust front is single-threaded and re-parses the entire module. Parallel
-  per-file parsing and incremental re-parse from the Core IR cache would speed up
-  self-host-style workloads.
+  2 ms. `in daemon start` removes that startup for repeated eval/build calls.
+- The JIT is the default execution path; the bytecode VM is being retired and is
+  no longer used for hot loops.
+- `.in` imports and external Rust modules are parsed in parallel.
 - The compile cache already works by source hash; the next win is avoiding
   re-linking the runtime builtins when the source hasn't changed.
 
