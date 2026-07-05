@@ -1356,6 +1356,22 @@ mod tests {
     }
 
     #[test]
+    fn parses_package_manifest_source_directly() {
+        let manifest = parse_package_manifest_source(
+            r#"name: direct_test
+version: 0.2.0
+targets:
+  macos: true
+"#,
+        )
+        .expect("parse manifest source directly");
+
+        assert_eq!(manifest.name, "direct_test");
+        assert_eq!(manifest.version, "0.2.0");
+        assert_eq!(manifest.targets.get("macos").copied(), Some(true));
+    }
+
+    #[test]
     fn loads_package_manifest_from_file() {
         let manifest = parse_text(
             r#"name: hyperchat
