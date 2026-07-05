@@ -1,7 +1,6 @@
 use crate::{CompileTargetCli, InError, NativeLinkageCli, Result};
 use inauguration::native_emit::NativeLinkage;
 use inauguration::owned_compile::CompileTarget;
-use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -82,11 +81,6 @@ pub(crate) fn run_cmd_silent(cmd: &mut Command) -> Result<()> {
             Err(InError::Message(stderr))
         }
     }
-}
-
-#[allow(dead_code)]
-pub(crate) fn path_as_os(path: &Path) -> &OsStr {
-    path.as_os_str()
 }
 
 pub(crate) fn cwd() -> Result<PathBuf> {
