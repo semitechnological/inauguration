@@ -210,7 +210,7 @@ fn main() {
 	})
 	println('building local in-cli binary for benchmark...')
 	build_local := run_with_status('cargo build in-cli', os.join_path(root, 'in-cli'),
-		'cargo build')
+		'cargo build --features extended')
 	if !build_local.ok {
 		eprintln('failed to build local in-cli binary')
 		exit(1)

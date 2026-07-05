@@ -21,13 +21,13 @@ if ! command -v "$IN_BIN" &>/dev/null; then
 fi
 
 echo "--- cold start ---"
-$IN_BIN compile --path "$SRC" --out "$OUT" --target bytecode --entry main 2>&1
+$IN_BIN compile --path "$SRC" --out "$OUT" --target native --entry main 2>&1
 
 echo "--- warm ($RUNS runs) ---"
 declare -a TIMINGS=()
 for i in $(seq 1 "$RUNS"); do
   start=$(python3 -c 'import time; print(int(time.time() * 1_000_000))')
-  $IN_BIN compile --path "$SRC" --out "$OUT" --target bytecode --entry main 2>&1 >/dev/null
+  $IN_BIN compile --path "$SRC" --out "$OUT" --target native --entry main 2>&1 >/dev/null
   end=$(python3 -c 'import time; print(int(time.time() * 1_000_000))')
   elapsed=$((end - start))
   TIMINGS+=("$elapsed")
