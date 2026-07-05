@@ -14,18 +14,18 @@ is_macos_aarch64() {
   [[ "$(uname -s)" == "Darwin" ]] && [[ "$(uname -m)" == "arm64" ]]
 }
 
-BYTECODE_OUT="target/in/owned-sample.bca"
+JIT_OUT="target/in/owned-sample-jit"
 NATIVE_OUT="target/in/owned-sample-native"
 
-echo "owned-native check: bytecode compile contract"
-bytecode_json="$TMP_DIR/bytecode-compile.json"
+echo "owned-native check: JIT compile contract"
+jit_json="$TMP_DIR/jit-compile.json"
 "${IN_CMD[@]}" compile \
   --path apps/polyglot-sample/sample.in \
-  --target bytecode \
+  --target jit \
   --entry main \
-  --out "$BYTECODE_OUT" \
-  --json >"$bytecode_json"
-python3 - "$bytecode_json" <<'PY'
+  --out "$JIT_OUT" \
+  --json >"$jit_json"
+python3 - "$jit_json" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -36,13 +36,13 @@ def require(condition, message):
     if not condition:
         raise SystemExit(message)
 
-require(data.get("owned") is True, "bytecode compile report owned was not true")
+require(data.get("owned") is True, "JIT compile report owned was not true")
 require(
     data.get("external_invocations") == [],
-    "bytecode compile external_invocations was not empty",
+    "JIT compile external_invocations was not empty",
 )
 PY
-echo "owned-native ok: bytecode compile owned with empty external_invocations"
+echo "owned-native ok: JIT compile owned with empty external_invocations"
 
 echo "owned-native check: native compile contract"
 native_json="$TMP_DIR/native-compile.json"
@@ -90,11 +90,11 @@ else:
 PY
 echo "owned-native ok: native compile owned report with empty external_invocations"
 
-echo "owned-native check: backend bytecode report"
-backend_json="$TMP_DIR/backend-bytecode.json"
+echo "owned-native check: backend native report"
+backend_json="$TMP_DIR/backend-native.json"
 "${IN_CMD[@]}" backend \
   --path apps/polyglot-sample/sample.in \
-  --target bytecode \
+  --target native \
   --json >"$backend_json"
 python3 - "$backend_json" <<'PY'
 import json
@@ -115,12 +115,5 @@ if "external_invocations" in data:
         "backend external_invocations was not empty",
     )
 PY
-echo "owned-native ok: backend bytecode report contract"
-
-if [[ -f "$BYTECODE_OUT" ]]; then
-  echo "owned-native check: run bytecode artifact"
-  "${IN_CMD[@]}" run-bytecode "$BYTECODE_OUT"
-  echo "owned-native ok: run-bytecode $BYTECODE_OUT"
-fi
-
+echo "owned-native ok: backend native report contract"
 echo "owned-native compiler checks passed"
