@@ -379,30 +379,30 @@ pub fn imul_rr(dst: u8, src: u8) -> Vec<u8> {
     code
 }
 
-/// xor r32/r64, r/m32/r/m64 (REX.W + 33 /r, reg=src, rm=dst) — also used for zero idiom
+/// xor r32/r64, r/m32/r/m64 (REX.W + 33 /r, reg=dst, rm=src) — also used for zero idiom
 pub fn xor_rr(dst: u8, src: u8) -> Vec<u8> {
     let mut code = Vec::new();
-    push_rex_wr(&mut code, src, dst);
+    push_rex_wr(&mut code, dst, src);
     code.push(0x33);
-    code.push(modrm(3, src & 7, dst & 7));
+    code.push(modrm(3, dst & 7, src & 7));
     code
 }
 
-/// and r32/r64, r/m32/r/m64 (REX.W + 23 /r, reg=src, rm=dst)
+/// and r32/r64, r/m32/r/m64 (REX.W + 23 /r, reg=dst, rm=src)
 pub fn and_rr(dst: u8, src: u8) -> Vec<u8> {
     let mut code = Vec::new();
-    push_rex_wr(&mut code, src, dst);
+    push_rex_wr(&mut code, dst, src);
     code.push(0x23);
-    code.push(modrm(3, src & 7, dst & 7));
+    code.push(modrm(3, dst & 7, src & 7));
     code
 }
 
-/// or r32/r64, r/m32/r/m64 (REX.W + 0B /r, reg=src, rm=dst)
+/// or r32/r64, r/m32/r/m64 (REX.W + 0B /r, reg=dst, rm=src)
 pub fn or_rr(dst: u8, src: u8) -> Vec<u8> {
     let mut code = Vec::new();
-    push_rex_wr(&mut code, src, dst);
+    push_rex_wr(&mut code, dst, src);
     code.push(0x0B);
-    code.push(modrm(3, src & 7, dst & 7));
+    code.push(modrm(3, dst & 7, src & 7));
     code
 }
 
