@@ -22,3 +22,6 @@ docs-site/dist/
 docs-site/.crepus-cache/
 piolium/
 docs-site/.crepus-dev/
+.wrangler/
+docs-site/.wrangler/
+.pi-subagents/artifacts/
