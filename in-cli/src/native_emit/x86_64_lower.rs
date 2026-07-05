@@ -1556,46 +1556,36 @@ fn lower_binary_expr(
     Ok(())
 }
 
-fn lower_call_expr(
+fn lower_builtin_call(
     emitter: &mut CodeEmitter,
     ctx: &mut LowerCtx<'_>,
+    target_name: &str,
     target_reg: u8,
-    callee: &Expr,
     args: &[Expr],
     pending_calls: &mut Vec<PendingCall>,
-) -> Result<(), String> {
-    let target_name = match callee {
-        Expr::Ident(name) => name.clone(),
-        _ => {
-            return Err(format!(
-                "x86_64-lower: unsupported call callee in `{}`",
-                ctx.fn_name
-            ));
-        }
-    };
-
-    match target_name.as_str() {
+) -> Result<bool, String> {
+    match target_name {
         "hlt" => {
             emitter.emit_bytes(&[0xF4]);
             if target_reg != RAX {
                 emitter.emit_insns(&x86_64::xor_rr(target_reg, target_reg));
             }
-            return Ok(());
+            return Ok(true);
         }
         "pause" => {
             emitter.emit_bytes(&[0xF3, 0x90]);
             if target_reg != RAX {
                 emitter.emit_insns(&x86_64::xor_rr(target_reg, target_reg));
             }
-            return Ok(());
+            return Ok(true);
         }
         "cli" => {
             emitter.emit_bytes(&[0xFA]);
-            return Ok(());
+            return Ok(true);
         }
         "sti" => {
             emitter.emit_bytes(&[0xFB]);
-            return Ok(());
+            return Ok(true);
         }
         "outb" => {
             if args.len() >= 2 {
@@ -1610,7 +1600,7 @@ fn lower_call_expr(
                     ctx.fn_name
                 ));
             }
-            return Ok(());
+            return Ok(true);
         }
         "inb" => {
             if args.len() >= 1 {
@@ -1624,7 +1614,7 @@ fn lower_call_expr(
                     ctx.fn_name
                 ));
             }
-            return Ok(());
+            return Ok(true);
         }
         "outl" => {
             if args.len() >= 2 {
@@ -1638,7 +1628,7 @@ fn lower_call_expr(
                     ctx.fn_name
                 ));
             }
-            return Ok(());
+            return Ok(true);
         }
         "inl" => {
             if args.len() >= 1 {
@@ -1651,7 +1641,7 @@ fn lower_call_expr(
                     ctx.fn_name
                 ));
             }
-            return Ok(());
+            return Ok(true);
         }
         "outw" => {
             if args.len() >= 2 {
@@ -1665,7 +1655,7 @@ fn lower_call_expr(
                     ctx.fn_name
                 ));
             }
-            return Ok(());
+            return Ok(true);
         }
         "inw" => {
             if args.len() >= 1 {
@@ -1679,7 +1669,7 @@ fn lower_call_expr(
                     ctx.fn_name
                 ));
             }
-            return Ok(());
+            return Ok(true);
         }
         "load8" => {
             if args.len() >= 1 {
@@ -1694,7 +1684,7 @@ fn lower_call_expr(
                     ctx.fn_name
                 ));
             }
-            return Ok(());
+            return Ok(true);
         }
         "store8" => {
             if args.len() >= 2 {
@@ -1709,7 +1699,7 @@ fn lower_call_expr(
                     ctx.fn_name
                 ));
             }
-            return Ok(());
+            return Ok(true);
         }
         "load16" => {
             if args.len() >= 1 {
@@ -1724,7 +1714,7 @@ fn lower_call_expr(
                     ctx.fn_name
                 ));
             }
-            return Ok(());
+            return Ok(true);
         }
         "store16" => {
             if args.len() >= 2 {
@@ -1739,7 +1729,7 @@ fn lower_call_expr(
                     ctx.fn_name
                 ));
             }
-            return Ok(());
+            return Ok(true);
         }
         "load32" => {
             if args.len() >= 1 {
@@ -1754,7 +1744,7 @@ fn lower_call_expr(
                     ctx.fn_name
                 ));
             }
-            return Ok(());
+            return Ok(true);
         }
         "store32" => {
             if args.len() >= 2 {
@@ -1769,7 +1759,7 @@ fn lower_call_expr(
                     ctx.fn_name
                 ));
             }
-            return Ok(());
+            return Ok(true);
         }
         "load64" => {
             if args.len() >= 1 {
@@ -1784,7 +1774,7 @@ fn lower_call_expr(
                     ctx.fn_name
                 ));
             }
-            return Ok(());
+            return Ok(true);
         }
         "store64" => {
             if args.len() >= 2 {
@@ -1799,28 +1789,28 @@ fn lower_call_expr(
                     ctx.fn_name
                 ));
             }
-            return Ok(());
+            return Ok(true);
         }
         "read_cr2" => {
             emitter.emit_bytes(&[0x48, 0x0F, 0x20, 0xD0]); // mov rax, cr2
             if target_reg != RAX {
                 emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
             }
-            return Ok(());
+            return Ok(true);
         }
         "read_cr3" => {
             emitter.emit_bytes(&[0x48, 0x0F, 0x20, 0xD8]); // mov rax, cr3
             if target_reg != RAX {
                 emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
             }
-            return Ok(());
+            return Ok(true);
         }
         "write_cr3" => {
             if args.len() >= 1 {
                 lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
                 emitter.emit_bytes(&[0x0F, 0x22, 0xC7]); // mov cr3, rdi
             }
-            return Ok(());
+            return Ok(true);
         }
         "invlpg" => {
             if args.len() >= 1 {
@@ -1832,7 +1822,7 @@ fn lower_call_expr(
                     ctx.fn_name
                 ));
             }
-            return Ok(());
+            return Ok(true);
         }
         "lidt" => {
             if args.len() >= 1 {
@@ -1844,7 +1834,7 @@ fn lower_call_expr(
                     ctx.fn_name
                 ));
             }
-            return Ok(());
+            return Ok(true);
         }
         "invoke" | "invoke1" | "invoke2" => {
             if args.len() >= 1 {
@@ -1872,9 +1862,40 @@ fn lower_call_expr(
                     ctx.fn_name
                 ));
             }
-            return Ok(());
+            return Ok(true);
         }
-        _ => {}
+        _ => return Ok(false),
+
+    }
+}
+
+fn lower_call_expr(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    target_reg: u8,
+    callee: &Expr,
+    args: &[Expr],
+    pending_calls: &mut Vec<PendingCall>,
+) -> Result<(), String> {
+    let target_name = match callee {
+        Expr::Ident(name) => name.clone(),
+        _ => {
+            return Err(format!(
+                "x86_64-lower: unsupported call callee in `{}`",
+                ctx.fn_name
+            ));
+        }
+    };
+
+    if lower_builtin_call(
+        emitter,
+        ctx,
+        target_name.as_str(),
+        target_reg,
+        args,
+        pending_calls,
+    )? {
+        return Ok(());
     }
 
     let arg_regs = [RDI, RSI, RDX, RCX, 8, 9];
