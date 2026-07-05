@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Self-host vs rustc: compile time, binary size, cold exec — docs/benchmarks/self-host-vs-native.json
+# Self-host vs rustc: compile time, binary size, cold exec — docs/self-host-vs-native.json
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 IN="${IN_BIN:-$ROOT/in-cli/target/release/in}"
 CLI_MANIFEST="$ROOT/in-cli/Cargo.toml"
 MAIN="$ROOT/in-cli/src/main.rs"
-OUT_JSON="${OUT_JSON:-$ROOT/docs/benchmarks/self-host-vs-native.json}"
+OUT_JSON="${OUT_JSON:-$ROOT/docs/self-host-vs-native.json}"
 RUNS="${BENCH_RUNS:-3}"
 
 if [[ ! -x "$IN" ]]; then

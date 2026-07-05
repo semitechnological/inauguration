@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Inject self-host-vs-native.json into docs/benchmarks/self-host-vs-native.md."""
+"""Inject self-host-vs-native.json into docs/self-host-vs-native.md."""
 import json
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-MD = ROOT / "docs/benchmarks/self-host-vs-native.md"
-JSON = ROOT / "docs/benchmarks/self-host-vs-native.json"
+MD = ROOT / "docs/self-host-vs-native.md"
+JSON = ROOT / "docs/self-host-vs-native.json"
 START = "<!-- BENCH:SELF_HOST_START -->"
 END = "<!-- BENCH:SELF_HOST_END -->"
 CMP_START = "<!-- BENCH:RUSTC_CMP_START -->"

@@ -4,7 +4,7 @@
 
 ## Docs hook (`[targets.docs]`)
 
-Markdown at repo **`docs/`** (symlinks into `architecture/` + `benchmarks/`). Hook:
+Flat Markdown at repo **`docs/`** (same layout as crepuscularity `docs/`; `internal/` is not published). Hook:
 
 ```toml
 [targets.docs]
