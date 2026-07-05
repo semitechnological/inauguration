@@ -57,7 +57,7 @@ pub fn emit_native_object(request: &NativeObjectRequest<'_>) -> Option<NativeObj
             Some(emit_arm32_elf_executable(request))
         }
         (WASM32_UNKNOWN_TRIPLE, NativeLinkage::StaticLib) => Some(emit_wasm32_module(request)),
-        (X86_64_TRIPLE, NativeLinkage::StaticLib) => Some(emit_x86_64_freestanding_object(request)),
+        ("i386-unknown-none", NativeLinkage::StaticLib) | ("i686-unknown-none", NativeLinkage::StaticLib) | (X86_64_TRIPLE, NativeLinkage::StaticLib) => Some(emit_x86_64_freestanding_object(request)),
         (AARCH64_NONE_TRIPLE, NativeLinkage::StaticLib) => {
             Some(emit_aarch64_freestanding_object(request))
         }

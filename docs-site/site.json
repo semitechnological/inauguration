@@ -2,17 +2,17 @@
   "businessName": "inauguration",
   "title": "inauguration",
   "seo": {
-    "title": "inauguration — Swift tooling, .in, and hybrid compile",
-    "description": "Incremental compiler experiments, SIL passes, hot reload, and the in CLI. Docs mirror the repository markdown.",
+    "title": "inauguration — ultrafast hybrid compiler & JIT pipeline for .in and general OOP/C languages",
+    "description": "High performance compiler and JIT compiler for the .in (inlang) language, integrated with crepuscularity. Zero VM or LLVM dependencies.",
     "ogImage": null
   },
   "theme": {
-    "accent": "#0070f3",
-    "accentSoft": "#3291ff",
-    "surface": "#ffffff",
-    "text": "#171717",
-    "muted": "#666666",
-    "border": "#eaeaea"
+    "accent": "#3b82f6",
+    "accentSoft": "#60a5fa",
+    "surface": "#09090b",
+    "text": "#f4f4f5",
+    "muted": "#a1a1aa",
+    "border": "#27272a"
   },
   "elements": [],
   "analytics": null,
