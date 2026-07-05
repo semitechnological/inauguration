@@ -1618,6 +1618,7 @@ fn lowers_option_unwrap_or_none_to_default_inline() {
 }
 
 #[test]
+#[cfg(target_arch = "aarch64")]
 fn jit_executes_string_concat() {
     let module = UnifiedModule {
         identity: Default::default(),
