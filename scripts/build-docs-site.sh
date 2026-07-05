@@ -4,27 +4,36 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SITE="$ROOT/docs-site"
 OUT="${OUT:-$SITE/dist}"
 CREPUS_BIN="${CREPUS_BIN:-crepus}"
+CREPUS_MIN="0.9.18"
+CREPU_ROOT="${CREPU_ROOT:-$ROOT/../crepuscularity}"
 
 finish() {
   "$ROOT/scripts/patch-docs-site-instrument-sans.sh" "$OUT"
   echo "inauguration.tsc.hk" >"$OUT/CNAME"
 }
 
-if command -v "$CREPUS_BIN" >/dev/null 2>&1; then
+crepus_ok() {
+  command -v "$CREPUS_BIN" >/dev/null 2>&1 || return 1
+  local ver
+  ver="$("$CREPUS_BIN" --version 2>/dev/null | awk '{print $2}')"
+  [[ -n "$ver" ]] && [[ "$(printf '%s\n' "$CREPUS_MIN" "$ver" | sort -V | head -1)" == "$CREPUS_MIN" ]]
+}
+
+if crepus_ok; then
   "$CREPUS_BIN" web build --site "$SITE" --out-dir "$OUT"
   finish
   exit 0
 fi
 
-CREPU_ROOT="${CREPU_ROOT:-$ROOT/../crepuscularity}"
-if [[ ! -f "$CREPU_ROOT/Cargo.toml" ]]; then
-  echo "error: crepus not on PATH and CREPU_ROOT=$CREPU_ROOT missing Cargo.toml" >&2
-  echo "  Install: cargo install crepuscularity-cli" >&2
-  echo "  Or set CREPU_ROOT to your crepuscularity checkout." >&2
-  exit 1
+if [[ -f "$CREPU_ROOT/Cargo.toml" ]]; then
+  echo "note: using CREPU_ROOT=$CREPU_ROOT (PATH crepus missing or < $CREPUS_MIN)" >&2
+  cargo run --manifest-path "$CREPU_ROOT/Cargo.toml" -p crepuscularity-cli -- \
+    web build --site "$SITE" --out-dir "$OUT"
+  finish
+  exit 0
 fi
 
-cargo run --manifest-path "$CREPU_ROOT/Cargo.toml" -p crepuscularity-cli -- \
-  web build --site "$SITE" --out-dir "$OUT"
-
-finish
+echo "error: need crepuscularity-cli >= $CREPUS_MIN for correct <br> SSR" >&2
+echo "  cargo install crepuscularity-cli --version $CREPUS_MIN --locked" >&2
+echo "  or set CREPU_ROOT to a crepuscularity checkout with void-html fix" >&2
+exit 1
