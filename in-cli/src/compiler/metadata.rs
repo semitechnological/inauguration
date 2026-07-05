@@ -367,21 +367,6 @@ impl ComponentMetadata {
         }
     }
 
-    #[deprecated(note = "use build() which accepts backend output and source")]
-    pub fn from_spec(spec: &ComponentSpec, module: &IrModule) -> Self {
-        Self::build(
-            spec,
-            module,
-            &BackendOutput {
-                data: Vec::new(),
-                extension: "",
-                entry_offset: None,
-                symbol_table: vec![],
-            },
-            "",
-        )
-    }
-
     pub fn to_json_pretty(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string_pretty(self)
     }
