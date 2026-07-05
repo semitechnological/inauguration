@@ -1608,22 +1608,22 @@ fn lower_builtin_call(
             if target_reg != RAX {
                 emitter.emit_insns(&x86_64::xor_rr(target_reg, target_reg));
             }
-            return Ok(true);
+            Ok(true)
         }
         "pause" => {
             emitter.emit_bytes(&[0xF3, 0x90]);
             if target_reg != RAX {
                 emitter.emit_insns(&x86_64::xor_rr(target_reg, target_reg));
             }
-            return Ok(true);
+            Ok(true)
         }
         "cli" => {
             emitter.emit_bytes(&[0xFA]);
-            return Ok(true);
+            Ok(true)
         }
         "sti" => {
             emitter.emit_bytes(&[0xFB]);
-            return Ok(true);
+            Ok(true)
         }
         "outb" => {
             if args.len() >= 2 {
@@ -1643,7 +1643,7 @@ fn lower_builtin_call(
                     ctx.fn_name
                 ));
             }
-            return Ok(true);
+            Ok(true)
         }
         "inb" => {
             if args.len() >= 1 {
@@ -1657,7 +1657,7 @@ fn lower_builtin_call(
                     ctx.fn_name
                 ));
             }
-            return Ok(true);
+            Ok(true)
         }
         "outl" => {
             if args.len() >= 2 {
@@ -1671,7 +1671,7 @@ fn lower_builtin_call(
                     ctx.fn_name
                 ));
             }
-            return Ok(true);
+            Ok(true)
         }
         "inl" => {
             if args.len() >= 1 {
@@ -1684,7 +1684,7 @@ fn lower_builtin_call(
                     ctx.fn_name
                 ));
             }
-            return Ok(true);
+            Ok(true)
         }
         "outw" => {
             if args.len() >= 2 {
@@ -1698,7 +1698,7 @@ fn lower_builtin_call(
                     ctx.fn_name
                 ));
             }
-            return Ok(true);
+            Ok(true)
         }
         "inw" => {
             if args.len() >= 1 {
@@ -1712,7 +1712,7 @@ fn lower_builtin_call(
                     ctx.fn_name
                 ));
             }
-            return Ok(true);
+            Ok(true)
         }
         "load8" => {
             if args.len() >= 1 {
@@ -1727,7 +1727,7 @@ fn lower_builtin_call(
                     ctx.fn_name
                 ));
             }
-            return Ok(true);
+            Ok(true)
         }
         "store8" => {
             if args.len() >= 2 {
@@ -1747,7 +1747,7 @@ fn lower_builtin_call(
                     ctx.fn_name
                 ));
             }
-            return Ok(true);
+            Ok(true)
         }
         "load16" => {
             if args.len() >= 1 {
@@ -1762,7 +1762,7 @@ fn lower_builtin_call(
                     ctx.fn_name
                 ));
             }
-            return Ok(true);
+            Ok(true)
         }
         "store16" => {
             if args.len() >= 2 {
@@ -1777,7 +1777,7 @@ fn lower_builtin_call(
                     ctx.fn_name
                 ));
             }
-            return Ok(true);
+            Ok(true)
         }
         "load32" => {
             if args.len() >= 1 {
@@ -1792,7 +1792,7 @@ fn lower_builtin_call(
                     ctx.fn_name
                 ));
             }
-            return Ok(true);
+            Ok(true)
         }
         "store32" => {
             if args.len() >= 2 {
@@ -1807,7 +1807,7 @@ fn lower_builtin_call(
                     ctx.fn_name
                 ));
             }
-            return Ok(true);
+            Ok(true)
         }
         "load64" => {
             if args.len() >= 1 {
@@ -1822,7 +1822,7 @@ fn lower_builtin_call(
                     ctx.fn_name
                 ));
             }
-            return Ok(true);
+            Ok(true)
         }
         "store64" => {
             if args.len() >= 2 {
@@ -1837,28 +1837,28 @@ fn lower_builtin_call(
                     ctx.fn_name
                 ));
             }
-            return Ok(true);
+            Ok(true)
         }
         "read_cr2" => {
             emitter.emit_width(&[0x0F, 0x20, 0xD0], &[0x48, 0x0F, 0x20, 0xD0]); // mov eax/rax, cr2
             if target_reg != RAX {
                 emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
             }
-            return Ok(true);
+            Ok(true)
         }
         "read_cr3" => {
             emitter.emit_width(&[0x0F, 0x20, 0xD8], &[0x48, 0x0F, 0x20, 0xD8]); // mov eax/rax, cr3
             if target_reg != RAX {
                 emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
             }
-            return Ok(true);
+            Ok(true)
         }
         "write_cr3" => {
             if args.len() >= 1 {
                 lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
                 emitter.emit_bytes(&[0x0F, 0x22, 0xC7]); // mov cr3, edi/rdi
             }
-            return Ok(true);
+            Ok(true)
         }
         "invlpg" => {
             if args.len() >= 1 {
@@ -1870,7 +1870,7 @@ fn lower_builtin_call(
                     ctx.fn_name
                 ));
             }
-            return Ok(true);
+            Ok(true)
         }
         "lidt" => {
             if args.len() >= 1 {
@@ -1882,7 +1882,7 @@ fn lower_builtin_call(
                     ctx.fn_name
                 ));
             }
-            return Ok(true);
+            Ok(true)
         }
         "invoke" | "invoke1" | "invoke2" => {
             if args.len() >= 1 {
@@ -1910,9 +1910,9 @@ fn lower_builtin_call(
                     ctx.fn_name
                 ));
             }
-            return Ok(true);
+            Ok(true)
         }
-        _ => return Ok(false),
+        _ => Ok(false),
     }
 }
 
