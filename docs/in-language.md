@@ -1,21 +1,46 @@
 # inlang (`.in`)
 
-**inlang** is inauguration’s brace + line-oriented surface: one file format for compiler orchestration, agent reports, and bounded executable programs. It lowers to **Core IR** → **MIR** → **native JIT** (no LLVM, no bytecode VM).
+**inlang** is inauguration’s surface for compiler orchestration, agent reports, and bounded programs. You can write it in **human-readable** form (colons + indentation, no braces) or **brace form**; the parser normalizes human syntax to braces before Core IR. Pipeline: **Core IR** → **MIR** → **native JIT** (no LLVM, no bytecode VM).
 
 **Crepuscularity** is the sibling UI stack (`.crepus`, GPUI, WASM sites). Inauguration owns compilation; crepuscularity owns rendering. The **docs-site** is a crepuscularity web target (`crepus web build` / `web serve`), same as crepuscularity’s own docs-site.
 
 Workflow flags and CI entry points stay in the repo [README](../../README.md#core-commands). This page is grammar, imports, and IR shape.
 
-## Quick start
+## Quick start (human-readable)
+
+Indent with spaces. Headers end with **`:`**; the compiler expands this to brace form internally (`normalize_human_in_source` in `in_lang_parse`).
 
 ```in
-package demo;
-module demo.main;
+import std.io
 
+needs process.stdout
+
+host_log(text: String) uses process.stdout
+
+Message:
+  text: String
+
+main:
+  print "hello from inlang"
+  host_log "visible to in agent"
+```
+
+Same program in **brace form** (what you see after canonicalize / in tools that emit braces):
+
+```in
 import std.io;
+
+capability process.stdout;
+
+extern human fn host_log(text: String) -> void requires process.stdout;
+
+struct Message {
+  String text;
+}
 
 fn main() -> void {
   print("hello from inlang");
+  host_log("visible to in agent");
   return;
 }
 ```
@@ -28,9 +53,50 @@ in graph --path hello.in --json
 
 ## Syntax by example
 
-Small, copy-pasteable shapes the parser and Core IR accept today. Params are always **`name: Type`**.
+Params are always **`name: Type`** in signatures. Prefer **human-readable** for docs and scripts; use **brace form** when you want explicit `{` / `}` or C-like bodies.
 
-### Package, module, imports
+### Human-readable rules
+
+| You write | Meaning |
+| --- | --- |
+| `import std.io` or `import "./lib.in"` | Semicolon optional on human lines |
+| `needs capability.name` | `capability capability.name;` |
+| `enable my-extension` | `enable my-extension;` |
+| `Name:` then indented lines | Struct (`field: Type` per line) or function body |
+| `fn name(a: Int) -> String:` | Function with indented body |
+| `main:` | Entry function (same as `fn main() -> void`) |
+| `print "text"` | Call — becomes `print("text")` |
+| `host_log "msg"` | Bare words → call with string arg |
+| `bump` on its own line | Bare identifier → `bump()` |
+| `done` | `return` |
+| `sig uses cap.a, cap.b` | `extern human fn sig -> void requires cap.a, cap.b;` |
+| `parallel:` | `parallel { … }` block |
+| `distributed train:` | `distributed fn train() -> void { … }` |
+
+Full example (human):
+
+```in
+package demo.app
+module demo.app.main
+
+import std.io
+import std.process
+
+needs process.stdout
+
+host_log(msg: String) uses process.stdout
+
+Message:
+  text: String
+
+main:
+  print "ok"
+  host_log "docs hook ran"
+  process_run "./scripts/build-docs-site.sh"
+  done
+```
+
+### Package, module, imports (brace form)
 
 ```in
 package demo.app;
