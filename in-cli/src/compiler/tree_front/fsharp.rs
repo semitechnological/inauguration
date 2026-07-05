@@ -1,6 +1,6 @@
 use super::extract::{
-    AstShape, ast_body, ast_expr, ast_stmt, collect_kinds, decl_fn, extract_fn_nodes, first_named,
-    node_txt, normalize_entry, simple_bounded_body,
+    AstShape, ast_body, ast_expr, ast_stmt, collect_kinds, decl_fn, extract_fn_nodes, find_return_expr,
+    first_named, infer_expr_type, node_txt, normalize_entry, simple_bounded_body,
 };
 use crate::core_ir::{Decl, Stmt, Typ, Visibility};
 use std::collections::HashSet;
@@ -192,15 +192,14 @@ fn fsharp_function_decl<'a>(src: &[u8], n: Node<'a>) -> Option<Decl> {
     let name = normalize_entry(node_txt(src, name_node).trim());
 
     let params = fsharp_params(src, n);
-    let ret_type = n
-        .child_by_field_name("return_type")
-        .map(|t| Typ::Named(node_txt(src, t).trim().to_string()))
-        .unwrap_or(Typ::Named("unit".into()));
-
     let body = n
         .child_by_field_name("body")
         .map(|b| fsharp_body(src, b))
         .unwrap_or_default();
+    let ret_type = n
+        .child_by_field_name("return_type")
+        .map(|t| Typ::Named(node_txt(src, t).trim().to_string()))
+        .unwrap_or_else(|| infer_fsharp_ret(&body));
 
     Some(Decl::Function {
         name,
@@ -234,6 +233,21 @@ fn fsharp_params<'a>(src: &[u8], n: Node<'a>) -> Vec<(String, Typ)> {
         }
     }
     out
+}
+
+fn infer_fsharp_ret(body: &[Stmt]) -> Typ {
+    let inferred = if let Some(Stmt::Expr(expr) | Stmt::Return(Some(expr))) = body.last() {
+        infer_expr_type(expr)
+    } else if let Some(expr) = find_return_expr(body) {
+        infer_expr_type(expr)
+    } else {
+        Typ::Named("unit".into())
+    };
+    if inferred.canonical() == Typ::Named("Any".into()) {
+        Typ::Named("unit".into())
+    } else {
+        inferred
+    }
 }
 
 fn fsharp_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {

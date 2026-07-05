@@ -35,141 +35,58 @@ use std::collections::HashSet;
 use std::path::Path;
 use tree_sitter::{Language, Node, Parser};
 
-// Optional parser crates (behind "extended" feature)
-#[cfg(feature = "tree-sitter-c-sharp")]
 use tree_sitter_c_sharp;
-#[cfg(feature = "tree-sitter-dart")]
 use tree_sitter_dart;
-#[cfg(feature = "tree-sitter-elixir")]
 use tree_sitter_elixir;
-#[cfg(feature = "tree-sitter-erlang")]
 use tree_sitter_erlang;
-#[cfg(feature = "tree-sitter-fsharp")]
 use tree_sitter_fsharp;
-#[cfg(feature = "tree-sitter-groovy")]
 use tree_sitter_groovy;
-#[cfg(feature = "tree-sitter-haskell")]
 use tree_sitter_haskell;
-#[cfg(feature = "tree-sitter-holyc")]
 use tree_sitter_holyc;
-#[cfg(feature = "tree-sitter-julia")]
 use tree_sitter_julia;
-#[cfg(feature = "tree-sitter-kotlin-ng")]
 use tree_sitter_kotlin_ng;
-#[cfg(feature = "tree-sitter-lua")]
 use tree_sitter_lua;
-#[cfg(feature = "tree-sitter-objc")]
 use tree_sitter_objc;
-#[cfg(feature = "tree-sitter-ocaml")]
 use tree_sitter_ocaml;
-#[cfg(feature = "tree-sitter-perl")]
 use tree_sitter_perl;
-#[cfg(feature = "tree-sitter-php")]
 use tree_sitter_php;
-#[cfg(feature = "tree-sitter-r")]
 use tree_sitter_r;
-#[cfg(feature = "tree-sitter-ruby")]
 use tree_sitter_ruby;
-#[cfg(feature = "tree-sitter-scala")]
 use tree_sitter_scala;
-#[cfg(feature = "tree-sitter-v")]
 use tree_sitter_v;
 
-/// Try to resolve a ParserId to a Tree-sitter Language. Returns None if the parser feature is not enabled.
+/// Try to resolve a ParserId to a Tree-sitter Language.
 fn try_lang_for(id: ParserId) -> Option<Language> {
     Some(match id {
         ParserId::C => tree_sitter_c::LANGUAGE.into(),
-        #[cfg(feature = "tree-sitter-cpp")]
         ParserId::Cpp | ParserId::ObjCpp => tree_sitter_cpp::LANGUAGE.into(),
-        #[cfg(not(feature = "tree-sitter-cpp"))]
-        ParserId::Cpp | ParserId::ObjCpp => return None,
         ParserId::Java => tree_sitter_java::LANGUAGE.into(),
         ParserId::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
         ParserId::Python => tree_sitter_python::LANGUAGE.into(),
         ParserId::Rust => tree_sitter_rust::LANGUAGE.into(),
-        #[cfg(feature = "tree-sitter-zig")]
         ParserId::Zig => tree_sitter_zig::LANGUAGE.into(),
-        #[cfg(not(feature = "tree-sitter-zig"))]
-        ParserId::Zig => return None,
         ParserId::Go => tree_sitter_go::LANGUAGE.into(),
         ParserId::Swift => tree_sitter_swift::LANGUAGE.into(),
         ParserId::TypeScript => tree_sitter_typescript::LANGUAGE_TSX.into(),
-        #[cfg(feature = "tree-sitter-objc")]
         ParserId::ObjC => tree_sitter_objc::LANGUAGE.into(),
-        #[cfg(not(feature = "tree-sitter-objc"))]
-        ParserId::ObjC => return None,
-        #[cfg(feature = "tree-sitter-kotlin-ng")]
         ParserId::Kotlin => tree_sitter_kotlin_ng::LANGUAGE.into(),
-        #[cfg(not(feature = "tree-sitter-kotlin-ng"))]
-        ParserId::Kotlin => return None,
-        #[cfg(feature = "tree-sitter-scala")]
         ParserId::Scala => tree_sitter_scala::LANGUAGE.into(),
-        #[cfg(not(feature = "tree-sitter-scala"))]
-        ParserId::Scala => return None,
-        #[cfg(feature = "tree-sitter-groovy")]
         ParserId::Groovy => tree_sitter_groovy::LANGUAGE.into(),
-        #[cfg(not(feature = "tree-sitter-groovy"))]
-        ParserId::Groovy => return None,
-        #[cfg(feature = "tree-sitter-c-sharp")]
         ParserId::CSharp => tree_sitter_c_sharp::LANGUAGE.into(),
-        #[cfg(not(feature = "tree-sitter-c-sharp"))]
-        ParserId::CSharp => return None,
-        #[cfg(feature = "tree-sitter-fsharp")]
         ParserId::FSharp => tree_sitter_fsharp::LANGUAGE_FSHARP.into(),
-        #[cfg(not(feature = "tree-sitter-fsharp"))]
-        ParserId::FSharp => return None,
-        #[cfg(feature = "tree-sitter-ruby")]
         ParserId::Ruby => tree_sitter_ruby::LANGUAGE.into(),
-        #[cfg(not(feature = "tree-sitter-ruby"))]
-        ParserId::Ruby => return None,
-        #[cfg(feature = "tree-sitter-php")]
         ParserId::Php => tree_sitter_php::LANGUAGE_PHP.into(),
-        #[cfg(not(feature = "tree-sitter-php"))]
-        ParserId::Php => return None,
-        #[cfg(feature = "tree-sitter-perl")]
         ParserId::Perl => tree_sitter_perl::LANGUAGE.into(),
-        #[cfg(not(feature = "tree-sitter-perl"))]
-        ParserId::Perl => return None,
-        #[cfg(feature = "tree-sitter-dart")]
         ParserId::Dart => tree_sitter_dart::LANGUAGE.into(),
-        #[cfg(not(feature = "tree-sitter-dart"))]
-        ParserId::Dart => return None,
-        #[cfg(feature = "tree-sitter-lua")]
         ParserId::Lua => tree_sitter_lua::LANGUAGE.into(),
-        #[cfg(not(feature = "tree-sitter-lua"))]
-        ParserId::Lua => return None,
-        #[cfg(feature = "tree-sitter-elixir")]
         ParserId::Elixir => tree_sitter_elixir::LANGUAGE.into(),
-        #[cfg(not(feature = "tree-sitter-elixir"))]
-        ParserId::Elixir => return None,
-        #[cfg(feature = "tree-sitter-erlang")]
         ParserId::Erlang => tree_sitter_erlang::LANGUAGE.into(),
-        #[cfg(not(feature = "tree-sitter-erlang"))]
-        ParserId::Erlang => return None,
-        #[cfg(feature = "tree-sitter-haskell")]
         ParserId::Haskell => tree_sitter_haskell::LANGUAGE.into(),
-        #[cfg(not(feature = "tree-sitter-haskell"))]
-        ParserId::Haskell => return None,
-        #[cfg(feature = "tree-sitter-julia")]
         ParserId::Julia => tree_sitter_julia::LANGUAGE.into(),
-        #[cfg(not(feature = "tree-sitter-julia"))]
-        ParserId::Julia => return None,
-        #[cfg(feature = "tree-sitter-ocaml")]
         ParserId::OCaml => tree_sitter_ocaml::LANGUAGE_OCAML.into(),
-        #[cfg(not(feature = "tree-sitter-ocaml"))]
-        ParserId::OCaml => return None,
-        #[cfg(feature = "tree-sitter-r")]
         ParserId::R => tree_sitter_r::LANGUAGE.into(),
-        #[cfg(not(feature = "tree-sitter-r"))]
-        ParserId::R => return None,
-        #[cfg(feature = "tree-sitter-holyc")]
         ParserId::HolyC => tree_sitter_holyc::LANGUAGE.into(),
-        #[cfg(not(feature = "tree-sitter-holyc"))]
-        ParserId::HolyC => return None,
-        #[cfg(feature = "tree-sitter-v")]
         ParserId::V => tree_sitter_v::LANGUAGE.into(),
-        #[cfg(not(feature = "tree-sitter-v"))]
-        ParserId::V => return None,
         _ => return None,
     })
 }

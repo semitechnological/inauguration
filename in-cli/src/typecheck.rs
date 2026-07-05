@@ -1223,10 +1223,10 @@ fn normalize_function_ret(parser_id: ParserId, ret: &Typ, body: &[Stmt]) -> Typ 
     ) && normalized == Typ::Void
     {
         if let Some(inferred) = infer_return_type_from_body(body) {
-            return inferred;
+            return normalize_parser_type(parser_id, &inferred);
         }
         if matches!(parser_id, ParserId::JavaScript) && body_returns_expression(body) {
-            return Typ::Named("Any".to_string());
+            return normalize_parser_type(parser_id, &Typ::Named("Any".to_string()));
         }
     }
     normalized

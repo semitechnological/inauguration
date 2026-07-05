@@ -751,9 +751,9 @@ fn eval_wraps_in_expression() {
     let plans = crate::eval::eval_plans(inauguration::parser_registry::ParserId::In, "1 + 2");
     assert_eq!(plans.len(), 2);
     assert_eq!(plans[0].wrapped, "fn main() -> Int { return 1 + 2 }");
-    assert!(!plans[0].print_result);
+    assert!(plans[0].print_result);
     assert_eq!(plans[1].wrapped, "main:\n  1 + 2");
-    assert!(plans[1].print_result);
+    assert!(!plans[1].print_result);
 }
 
 #[test]
@@ -771,7 +771,7 @@ fn eval_wraps_python_expression() {
     assert_eq!(plans.len(), 2);
     assert_eq!(plans[0].wrapped, "def main() -> int:\n    return 1 + 2");
     assert!(plans[0].print_result);
-    assert_eq!(plans[1].wrapped, "def main() -> None:\n    print(1 + 2)");
+    assert_eq!(plans[1].wrapped, "def main() -> None:\n    1 + 2");
     assert!(!plans[1].print_result);
 }
 
@@ -802,7 +802,7 @@ fn eval_wraps_rust_statement() {
     assert_eq!(plans.len(), 1);
     assert_eq!(
         plans[0].wrapped,
-        "fn main() -> i64 { println!(\"hi\");\n0\n}"
+        "fn main() -> i64 { print(\"hi\");\n0\n}"
     );
     assert!(!plans[0].print_result);
 }
@@ -822,7 +822,7 @@ fn eval_wraps_javascript_statement() {
         "console.log(\"hi\")",
     );
     assert_eq!(plans.len(), 1);
-    assert_eq!(plans[0].wrapped, "function main() { console.log(\"hi\") }");
+    assert_eq!(plans[0].wrapped, "function main() { print(\"hi\") }");
     assert!(!plans[0].print_result);
 }
 
@@ -863,12 +863,12 @@ fn eval_wraps_go_statement() {
         inauguration::parser_registry::ParserId::Go,
         "println(\"hi\")",
     );
-    assert_eq!(plans.len(), 1);
+    assert_eq!(plans.len(), 2);
     assert_eq!(
         plans[0].wrapped,
-        "package main\n\nfunc main() {\n\tprintln(\"hi\")\n}"
+        "package main\n\nfunc main() int {\n\treturn println(\"hi\")\n}"
     );
-    assert!(!plans[0].print_result);
+    assert!(plans[0].print_result);
 }
 
 #[test]
@@ -887,12 +887,12 @@ fn eval_wraps_v_statement() {
         inauguration::parser_registry::ParserId::V,
         "println(\"hi\")",
     );
-    assert_eq!(plans.len(), 1);
+    assert_eq!(plans.len(), 2);
     assert_eq!(
         plans[0].wrapped,
-        "module main\n\nfn main() {\n\tprintln(\"hi\")\n}"
+        "module main\n\nfn main() int {\n\treturn println(\"hi\")\n}"
     );
-    assert!(!plans[0].print_result);
+    assert!(plans[0].print_result);
 }
 
 #[test]
@@ -951,7 +951,7 @@ fn eval_wraps_kotlin_statement() {
         "println(\"hi\")",
     );
     assert_eq!(plans.len(), 1);
-    assert_eq!(plans[0].wrapped, "fun main() {\n    println(\"hi\")\n}");
+    assert_eq!(plans[0].wrapped, "fun main() {\n    print(\"hi\")\n}");
     assert!(!plans[0].print_result);
 }
 
@@ -971,7 +971,7 @@ fn eval_wraps_scala_statement() {
     assert_eq!(plans.len(), 1);
     assert_eq!(
         plans[0].wrapped,
-        "def main(): Unit = {\n  println(\"hi\")\n}"
+        "def main(): Unit = {\n  print(\"hi\")\n}"
     );
     assert!(!plans[0].print_result);
 }
@@ -982,7 +982,7 @@ fn eval_wraps_groovy_expression() {
     assert_eq!(plans.len(), 2);
     assert_eq!(
         plans[0].wrapped,
-        "class App {\n  static Integer main(String[] args) {\n    return 1 + 2;\n  }\n}"
+        "class App {\n  static int main(String[] args) {\n    return 1 + 2\n  }\n}"
     );
     assert!(plans[0].print_result);
     assert_eq!(
@@ -1001,7 +1001,7 @@ fn eval_wraps_groovy_statement() {
     assert_eq!(plans.len(), 1);
     assert_eq!(
         plans[0].wrapped,
-        "class App {\n  static void main(String[] args) {\n    println(\"hi\")\n  }\n}"
+        "class App {\n  static void main(String[] args) {\n    print(\"hi\")\n  }\n}"
     );
     assert!(!plans[0].print_result);
 }
@@ -1009,7 +1009,7 @@ fn eval_wraps_groovy_statement() {
 #[test]
 fn eval_wraps_java_expression() {
     let plans = crate::eval::eval_plans(inauguration::parser_registry::ParserId::Java, "1 + 2");
-    assert_eq!(plans.len(), 1);
+    assert_eq!(plans.len(), 2);
     assert_eq!(
         plans[0].wrapped,
         "class App {\n  public static int main(String[] args) {\n    return 1 + 2;\n  }\n}"
@@ -1026,7 +1026,7 @@ fn eval_wraps_java_statement() {
     assert_eq!(plans.len(), 1);
     assert_eq!(
         plans[0].wrapped,
-        "class App {\n  public static void main(String[] args) {\n    System.out.println(\"hi\");\n  }\n}"
+        "class App {\n  public static void main(String[] args) {\n    print(\"hi\");\n  }\n}"
     );
     assert!(!plans[0].print_result);
 }
@@ -1034,7 +1034,7 @@ fn eval_wraps_java_statement() {
 #[test]
 fn eval_wraps_csharp_expression() {
     let plans = crate::eval::eval_plans(inauguration::parser_registry::ParserId::CSharp, "1 + 2");
-    assert_eq!(plans.len(), 1);
+    assert_eq!(plans.len(), 2);
     assert_eq!(
         plans[0].wrapped,
         "class App {\n    static int Main() {\n        return 1 + 2;\n    }\n}"
@@ -1048,18 +1048,18 @@ fn eval_wraps_csharp_statement() {
         inauguration::parser_registry::ParserId::CSharp,
         "Console.WriteLine(\"hi\")",
     );
-    assert_eq!(plans.len(), 1);
+    assert_eq!(plans.len(), 2);
     assert_eq!(
         plans[0].wrapped,
-        "class App {\n    static void Main() {\n        Console.WriteLine(\"hi\");\n    }\n}"
+        "class App {\n    static int Main() {\n        return Console.WriteLine(\"hi\");\n    }\n}"
     );
-    assert!(!plans[0].print_result);
+    assert!(plans[0].print_result);
 }
 
 #[test]
 fn eval_wraps_cpp_expression() {
     let plans = crate::eval::eval_plans(inauguration::parser_registry::ParserId::Cpp, "1 + 2");
-    assert_eq!(plans.len(), 1);
+    assert_eq!(plans.len(), 2);
     assert_eq!(plans[0].wrapped, "int main() { return 1 + 2; }");
     assert!(plans[0].print_result);
 }
@@ -1070,18 +1070,18 @@ fn eval_wraps_cpp_statement() {
         inauguration::parser_registry::ParserId::Cpp,
         "std::cout << \"hi\"",
     );
-    assert_eq!(plans.len(), 1);
+    assert_eq!(plans.len(), 2);
     assert_eq!(
         plans[0].wrapped,
-        "int main() { std::cout << \"hi\"; return 0; }"
+        "int main() { return std::cout << \"hi\"; }"
     );
-    assert!(!plans[0].print_result);
+    assert!(plans[0].print_result);
 }
 
 #[test]
 fn eval_wraps_c_expression() {
     let plans = crate::eval::eval_plans(inauguration::parser_registry::ParserId::C, "1 + 2");
-    assert_eq!(plans.len(), 1);
+    assert_eq!(plans.len(), 2);
     assert_eq!(plans[0].wrapped, "int main() { return 1 + 2; }");
     assert!(plans[0].print_result);
 }
@@ -1090,14 +1090,15 @@ fn eval_wraps_c_expression() {
 fn eval_wraps_c_statement() {
     let plans =
         crate::eval::eval_plans(inauguration::parser_registry::ParserId::C, "printf(\"hi\")");
-    assert_eq!(plans.len(), 1);
-    assert_eq!(plans[0].wrapped, "int main() { printf(\"hi\"); return 0; }");
-    assert!(!plans[0].print_result);
+    assert_eq!(plans.len(), 2);
+    assert_eq!(plans[0].wrapped, "int main() { return printf(\"hi\"); }");
+    assert!(plans[0].print_result);
 }
 
 #[test]
 fn eval_wraps_crystal_expression() {
     let plans = crate::eval::eval_plans(inauguration::parser_registry::ParserId::Crystal, "1 + 2");
+    assert_eq!(plans.len(), 2);
     assert_eq!(plans[0].wrapped, "def main : Int32\n  1 + 2\nend");
     assert!(plans[0].print_result);
 }
@@ -1108,14 +1109,15 @@ fn eval_wraps_crystal_statement() {
         inauguration::parser_registry::ParserId::Crystal,
         "puts \"hi\"",
     );
-    assert_eq!(plans.len(), 1);
-    assert_eq!(plans[0].wrapped, "def main\n  puts \"hi\"\nend");
-    assert!(!plans[0].print_result);
+    assert_eq!(plans.len(), 2);
+    assert_eq!(plans[0].wrapped, "def main : Int32\n  puts \"hi\"\nend");
+    assert!(plans[0].print_result);
 }
 
 #[test]
 fn eval_wraps_nim_expression() {
     let plans = crate::eval::eval_plans(inauguration::parser_registry::ParserId::Nim, "1 + 2");
+    assert_eq!(plans.len(), 2);
     assert_eq!(plans[0].wrapped, "proc main(): int =\n  return 1 + 2");
     assert!(plans[0].print_result);
 }
@@ -1124,15 +1126,16 @@ fn eval_wraps_nim_expression() {
 fn eval_wraps_nim_statement() {
     let plans =
         crate::eval::eval_plans(inauguration::parser_registry::ParserId::Nim, "echo \"hi\"");
-    assert_eq!(plans.len(), 1);
-    assert_eq!(plans[0].wrapped, "proc main() =\n  echo \"hi\"");
-    assert!(!plans[0].print_result);
+    assert_eq!(plans.len(), 2);
+    assert_eq!(plans[0].wrapped, "proc main(): int =\n  return echo \"hi\"");
+    assert!(plans[0].print_result);
 }
 
 #[test]
 fn eval_wraps_haskell_expression() {
     let plans = crate::eval::eval_plans(inauguration::parser_registry::ParserId::Haskell, "1 + 2");
-    assert_eq!(plans[0].wrapped, "main = (1 + 2)");
+    assert_eq!(plans.len(), 2);
+    assert_eq!(plans[0].wrapped, "main = 1 + 2");
     assert!(plans[0].print_result);
 }
 
@@ -1142,18 +1145,16 @@ fn eval_wraps_haskell_statement() {
         inauguration::parser_registry::ParserId::Haskell,
         "putStrLn \"hi\"",
     );
-    assert_eq!(plans.len(), 1);
-    assert_eq!(plans[0].wrapped, "main = print hi");
-    assert!(!plans[0].print_result);
+    assert_eq!(plans.len(), 2);
+    assert_eq!(plans[0].wrapped, "main = putStrLn \"hi\"");
+    assert!(plans[0].print_result);
 }
 
 #[test]
 fn eval_wraps_fsharp_expression() {
     let plans = crate::eval::eval_plans(inauguration::parser_registry::ParserId::FSharp, "1 + 2");
-    assert_eq!(
-        plans[0].wrapped,
-        "let main _ =\n    let value = 1 + 2\n    value"
-    );
+    assert_eq!(plans.len(), 2);
+    assert_eq!(plans[0].wrapped, "let main _ : int = 1 + 2");
     assert!(plans[0].print_result);
 }
 
@@ -1163,20 +1164,18 @@ fn eval_wraps_fsharp_statement() {
         inauguration::parser_registry::ParserId::FSharp,
         "printfn \"hi\"",
     );
-    assert_eq!(plans.len(), 1);
-    assert_eq!(
-        plans[0].wrapped,
-        "let main _ =\n    let value = printfn \"hi\"\n    value"
-    );
-    assert!(!plans[0].print_result);
+    assert_eq!(plans.len(), 2);
+    assert_eq!(plans[0].wrapped, "let main _ : int = printfn \"hi\"");
+    assert!(plans[0].print_result);
 }
 
 #[test]
 fn eval_wraps_odin_expression() {
     let plans = crate::eval::eval_plans(inauguration::parser_registry::ParserId::Odin, "1 + 2");
+    assert_eq!(plans.len(), 2);
     assert_eq!(
         plans[0].wrapped,
-        "package main\n\nmain :: proc() -> int {\n\treturn 1 + 2\n}\n"
+        "package main\n\nmain :: proc() ->  {\n\treturn 1 + 2\n}\n"
     );
     assert!(plans[0].print_result);
 }
@@ -1187,17 +1186,18 @@ fn eval_wraps_odin_statement() {
         inauguration::parser_registry::ParserId::Odin,
         "println(\"hi\")",
     );
-    assert_eq!(plans.len(), 1);
+    assert_eq!(plans.len(), 2);
     assert_eq!(
         plans[0].wrapped,
-        "package main\n\nmain :: proc() {\n\tprintln(\"hi\")\n}\n"
+        "package main\n\nmain :: proc() ->  {\n\treturn println(\"hi\")\n}\n"
     );
-    assert!(!plans[0].print_result);
+    assert!(plans[0].print_result);
 }
 
 #[test]
 fn eval_wraps_d_expression() {
     let plans = crate::eval::eval_plans(inauguration::parser_registry::ParserId::D, "1 + 2");
+    assert_eq!(plans.len(), 2);
     assert_eq!(plans[0].wrapped, "int main() { return 1 + 2; }");
     assert!(plans[0].print_result);
 }
@@ -1208,9 +1208,9 @@ fn eval_wraps_d_statement() {
         inauguration::parser_registry::ParserId::D,
         "writeln(\"hi\")",
     );
-    assert_eq!(plans.len(), 1);
-    assert_eq!(plans[0].wrapped, "void main() { writeln(\"hi\"); }");
-    assert!(!plans[0].print_result);
+    assert_eq!(plans.len(), 2);
+    assert_eq!(plans[0].wrapped, "int main() { return writeln(\"hi\"); }");
+    assert!(plans[0].print_result);
 }
 
 #[test]
@@ -1224,9 +1224,9 @@ fn eval_wraps_ruby_expression() {
 fn eval_wraps_ruby_statement() {
     let plans =
         crate::eval::eval_plans(inauguration::parser_registry::ParserId::Ruby, "puts \"hi\"");
-    assert_eq!(plans.len(), 1);
+    assert_eq!(plans.len(), 2);
     assert_eq!(plans[0].wrapped, "def main\n  puts \"hi\"\nend");
-    assert!(!plans[0].print_result);
+    assert!(plans[0].print_result);
 }
 
 #[test]
@@ -1253,12 +1253,12 @@ fn eval_wraps_php_expression() {
     assert_eq!(plans.len(), 2);
     assert_eq!(
         plans[0].wrapped,
-        "<?php\nfunction main() {\n    return print(1 + 2)\");\n}\n"
+        "<?php\nfunction main() {\n    return 1 + 2;\n}\n"
     );
     assert!(plans[0].print_result);
     assert_eq!(
         plans[1].wrapped,
-        "<?php\nfunction main() {\n    print(1 + 2);\n}\n"
+        "<?php\nfunction main() {\n    1 + 2;\n}\n"
     );
     assert!(!plans[1].print_result);
 }
@@ -1270,7 +1270,7 @@ fn eval_wraps_php_statement() {
     assert_eq!(plans.len(), 1);
     assert_eq!(
         plans[0].wrapped,
-        "<?php\nfunction main() {\n    echo \"hi\";\n}\n"
+        "<?php\nfunction main() {\n    print(\"hi)\");\n}\n"
     );
     assert!(!plans[0].print_result);
 }
@@ -1296,8 +1296,9 @@ fn eval_wraps_perl_statement() {
 #[test]
 fn eval_prefers_printed_perl_expression() {
     let plans = crate::eval::eval_plans(inauguration::parser_registry::ParserId::Perl, "1 + 2");
-    assert_eq!(plans[0].wrapped, "sub main {\n    print(1 + 2);\n}\n");
-    assert!(!plans[0].print_result);
+    assert_eq!(plans.len(), 2);
+    assert_eq!(plans[0].wrapped, "sub main {\n    return 1 + 2;\n}\n");
+    assert!(plans[0].print_result);
 }
 
 #[test]
@@ -1314,8 +1315,9 @@ fn eval_wraps_perl_statement_in_main() {
 #[test]
 fn eval_prefers_printed_clojure_expression() {
     let plans = crate::eval::eval_plans(inauguration::parser_registry::ParserId::Clojure, "1 + 2");
-    assert_eq!(plans[0].wrapped, "(defn main [] print(1 + 2))\n");
-    assert!(!plans[0].print_result);
+    assert_eq!(plans.len(), 2);
+    assert_eq!(plans[0].wrapped, "(defn main [] 1 + 2)\n");
+    assert!(plans[0].print_result);
 }
 
 #[test]
@@ -1332,11 +1334,12 @@ fn eval_wraps_clojure_statement_in_main() {
 #[test]
 fn eval_prefers_printed_elixir_expression() {
     let plans = crate::eval::eval_plans(inauguration::parser_registry::ParserId::Elixir, "1 + 2");
+    assert_eq!(plans.len(), 2);
     assert_eq!(
         plans[0].wrapped,
-        "defmodule App do\n  def main do\n    print(1 + 2)\n  end\nend\n"
+        "def main do\n  1 + 2\nend\n"
     );
-    assert!(!plans[0].print_result);
+    assert!(plans[0].print_result);
 }
 
 #[test]
@@ -1348,7 +1351,7 @@ fn eval_wraps_elixir_statement_in_main() {
     assert_eq!(plans.len(), 1);
     assert_eq!(
         plans[0].wrapped,
-        "defmodule App do\n  def main do\n    print(\"hi\")\n  end\nend\n"
+        "def main do\n  print(\"hi\")\nend\n"
     );
     assert!(!plans[0].print_result);
 }
@@ -1356,11 +1359,12 @@ fn eval_wraps_elixir_statement_in_main() {
 #[test]
 fn eval_prefers_printed_erlang_expression() {
     let plans = crate::eval::eval_plans(inauguration::parser_registry::ParserId::Erlang, "1 + 2");
+    assert_eq!(plans.len(), 2);
     assert_eq!(
         plans[0].wrapped,
-        "-module(app).\n-export([main/0]).\n\nmain() ->\n    print(1 + 2).\n"
+        "-module(app).\n-export([main/0]).\n\nmain() ->\n    1 + 2.\n"
     );
-    assert!(!plans[0].print_result);
+    assert!(plans[0].print_result);
 }
 
 #[test]
@@ -1384,7 +1388,7 @@ fn eval_normalizes_scala_println() {
         "println(\"hi\")",
     );
     assert_eq!(plans.len(), 1);
-    assert_eq!(plans[0].wrapped, "def main(): Unit = {\n  print(\"hi\")}");
+    assert_eq!(plans[0].wrapped, "def main(): Unit = {\n  print(\"hi\")\n}");
     assert!(!plans[0].print_result);
 }
 
@@ -1412,11 +1416,12 @@ fn eval_wraps_holyc_statement_in_main() {
         inauguration::parser_registry::ParserId::HolyC,
         "print(\"hi\")",
     );
+    assert_eq!(plans.len(), 1);
     assert_eq!(
         plans[0].wrapped,
-        "U8 * Main()\n{\n  return \"hi\";\n}\nMain;"
+        "U0 Main()\n{\n  print(\"hi\");\n}\nMain;"
     );
-    assert!(plans[0].print_result);
+    assert!(!plans[0].print_result);
 }
 
 #[test]

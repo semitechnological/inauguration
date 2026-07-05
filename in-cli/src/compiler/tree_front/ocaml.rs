@@ -1,5 +1,5 @@
 use super::extract::{
-    AstShape, ast_body, extract_fn_nodes, first_named, node_txt, normalize_entry,
+    AstShape, ast_body, extract_fn_nodes, first_named, infer_expr_type, node_txt, normalize_entry,
     simple_bounded_body, strict_simple_bounded_body,
 };
 use crate::core_ir::{Decl, Stmt, Typ};
@@ -41,14 +41,26 @@ pub(super) fn extract_ocaml(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, Str
             .child_by_field_name("body")
             .map(|b| ocaml_body(src, b))
             .unwrap_or_default();
+        let ret = infer_ocaml_ret(&body);
         Some(Decl::Function {
             name,
             params,
-            ret: Typ::Void,
+            ret,
             body,
             type_params: vec![],
         })
     })
+}
+
+fn infer_ocaml_ret(body: &[Stmt]) -> Typ {
+    if let Some(Stmt::Expr(expr) | Stmt::Return(Some(expr))) = body.last() {
+        let t = infer_expr_type(expr);
+        if t.canonical() == Typ::Named("Any".into()) {
+            return Typ::Void;
+        }
+        return t;
+    }
+    Typ::Void
 }
 
 fn ocaml_name_from_pattern(src: &[u8], pattern: Node<'_>) -> String {
@@ -70,7 +82,7 @@ fn ocaml_params(src: &[u8], binding: Node<'_>) -> Vec<(String, Typ)> {
                 .or_else(|| first_named(ch, "value_pattern"))
                 .map(|n| node_txt(src, n).trim().to_string())
                 .unwrap_or_else(|| "_".to_string());
-            out.push((name, Typ::Named("a".into())));
+            out.push((name, Typ::Void));
         }
     }
     out

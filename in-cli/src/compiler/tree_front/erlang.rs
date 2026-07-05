@@ -1,6 +1,6 @@
 use super::extract::{
-    AstShape, ast_body, collect_kinds, decl_fn, extract_fn_nodes, named_descendant, node_txt,
-    normalize_entry, simple_bounded_body, strict_simple_bounded_body,
+    AstShape, ast_body, collect_kinds, decl_fn, extract_fn_nodes, infer_expr_type, named_descendant,
+    node_txt, normalize_entry, simple_bounded_body, strict_simple_bounded_body,
 };
 use crate::core_ir::{Decl, Expr, Stmt, Typ, Visibility};
 use tree_sitter::Node;
@@ -141,14 +141,26 @@ fn erlang_function_decl<'a>(src: &[u8], n: Node<'a>) -> Option<Decl> {
         .child_by_field_name("body")
         .map(|b| erlang_body(src, b))
         .unwrap_or_default();
+    let ret = infer_erlang_ret(&body);
 
     Some(Decl::Function {
         name,
         params,
-        ret: Typ::Named("Any".into()),
+        ret,
         body,
         type_params: vec![],
     })
+}
+
+fn infer_erlang_ret(body: &[Stmt]) -> Typ {
+    if let Some(Stmt::Expr(expr) | Stmt::Return(Some(expr))) = body.last() {
+        let t = infer_expr_type(expr);
+        if t.canonical() == Typ::Named("Any".into()) {
+            return Typ::Void;
+        }
+        return t;
+    }
+    Typ::Void
 }
 
 fn erlang_params<'a>(src: &[u8], n: Node<'a>) -> Vec<(String, Typ)> {

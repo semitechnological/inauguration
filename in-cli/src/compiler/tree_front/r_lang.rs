@@ -1,6 +1,6 @@
 use super::extract::{
-    AstShape, ast_body, collect_kinds, decl_fn, first_named, named_descendant, node_txt,
-    normalize_entry, simple_bounded_body,
+    AstShape, ast_body, collect_kinds, decl_fn, first_named, infer_expr_type, named_descendant,
+    node_txt, normalize_entry, simple_bounded_body,
 };
 use crate::core_ir::{Decl, Stmt, Typ};
 use tree_sitter::Node;
@@ -98,14 +98,26 @@ fn r_function_decl<'a>(src: &[u8], name: String, func_node: Node<'a>) -> Option<
         .child_by_field_name("body")
         .map(|b| r_body(src, b))
         .unwrap_or_default();
+    let ret = infer_r_ret(&body);
 
     Some(Decl::Function {
         name,
         params,
-        ret: Typ::Named("Any".into()),
+        ret,
         body,
         type_params: vec![],
     })
+}
+
+fn infer_r_ret(body: &[Stmt]) -> Typ {
+    if let Some(Stmt::Expr(expr) | Stmt::Return(Some(expr))) = body.last() {
+        let t = infer_expr_type(expr);
+        if t.canonical() == Typ::Named("Any".into()) {
+            return Typ::Void;
+        }
+        return t;
+    }
+    Typ::Void
 }
 
 fn r_params<'a>(src: &[u8], func_node: Node<'a>) -> Vec<(String, Typ)> {

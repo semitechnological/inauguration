@@ -1,4 +1,4 @@
-use super::extract::{AstShape, ast_expr, extract_fn_nodes, node_txt, normalize_entry};
+use super::extract::{AstShape, ast_expr, extract_fn_nodes, infer_expr_type, node_txt, normalize_entry};
 use crate::core_ir::{Decl, Expr, Stmt, Typ};
 use tree_sitter::Node;
 
@@ -34,11 +34,11 @@ pub(super) fn extract_haskell(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, S
         let name_n = n.child_by_field_name("name")?;
         let name = normalize_entry(node_txt(src, name_n).trim());
         let params = haskell_params(src, n);
+        let body = haskell_body(src, n);
         let ret = n
             .child_by_field_name("result")
             .map(|r| Typ::Named(node_txt(src, r).trim().to_string()))
-            .unwrap_or(Typ::Void);
-        let body = haskell_body(src, n);
+            .unwrap_or_else(|| infer_haskell_ret(&body));
         Some(Decl::Function {
             name,
             params,
@@ -75,10 +75,11 @@ pub(super) fn extract_haskell(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, S
         let Some(body) = simple_haskell_body(right) else {
             continue;
         };
+        let ret = infer_haskell_ret(&body);
         fallback.push(Decl::Function {
             name,
             params,
-            ret: Typ::Void,
+            ret,
             body,
             type_params: vec![],
         });
@@ -100,6 +101,18 @@ fn haskell_params(src: &[u8], func: Node<'_>) -> Vec<(String, Typ)> {
         }
     }
     out
+}
+
+fn infer_haskell_ret(body: &[Stmt]) -> Typ {
+    if let Some(Stmt::Expr(expr) | Stmt::Return(Some(expr))) = body.last() {
+        let t = infer_expr_type(expr);
+        return if t.canonical() == Typ::Named("Any".into()) {
+            Typ::Void
+        } else {
+            t
+        };
+    }
+    Typ::Void
 }
 
 fn haskell_body(src: &[u8], func: Node<'_>) -> Vec<Stmt> {
