@@ -59,7 +59,7 @@ div min-h-screen bg-zinc-950 text-zinc-300 p-6 sm:p-12 text-sm leading-relaxed i
 						span w-2 h-2 rounded-full bg-amber-900/80
 						span w-2 h-2 rounded-full bg-emerald-900/80
 				pre p-4 m-0 font-mono text-xs leading-relaxed text-zinc-400 overflow-x-auto whitespace-pre
-					"# install\n$ cargo install inauguration\n\n# build this repo\n$ in .\n\n# eval: .in, ~40 polyglot fronts, cargo/npm deps\n$ in eval \"print('hello world')\"\n\n# matrix + docs site\n$ in languages --json\n"
+					"# install\n$ cargo install inauguration\n\n# evaluate / run inline or a file\n$ in eval \"print('hello world')\"\n$ in ./examples/hello.in\n\n# build this repo\n$ in .\n"
 
 		section border-t border-zinc-800 pt-8 crepus-entrance crepus-e3
 			div text-zinc-100 font-semibold tracking-wider mb-4
@@ -85,10 +85,25 @@ div min-h-screen bg-zinc-950 text-zinc-300 p-6 sm:p-12 text-sm leading-relaxed i
 			div text-zinc-100 font-semibold tracking-wider mb-4
 				"LANGUAGE FRONTS"
 			p text-zinc-500 text-xs mb-4 m-0
-				"Run "
+				"~40 polyglot fronts plus "
 				code text-zinc-400
-					"in languages"
-				" for the live matrix (39 polyglot + in + icore)."
+					".in"
+				" / "
+				code text-zinc-400
+					".icore"
+				". Eval and project builds can pull "
+				span text-zinc-400
+					"Cargo"
+				", "
+				span text-zinc-400
+					"npm"
+				", and "
+				span text-zinc-400
+					"Go"
+				" module deps from the tree. Run "
+				code text-zinc-400
+					"in languages --json"
+				" for the live matrix."
 			div flex flex-wrap gap-2 text-xs font-mono
 				span lang-chip
 					".in"
