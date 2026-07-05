@@ -1016,10 +1016,10 @@ pub fn typecheck_module(module: &UnifiedModule, kind: ModuleKind) -> Result<(), 
     let mut top_level = HashSet::new();
     for decl in &module.decls {
         match decl {
-            Decl::Struct { name, .. } | Decl::Class { name, .. } | Decl::Function { name, .. } => {
-                if !top_level.insert(name.clone()) {
-                    return Err(format!("duplicate top-level name `{name}`"));
-                }
+            Decl::Struct { name, .. } | Decl::Class { name, .. } | Decl::Function { name, .. }
+                if !top_level.insert(name.clone()) =>
+            {
+                return Err(format!("duplicate top-level name `{name}`"));
             }
             _ => {}
         }

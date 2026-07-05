@@ -55,6 +55,17 @@ pub struct JitRuntime {
 struct CodePage {
     ptr: *mut u8,
     size: usize,
+    /// Bytes written; used for icache flush on macOS and AArch64 Linux.
+    #[cfg_attr(
+        not(any(
+            target_os = "macos",
+            all(
+                any(target_os = "linux", target_os = "android"),
+                target_arch = "aarch64"
+            )
+        )),
+        allow(dead_code)
+    )]
     used: usize,
 }
 
@@ -235,7 +246,8 @@ impl JitRuntime {
         relocations: &[(u32, u64)],              // (offset, codegen_base) — patched at load time
     ) -> Result<(), String> {
         // Allocate a code page large enough
-        let page = CodePage::new(code.len()).ok_or_else(|| "jit: mmap failed".to_string())?;
+        let mut page = CodePage::new(code.len()).ok_or_else(|| "jit: mmap failed".to_string())?;
+        page.used = code.len();
 
         let dest = page.ptr;
         unsafe {
