@@ -121,7 +121,7 @@ fn native_staticlib_emits_x86_64_linux_object_file() {
     assert_eq!(report.reason_code.as_deref(), Some("native-object-subset"));
     assert_eq!(
         report.artifact_path.as_deref(),
-        Some(out_path.to_str().unwrap())
+        out_path.to_str()
     );
     let bytes = fs::read(&out_path).expect("object bytes");
     assert_eq!(&bytes[0..4], b"\x7FELF");

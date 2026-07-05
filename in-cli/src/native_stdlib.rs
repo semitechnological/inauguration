@@ -55,7 +55,7 @@ unsafe fn instring_from_os_str(s: &std::ffi::OsStr) -> *const u8 {
 
 #[cfg(not(unix))]
 unsafe fn instring_from_os_str(s: &std::ffi::OsStr) -> *const u8 {
-    unsafe { instring_from_bytes(s.to_str().unwrap_or("").as_bytes()) }
+    unsafe { instring_from_bytes(s.to_string_lossy().as_bytes()) }
 }
 
 unsafe fn instring_from_string(s: String) -> *const u8 {
@@ -717,7 +717,7 @@ mod tests {
                     .unwrap()
                     .as_nanos()
             ));
-            let path_str = path.to_str().unwrap();
+            let path_str = path.to_string_lossy();
             let path_ptr = instring_from_bytes(path_str.as_bytes());
             let contents_ptr = instring_from_bytes(b"hello inauguration");
             let written = in_fs_write(path_ptr, contents_ptr);
@@ -743,7 +743,7 @@ mod tests {
                     .unwrap()
                     .as_nanos()
             ));
-            let path_str = path.to_str().unwrap();
+            let path_str = path.to_string_lossy();
             let path_ptr = instring_from_bytes(path_str.as_bytes());
             let created = in_fs_create_dir(path_ptr);
             assert_eq!(created, 1);
