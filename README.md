@@ -5,93 +5,27 @@ Own compiler backend — no LLVM, no bytecode VM, no SIL.
 
 ## What it is
 
-`inauguration` is a self-hosted compiler project that compiles its own Rust source
-code to native binaries without delegating to cargo/rustc. It uses its own
-AArch64/x86_64 native backend with an `as`+`ld` pipeline.
+`inauguration` is a compiler toolchain that lowers multiple source languages
+into a shared Core IR and then compiles that IR to native machine code or runs
+it in a JIT. It targets its own backends for AArch64 and x86_64.
 
 ## Current status
 
-**Self-hosting in progress.** `in` can compile its own Rust source to a working
-Mach-O binary. The binary runs correctly for:
-- Arithmetic, functions, recursion (fib(30)=832040 ✓)
-- Struct allocations, field access, method dispatch (Point.magnitude ✓)
-- While/for/loop control flow, if/else, match
-- `_exit` via libSystem linking
+- **JIT execution**: `.in`, `.icore`, and many polyglot samples run through the
+  owned JIT on macOS and Linux.
+- **Native binaries**: Mach-O arm64 executables via `as`+`ld` on macOS; static
+  libs / boot images for x86_64 freestanding.
+- **Self-hosting**: `in build --path in-cli/src/main.rs` parses and type-checks
+  the Rust source (1965 functions) via the bytecode path. A full native
+  self-build is still blocked by stdlib surface coverage; see the language support
+  table below.
 
-**Remaining**: 120+ unresolved std library symbols. These are being resolved
-by writing thin Rust wrappers around the C ABI (libSystem on macOS), compiled
-directly by `in`.
+## Unified stdlib
 
-## Unified stdlib architecture
-
-One portable systems-level stdlib for ALL languages. Every language's stdlib
-surface maps to the same underlying implementations:
-
-```
-Rust: std::fs::read_dir  \
-Python: os.listdir       |  →  Core IR: StdCall("fs.read_dir")
-Go: os.ReadDir          /       →  inrt: fs_read_dir(C ABI)
-                               →  syscall: openat + getdents64
-```
-
-### How it works
-
-1. **Language front** (Tree-sitter or native) parses source to Core IR
-2. **Stdlib mapper** recognizes function calls against known stdlib surfaces:
-   - Rust `std::fs::*`, `std::env::*`, `std::path::*`, etc.
-   - Python `os.*`, `sys.*`, `pathlib.*`, etc.
-   - Go `os.*`, `fmt.*`, `net.*`, etc.
-   - C `fopen`, `readdir`, `getenv`, etc.
-   - JavaScript `fs.*`, `path.*`, `process.*`, etc.
-   - PyPI/cargo/npm packages that transitively use stdlib
-3. Each recognized call is redirected to **inrt** — our unified runtime
-4. inrt implements each function as a portable C ABI wrapper:
-   - macOS: calls libSystem
-   - Linux: calls glibc/musl
-   - No platform: direct syscall in AArch64/x86_64 assembly
-
-### Layer stack
-
-```
-┌─────────────────────────────────────────────────┐
-│  Language frontends (Rust, Python, Go, C, ...)   │
-│  Each produces Core IR with stdlib annotations   │
-├─────────────────────────────────────────────────┤
-│  Stdlib mapper (language-agnostic)              │
-│  {lang}.{module}.{func} → inrt.{func}           │
-├─────────────────────────────────────────────────┤
-│  inrt — unified runtime                         │
-│  Compiled by `in` from Rust source               │
-│  Cross-platform: portable C ABI + direct syscall │
-├─────────────────────────────────────────────────┤
-│  Platform layer                                 │
-│  macOS: libSystem.dylib  Linux: libc.so         │
-│  Fallback: inline syscall (AArch64/x86_64)      │
-└─────────────────────────────────────────────────┘
-```
-
-### Cross-platform support
-
-| Platform | C ABI lib | Fallback | Status |
-|----------|-----------|----------|--------|
-| macOS (arm64) | libSystem.dylib | Mach syscall | **working** |
-| Linux (x86_64) | glibc/musl | Linux syscall | planned |
-| Linux (arm64) | glibc/musl | Linux syscall | planned |
-| Windows (x86_64) | msvcrt | NT syscall | planned |
-| Chimera Linux (musl) | musl | Linux syscall | planned |
-
-### Why not compile Rust stdlib
-
-The Rust standard library is 3M+ lines using every Rust feature (closures,
-generics, async, proc macros, const eval, inline asm). Compiling it from
-source requires implementing all of those features first. Instead, each std
-function `in` needs becomes a thin Rust `extern "C"` wrapper that:
-
-1. Is simple enough for `in`'s backend to compile (no generics, no traits)
-2. Calls the C ABI (libSystem, glibc) for the actual system work
-3. Is portable — the C ABI is the universal system interface
-
-This gives us **immediate cross-platform support** with minimal backend work.
+One portable systems-level stdlib backs all language fronts. Calls like
+`std::fs::read_dir`, `os.listdir`, or `os.ReadDir` lower to the same Core IR
+stdlib call, then to `inrt` C-ABI wrappers, then to libSystem/glibc or direct
+syscalls.
 
 ## Install
 
@@ -101,34 +35,46 @@ cargo install inauguration      # crates.io (all platforms)
 ./install.sh                    # from source
 ```
 
-Binary: **8.7MB** (release, LTO+strip), no LLVM dependency.
+Binary: ~8.7MB (release, LTO+strip), no LLVM dependency.
 
-## Language Support
-
-39 Tree-sitter parsers + native `.in`/`.icore` frontends → one Core IR.
+## Language support
 
 | Feature | Status |
 |---------|--------|
-| `.in` language (canonical + .icore) | parse, typecheck, native/JIT |
-| Rust (simple functions) | parse, native binary (as+ld) |
-| Rust (structs, methods, dispatch) | parse, native binary |
-| Rust (closures, generics, traits) | parse only |
-| Rust (proc macros, async, unsafe) | parse skipped |
-| 37 other languages (Swift, Go, Zig, etc.) | Tree-sitter parse + IR |
+| `.in` / `.icore` | parse, typecheck, native/JIT, bytecode |
+| Rust (simple functions, structs, methods) | parse, native binary (as+ld) |
+| Rust (closures, generics, traits, async, unsafe) | parse only / skipped |
+| 37 other languages (Swift, Go, Zig, etc.) | Tree-sitter parse → Core IR |
 | Native AArch64 backend | JIT + Mach-O binary |
-| Native x86_64 backend | JIT only |
-| MIR (Machine IR) layer | offset-deferred assembly |
-| Self-hosting (in compiles in) | **in progress** |
+| Native x86_64 backend | JIT + freestanding boot image |
+| MIR layer | offset-deferred assembly |
+| Self-hosting (native) | in progress |
 
-## Compile-time performance
+## Performance
 
-| Workload | Time | Notes |
-|----------|------|-------|
-| fib(30) JIT | ~30ms | 2 functions, in-memory JIT |
-| fib(30) native binary | ~100ms | as+ld pipeline |
-| Self-host parse (3444 fns) | ~50ms | Rust front → Core IR |
-| Self-host native build | ~2.5s | as+ld + cargo metadata |
-| Rust stdlib compile | N/A | Using syscall wrappers instead |
+Measured on macOS ARM64 (M3), `in` v0.7.1.
+
+| Workload | Cold | Warm (cached) | Notes |
+|----------|------:|---------------:|-------|
+| fib(30) JIT build | ~35 ms | <1 ms | process startup dominates cold |
+| fib(30) bytecode compile | ~1 ms | ~0.1 ms | parse + lower + emit |
+| Self-host parse (1965 fns) | ~175 ms | ~175 ms | Rust front → Core IR |
+| Space kernel compile | ~50 ms | ~30 ms | x86_64 boot image |
+| fib(30) bytecode runtime | ~1.6 s | — | bytecode VM, not JIT |
+
+### Performance notes
+
+- Cold times are dominated by the `in` binary's process startup (~30 ms), not by
+  the compiler pipeline. The actual parse/lower/emit for small programs is under
+  2 ms. A compiler daemon or resident LSP-style server would erase that startup.
+- The bytecode VM is currently the slowest path for compute-heavy code; the JIT
+  path is the intended default for hot loops. A register-based VM or a tier that
+  JITs hot bytecode paths would close the gap.
+- The Rust front is single-threaded and re-parses the entire module. Parallel
+  per-file parsing and incremental re-parse from the Core IR cache would speed up
+  self-host-style workloads.
+- The compile cache already works by source hash; the next win is avoiding
+  re-linking the runtime builtins when the source hasn't changed.
 
 ## Repository layout
 
@@ -140,22 +86,6 @@ Binary: **8.7MB** (release, LTO+strip), no LLVM dependency.
 | `in-cli/src/inrt.rs` | Builtin runtime — `.in` language stdlib |
 | `plugins/registry/` | Project accelerators |
 | `scripts/` | Validation, benchmarks, install |
-
-## Self-hosting
-
-```bash
-# Stage 0: build with cargo
-cargo build --release --bin in --features extended
-
-# Stage 1: build with itself (native backend)
-./target/release/in build --path in-cli/src/main.rs --out /tmp/in
-
-# Stage 2: verify bootstrap
-/tmp/in build --path in-cli/src/main.rs --out /tmp/in2
-```
-
-The native backend produces Mach-O 64-bit arm64 executables via `as`+`ld`,
-linking against libSystem for C ABI functions (`_exit`, etc.).
 
 ## License
 
