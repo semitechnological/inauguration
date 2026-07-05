@@ -10,18 +10,18 @@ Measured on macOS ARM64 (M3), `in` v0.7.1.
 | Functions typed | 1,965 |
 | Call edges | 4,815 |
 | Wall time | ~175 ms |
-| Backend | bytecode path (no `--out`) |
+| Backend | owned Core IR path (no `--out`) |
 
 A full native self-build (`--out /tmp/in`) is currently blocked by stdlib surface
-coverage; the parser/typechecker path through the bytecode backend exercises the
-full front end.
+coverage; the parser/typechecker path through the owned Core IR backend exercises
+the full front end.
 
 ## Language coverage
 
 | Language | Compile | Execute | Notes |
 |----------|:-------:|:-------:|-------|
-| `.in` | ✅ | ✅ | full language subset |
-| `.icore` | ✅ | ✅ | direct Core IR |
+| `.in` | ✅ | ✅ | full language subset, JIT |
+| `.icore` | ✅ | ✅ | direct Core IR, JIT |
 | `.rs` (simple) | ✅ | ✅ | native Mach-O via as+ld |
 | `.rs` (self-host) | ✅ | ⚠️ | parses/types; native blocked by stdlib |
 | `.zig` | ✅ | ✅ | simple functions |
@@ -31,11 +31,10 @@ full front end.
 
 ## Optimization opportunities
 
-1. **Process startup** — `in` cold invocations spend ~30 ms in binary load. A
-   compiler daemon would make repeated self-host checks nearly instant.
-2. **Rust front** — single-threaded parsing of 1,965 functions. Parallel
-   per-file parsing and incremental re-parse from the Core IR cache would cut
-   self-host time.
+1. **Process startup** — `in` cold invocations spend ~30 ms in binary load. Use
+   `in daemon start` to keep the compiler resident for repeated self-host checks.
+2. **Rust front** — parallel per-file parsing of external modules is now enabled;
+   next step is incremental re-parse from the Core IR cache.
 3. **Compile cache** — source-hash caching works; next step is to cache the
    lowered native code and avoid re-linking inrt builtins.
 4. **Stdlib surface** — native self-host needs thin C-ABI wrappers for the
