@@ -211,20 +211,43 @@ fn emit_x86_64_elf_executable(request: &NativeObjectRequest<'_>) -> NativeObject
 }
 
 fn emit_aarch64_freestanding_object(request: &NativeObjectRequest<'_>) -> NativeObjectArtifact {
-    let object = ElfObject {
-        code: aarch64_return_i32_object_code(request.exit_code),
-        export_name: request.entry.to_string(),
-    };
-    let mut bytes = Vec::new();
-    write_aarch64_relocatable_object(&object, &mut bytes);
-    NativeObjectArtifact {
-        bytes,
-        artifact_kind: "elf-relocatable-object",
-        backend_level: "owned-object-subset-freestanding",
-        runtime_level: "freestanding-none",
-        reason_code: "native-aarch64-unknown-none-freestanding",
-        reason: "inauguration owns ELF64 AArch64 relocatable object emission for const-evaluable scalar entry functions on freestanding target",
-        abi_manifest: Some(object_abi_manifest(request)),
+    // Use real AArch64 lowering for freestanding targets
+    match crate::native_emit::lower::lower_module(request.module, request.entry, NativeLinkage::StaticLib) {
+        Ok(result) => {
+            let mut bytes = Vec::new();
+            let object = ElfObject {
+                code: result.code,
+                export_name: request.entry.to_string(),
+            };
+            write_aarch64_relocatable_object(&object, &mut bytes);
+            NativeObjectArtifact {
+                bytes,
+                artifact_kind: "elf-relocatable-object",
+                backend_level: "owned-native-subset-freestanding",
+                runtime_level: "freestanding-none",
+                reason_code: "native-aarch64-unknown-none-freestanding",
+                reason: "inauguration owns ELF64 relocatable object emission for real AArch64 freestanding function bodies",
+                abi_manifest: Some(object_abi_manifest(request)),
+            }
+        }
+        Err(_err) => {
+            // Fallback to const-evaluated exit code for trivial functions
+            let object = ElfObject {
+                code: aarch64_return_i32_object_code(request.exit_code),
+                export_name: request.entry.to_string(),
+            };
+            let mut bytes = Vec::new();
+            write_aarch64_relocatable_object(&object, &mut bytes);
+            NativeObjectArtifact {
+                bytes,
+                artifact_kind: "elf-relocatable-object",
+                backend_level: "owned-object-subset",
+                runtime_level: "freestanding-none",
+                reason_code: "native-object-subset",
+                reason: "inauguration owns ELF64 AArch64 relocatable object emission for const-evaluable scalar entry functions on freestanding target",
+                abi_manifest: Some(object_abi_manifest(request)),
+            }
+        }
     }
 }
 
