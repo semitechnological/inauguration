@@ -720,6 +720,67 @@ mod tests {
     }
 
     #[test]
+    fn formats_package_lock_correctly() {
+        let lock_empty = PackageLock {
+            lock_version: "1".into(),
+            name: "hyperchat".into(),
+            version: "0.1.0".into(),
+            dependencies: BTreeMap::new(),
+        };
+
+        let formatted = format_package_lock(&lock_empty);
+        let expected = "\
+lock-version: 1
+name: hyperchat
+version: 0.1.0
+";
+        assert_eq!(formatted, expected);
+
+        let lock_full = PackageLock {
+            lock_version: "1".into(),
+            name: "hyperchat".into(),
+            version: "0.1.0".into(),
+            dependencies: BTreeMap::from([(
+                "postgres".into(),
+                PackageDependency {
+                    version: "1.2.3".into(),
+                    kind: Some("registry".into()),
+                    source: Some("https://registry.inauguration.dev".into()),
+                    rev: Some("abc123".into()),
+                    checksum: Some("sha256:deadbeef".into()),
+                    targets: vec!["macos".into(), "linux".into()],
+                    capabilities: vec!["network.http".into()],
+                    build: BTreeMap::from([("profile".into(), "release".into())]),
+                    install_path: Some("local_dep".into()),
+                },
+            )]),
+        };
+
+        let formatted_full = format_package_lock(&lock_full);
+        let expected_full = "\
+lock-version: 1
+name: hyperchat
+version: 0.1.0
+dependencies:
+  postgres:
+    version: 1.2.3
+    kind: registry
+    source: https://registry.inauguration.dev
+    rev: abc123
+    checksum: sha256:deadbeef
+    install_path: local_dep
+    targets:
+      - macos
+      - linux
+    capabilities:
+      - network.http
+    build:
+      profile: release
+";
+        assert_eq!(formatted_full, expected_full);
+    }
+
+    #[test]
     fn round_trips_package_lock_file() {
         let lock = PackageLock {
             lock_version: "1".into(),
