@@ -22,14 +22,8 @@ pub(crate) fn cmd_update(root: &Path) -> Result<()> {
     if in_cli.join("Cargo.lock").is_file() {
         cmd.arg("--locked");
     }
-    if let Ok(bin_dir) = std::env::var("IN_INSTALL_DIR") {
-        let trimmed = bin_dir.trim();
-        if !trimmed.is_empty() {
-            let bin_path = PathBuf::from(trimmed);
-            if let Some(root_dir) = bin_path.parent() {
-                cmd.arg("--root").arg(root_dir);
-            }
-        }
+    if let Some(root_dir) = crate::config::env_config().install_root() {
+        cmd.arg("--root").arg(root_dir);
     }
 
     run_cmd(&mut cmd)?;
@@ -42,23 +36,7 @@ pub(crate) fn cmd_update(root: &Path) -> Result<()> {
 }
 
 pub(crate) fn github_repo_slug_for_remote_install() -> String {
-    const DEFAULT: &str = "semitechnological/inauguration";
-    let raw = std::env::var("IN_REPO").unwrap_or_default();
-    let s = raw.trim();
-    if s.is_empty() {
-        return DEFAULT.to_string();
-    }
-    let ok = s.contains('/')
-        && s.matches('/').count() == 1
-        && !s.starts_with('/')
-        && s.chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '/');
-    if ok {
-        s.to_string()
-    } else {
-        eprintln!("warning: IN_REPO is not a valid owner/repo slug; using {DEFAULT}");
-        DEFAULT.to_string()
-    }
+    crate::config::env_config().github_repo_slug()
 }
 
 pub(crate) fn cmd_update_remote() -> Result<()> {

@@ -37,6 +37,7 @@ pub mod cargo_linker;
 pub mod compile_cache;
 pub mod compile_error;
 pub mod compiler;
+pub mod config;
 pub mod core_ir;
 pub mod core_ir_verifier;
 pub mod core_typecheck;

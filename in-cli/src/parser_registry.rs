@@ -389,8 +389,7 @@ fn parse_magic_parser_first_line(line: &str) -> Option<MagicParserDirective> {
 }
 
 pub fn resolve_parser_id(path: &Path, cli: ParserCli) -> ResolvedBuildParser {
-    let env_val = std::env::var("IN_PARSER").ok();
-    resolve_parser_id_with_env(path, cli, env_val.as_deref())
+    resolve_parser_id_with_env(path, cli, crate::config::env_config().parser_override.as_deref())
 }
 
 pub fn resolve_parser_id_with_env(

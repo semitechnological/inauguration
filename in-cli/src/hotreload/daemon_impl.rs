@@ -293,9 +293,7 @@ pub fn plan_patch_with_sil_graph(
 }
 
 fn sil_callee_driven_hotreload_enabled() -> bool {
-    std::env::var("IN_SIL_CALLEE_DRIVEN_HOTRELOAD")
-        .ok()
-        .is_some_and(|value| parse_env_bool_like_in(&value))
+    crate::config::env_config().sil_callee_driven_hotreload
 }
 
 pub fn symbols_for_path(path: &str) -> Vec<String> {
@@ -396,11 +394,6 @@ fn classify_change(path: &str, graph: &mut QueryGraph) -> Vec<String> {
 
 fn compile_check_swift(_path: &Path) -> bool {
     true
-}
-
-fn parse_env_bool_like_in(value: &str) -> bool {
-    let trimmed = value.trim();
-    trimmed == "1" || trimmed.eq_ignore_ascii_case("true")
 }
 
 fn graph_detail_from_sil(sil: &str, swiftc: bool) -> SilGraphDetail {
@@ -880,14 +873,6 @@ mod tests {
         assert_eq!(empty.edge_count(), Some(0));
     }
 
-    #[test]
-    fn hotreload_swiftc_graph_flag_uses_bool_env_semantics() {
-        assert!(parse_env_bool_like_in("1"));
-        assert!(parse_env_bool_like_in("true"));
-        assert!(parse_env_bool_like_in(" TRUE "));
-        assert!(!parse_env_bool_like_in("0"));
-        assert!(!parse_env_bool_like_in("false"));
-    }
 
     #[test]
     fn content_view_prefers_view_body_patch() {
