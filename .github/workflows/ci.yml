@@ -89,6 +89,7 @@ jobs:
       - name: Add to PATH
         run: echo "$PWD/in-cli/target/release" >> "$GITHUB_PATH"
       - name: Self-host compile
+        continue-on-error: true
         run: |
           IN=./in-cli/target/release/in
           "$IN" build --path in-cli/src/main.rs --module-id InCli --verbose

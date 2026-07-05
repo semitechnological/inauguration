@@ -12,7 +12,7 @@ cd "$ROOT"
   --module-id App \
   --parser auto
 
-# ponytail: min.icore (v2) uses `assign` which the bytecode backend doesn't support yet.
+# ponytail: min.icore (v2) uses `assign` which the JIT native backend doesn't support yet.
 # Keep the test but allow failure until assignment lowering is implemented.
 "${IN_BIN:-in}" build \
   --path apps/icore-sample/min.icore \
