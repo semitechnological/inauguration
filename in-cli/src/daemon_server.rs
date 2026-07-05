@@ -144,7 +144,7 @@ fn handle_eval(code: &str, parser: Option<&str>, _verbose: bool) -> DaemonRespon
     if report.success {
         DaemonResponse {
             success: true,
-            result: report.eval_exit_code.map(i64::from),
+            result: report.eval_result,
             report_json: None,
             output: None,
             error: None,

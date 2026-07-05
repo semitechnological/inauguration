@@ -71,6 +71,7 @@ pub struct OwnedCompileReport {
     pub cache_hit: bool,
     pub frontend_hash: Option<String>,
     pub eval_exit_code: Option<u8>,
+    pub eval_result: Option<i64>,
     pub error: Option<String>,
 }
 
@@ -190,6 +191,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
                 cache_hit: false,
                 frontend_hash: None,
                 eval_exit_code: None,
+                eval_result: None,
                 error: Some(err.to_string()),
             };
         }
@@ -258,6 +260,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         cache_hit: false,
         frontend_hash: Some(frontend_hash.clone()),
         eval_exit_code: None,
+        eval_result: None,
         error: None,
     };
 
@@ -475,6 +478,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
                 report.reason = Some(native_result.reason.to_string());
                 report.success = true;
                 report.eval_exit_code = native_result.eval_exit_code;
+                report.eval_result = native_result.eval_result;
                 report.executable_path = if request.linkage == NativeLinkage::Executable {
                     Some(native_result.artifact_path.clone())
                 } else {
@@ -525,6 +529,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
                     report.reason = Some(jit_result.reason.to_string());
                     report.success = true;
                     report.eval_exit_code = jit_result.eval_exit_code;
+                    report.eval_result = jit_result.eval_result;
                 }
                 Err(err) => {
                     report.backend_level = "owned-native-subset";
@@ -674,10 +679,11 @@ fn compile_jit(
     // code doesn't handle struct layouts correctly and crashes at runtime.
     // Only JIT-execute non-Rust (in-lang, icore) programs.
     let is_rust = request.path.extension().is_some_and(|e| e == "rs");
-    let exit_code = if is_rust {
-        0
+    let (exit_code, eval_result) = if is_rust {
+        (0, None)
     } else {
-        (unsafe { rt.invoke(&resolved_entry, &[]).unwrap_or(1) }) as u8
+        let raw = unsafe { rt.invoke(&resolved_entry, &[]).unwrap_or(1) };
+        (raw as u8, Some(raw))
     };
 
     let reason_code = if is_rust {
@@ -694,6 +700,7 @@ fn compile_jit(
     Ok(NativeCompileResult {
         artifact_path: String::new(),
         eval_exit_code: Some(exit_code),
+        eval_result,
         abi_path: None,
         backend_level: "owned-native-jit",
         runtime_level: "inrt-jit",
@@ -739,6 +746,7 @@ fn compile_native(
             return Ok(NativeCompileResult {
                 artifact_path: out_path.display().to_string(),
                 eval_exit_code: Some(exit),
+                eval_result: None,
                 abi_path: None,
                 backend_level: "owned-native-subset-aarch64-app",
                 runtime_level: "macos-app-bundle",
@@ -760,6 +768,7 @@ fn compile_native(
             return Ok(NativeCompileResult {
                 artifact_path: out_path.display().to_string(),
                 eval_exit_code: Some(exit),
+                eval_result: None,
                 abi_path: None,
                 backend_level: "owned-native-subset-x86_64-appdir",
                 runtime_level: "linux-appdir",
@@ -796,6 +805,7 @@ fn compile_native(
                 } else {
                     None
                 },
+                eval_result: None,
                 abi_path,
                 backend_level: artifact.backend_level,
                 runtime_level: artifact.runtime_level,
@@ -820,6 +830,7 @@ fn compile_native(
     Ok(NativeCompileResult {
         artifact_path: out_path.display().to_string(),
         eval_exit_code: eval_exit,
+        eval_result: None,
         abi_path: abi_path.map(|path| path.display().to_string()),
         backend_level: "owned-native-subset",
         runtime_level: "inrt-native",
@@ -1088,6 +1099,7 @@ fn set_native_artifact_permissions(_path: &Path, _linkage: NativeLinkage) -> Res
 struct NativeCompileResult {
     artifact_path: String,
     eval_exit_code: Option<u8>,
+    eval_result: Option<i64>,
     abi_path: Option<String>,
     backend_level: &'static str,
     runtime_level: &'static str,
