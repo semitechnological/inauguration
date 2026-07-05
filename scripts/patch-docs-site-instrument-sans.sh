@@ -18,7 +18,10 @@ google_fonts = """<link rel="preconnect" href="https://fonts.googleapis.com">
 
 for path in dist.rglob("*.html"):
     text = path.read_text(encoding="utf-8")
-    
+
+    # crepus web <0.9.18 emits void <br> as <br></br> (double line breaks in browsers)
+    text = text.replace("<br></br>", "<br>")
+
     # Inject Google Fonts if not already present
     if "fonts.googleapis.com" not in text and "<head>" in text:
         text = text.replace("<head>", f"<head>\n{google_fonts}")

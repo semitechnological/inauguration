@@ -26,7 +26,10 @@ in languages --json
 
 ## Build site
 
+Requires **crepuscularity-cli ≥ 0.9.18** (void `<br>` SSR) or `CREPU_ROOT` pointing at a matching checkout. `build-docs-site.sh` falls back to `CREPU_ROOT` when `crepus` on PATH is older.
+
 ```bash
+cargo install crepuscularity-cli --version 0.9.18 --locked   # if needed
 ./scripts/build-docs-site.sh
 # or: in execute docs-site/backend.in
 ```
