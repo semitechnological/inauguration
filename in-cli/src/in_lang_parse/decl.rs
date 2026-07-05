@@ -306,7 +306,7 @@ pub(crate) fn parse_interface_method_sigs(inner: &str) -> Result<Vec<MethodSig>,
         let rest = trim(line.strip_prefix("fn ").ok_or_else(|| {
             format!(".in: interface body may only contain method signatures, got `{line}`")
         })?);
-        let (name, params, ret) = parse_fn_header(rest);
+        let (name, params, ret) = parse_fn_header(rest)?;
         if name.is_empty() {
             return Err(format!(".in: interface method name missing in `{line}`"));
         }
@@ -349,14 +349,14 @@ pub(crate) fn parse_fn_block(
         .ok_or_else(|| format!(".in at line {fn_line}: expected `fn`"))?;
     if let Some(brace_idx) = find_fn_body_open_brace(rest) {
         let header = trim(&rest[..brace_idx]);
-        let (name, params, ret) = parse_fn_header(header);
+        let (name, params, ret) = parse_fn_header(header)?;
         let body_inner = brace_content_after_open(rest, brace_idx)
             .ok_or_else(|| format!(".in at line {fn_line}: unclosed `{{` in function body"))?;
         let body =
             parse_function_body(body_inner).map_err(|e| format!(".in at line {fn_line}: {e}"))?;
         Ok((name, params, ret, body))
     } else {
-        let (name, params, ret) = parse_fn_header(rest);
+        let (name, params, ret) = parse_fn_header(rest)?;
         Ok((name, params, ret, Vec::new()))
     }
 }
@@ -386,7 +386,7 @@ pub(crate) fn parse_extern_fn_block(block: &str) -> Result<InExternBinding, Stri
         } else {
             (header, Vec::new())
         };
-    let (name, _, _) = parse_fn_header(header);
+    let (name, _, _) = parse_fn_header(header)?;
     if name.is_empty() {
         return Err(".in: extern function name missing".into());
     }

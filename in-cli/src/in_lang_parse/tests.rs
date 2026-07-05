@@ -31,6 +31,12 @@ fn void_return_case_insensitive() {
 }
 
 #[test]
+fn rejects_malformed_param_without_type() {
+    let err = parse_in_source("fn main(bad) -> void\n").expect_err("param");
+    assert!(err.contains("name: Type") || err.contains("parameter"));
+}
+
+#[test]
 fn rejects_duplicate() {
     let err = parse_in_source("fn main() -> void\nfn main() -> void\n").expect_err("dup");
     assert!(err.contains("duplicate"));
