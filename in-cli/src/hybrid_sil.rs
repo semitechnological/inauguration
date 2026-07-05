@@ -303,6 +303,46 @@ mod tests {
     }
 
     #[test]
+    fn remove_debug_insts_with_instruction_callers_removes_debug() {
+        let artifact = SilArtifact {
+            function_id: "main".into(),
+            cfg_blocks: vec!["bb0".into()],
+            instructions: vec![
+                "debug_value %0".into(),
+                "%1 = function_ref @a : $@convention(thin)".into(),
+                "debug_value %2".into(),
+            ],
+            instruction_callers: vec!["main".into(), "main".into(), "main".into()],
+            functions: vec![],
+        };
+        let cleaned = remove_debug_insts(&artifact);
+        assert_eq!(cleaned.instructions.len(), 1);
+        assert_eq!(cleaned.instructions[0], "%1 = function_ref @a : $@convention(thin)");
+        assert_eq!(cleaned.instruction_callers.len(), 1);
+        assert_eq!(cleaned.instruction_callers[0], "main");
+    }
+
+    #[test]
+    fn remove_debug_insts_legacy_missing_instruction_callers_removes_debug() {
+        let artifact = SilArtifact {
+            function_id: "main".into(),
+            cfg_blocks: vec!["bb0".into()],
+            instructions: vec![
+                "debug_value %0".into(),
+                "%1 = function_ref @a : $@convention(thin)".into(),
+                "debug_value %2".into(),
+            ],
+            instruction_callers: vec![],
+            functions: vec![],
+        };
+        let cleaned = remove_debug_insts(&artifact);
+        assert_eq!(cleaned.instructions.len(), 1);
+        assert_eq!(cleaned.instructions[0], "%1 = function_ref @a : $@convention(thin)");
+        assert_eq!(cleaned.instruction_callers.len(), 1);
+        assert_eq!(cleaned.instruction_callers[0], "main");
+    }
+
+    #[test]
     fn merged_multi_function_sil_records_each_function() {
         let artifact = parse_textual_sil(concat!(
             "sil @helper\nbb0:\n",
