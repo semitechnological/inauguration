@@ -593,24 +593,30 @@ fn compile_jit(
     // Lazy dependency resolution: before lowering, resolve external
     // function calls by loading their source crates.
     let crate_db = crate::crate_db::CrateDb::new();
-    // Register the std crate (found via sysroot or vendor)
-    for root in &crate_db.search_roots {
-        let std_root = root.join("std");
-        if std_root.join("src").exists() {
-            crate_db.register_crate("std", std_root);
-            break;
-        }
-    }
-    // Register core and alloc too
-    for name in &["core", "alloc"] {
-        for root in &crate_db.search_roots {
-            let crate_root = root.join(name);
-            if crate_root.join("src").exists() {
-                crate_db.register_crate(name, crate_root);
-                break;
+    // Register std, core, alloc in parallel — each crate search is I/O bound.
+    std::thread::scope(|s| {
+        let crate_db = &crate_db;
+        s.spawn(move || {
+            for root in &crate_db.search_roots {
+                let std_root = root.join("std");
+                if std_root.join("src").exists() {
+                    crate_db.register_crate("std", std_root);
+                    break;
+                }
             }
-        }
-    }
+        });
+        s.spawn(move || {
+            for name in &["core", "alloc"] {
+                for root in &crate_db.search_roots {
+                    let crate_root = root.join(name);
+                    if crate_root.join("src").exists() {
+                        crate_db.register_crate(name, crate_root);
+                        break;
+                    }
+                }
+            }
+        });
+    });
 
     let resolved_module = crate::dep_resolver::resolve_deps(module, &crate_db);
     let expanded_module = &resolved_module.module;
