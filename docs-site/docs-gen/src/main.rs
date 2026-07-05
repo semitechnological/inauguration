@@ -55,19 +55,34 @@ fn arg_value(args: &[String], flag: &str) -> Option<String> {
     args.get(i + 1).cloned()
 }
 
-/// Published doc order; `benchmarks/*` is a section like crepuscularity topic groups.
-const NAV_ORDER: &[&str] = &[
-    "in-language",
-    "general-compiler",
-    "multi-frontend-ir",
-    "languages",
-    "parser-surface",
-    "native-backend",
-    "docs-site",
-    "benchmarks/README",
-    "benchmarks/jit",
-    "benchmarks/polyglot-compilers",
-    "benchmarks/self-host-vs-native",
+/// Sidebar sections (label, page key, short nav label).
+const NAV_SECTIONS: &[(&str, &[(&str, &str)])] = &[
+    (
+        "Language & IR",
+        &[
+            ("in-language", "inlang (.in)"),
+            ("multi-frontend-ir", "Multi-front Core IR"),
+            ("languages", "Language fronts"),
+            ("parser-surface", "Parser surface"),
+        ],
+    ),
+    (
+        "Compiler",
+        &[
+            ("general-compiler", "General compiler"),
+            ("native-backend", "Native / JIT"),
+            ("docs-site", "Docs-site"),
+        ],
+    ),
+    (
+        "Benchmarks",
+        &[
+            ("benchmarks/README", "Overview"),
+            ("benchmarks/jit", "JIT"),
+            ("benchmarks/polyglot-compilers", "Polyglot vs native"),
+            ("benchmarks/self-host-vs-native", "Self-host vs rustc"),
+        ],
+    ),
 ];
 
 fn generate_docs(
@@ -221,39 +236,70 @@ fn brand_href(web_key: &str) -> String {
     format!("{}index.html", "../".repeat(ups))
 }
 
-fn render_nav(pages: &[(String, String)], current: &str) -> String {
-    let order: Vec<&(String, String)> = {
-        let mut seen = HashSet::new();
-        let mut ordered = Vec::new();
-        for key in NAV_ORDER {
-            if let Some(p) = pages.iter().find(|(s, _)| s == key) {
-                if seen.insert(p.0.clone()) {
-                    ordered.push(p);
-                }
-            }
+fn nav_link_class(key: &str, current: &str) -> String {
+    let nested = key.starts_with("benchmarks/") && key != "benchmarks/README";
+    if key == current {
+        if nested {
+            return " class=\"active doc-nav-nested\"".into();
         }
-        for p in pages {
-            if seen.insert(p.0.clone()) {
-                ordered.push(p);
-            }
-        }
-        ordered
-    };
+        return " class=\"active\"".into();
+    }
+    if nested {
+        return " class=\"doc-nav-nested\"".into();
+    }
+    String::new()
+}
 
-    let mut items = String::new();
-    for (web_key, page_title) in order {
-        let active = if web_key == current {
-            " class=\"active\""
-        } else {
-            ""
-        };
+fn render_nav(pages: &[(String, String)], current: &str) -> String {
+    let present: HashSet<&str> = pages.iter().map(|(k, _)| k.as_str()).collect();
+
+    let mut out = String::from("<nav aria-label=\"Documentation\" class=\"doc-nav\">");
+    for (section, entries) in NAV_SECTIONS {
+        let mut section_items = String::new();
+        for (key, label) in *entries {
+            if !present.contains(key) {
+                continue;
+            }
+            let href = doc_href(current, key);
+            let cls = nav_link_class(key, current);
+            section_items.push_str(&format!(
+                "<li><a href=\"{href}\"{cls}>{}</a></li>",
+                esc(label)
+            ));
+        }
+        if section_items.is_empty() {
+            continue;
+        }
+        out.push_str(&format!(
+            "<div class=\"doc-nav-section\">{}</div><ul class=\"doc-nav-list\">{section_items}</ul>",
+            esc(section)
+        ));
+    }
+
+    let listed: HashSet<&str> = NAV_SECTIONS
+        .iter()
+        .flat_map(|(_, e)| e.iter().map(|(k, _)| *k))
+        .collect();
+    let mut extras = String::new();
+    for (web_key, page_title) in pages {
+        if listed.contains(web_key.as_str()) {
+            continue;
+        }
         let href = doc_href(current, web_key);
-        items.push_str(&format!(
-            "<li><a href=\"{href}\"{active}>{}</a></li>",
+        let cls = nav_link_class(&web_key, current);
+        extras.push_str(&format!(
+            "<li><a href=\"{href}\"{cls}>{}</a></li>",
             esc(page_title)
         ));
     }
-    format!("<nav aria-label=\"Documentation\"><ul class=\"doc-nav\">{items}</ul></nav>")
+    if !extras.is_empty() {
+        out.push_str(&format!(
+            "<div class=\"doc-nav-section\">More</div><ul class=\"doc-nav-list\">{extras}</ul>"
+        ));
+    }
+
+    out.push_str("</nav>");
+    out
 }
 
 fn render_shell(
@@ -289,9 +335,13 @@ fn render_shell(
   aside{{position:sticky;top:0;height:100vh;overflow-y:auto;padding:1.5rem;border-right:1px solid {b};background:color-mix(in srgb,{s} 92%,white 8%)}}
   .brand{{font-weight:700;font-size:.95rem;color:{t};display:block;margin-bottom:1rem}}
   .brand:hover{{opacity:.85;text-decoration:none}}
-  .doc-nav{{list-style:none;padding:0;margin:0;font-size:.875rem}}
-  .doc-nav li{{margin:.35rem 0}}
+  .doc-nav{{font-size:.875rem}}
+  .doc-nav-section{{margin-top:1.1rem;font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:{m};opacity:.9}}
+  .doc-nav-section:first-of-type{{margin-top:0}}
+  .doc-nav-list{{list-style:none;padding:0;margin:.35rem 0 0}}
+  .doc-nav-list li{{margin:.28rem 0}}
   .doc-nav a{{color:{m}}}
+  .doc-nav a.doc-nav-nested{{padding-left:.65rem;display:inline-block}}
   .doc-nav a.active{{color:{a};font-weight:600}}
   .doc-nav a:hover{{color:{t}}}
   article{{max-width:45rem;margin:0 auto;padding:1.5rem 2rem 3rem}}
