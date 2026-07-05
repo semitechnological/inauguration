@@ -272,4 +272,40 @@ mod tests {
         assert_eq!(output.data.len(), 16);
         assert_eq!(output.entry_offset, Some(0));
     }
+
+    #[test]
+    fn returns_error_for_unsupported_macho_target() {
+        let result = select_backend(&spec("x86_64-apple-darwin", Executable));
+        match result {
+            Err(BackendError::UnsupportedTarget(target, kind)) => {
+                assert_eq!(target, "x86_64-apple-darwin");
+                assert_eq!(kind, Executable);
+            }
+            _ => panic!("Expected UnsupportedTarget error, got {:?}", result),
+        }
+    }
+
+    #[test]
+    fn returns_error_for_unsupported_elf_target() {
+        let result = select_backend(&spec("riscv64-unknown-linux-gnu", Executable));
+        match result {
+            Err(BackendError::UnsupportedTarget(target, kind)) => {
+                assert_eq!(target, "riscv64-unknown-linux-gnu");
+                assert_eq!(kind, Executable);
+            }
+            _ => panic!("Expected UnsupportedTarget error, got {:?}", result),
+        }
+    }
+
+    #[test]
+    fn returns_error_for_unsupported_coff_target() {
+        let result = select_backend(&spec("riscv64-pc-windows-msvc", Executable));
+        match result {
+            Err(BackendError::UnsupportedTarget(target, kind)) => {
+                assert_eq!(target, "riscv64-pc-windows-msvc");
+                assert_eq!(kind, Executable);
+            }
+            _ => panic!("Expected UnsupportedTarget error, got {:?}", result),
+        }
+    }
 }
