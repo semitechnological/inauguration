@@ -581,7 +581,7 @@ fn compile_jit(
     request: &OwnedCompileRequest,
 ) -> Result<NativeCompileResult, String> {
     use crate::native_emit::NativeLinkage;
-    use crate::native_emit::lower::{host_supports_native_subset, lower_module};
+    use crate::native_emit::lower::host_supports_native_subset;
 
     if !host_supports_native_subset() {
         return Err(
@@ -655,8 +655,14 @@ fn compile_jit(
             external_refs: Vec::new(),
         }
     } else {
-        lower_module(expanded_module, &resolved_entry, NativeLinkage::Executable)
-            .map_err(|e| format!("jit-lowering-failed: {e}"))?
+        let jobs = jobs_for_request(request);
+        crate::native_emit::lower::lower_module_with_jobs(
+            expanded_module,
+            &resolved_entry,
+            NativeLinkage::Executable,
+            jobs,
+        )
+        .map_err(|e| format!("jit-lowering-failed: {e}"))?
     };
 
     // Build function offset table for all compiled functions
