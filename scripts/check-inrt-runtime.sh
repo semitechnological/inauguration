@@ -6,7 +6,7 @@ echo "=== inrt runtime check ==="
 SRC=$(mktemp -d)/answer.in
 trap 'rm -f "$SRC"' EXIT
 
-echo 'fn answer() -> Int { return 42; }' > "$SRC"
+echo -e 'fn answer() -> Int { return 42; }\nfn main() -> void { return; }' > "$SRC"
 
 export IN_DEV_BIN="${IN_DEV_BIN:-cargo run --manifest-path in-cli/Cargo.toml --}"
 
@@ -16,8 +16,8 @@ else
   IN_BIN="cargo run --manifest-path in-cli/Cargo.toml --"
 fi
 
-echo "--- owned bytecode compile ---"
-$IN_BIN compile --path "$SRC" --target bytecode --entry answer --out /tmp/inrt-test.bca
+echo "--- owned JIT compile & run ---"
+$IN_BIN compile --path "$SRC" --target jit --entry answer --out /tmp/inrt-test.bin
 
 echo "--- owned native compile ---"
 $IN_BIN compile --path "$SRC" --target native --entry answer --out /tmp/inrt-test.bin 2>&1 || true
