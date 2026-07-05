@@ -5,7 +5,7 @@ pub struct LanguageSupport {
     pub language: &'static str,
     pub parser_id: Option<&'static str>,
     pub extensions: &'static [&'static str],
-    /// Capabilities this frontend supports: parse, lower, typecheck, boundary, bytecode
+    /// Capabilities this frontend supports: parse, lower, typecheck, boundary, jit
     pub capabilities: &'static [&'static str],
     pub front: &'static str,
     pub runtime_boundary: &'static str,
@@ -26,8 +26,8 @@ impl LanguageSupport {
     pub fn can_boundary(&self) -> bool {
         self.capabilities.contains(&"boundary")
     }
-    pub fn can_bytecode(&self) -> bool {
-        self.capabilities.contains(&"bytecode")
+    pub fn can_jit(&self) -> bool {
+        self.capabilities.contains(&"jit")
     }
 }
 
@@ -36,9 +36,9 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "in",
         parser_id: Some("in"),
         extensions: &["in"],
-        capabilities: &["parse", "lower", "typecheck", "boundary", "bytecode"],
+        capabilities: &["parse", "lower", "typecheck", "boundary"],
         front: "in_lang_parse",
-        runtime_boundary: "self-hosted Core IR to textual SIL and bytecode VM subset",
+        runtime_boundary: "self-hosted Core IR to textual SIL and in-memory JIT",
         example: "apps/polyglot-sample/sample.in",
         next_step: "Deepen closure runtime semantics, package binding execution boundaries, and richer class/interface lowering",
     },
@@ -46,9 +46,9 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "icore",
         parser_id: Some("icore"),
         extensions: &["icore"],
-        capabilities: &["parse", "lower", "typecheck", "boundary", "bytecode"],
+        capabilities: &["parse", "lower", "typecheck", "boundary"],
         front: "compiler::icore",
-        runtime_boundary: "self-hosted Core IR to textual SIL and bytecode VM subset",
+        runtime_boundary: "self-hosted Core IR to textual SIL and in-memory JIT",
         example: "apps/polyglot-sample/sample.icore",
         next_step: "Keep schema stable and add conformance fixtures from external emitters",
     },
@@ -86,7 +86,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "V",
         parser_id: Some("v"),
         extensions: &["v"],
-        capabilities: &["parse", "lower", "typecheck", "boundary", "bytecode"],
+        capabilities: &["parse", "lower", "typecheck", "boundary"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL",
         example: "apps/polyglot-sample/sample.v",
@@ -156,9 +156,9 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "JavaScript",
         parser_id: Some("javascript"),
         extensions: &["js", "mjs", "cjs", "jsx"],
-        capabilities: &["parse", "lower", "typecheck", "boundary", "bytecode"],
+        capabilities: &["parse", "lower", "typecheck", "boundary"],
         front: "compiler::tree_front",
-        runtime_boundary: "Core IR, Boundary IR, textual SIL, and owned bytecode VM subset; JS runtime is not bundled",
+        runtime_boundary: "Core IR, Boundary IR, textual SIL, and in-memory JIT; JS runtime is not bundled",
         example: "apps/polyglot-sample/sample.js",
         next_step: "Expand class/closure/arrow semantics beyond the bounded entrypoint subset and define JS runtime strategy",
     },
@@ -166,9 +166,9 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "TypeScript",
         parser_id: Some("typescript"),
         extensions: &["ts", "tsx", "mts", "cts"],
-        capabilities: &["parse", "lower", "typecheck", "boundary", "bytecode"],
+        capabilities: &["parse", "lower", "typecheck", "boundary"],
         front: "compiler::tree_front",
-        runtime_boundary: "Core IR, Boundary IR, textual SIL, and owned bytecode VM subset; TS checker/runtime is not bundled",
+        runtime_boundary: "Core IR, Boundary IR, textual SIL, and in-memory JIT; TS checker/runtime is not bundled",
         example: "apps/polyglot-sample/sample.ts",
         next_step: "Expand typed class/arrow semantics beyond the bounded entrypoint subset and define TS checker/runtime strategy",
     },
@@ -396,7 +396,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "Odin",
         parser_id: Some("odin"),
         extensions: &["odin"],
-        capabilities: &["parse", "lower", "typecheck", "boundary", "bytecode"],
+        capabilities: &["parse", "lower", "typecheck", "boundary"],
         front: "compiler::odin_boundary",
         runtime_boundary: "Core IR and textual SIL; Odin runtime is not bundled",
         example: "apps/polyglot-sample/sample.odin",
@@ -509,7 +509,6 @@ mod tests {
                 .iter()
                 .find(|entry| entry.language == language)
                 .expect(language);
-            assert!(entry.can_bytecode(), "{} should support bytecode", language);
             assert!(entry.can_boundary(), "{} should support boundary", language);
         }
     }
@@ -529,7 +528,6 @@ mod tests {
                 .iter()
                 .find(|entry| entry.language == language)
                 .expect(language);
-            assert!(entry.can_bytecode(), "{language} should support bytecode");
             assert!(entry.can_boundary(), "{language} should support boundary");
             assert!(entry.runtime_boundary.contains("Boundary IR"), "{language}");
         }

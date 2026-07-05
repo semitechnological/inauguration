@@ -52,13 +52,11 @@ enum PackageCommands {
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum BackendTargetCli {
-    Bytecode,
     Native,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum CompileTargetCli {
-    Bytecode,
     Native,
     Jit,
 }
@@ -267,28 +265,6 @@ enum Commands {
         #[arg(long, default_value_t = 60)]
         debounce_ms: u64,
     },
-    #[command(about = "Compile and execute bytecode (self-hosted backend)")]
-    ExecuteBytecode {
-        #[arg(help = "Source file path (.in, .icore, .go, .v, .rs, etc.)")]
-        path: String,
-        #[arg(long, default_value = "App")]
-        module_id: String,
-        #[arg(long, default_value_t = false)]
-        verbose: bool,
-    },
-    #[command(about = "Compile source to bytecode assembly")]
-    CompileBytecode {
-        #[arg(help = "Source file path (.in, .icore, .go, .v, .rs, etc.)")]
-        path: String,
-        #[arg(long, default_value = "App")]
-        module_id: String,
-        #[arg(long, value_enum, default_value_t = ParserCli::Auto)]
-        parser: ParserCli,
-        #[arg(long, short = 'o')]
-        out: String,
-        #[arg(long, default_value_t = false)]
-        verbose: bool,
-    },
     #[command(about = "Compile source through owned inauguration pipeline")]
     Compile {
         #[arg(long)]
@@ -320,10 +296,12 @@ enum Commands {
         #[arg(long)]
         metadata: Option<String>,
     },
-    #[command(about = "Run bytecode assembly")]
-    RunBytecode {
-        #[arg(help = "Bytecode assembly path (.bca)")]
+    #[command(about = "Compile and execute a source file via JIT")]
+    Execute {
+        #[arg(help = "Source file path (.in, .icore, .go, .v, .rs, etc.)")]
         path: String,
+        #[arg(long, default_value = "App")]
+        module_id: String,
         #[arg(long, default_value_t = false)]
         verbose: bool,
     },
@@ -577,25 +555,6 @@ fn run() -> Result<()> {
             &metrics,
             debounce_ms,
         ),
-        Commands::ExecuteBytecode {
-            path,
-            module_id,
-            verbose,
-        } => crate::compile::cmd_execute_bytecode(&invocation_cwd, &path, &module_id, verbose),
-        Commands::CompileBytecode {
-            path,
-            module_id,
-            parser,
-            out,
-            verbose,
-        } => crate::compile::cmd_compile_bytecode(
-            &invocation_cwd,
-            &path,
-            &module_id,
-            parser,
-            &out,
-            verbose,
-        ),
         Commands::Compile {
             path,
             target,
@@ -628,9 +587,11 @@ fn run() -> Result<()> {
             base.as_deref(),
             metadata.as_deref(),
         ),
-        Commands::RunBytecode { path, verbose } => {
-            crate::compile::cmd_run_bytecode(&invocation_cwd, &path, verbose)
-        }
+        Commands::Execute {
+            path,
+            module_id,
+            verbose,
+        } => crate::compile::cmd_execute(&invocation_cwd, &path, &module_id, verbose),
         Commands::Backend {
             path,
             module_id,
@@ -688,7 +649,7 @@ fn run() -> Result<()> {
                             cmd_compile(
                                 &invocation_cwd,
                                 &bin_str,
-                                CompileTargetCli::Bytecode,
+                                CompileTargetCli::Jit,
                                 &out.to_string_lossy(),
                                 &module_id,
                                 parser_registry::ParserCli::Auto,
@@ -702,7 +663,7 @@ fn run() -> Result<()> {
                                 None,
                                 None,
                             )?;
-                            return crate::compile::cmd_execute_bytecode(
+                            return crate::compile::cmd_execute(
                                 &invocation_cwd,
                                 &bin_str,
                                 &module_id,
@@ -731,7 +692,7 @@ fn run() -> Result<()> {
                             cmd_compile(
                                 &invocation_cwd,
                                 s,
-                                CompileTargetCli::Bytecode,
+                                CompileTargetCli::Jit,
                                 &out.to_string_lossy(),
                                 &module_id,
                                 parser_registry::ParserCli::Auto,
@@ -745,7 +706,7 @@ fn run() -> Result<()> {
                                 None,
                                 None,
                             )?;
-                            return crate::compile::cmd_execute_bytecode(
+                            return crate::compile::cmd_execute(
                                 &invocation_cwd,
                                 s,
                                 &module_id,
@@ -1035,9 +996,9 @@ mod tests {
             "--path",
             "apps/in-sample/hello.in",
             "--target",
-            "bytecode",
+            "jit",
             "--out",
-            "target/hello.bca",
+            "target/hello",
             "--module-id",
             "Hello",
             "--parser",
@@ -1062,8 +1023,8 @@ mod tests {
                 ..
             } => {
                 assert_eq!(path, "apps/in-sample/hello.in");
-                assert!(matches!(target, CompileTargetCli::Bytecode));
-                assert_eq!(out, "target/hello.bca");
+                assert!(matches!(target, CompileTargetCli::Jit));
+                assert_eq!(out, "target/hello");
                 assert_eq!(module_id, "Hello");
                 assert!(matches!(parser, ParserCli::In));
                 assert_eq!(entry.as_deref(), Some("main"));
@@ -1151,76 +1112,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_compile_bytecode_subcommand() {
-        let cli = Cli::try_parse_from([
-            "in",
-            "compile-bytecode",
-            "hello.in",
-            "--module-id",
-            "Hello",
-            "--parser",
-            "in",
-            "--out",
-            "target/hello.bca",
-        ])
-        .expect("cli parse");
-        match cli.command {
-            Commands::CompileBytecode {
-                path,
-                module_id,
-                parser,
-                out,
-                verbose,
-            } => {
-                assert_eq!(path, "hello.in");
-                assert_eq!(module_id, "Hello");
-                assert!(matches!(parser, ParserCli::In));
-                assert_eq!(out, "target/hello.bca");
-                assert!(!verbose);
-            }
-            _ => panic!("expected compile-bytecode command"),
-        }
-    }
-
-    #[test]
-    fn parse_run_bytecode_subcommand() {
-        let cli = Cli::try_parse_from(["in", "run-bytecode", "target/hello.bca", "--verbose"])
-            .expect("cli parse");
-        match cli.command {
-            Commands::RunBytecode { path, verbose } => {
-                assert_eq!(path, "target/hello.bca");
-                assert!(verbose);
-            }
-            _ => panic!("expected run-bytecode command"),
-        }
-    }
-
-    #[test]
-    fn parse_execute_bytecode_subcommand() {
-        let cli = Cli::try_parse_from([
-            "in",
-            "execute-bytecode",
-            "apps/in-sample/hello.in",
-            "--module-id",
-            "Hello",
-            "--verbose",
-        ])
-        .expect("cli parse");
-        match cli.command {
-            Commands::ExecuteBytecode {
-                path,
-                module_id,
-                verbose,
-            } => {
-                assert_eq!(path, "apps/in-sample/hello.in");
-                assert_eq!(module_id, "Hello");
-                assert!(verbose);
-            }
-            _ => panic!("expected execute-bytecode command"),
-        }
-    }
-
-    #[test]
     fn parse_backend_report_subcommand() {
         let cli = Cli::try_parse_from([
             "in",
@@ -1228,7 +1119,7 @@ mod tests {
             "--path",
             "apps/in-sample/hello.in",
             "--target",
-            "bytecode",
+            "native",
             "--json",
         ])
         .expect("cli parse");
@@ -1237,7 +1128,7 @@ mod tests {
                 path, target, json, ..
             } => {
                 assert_eq!(path, "apps/in-sample/hello.in");
-                assert!(matches!(target, BackendTargetCli::Bytecode));
+                assert!(matches!(target, BackendTargetCli::Native));
                 assert!(json);
             }
             _ => panic!("expected backend command"),
@@ -1283,6 +1174,31 @@ mod tests {
         for argv in [["in", "update"], ["in", "self-update"]] {
             let cli = Cli::try_parse_from(argv).expect("cli parse");
             assert!(matches!(cli.command, Commands::Update));
+        }
+    }
+
+    #[test]
+    fn parse_execute_subcommand() {
+        let cli = Cli::try_parse_from([
+            "in",
+            "execute",
+            "apps/in-sample/hello.in",
+            "--module-id",
+            "Hello",
+            "--verbose",
+        ])
+        .expect("cli parse");
+        match cli.command {
+            Commands::Execute {
+                path,
+                module_id,
+                verbose,
+            } => {
+                assert_eq!(path, "apps/in-sample/hello.in");
+                assert_eq!(module_id, "Hello");
+                assert!(verbose);
+            }
+            _ => panic!("expected execute command"),
         }
     }
 
@@ -1366,7 +1282,7 @@ mod tests {
         assert!(
             crate::cli_test::test_step_names()
                 .iter()
-                .any(|step| step.contains("check-bytecode-compiler.sh"))
+                .any(|step| step.contains("check-jit-compiler.sh"))
         );
         assert!(
             crate::cli_test::test_step_names()
@@ -1401,7 +1317,7 @@ mod tests {
         assert!(
             steps
                 .iter()
-                .any(|step| step.contains("check-bytecode-compiler.sh"))
+                .any(|step| step.contains("check-jit-compiler.sh"))
         );
         assert!(
             steps

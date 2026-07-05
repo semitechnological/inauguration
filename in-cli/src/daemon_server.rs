@@ -87,7 +87,6 @@ fn parser_from_cli(s: Option<&str>) -> ParserCli {
 fn target_from_cli(s: Option<&str>) -> CompileTarget {
     match s.as_deref() {
         Some("native") => CompileTarget::Native,
-        Some("bytecode") => CompileTarget::Bytecode,
         Some("jit") | Some(_) | None => CompileTarget::Jit,
     }
 }

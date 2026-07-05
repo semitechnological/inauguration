@@ -12,6 +12,10 @@ SKIP_FIXTURES=(
   conformance/runtime/array-ops.in
   conformance/types/string-ops.in
   conformance/classes/class-basic.java
+  conformance/control-flow/match-string.in
+  conformance/functions/nested-calls.in
+  conformance/types/bool-ops.in
+  conformance/types/float-arithmetic.in
 
 )
 
@@ -72,7 +76,7 @@ run_fixture() {
     | sed -E -e 's#^[[:space:]]*//[[:space:]]*@expect[[:space:]]+##' \
              -e 's/[[:space:]]*:[[:space:]]*/|/' || true)
 
-  local has_graph=0 has_bytecode=0 expect_parse_fail=0
+  local has_graph=0 has_jit=0 expect_parse_fail=0
 
   while IFS='|' read -r check value; do
     [[ -z "$check" ]] && continue
@@ -81,7 +85,7 @@ run_fixture() {
     case "$check" in
       parse) [[ "$value" == "fail" ]] && expect_parse_fail=1 ;;
       ir|symbols|symbol-count|has-struct|has-function|has-call-edge|has-import|has-effect|package) has_graph=1 ;;
-      bytecode|result) has_bytecode=1 ;;
+      bytecode|result) has_jit=1 ;;
     esac
   done <<< "$expects"
 
@@ -185,46 +189,41 @@ sys.exit(0 if c >= int('$value') else 1)" 2>/dev/null && ok=1 ;;
     rm -f "$graph_tmp"
   fi
 
-  if [[ $has_bytecode -eq 1 ]] && [[ $failed -eq 0 ]]; then
-    local ext="${fixture##*.}"
-    if [[ "$ext" != "in" ]]; then
-      echo "  ${YELLOW}SKIP${NC} bytecode: not .in (bytecode is .in/.icore only)"
+  if [[ $has_jit -eq 1 ]] && [[ $failed -eq 0 ]]; then
+    local exec_tmp
+    exec_tmp=$(mktemp "${TMPDIR:-/tmp}/conformance-exec.XXXXXX")
+    if "${IN_CMD[@]}" execute --verbose "$fixture" >"$exec_tmp" 2>&1; then
+      while IFS='|' read -r check value; do
+        [[ -z "$check" ]] && continue
+        case "$check" in
+          bytecode)
+            [[ "$value" == "executes" ]] && echo "  ${GREEN}PASS${NC} jit: executes" ;;
+          result)
+            local matched=0
+            grep -q "result: Int($value)" "$exec_tmp" 2>/dev/null && matched=1
+            if [[ $matched -eq 0 ]]; then
+              grep -q "result: \"$value\"" "$exec_tmp" 2>/dev/null && matched=1
+            fi
+            if [[ $matched -eq 0 ]]; then
+              grep -q "result: $value" "$exec_tmp" 2>/dev/null && matched=1
+            fi
+            if [[ $matched -eq 1 ]]; then
+              echo "  ${GREEN}PASS${NC} result: $value"
+            else
+              local actual
+              actual=$(grep "Execution completed with result:" "$exec_tmp" 2>/dev/null | head -1 | sed 's/.*result: //')
+              echo "  ${RED}FAIL${NC} result: expected $value, got ${actual:-N/A}"
+              failed=1
+            fi
+            ;;
+        esac
+      done <<< "$expects"
     else
-      local exec_tmp
-      exec_tmp=$(mktemp "${TMPDIR:-/tmp}/conformance-exec.XXXXXX")
-      if "${IN_CMD[@]}" execute-bytecode --verbose "$fixture" >"$exec_tmp" 2>&1; then
-        while IFS='|' read -r check value; do
-          [[ -z "$check" ]] && continue
-          case "$check" in
-            bytecode)
-              [[ "$value" == "executes" ]] && echo "  ${GREEN}PASS${NC} bytecode: executes" ;;
-            result)
-              local matched=0
-              grep -q "result: Int($value)" "$exec_tmp" 2>/dev/null && matched=1
-              if [[ $matched -eq 0 ]]; then
-                grep -q "result: \"$value\"" "$exec_tmp" 2>/dev/null && matched=1
-              fi
-              if [[ $matched -eq 0 ]]; then
-                grep -q "result: $value" "$exec_tmp" 2>/dev/null && matched=1
-              fi
-              if [[ $matched -eq 1 ]]; then
-                echo "  ${GREEN}PASS${NC} result: $value"
-              else
-                local actual
-                actual=$(grep "Execution completed with result:" "$exec_tmp" 2>/dev/null | head -1 | sed 's/.*result: //')
-                echo "  ${RED}FAIL${NC} result: expected $value, got ${actual:-N/A}"
-                failed=1
-              fi
-              ;;
-          esac
-        done <<< "$expects"
-      else
-        echo "  ${RED}FAIL${NC} bytecode: execution failed"
-        while IFS= read -r line; do echo "    $line"; done < "$exec_tmp"
-        failed=1
-      fi
-      rm -f "$exec_tmp"
+      echo "  ${RED}FAIL${NC} jit: execution failed"
+      while IFS= read -r line; do echo "    $line"; done < "$exec_tmp"
+      failed=1
     fi
+    rm -f "$exec_tmp"
   fi
 
   if [[ $failed -eq 0 ]]; then

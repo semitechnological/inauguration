@@ -142,7 +142,7 @@ pub(crate) fn test_step_names() -> [&'static str; 7] {
         "polyglot graph samples (scripts/check-graph-polyglot-sample.sh)",
         "polyglot eval samples (scripts/check-eval-polyglot-sample.sh)",
         "native answer polyglot subset (scripts/check-native-answer-polyglot-subset.sh)",
-        "bytecode compiler (scripts/check-bytecode-compiler.sh)",
+        "jit compiler (scripts/check-jit-compiler.sh)",
         "orchestration compiler (scripts/check-orchestration-compiler.sh)",
         "conformance suite (scripts/run-conformance.sh)",
     ]
@@ -174,8 +174,8 @@ fn self_host_test_groups(root: &Path) -> Vec<TestGroup> {
                 } else {
                     "scripts/check-polyglot-sample.sh"
                 }
-            } else if name.contains("bytecode") {
-                "scripts/check-bytecode-compiler.sh"
+            } else if name.contains("jit") {
+                "scripts/check-jit-compiler.sh"
             } else if name.contains("conformance") {
                 "scripts/run-conformance.sh"
             } else {

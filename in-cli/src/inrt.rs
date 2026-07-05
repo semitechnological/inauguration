@@ -169,7 +169,7 @@ fn build_inrt_str_concat() -> Vec<u8> {
     emit_insn_blob(&[aarch64::b(lb as i32 - buf.len() as i32)], &mut buf);
     emit_insn_blob(
         &[
-            aarch64::ldr64(X0, SP, 0),
+            aarch64::ldr64(X0, SP, 16),
             aarch64::ldp_post(FP, LR, 32),
             aarch64::ret(),
         ],

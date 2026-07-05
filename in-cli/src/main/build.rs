@@ -221,7 +221,7 @@ fn run_pipeline_for_path(
             path: source_path.clone(),
             module_id: module_id.to_string(),
             parser,
-            target: CompileTarget::Bytecode,
+            target: CompileTarget::Jit,
             entry: Some("main".to_string()),
             out: None,
             linkage: inauguration::native_emit::NativeLinkage::Executable,
@@ -236,7 +236,7 @@ fn run_pipeline_for_path(
         }
         if verbose {
             println!("Compiled {} in {:.3}ms", source_path.display(), elapsed_ms);
-            println!("  target: analysis (bytecode path)");
+            println!("  target: analysis (jit path)");
             println!(
                 "  functions: {} parsed, {} typed",
                 report.parsed_function_count, report.typed_function_count

@@ -1,4 +1,3 @@
-use crate::bytecode_compiler;
 use crate::compile_cache;
 use crate::core_ir::{Decl, ModuleIdentityReport, UnifiedModule};
 use crate::core_ir_verifier;
@@ -8,8 +7,6 @@ use crate::external_guard::{self, ExternalInvocationGuard};
 use crate::native_backend;
 use crate::native_emit::{self, NativeLinkage};
 use crate::parser_registry::{self, ParserCli};
-use crate::sil_to_bytecode;
-use crate::vm::BytecodeVM;
 use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -17,7 +14,6 @@ use std::time::Instant;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum CompileTarget {
-    Bytecode,
     Native,
     /// Native lowering + in-memory JIT execution (no object file on disk)
     Jit,
@@ -72,12 +68,13 @@ pub struct OwnedCompileReport {
     pub frontend_hash: Option<String>,
     pub eval_exit_code: Option<u8>,
     pub eval_result: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub eval_result_string: Option<String>,
     pub error: Option<String>,
 }
 
 fn target_label(target: CompileTarget) -> &'static str {
     match target {
-        CompileTarget::Bytecode => "bytecode",
         CompileTarget::Native => "native",
         CompileTarget::Jit => "jit",
     }
@@ -166,12 +163,10 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
                 frontend_level: "unsupported",
                 semantic_level: "failed",
                 backend_level: match request.target {
-                    CompileTarget::Bytecode => "bytecode-vm-subset",
                     CompileTarget::Native => "contract-only",
                     CompileTarget::Jit => "owned-native-subset",
                 },
                 runtime_level: match request.target {
-                    CompileTarget::Bytecode => "inrt-bytecode",
                     CompileTarget::Native => "none",
                     CompileTarget::Jit => "inrt-jit",
                 },
@@ -192,6 +187,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
                 frontend_hash: None,
                 eval_exit_code: None,
                 eval_result: None,
+                eval_result_string: None,
                 error: Some(err.to_string()),
             };
         }
@@ -235,12 +231,10 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         frontend_level: "unsupported",
         semantic_level: "failed",
         backend_level: match request.target {
-            CompileTarget::Bytecode => "bytecode-vm-subset",
             CompileTarget::Native => "contract-only",
             CompileTarget::Jit => "owned-native-subset",
         },
         runtime_level: match request.target {
-            CompileTarget::Bytecode => "inrt-bytecode",
             CompileTarget::Native => "none",
             CompileTarget::Jit => "inrt-jit",
         },
@@ -261,6 +255,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         frontend_hash: Some(frontend_hash.clone()),
         eval_exit_code: None,
         eval_result: None,
+        eval_result_string: None,
         error: None,
     };
 
@@ -412,28 +407,6 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         report.call_edge_count = verify_report.call_edges.len();
     }
 
-    let semantic_module =
-        if request.target == CompileTarget::Native || request.target == CompileTarget::Jit {
-            effective_entry
-                .as_deref()
-                .map(|entry| native_entry_module(&module, entry))
-                .unwrap_or_else(|| module.clone())
-        } else {
-            module.clone()
-        };
-
-    if request.target != CompileTarget::Native
-        && request.target != CompileTarget::Jit
-        && !is_rust_source
-        && let Err(err) = crate::family_typecheck::typecheck_resolved(&resolved, &semantic_module)
-    {
-        report.semantic_level = "failed";
-        report.reason_code = Some("semantic-typecheck-failed".to_string());
-        report.reason = Some(err.clone());
-        report.error = Some(err);
-        return finalize_report(&mut report, started, &cwd, &frontend_hash);
-    }
-
     if std::env::var("IN_TYPECHECK").is_ok() {
         let strict = std::env::var("IN_TYPECHECK").as_deref() == Ok("strict");
         match crate::typecheck::TypeChecker::new().check_module(&module) {
@@ -455,21 +428,6 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
     report.call_edge_count = count_call_edges(&module, &request.module_id);
 
     match request.target {
-        CompileTarget::Bytecode => {
-            report.backend_level = "bytecode-vm-subset";
-            report.runtime_level = "inrt-bytecode";
-            match compile_bytecode(&module, &request.module_id, request.out.as_deref()) {
-                Ok(artifact_path) => {
-                    report.success = true;
-                    report.artifact_path = artifact_path;
-                }
-                Err(err) => {
-                    report.reason_code = Some("bytecode-lowering-failed".to_string());
-                    report.reason = Some(err.clone());
-                    report.error = Some(err);
-                }
-            }
-        }
         CompileTarget::Native => match compile_native(&module, &request.module_id, request) {
             Ok(native_result) => {
                 report.backend_level = native_result.backend_level;
@@ -479,6 +437,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
                 report.success = true;
                 report.eval_exit_code = native_result.eval_exit_code;
                 report.eval_result = native_result.eval_result;
+                report.eval_result_string = native_result.eval_result_string;
                 report.executable_path = if request.linkage == NativeLinkage::Executable {
                     Some(native_result.artifact_path.clone())
                 } else {
@@ -530,6 +489,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
                     report.success = true;
                     report.eval_exit_code = jit_result.eval_exit_code;
                     report.eval_result = jit_result.eval_result;
+                    report.eval_result_string = jit_result.eval_result_string;
                 }
                 Err(err) => {
                     report.backend_level = "owned-native-subset";
@@ -636,6 +596,21 @@ fn compile_jit(
         .unwrap_or("main");
     let resolved_entry = resolve_jit_entry(expanded_module, entry);
 
+    crate::native_emit::native_link::bootstrap_jit_native();
+
+    let entry_returns_string = expanded_module
+        .decls
+        .iter()
+        .find_map(|decl| match decl {
+            crate::core_ir::Decl::Function { name, ret, .. }
+                if name == &resolved_entry || name.ends_with(&format!(".{resolved_entry}")) =>
+            {
+                Some(ret.canonical() == crate::core_ir::Typ::String)
+            }
+            _ => None,
+        })
+        .unwrap_or(false);
+
     // Select lowering based on host architecture
     let lowered = if cfg!(target_arch = "x86_64") {
         let result =
@@ -691,11 +666,27 @@ fn compile_jit(
     // code doesn't handle struct layouts correctly and crashes at runtime.
     // Only JIT-execute non-Rust (in-lang, icore) programs.
     let is_rust = request.path.extension().is_some_and(|e| e == "rs");
-    let (exit_code, eval_result) = if is_rust {
-        (0, None)
+    let (exit_code, eval_result, eval_result_string) = if is_rust {
+        (0, None, None)
     } else {
         let raw = unsafe { rt.invoke(&resolved_entry, &[]).unwrap_or(1) };
-        (raw as u8, Some(raw))
+        let decode_string = entry_returns_string && raw != 0 && request.out.is_none();
+        let string = if decode_string {
+            let ptr = raw as *const u8;
+            unsafe {
+                let len = *(ptr as *const u64) as usize;
+                let data = ptr.add(8);
+                let bytes = std::slice::from_raw_parts(data, len);
+                String::from_utf8_lossy(bytes).to_string()
+            }
+        } else {
+            String::new()
+        };
+        (
+            raw as u8,
+            Some(raw),
+            if decode_string { Some(string) } else { None },
+        )
     };
 
     let reason_code = if is_rust {
@@ -713,6 +704,7 @@ fn compile_jit(
         artifact_path: String::new(),
         eval_exit_code: Some(exit_code),
         eval_result,
+        eval_result_string,
         abi_path: None,
         backend_level: "owned-native-jit",
         runtime_level: "inrt-jit",
@@ -759,6 +751,7 @@ fn compile_native(
                 artifact_path: out_path.display().to_string(),
                 eval_exit_code: Some(exit),
                 eval_result: None,
+                eval_result_string: None,
                 abi_path: None,
                 backend_level: "owned-native-subset-aarch64-app",
                 runtime_level: "macos-app-bundle",
@@ -781,6 +774,7 @@ fn compile_native(
                 artifact_path: out_path.display().to_string(),
                 eval_exit_code: Some(exit),
                 eval_result: None,
+                eval_result_string: None,
                 abi_path: None,
                 backend_level: "owned-native-subset-x86_64-appdir",
                 runtime_level: "linux-appdir",
@@ -818,6 +812,7 @@ fn compile_native(
                     None
                 },
                 eval_result: None,
+                eval_result_string: None,
                 abi_path,
                 backend_level: artifact.backend_level,
                 runtime_level: artifact.runtime_level,
@@ -843,6 +838,7 @@ fn compile_native(
         artifact_path: out_path.display().to_string(),
         eval_exit_code: eval_exit,
         eval_result: None,
+        eval_result_string: None,
         abi_path: abi_path.map(|path| path.display().to_string()),
         backend_level: "owned-native-subset",
         runtime_level: "inrt-native",
@@ -1112,6 +1108,7 @@ struct NativeCompileResult {
     artifact_path: String,
     eval_exit_code: Option<u8>,
     eval_result: Option<i64>,
+    eval_result_string: Option<String>,
     abi_path: Option<String>,
     backend_level: &'static str,
     runtime_level: &'static str,
@@ -1288,28 +1285,13 @@ fn try_const_answer_entry(module: &UnifiedModule, entry: &str) -> Option<u8> {
 
 fn const_eval_entry_exit_code(
     module: &UnifiedModule,
-    module_id: &str,
+    _module_id: &str,
     entry: &str,
 ) -> Result<u8, String> {
-    #[cfg(feature = "v-native")]
-    if crate::v_native::v_native_available()
-        && let Some(code) = try_const_answer_entry(module, entry)
-    {
+    if let Some(code) = try_const_answer_entry(module, entry) {
         return Ok(code);
     }
-    let sil = crate::compiler::driver::lower_unified_module(
-        module,
-        module.effective_module_id(module_id),
-    );
-    let artifact = crate::hybrid_sil::parse_textual_sil(&sil);
-    let mut bytecode_module = sil_to_bytecode::lower_sil_to_bytecode(&artifact)?;
-    bytecode_module.entry_point = entry.to_string();
-    if bytecode_module.find_function(entry).is_none() {
-        return Err(format!("native compile missing entry function `{entry}`"));
-    }
-    let mut vm = BytecodeVM::new(bytecode_module);
-    let value = vm.run()?;
-    let code = value.to_int();
+    let code = eval_entry_via_jit(module, entry)?;
     if !(0..=255).contains(&code) {
         return Err(format!(
             "native compile entry `{entry}` exit code {code} is outside 0..=255"
@@ -1318,22 +1300,29 @@ fn const_eval_entry_exit_code(
     Ok(code as u8)
 }
 
-fn compile_bytecode(
-    module: &UnifiedModule,
-    module_id: &str,
-    out: Option<&Path>,
-) -> Result<Option<String>, String> {
-    let sil = crate::compiler::driver::lower_unified_module(
-        module,
-        module.effective_module_id(module_id),
-    );
-    let artifact = crate::hybrid_sil::parse_textual_sil(&sil);
-    let bytecode_module = sil_to_bytecode::lower_sil_to_bytecode(&artifact)?;
-    let Some(out_path) = out else {
-        return Ok(None);
+fn eval_entry_via_jit(module: &UnifiedModule, entry: &str) -> Result<i64, String> {
+    use crate::native_emit::lower::host_supports_native_subset;
+    if !host_supports_native_subset() {
+        return Err(
+            "jit-host-unsupported: JIT currently requires macOS AArch64 or Linux x86_64"
+                .to_string(),
+        );
+    }
+    let request = OwnedCompileRequest {
+        path: PathBuf::from("const_eval.in"),
+        module_id: "App".to_string(),
+        parser: ParserCli::Auto,
+        target: CompileTarget::Jit,
+        entry: Some(entry.to_string()),
+        out: None,
+        linkage: NativeLinkage::Executable,
+        target_triple: None,
+        jobs: 1,
     };
-    bytecode_compiler::write_bytecode_module(&bytecode_module, out_path)?;
-    Ok(Some(out_path.display().to_string()))
+    let result = compile_jit(module, "App", &request)?;
+    result
+        .eval_result
+        .ok_or_else(|| "jit did not produce a result for entry".to_string())
 }
 
 fn finalize_report(
@@ -1401,40 +1390,6 @@ mod tests {
             target_triple: None,
             jobs: 1,
         }
-    }
-
-    #[test]
-    fn compiles_sample_in_bytecode_with_temp_out_file() {
-        let source_path = temp_path("sample.in");
-        let out_path = temp_path("sample.bca");
-        fs::write(
-            &source_path,
-            "fn helper(value: Int) -> Int { return value; }\nfn main() -> void { helper(1); return; }\n",
-        )
-        .unwrap();
-
-        let report = compile_owned(&default_request(
-            source_path.clone(),
-            CompileTarget::Bytecode,
-            Some("main"),
-            Some(out_path.clone()),
-        ));
-
-        assert!(report.success, "{:?}", report);
-        assert_eq!(report.frontend_level, "core-ir-direct");
-        assert_eq!(report.semantic_level, "typed-subset");
-        assert_eq!(report.backend_level, "bytecode-vm-subset");
-        assert_eq!(report.runtime_level, "inrt-bytecode");
-        assert_eq!(report.parsed_function_count, 2);
-        assert_eq!(report.typed_function_count, 2);
-        assert_eq!(
-            report.artifact_path.as_deref(),
-            Some(out_path.to_str().unwrap())
-        );
-        assert!(out_path.exists());
-
-        fs::remove_file(source_path).unwrap();
-        fs::remove_file(&out_path).unwrap();
     }
 
     #[test]
@@ -2082,12 +2037,15 @@ mod tests {
 
     #[test]
     fn report_has_empty_external_invocations() {
+        if !native_backend::native_subset_host_available() {
+            return;
+        }
         let source_path = temp_path("external.in");
         fs::write(&source_path, "fn main() -> void { return; }\n").unwrap();
 
         let report = compile_owned(&default_request(
             source_path.clone(),
-            CompileTarget::Bytecode,
+            CompileTarget::Jit,
             None,
             None,
         ));
@@ -2100,12 +2058,15 @@ mod tests {
 
     #[test]
     fn report_to_json_roundtrip_fields() {
+        if !native_backend::native_subset_host_available() {
+            return;
+        }
         let source_path = temp_path("json.in");
         fs::write(&source_path, "fn main() -> void { return; }\n").unwrap();
 
         let report = compile_owned(&default_request(
             source_path.clone(),
-            CompileTarget::Bytecode,
+            CompileTarget::Jit,
             None,
             None,
         ));
@@ -2119,6 +2080,9 @@ mod tests {
 
     #[test]
     fn report_carries_core_identity_metadata() {
+        if !native_backend::native_subset_host_available() {
+            return;
+        }
         let source_path = temp_path("identity.in");
         fs::write(
             &source_path,
@@ -2128,7 +2092,7 @@ mod tests {
 
         let report = compile_owned(&default_request(
             source_path.clone(),
-            CompileTarget::Bytecode,
+            CompileTarget::Jit,
             None,
             None,
         ));
@@ -2145,12 +2109,15 @@ mod tests {
 
     #[test]
     fn report_defaults_identity_metadata_without_source_identity() {
+        if !native_backend::native_subset_host_available() {
+            return;
+        }
         let source_path = temp_path("default-identity.in");
         fs::write(&source_path, "fn main() -> void { return; }\n").unwrap();
 
         let report = compile_owned(&default_request(
             source_path.clone(),
-            CompileTarget::Bytecode,
+            CompileTarget::Jit,
             None,
             None,
         ));
@@ -2167,18 +2134,21 @@ mod tests {
 
     #[test]
     fn compile_cache_hit_on_second_run() {
+        if !native_backend::native_subset_host_available() {
+            return;
+        }
         let source_path = temp_path("cache.in");
         fs::write(&source_path, "fn main() -> void { return; }\n").unwrap();
         let first = compile_owned(&default_request(
             source_path.clone(),
-            CompileTarget::Bytecode,
+            CompileTarget::Jit,
             None,
             None,
         ));
         assert!(!first.cache_hit);
         let second = compile_owned(&default_request(
             source_path.clone(),
-            CompileTarget::Bytecode,
+            CompileTarget::Jit,
             None,
             None,
         ));

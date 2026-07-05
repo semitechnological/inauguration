@@ -4,11 +4,9 @@ use std::sync::OnceLock;
 pub const NATIVE_BACKEND_NOT_IMPLEMENTED: &str = "native-backend-not-implemented";
 pub const NATIVE_AARCH64_SUBSET: &str = "native-aarch64-subset";
 pub const NATIVE_OBJECT_SUBSET: &str = "native-object-subset";
-pub const BYTECODE_BACKEND_SUBSET: &str = "bytecode-vm-subset";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TargetId {
-    Bytecode,
     Native,
 }
 
@@ -16,7 +14,6 @@ impl TargetId {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
-            TargetId::Bytecode => "bytecode",
             TargetId::Native => "native",
         }
     }
@@ -24,7 +21,6 @@ impl TargetId {
     #[must_use]
     pub fn parse(name: &str) -> Option<Self> {
         match name {
-            "bytecode" => Some(TargetId::Bytecode),
             "native" => Some(TargetId::Native),
             _ => None,
         }
@@ -43,18 +39,6 @@ pub struct TargetSpec {
     pub host_triple: Option<&'static str>,
     pub backend_artifact_supported: bool,
 }
-
-const BYTECODE_TARGET: TargetSpec = TargetSpec {
-    name: "bytecode",
-    implemented: true,
-    stage: "owned-runtime-subset",
-    reason_code: BYTECODE_BACKEND_SUBSET,
-    reason: "inauguration owns this bytecode assembly format, SIL-to-bytecode lowering path, and stack VM runtime for the supported Core IR subset",
-    input_stage: "core-ir-to-textual-sil",
-    artifact_kind: "bytecode-assembly",
-    host_triple: None,
-    backend_artifact_supported: true,
-};
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 const NATIVE_TARGET: TargetSpec = TargetSpec {
@@ -405,14 +389,8 @@ pub fn all_target_specs() -> &'static [TargetSpec] {
 #[must_use]
 pub fn target_spec(id: TargetId) -> TargetSpec {
     match id {
-        TargetId::Bytecode => BYTECODE_TARGET,
         TargetId::Native => NATIVE_TARGET,
     }
-}
-
-#[must_use]
-pub fn bytecode_target_spec() -> TargetSpec {
-    BYTECODE_TARGET
 }
 
 #[must_use]
@@ -434,7 +412,7 @@ pub fn native_subset_host_available() -> bool {
 }
 
 fn build_target_registry() -> Vec<TargetSpec> {
-    let mut specs = vec![BYTECODE_TARGET, NATIVE_TARGET];
+    let mut specs = vec![NATIVE_TARGET];
     for &target in IN_EQUIVALENT_TARGETS {
         if specs.iter().any(|spec| spec.name == target) {
             continue;
@@ -511,17 +489,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn registry_lists_bytecode_and_native_targets() {
+    fn registry_lists_native_target() {
         let specs = all_target_specs();
-        assert!(specs.len() > 2);
-        assert_eq!(specs[0].name, "bytecode");
-        assert_eq!(specs[1].name, "native");
+        assert!(specs.len() > 1);
+        assert_eq!(specs[0].name, "native");
     }
 
     #[test]
     fn registry_lists_rust_style_compiler_targets() {
         let specs = all_target_specs();
-        assert_eq!(specs.len(), IN_EQUIVALENT_TARGETS.len() + 2);
+        assert_eq!(specs.len(), IN_EQUIVALENT_TARGETS.len() + 1);
         let names: Vec<&str> = specs.iter().map(|spec| spec.name).collect();
         for target in [
             "x86_64-unknown-none",
@@ -586,17 +563,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn reports_bytecode_target_as_owned_runtime_subset() {
-        let spec = bytecode_target_spec();
-        assert!(spec.implemented);
-        assert_eq!(spec.stage, "owned-runtime-subset");
-        assert_eq!(spec.reason_code, BYTECODE_BACKEND_SUBSET);
-        assert_eq!(spec.input_stage, "core-ir-to-textual-sil");
-        assert_eq!(spec.artifact_kind, "bytecode-assembly");
-        assert!(spec.backend_artifact_supported);
-    }
-
     #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
     #[test]
     fn reports_native_target_contract_on_unsupported_hosts() {
@@ -625,7 +591,6 @@ mod tests {
 
     #[test]
     fn target_id_round_trips_known_names() {
-        assert_eq!(TargetId::parse("bytecode"), Some(TargetId::Bytecode));
         assert_eq!(TargetId::parse("native"), Some(TargetId::Native));
         assert_eq!(TargetId::parse("wasm"), None);
     }

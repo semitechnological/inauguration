@@ -1,13 +1,6 @@
-pub use crate::target::{
-    BYTECODE_BACKEND_SUBSET, NATIVE_AARCH64_SUBSET, NATIVE_BACKEND_NOT_IMPLEMENTED, TargetSpec,
-};
+pub use crate::target::{NATIVE_AARCH64_SUBSET, NATIVE_BACKEND_NOT_IMPLEMENTED, TargetSpec};
 
 pub type NativeBackendStatus = TargetSpec;
-
-#[must_use]
-pub fn bytecode_backend_status() -> TargetSpec {
-    crate::target::bytecode_target_spec()
-}
 
 #[must_use]
 pub fn native_backend_status() -> TargetSpec {
@@ -48,15 +41,5 @@ mod tests {
         assert_eq!(status.reason_code, NATIVE_AARCH64_SUBSET);
         assert_eq!(status.input_stage, "core-ir");
         assert_eq!(status.artifact_kind, "mach-o-executable");
-    }
-
-    #[test]
-    fn reports_bytecode_backend_as_owned_runtime_subset() {
-        let status = bytecode_backend_status();
-        assert!(status.implemented);
-        assert_eq!(status.stage, "owned-runtime-subset");
-        assert_eq!(status.reason_code, "bytecode-vm-subset");
-        assert_eq!(status.input_stage, "core-ir-to-textual-sil");
-        assert_eq!(status.artifact_kind, "bytecode-assembly");
     }
 }

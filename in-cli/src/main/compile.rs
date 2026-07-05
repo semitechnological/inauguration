@@ -335,95 +335,10 @@ fn cmd_emit_boot(
     Ok(())
 }
 
-pub(crate) fn cmd_compile_bytecode(
-    cwd: &Path,
-    path: &str,
-    module_id: &str,
-    parser: ParserCli,
-    out: &str,
-    verbose: bool,
-) -> Result<()> {
-    let start = Instant::now();
-    let source_path = resolve_invocation_path(cwd, path);
-    let out_path = resolve_invocation_path(cwd, out);
-    if !source_path.exists() {
-        return Err(InError::Message(format!(
-            "file not found: {}",
-            source_path.display()
-        )));
-    }
-
-    let output =
-        inauguration::bytecode_compiler::compile_source_path(&source_path, module_id, parser)
-            .map_err(|e| InError::Message(format!("bytecode compile: {e}")))?;
-    inauguration::bytecode_compiler::write_bytecode_module(&output.module, &out_path)
-        .map_err(|e| InError::Message(format!("bytecode write: {e}")))?;
-
-    if verbose {
-        eprintln!("[bytecode] Generated SIL ({} bytes)", output.sil.len());
-        eprintln!(
-            "[bytecode] Generated {} functions",
-            output.module.functions.len()
-        );
-        eprintln!("[bytecode] Wrote {}", out_path.display());
-    }
-
-    let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
-    println!(
-        "[bytecode] Compiled {} -> {} in {:.3}ms",
-        source_path.display(),
-        out_path.display(),
-        elapsed_ms
-    );
-    Ok(())
-}
-
-pub(crate) fn cmd_run_bytecode(cwd: &Path, path: &str, verbose: bool) -> Result<()> {
-    let start = Instant::now();
-    let bytecode_path = resolve_invocation_path(cwd, path);
-    if !bytecode_path.exists() {
-        return Err(InError::Message(format!(
-            "file not found: {}",
-            bytecode_path.display()
-        )));
-    }
-
-    let module = inauguration::bytecode_compiler::read_bytecode_module(&bytecode_path)
-        .map_err(|e| InError::Message(format!("bytecode read: {e}")))?;
-    if verbose {
-        eprintln!("[bytecode] Executing entry point: @{}", module.entry_point);
-    }
-    let result = inauguration::bytecode_compiler::run_bytecode_module(module)
-        .map_err(|e| InError::Message(format!("bytecode execution: {e}")))?;
-    if verbose {
-        eprintln!("[bytecode] Execution completed with result: {:?}", result);
-    }
-
-    let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
-    println!("[bytecode] Finished execution in {:.3}ms", elapsed_ms);
-    Ok(())
-}
-
-pub(crate) struct SourceExecution {
-    pub(crate) output: inauguration::bytecode_compiler::BytecodeCompileOutput,
-    pub(crate) result: inauguration::bytecode::Value,
-}
-
-pub(crate) fn compile_and_run_source_path(
-    source_path: &Path,
-    module_id: &str,
-    parser: ParserCli,
-) -> Result<SourceExecution> {
-    let output =
-        inauguration::bytecode_compiler::compile_source_path(source_path, module_id, parser)
-            .map_err(|e| InError::Message(format!("bytecode compile: {e}")))?;
-    let result = inauguration::bytecode_compiler::run_bytecode_module(output.module.clone())
-        .map_err(|e| InError::Message(format!("bytecode execution: {e}")))?;
-    Ok(SourceExecution { output, result })
-}
-
-pub(crate) struct JitExecution {
-    pub(crate) result: i64,
+#[derive(Debug)]
+pub(crate) enum JitExecution {
+    Int(i64),
+    String(String),
 }
 
 pub(crate) fn compile_and_run_jit_source_path(
@@ -452,16 +367,14 @@ pub(crate) fn compile_and_run_jit_source_path(
                 .unwrap_or_else(|| "jit eval failed".to_string()),
         ));
     }
-    let result = report.eval_result.unwrap_or(0);
-    Ok(JitExecution { result })
+    if let Some(s) = report.eval_result_string {
+        Ok(JitExecution::String(s))
+    } else {
+        Ok(JitExecution::Int(report.eval_result.unwrap_or(0)))
+    }
 }
 
-pub(crate) fn cmd_execute_bytecode(
-    cwd: &Path,
-    path: &str,
-    module_id: &str,
-    verbose: bool,
-) -> Result<()> {
+pub(crate) fn cmd_execute(cwd: &Path, path: &str, module_id: &str, verbose: bool) -> Result<()> {
     let start = Instant::now();
     let source_path = resolve_invocation_path(cwd, path);
 
@@ -474,7 +387,7 @@ pub(crate) fn cmd_execute_bytecode(
 
     if let Some(ext) = source_path.extension().and_then(|s| s.to_str()) {
         if verbose {
-            eprintln!("[bytecode] Detected file extension: {}", ext);
+            eprintln!("[jit] Detected file extension: {}", ext);
         }
     } else {
         return Err(InError::Message(
@@ -482,52 +395,14 @@ pub(crate) fn cmd_execute_bytecode(
         ));
     }
 
-    let execution = compile_and_run_source_path(&source_path, module_id, ParserCli::Auto)?;
-    let output = execution.output;
+    let result = compile_and_run_jit_source_path(&source_path, module_id, ParserCli::Auto)?;
 
     if verbose {
-        eprintln!("[bytecode] Generated SIL ({} bytes)", output.sil.len());
-    }
-
-    let artifact = inauguration::hybrid_sil::parse_textual_sil(&output.sil);
-
-    if verbose {
-        eprintln!(
-            "[bytecode] Parsed {} instructions in function @{}",
-            artifact.instructions.len(),
-            artifact.function_id
-        );
-    }
-
-    if verbose {
-        eprintln!(
-            "[bytecode] Generated {} functions",
-            output.module.functions.len()
-        );
-        for func in &output.module.functions {
-            eprintln!(
-                "  - @{} ({} instructions)",
-                func.name,
-                func.instructions.len()
-            );
-        }
-    }
-
-    if verbose {
-        eprintln!(
-            "[bytecode] Executing entry point: @{}",
-            output.module.entry_point
-        );
-    }
-
-    let result = execution.result;
-
-    if verbose {
-        eprintln!("[bytecode] Execution completed with result: {:?}", result);
+        eprintln!("[jit] Execution completed with result: {:?}", result);
     }
 
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
-    println!("[bytecode] Finished execution in {:.3}ms", elapsed_ms);
+    println!("[jit] Finished execution in {:.3}ms", elapsed_ms);
 
     Ok(())
 }

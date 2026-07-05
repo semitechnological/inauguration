@@ -1,4 +1,4 @@
-use crate::compile::compile_and_run_jit_source_path;
+use crate::compile::{JitExecution, compile_and_run_jit_source_path};
 use crate::util::resolve_invocation_path;
 use crate::{InError, Result};
 use inauguration::parser_registry::{self, ParserCli};
@@ -66,12 +66,16 @@ pub(crate) fn cmd_eval(cwd: &Path, code: &str, parser: Option<&str>, verbose: bo
         Some(run) => run,
         None => return Err(last_err.unwrap_or_else(|| InError::Message("eval failed".to_string()))),
     };
-    let result = execution.result;
-
     if verbose {
-        eprintln!("> {}", result);
+        match &execution {
+            JitExecution::Int(result) => eprintln!("> {}", result),
+            JitExecution::String(result) => eprintln!("> {}", result),
+        }
     } else if print_result {
-        println!("{}", result);
+        match execution {
+            JitExecution::Int(result) => println!("{}", result),
+            JitExecution::String(result) => println!("{}", result),
+        }
     }
     Ok(())
 }
