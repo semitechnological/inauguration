@@ -22,6 +22,13 @@ in execute docs-site/backend.in
 ./scripts/build-docs-site.sh
 ```
 
+## Deploy (Cloudflare)
+
+```bash
+./scripts/build-docs-site.sh
+wrangler pages deploy dist --project-name inauguration   # or upload dist/ in dashboard
+```
+
 ## Dev
 
 ```bash
