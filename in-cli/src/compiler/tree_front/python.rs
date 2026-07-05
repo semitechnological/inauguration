@@ -1,4 +1,6 @@
-use super::extract::{AstShape, ast_body, ast_expr, collect_kinds, first_named, node_txt, normalize_entry};
+use super::extract::{
+    AstShape, ast_body, ast_expr, collect_kinds, first_named, node_txt, normalize_entry,
+};
 use crate::core_ir::{Decl, Stmt, Typ, Visibility};
 use tree_sitter::Node;
 
@@ -237,4 +239,3 @@ fn simple_param_names<'a>(src: &[u8], plist: Node<'a>) -> Vec<(String, Typ)> {
 fn python_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
     ast_body(src, body, PYTHON_AST)
 }
-

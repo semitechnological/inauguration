@@ -100,4 +100,3 @@ pub(super) fn go_return_type(src: &[u8], func: Node<'_>) -> Option<Typ> {
 }
 
 // ─── OCaml ────────────────────────────────────────────────────────────
-

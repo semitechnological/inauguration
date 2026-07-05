@@ -307,4 +307,3 @@ pub(super) fn extract_holyc(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, Str
     }
     Ok(decls)
 }
-

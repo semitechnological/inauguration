@@ -1,4 +1,6 @@
-use super::extract::{collect_kinds, decl_fn, first_named, last_named, named_descendant, node_txt, normalize_entry};
+use super::extract::{
+    collect_kinds, decl_fn, first_named, last_named, named_descendant, node_txt, normalize_entry,
+};
 use crate::core_ir::{Decl, Expr, Stmt, Typ, Visibility};
 use tree_sitter::Node;
 
@@ -563,4 +565,3 @@ pub(super) fn objc_like<'a>(src: &[u8], n: Node<'a>) -> Option<Decl> {
     }
     None
 }
-

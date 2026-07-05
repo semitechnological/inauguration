@@ -1,4 +1,7 @@
-use super::extract::{AstShape, ast_body, collect_kinds, decl_fn, extract_fn_nodes, named_descendant, node_txt, normalize_entry, simple_bounded_body, strict_simple_bounded_body};
+use super::extract::{
+    AstShape, ast_body, collect_kinds, decl_fn, extract_fn_nodes, named_descendant, node_txt,
+    normalize_entry, simple_bounded_body, strict_simple_bounded_body,
+};
 use crate::core_ir::{Decl, Expr, Stmt, Typ, Visibility};
 use tree_sitter::Node;
 
@@ -196,4 +199,3 @@ fn clean_erlang_stmts(mut stmts: Vec<Stmt>) -> Vec<Stmt> {
     stmts.retain(|stmt| !matches!(stmt, Stmt::Expr(Expr::Ident(name)) if name.contains("->")));
     stmts
 }
-

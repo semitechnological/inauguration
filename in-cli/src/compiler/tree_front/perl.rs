@@ -1,4 +1,7 @@
-use super::extract::{AstShape, ast_expr, ast_return_expr, collect_kinds, decl_fn, extract_fn_nodes, first_named, node_txt, normalize_entry, simple_bounded_body};
+use super::extract::{
+    AstShape, ast_expr, ast_return_expr, collect_kinds, decl_fn, extract_fn_nodes, first_named,
+    node_txt, normalize_entry, simple_bounded_body,
+};
 use crate::core_ir::{Decl, Stmt, Typ, Visibility};
 use tree_sitter::Node;
 
@@ -304,4 +307,3 @@ fn perl_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
     }
     simple_bounded_body(node_txt(src, body), "=").unwrap_or_default()
 }
-

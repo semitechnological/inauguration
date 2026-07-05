@@ -1,4 +1,6 @@
-use super::extract::{AstShape, ast_body, collect_kinds, first_named, named_descendant, node_txt, normalize_entry};
+use super::extract::{
+    AstShape, ast_body, collect_kinds, first_named, named_descendant, node_txt, normalize_entry,
+};
 use crate::core_ir::{Decl, MethodSig, Stmt, Typ, Visibility};
 use tree_sitter::Node;
 
@@ -331,4 +333,3 @@ fn java_param_name<'a>(src: &[u8], fp: Node<'a>) -> Option<String> {
 fn java_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
     ast_body(src, body, JAVA_AST)
 }
-

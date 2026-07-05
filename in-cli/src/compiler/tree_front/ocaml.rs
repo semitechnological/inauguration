@@ -1,4 +1,7 @@
-use super::extract::{AstShape, ast_body, extract_fn_nodes, first_named, node_txt, normalize_entry, simple_bounded_body, strict_simple_bounded_body};
+use super::extract::{
+    AstShape, ast_body, extract_fn_nodes, first_named, node_txt, normalize_entry,
+    simple_bounded_body, strict_simple_bounded_body,
+};
 use crate::core_ir::{Decl, Stmt, Typ};
 use tree_sitter::Node;
 
@@ -89,4 +92,3 @@ fn ocaml_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
 }
 
 // ─── Haskell ───────────────────────────────────────────────────────────
-

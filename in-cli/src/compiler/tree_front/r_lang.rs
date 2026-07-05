@@ -1,4 +1,7 @@
-use super::extract::{AstShape, ast_body, collect_kinds, decl_fn, first_named, named_descendant, node_txt, normalize_entry, simple_bounded_body};
+use super::extract::{
+    AstShape, ast_body, collect_kinds, decl_fn, first_named, named_descendant, node_txt,
+    normalize_entry, simple_bounded_body,
+};
 use crate::core_ir::{Decl, Stmt, Typ};
 use tree_sitter::Node;
 
@@ -142,4 +145,3 @@ fn r_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
         stmts
     }
 }
-

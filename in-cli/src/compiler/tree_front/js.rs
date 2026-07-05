@@ -1,4 +1,7 @@
-use super::extract::{AstShape, ast_body, collect_kinds, find_return_expr, first_named, infer_expr_type, node_txt, normalize_entry};
+use super::extract::{
+    AstShape, ast_body, collect_kinds, find_return_expr, first_named, infer_expr_type, node_txt,
+    normalize_entry,
+};
 use crate::core_ir::{Decl, Expr, Stmt, Typ, Visibility};
 use std::collections::HashMap;
 use tree_sitter::Node;
@@ -490,4 +493,3 @@ fn js_return_type(body: &[Stmt]) -> Typ {
 pub(super) fn js_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
     ast_body(src, body, JS_AST)
 }
-
