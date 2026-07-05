@@ -155,12 +155,22 @@ fn collect_declared_vars_in_body(body: &[Stmt], out: &mut HashSet<String>) {
 fn collect_free_vars(body: &[Stmt], params: &[(String, Typ)]) -> Vec<String> {
     let mut reads = HashSet::new();
     collect_body_reads(body, &mut reads);
+
     let mut declared = HashSet::new();
-    for (pname, _) in params {
-        declared.insert(pname.clone());
-    }
     collect_declared_vars_in_body(body, &mut declared);
-    let mut captures: Vec<String> = reads.difference(&declared).cloned().collect();
+
+    let mut param_refs = HashSet::with_capacity(params.len());
+    for (pname, _) in params {
+        param_refs.insert(pname.as_str());
+    }
+
+    let mut captures = Vec::new();
+    for read in reads {
+        if !declared.contains(&read) && !param_refs.contains(&read.as_str()) {
+            captures.push(read);
+        }
+    }
+
     captures.sort();
     captures
 }
