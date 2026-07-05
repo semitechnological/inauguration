@@ -246,6 +246,11 @@ enum Commands {
     },
     #[command(about = "Run full local dev loop (daemon + Rust socket client)")]
     Dev,
+    #[command(about = "Persistent compiler daemon")]
+    Daemon {
+        #[command(subcommand)]
+        action: DaemonAction,
+    },
     #[command(about = "Swift subset parse/check → JSON artifact (Rust; legacy subcommand name)")]
     Ocaml {
         #[arg(default_value = "stdin.swift")]
@@ -394,6 +399,16 @@ enum PluginAction {
     },
 }
 
+#[derive(Subcommand, Debug)]
+enum DaemonAction {
+    #[command(about = "Start the compiler daemon")]
+    Start,
+    #[command(about = "Stop the compiler daemon")]
+    Stop,
+    #[command(about = "Check daemon status")]
+    Status,
+}
+
 #[path = "main/backend.rs"]
 pub mod backend;
 #[path = "main/bench.rs"]
@@ -402,6 +417,8 @@ pub mod bench;
 pub mod build;
 #[path = "main/compile.rs"]
 pub mod compile;
+#[path = "main/compiler_daemon.rs"]
+pub mod compiler_daemon;
 #[path = "main/daemon.rs"]
 pub mod daemon;
 #[path = "main/doctor.rs"]
@@ -433,6 +450,7 @@ fn run() -> Result<()> {
     use crate::bench::cmd_bench;
     use crate::build::cmd_build;
     use crate::compile::cmd_compile;
+    use crate::compiler_daemon::{cmd_daemon_start, cmd_daemon_status, cmd_daemon_stop};
     use crate::daemon::{cmd_dev, cmd_run};
     use crate::doctor::cmd_doctor;
     use crate::eval::cmd_eval_dispatch;
@@ -541,6 +559,11 @@ fn run() -> Result<()> {
         },
         Commands::Languages { json } => cmd_languages(json),
         Commands::Dev => cmd_dev(&workspace_root(invocation_cwd.clone())?),
+        Commands::Daemon { action } => match action {
+            DaemonAction::Start => cmd_daemon_start(),
+            DaemonAction::Stop => cmd_daemon_stop(),
+            DaemonAction::Status => cmd_daemon_status(),
+        },
         Commands::Ocaml { path } => cmd_ocaml(&invocation_cwd, &path),
         Commands::Run {
             watch_root,

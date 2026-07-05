@@ -44,6 +44,10 @@ pub mod core_ir;
 pub mod core_ir_verifier;
 pub mod core_typecheck;
 pub mod crate_db;
+#[cfg(unix)]
+pub mod daemon_client;
+#[cfg(unix)]
+pub mod daemon_server;
 pub mod dep_resolver;
 pub mod dynamic_module;
 pub mod extension_registry;
