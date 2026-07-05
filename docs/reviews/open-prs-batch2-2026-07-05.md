@@ -33,6 +33,14 @@ Excludes merged **#66/#70** and closed **#52/#68/#62/#51**.
 
 Master/local **~18 fails** (macOS native_emit executables, macho). Many PRs show `in-cli` red — may be **baseline**, not PR-only. Trust **JIT conformance** for **#63**.
 
+## Merged on GitHub (2026-07-05)
+
+**#69, #55, #57, #60, #56, #65, #64, #63, #59, #53** (+ prior #66/#70). **#67** closed.
+
+**Still open / blocked:** **#58** (merge conflicts after batch). **#41–54** etc. — merge individually if still open.
+
+Master after pull: **854 pass / 18 fail** (native_emit baseline).
+
 ## Suggested commands
 
 ```bash
