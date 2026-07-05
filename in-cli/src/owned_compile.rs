@@ -47,10 +47,10 @@ pub struct OwnedCompileReport {
     pub entry: Option<String>,
     #[serde(default = "default_linkage_label")]
     pub linkage: String,
-    pub frontend_level: &'static str,
-    pub semantic_level: &'static str,
-    pub backend_level: &'static str,
-    pub runtime_level: &'static str,
+    pub frontend_level: String,
+    pub semantic_level: String,
+    pub backend_level: String,
+    pub runtime_level: String,
     pub external_invocations: Vec<String>,
     pub reason_code: Option<String>,
     pub reason: Option<String>,
@@ -160,15 +160,15 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
                 target_triple: request.target_triple.clone(),
                 entry: request.entry.clone(),
                 linkage: linkage_label(request.linkage).to_string(),
-                frontend_level: "unsupported",
-                semantic_level: "failed",
+                frontend_level: "unsupported".to_string(),
+                semantic_level: "failed".to_string(),
                 backend_level: match request.target {
-                    CompileTarget::Native => "contract-only",
-                    CompileTarget::Jit => "owned-native-subset",
+                    CompileTarget::Native => "contract-only".to_string(),
+                    CompileTarget::Jit => "owned-native-subset".to_string(),
                 },
                 runtime_level: match request.target {
-                    CompileTarget::Native => "none",
-                    CompileTarget::Jit => "inrt-jit",
+                    CompileTarget::Native => "none".to_string(),
+                    CompileTarget::Jit => "inrt-jit".to_string(),
                 },
                 external_invocations: Vec::new(),
                 reason_code: Some("frontend-read-failed".to_string()),
@@ -228,15 +228,15 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         target_triple: request.target_triple.clone(),
         entry: request.entry.clone(),
         linkage: linkage_label(request.linkage).to_string(),
-        frontend_level: "unsupported",
-        semantic_level: "failed",
+        frontend_level: "unsupported".to_string(),
+        semantic_level: "failed".to_string(),
         backend_level: match request.target {
-            CompileTarget::Native => "contract-only",
-            CompileTarget::Jit => "owned-native-subset",
+            CompileTarget::Native => "contract-only".to_string(),
+            CompileTarget::Jit => "owned-native-subset".to_string(),
         },
         runtime_level: match request.target {
-            CompileTarget::Native => "none",
-            CompileTarget::Jit => "inrt-jit",
+            CompileTarget::Native => "none".to_string(),
+            CompileTarget::Jit => "inrt-jit".to_string(),
         },
         external_invocations: Vec::new(),
         reason_code: None,
@@ -377,7 +377,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         module = crate::family_typecheck::normalize_module(parser_id, &module);
     }
 
-    report.frontend_level = "core-ir-direct";
+    report.frontend_level = "core-ir-direct".to_string();
     report.module_identity = Some(module.identity_report(&request.module_id));
     report.parsed_function_count = count_functions(&module);
 
@@ -407,7 +407,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         report.call_edge_count = verify_report.call_edges.len();
     }
 
-    report.semantic_level = "typed-subset";
+    report.semantic_level = "typed-subset".to_string();
     report.typed_function_count = report.parsed_function_count;
     report.call_edge_count = count_call_edges(&module, &request.module_id);
 
@@ -432,28 +432,28 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
             }
             Err(err) if err == "native-host-unsupported" => {
                 let status = native_backend::native_backend_status();
-                report.backend_level = "contract-only";
-                report.runtime_level = "none";
+                report.backend_level = "contract-only".to_string();
+                report.runtime_level = "none".to_string();
                 report.reason_code = Some(status.reason_code.to_string());
                 report.reason = Some(status.reason.to_string());
             }
             Err(err) if err.starts_with("native-target-not-implemented:") => {
-                report.backend_level = "contract-only";
-                report.runtime_level = "none";
+                report.backend_level = "contract-only".to_string();
+                report.runtime_level = "none".to_string();
                 report.reason_code = Some("native-target-not-implemented".to_string());
                 report.reason = Some(err.clone());
                 report.error = Some(err);
             }
             Err(err) if err.starts_with("native-package-not-implemented:") => {
-                report.backend_level = "contract-only";
-                report.runtime_level = "none";
+                report.backend_level = "contract-only".to_string();
+                report.runtime_level = "none".to_string();
                 report.reason_code = Some("native-package-not-implemented".to_string());
                 report.reason = Some(err.clone());
                 report.error = Some(err);
             }
             Err(err) => {
-                report.backend_level = "owned-native-subset";
-                report.runtime_level = "inrt-native";
+                report.backend_level = "owned-native-subset".to_string();
+                report.runtime_level = "inrt-native".to_string();
                 report.reason_code = Some("native-lowering-failed".to_string());
                 report.reason = Some(err.clone());
                 report.error = Some(err);
@@ -476,8 +476,8 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
                     report.eval_result_string = jit_result.eval_result_string;
                 }
                 Err(err) => {
-                    report.backend_level = "owned-native-subset";
-                    report.runtime_level = "inrt-jit";
+                    report.backend_level = "owned-native-subset".to_string();
+                    report.runtime_level = "inrt-jit".to_string();
                     report.reason_code = Some("jit-failed".to_string());
                     report.reason = Some(err.clone());
                     report.error = Some(err);
@@ -690,10 +690,10 @@ fn compile_jit(
         eval_result,
         eval_result_string,
         abi_path: None,
-        backend_level: "owned-native-jit",
-        runtime_level: "inrt-jit",
-        reason_code,
-        reason,
+        backend_level: "owned-native-jit".to_string(),
+        runtime_level: "inrt-jit".to_string(),
+        reason_code: reason_code.to_string(),
+        reason: reason.to_string(),
     })
 }
 
@@ -737,10 +737,10 @@ fn compile_native(
                 eval_result: None,
                 eval_result_string: None,
                 abi_path: None,
-                backend_level: "owned-native-subset-aarch64-app",
-                runtime_level: "macos-app-bundle",
-                reason_code: "native-aarch64-darwin-app-subset",
-                reason: "inauguration owns macOS .app bundle emission around its AArch64 Mach-O executable subset",
+                backend_level: "owned-native-subset-aarch64-app".to_string(),
+                runtime_level: "macos-app-bundle".to_string(),
+                reason_code: "native-aarch64-darwin-app-subset".to_string(),
+                reason: "inauguration owns macOS .app bundle emission around its AArch64 Mach-O executable subset".to_string(),
             });
         }
         if request.linkage == NativeLinkage::Executable
@@ -760,10 +760,10 @@ fn compile_native(
                 eval_result: None,
                 eval_result_string: None,
                 abi_path: None,
-                backend_level: "owned-native-subset-x86_64-appdir",
-                runtime_level: "linux-appdir",
-                reason_code: "native-x86_64-linux-appdir-subset",
-                reason: "inauguration owns Linux AppDir emission around its x86_64 ELF executable subset",
+                backend_level: "owned-native-subset-x86_64-appdir".to_string(),
+                runtime_level: "linux-appdir".to_string(),
+                reason_code: "native-x86_64-linux-appdir-subset".to_string(),
+                reason: "inauguration owns Linux AppDir emission around its x86_64 ELF executable subset".to_string(),
             });
         }
         let object_request = native_emit::NativeObjectRequest {
@@ -798,10 +798,10 @@ fn compile_native(
                 eval_result: None,
                 eval_result_string: None,
                 abi_path,
-                backend_level: artifact.backend_level,
-                runtime_level: artifact.runtime_level,
-                reason_code: artifact.reason_code,
-                reason: artifact.reason,
+                backend_level: artifact.backend_level.to_string(),
+                runtime_level: artifact.runtime_level.to_string(),
+                reason_code: artifact.reason_code.to_string(),
+                reason: artifact.reason.to_string(),
             });
         }
         return Err(format!(
@@ -824,10 +824,10 @@ fn compile_native(
         eval_result: None,
         eval_result_string: None,
         abi_path: abi_path.map(|path| path.display().to_string()),
-        backend_level: "owned-native-subset",
-        runtime_level: "inrt-native",
-        reason_code: status.reason_code,
-        reason: status.reason,
+        backend_level: "owned-native-subset".to_string(),
+        runtime_level: "inrt-native".to_string(),
+        reason_code: status.reason_code.to_string(),
+        reason: status.reason.to_string(),
     })
 }
 
@@ -1094,10 +1094,10 @@ struct NativeCompileResult {
     eval_result: Option<i64>,
     eval_result_string: Option<String>,
     abi_path: Option<String>,
-    backend_level: &'static str,
-    runtime_level: &'static str,
-    reason_code: &'static str,
-    reason: &'static str,
+    backend_level: String,
+    runtime_level: String,
+    reason_code: String,
+    reason: String,
 }
 
 fn native_entry_module(module: &UnifiedModule, entry: &str) -> UnifiedModule {

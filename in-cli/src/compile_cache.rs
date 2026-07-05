@@ -64,10 +64,10 @@ impl From<&OwnedCompileReport> for CachedOwnedCompileReport {
             target_triple: report.target_triple.clone(),
             entry: report.entry.clone(),
             linkage: report.linkage.clone(),
-            frontend_level: report.frontend_level.to_string(),
-            semantic_level: report.semantic_level.to_string(),
-            backend_level: report.backend_level.to_string(),
-            runtime_level: report.runtime_level.to_string(),
+            frontend_level: report.frontend_level.clone(),
+            semantic_level: report.semantic_level.clone(),
+            backend_level: report.backend_level.clone(),
+            runtime_level: report.runtime_level.clone(),
             external_invocations: report.external_invocations.clone(),
             reason_code: report.reason_code.clone(),
             reason: report.reason.clone(),
@@ -104,10 +104,10 @@ impl From<CachedOwnedCompileReport> for OwnedCompileReport {
             target_triple: cached.target_triple,
             entry: cached.entry,
             linkage: cached.linkage,
-            frontend_level: leak_static(cached.frontend_level),
-            semantic_level: leak_static(cached.semantic_level),
-            backend_level: leak_static(cached.backend_level),
-            runtime_level: leak_static(cached.runtime_level),
+            frontend_level: cached.frontend_level,
+            semantic_level: cached.semantic_level,
+            backend_level: cached.backend_level,
+            runtime_level: cached.runtime_level,
             external_invocations: cached.external_invocations,
             reason_code: cached.reason_code,
             reason: cached.reason,
@@ -129,10 +129,6 @@ impl From<CachedOwnedCompileReport> for OwnedCompileReport {
             error: cached.error,
         }
     }
-}
-
-fn leak_static(value: String) -> &'static str {
-    Box::leak(value.into_boxed_str())
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -284,10 +280,10 @@ mod tests {
             target_triple: None,
             entry: None,
             linkage: "executable".to_string(),
-            frontend_level: "core-ir-direct",
-            semantic_level: "typed-subset",
-            backend_level: "owned-native-subset",
-            runtime_level: "inrt-jit",
+            frontend_level: "core-ir-direct".to_string(),
+            semantic_level: "typed-subset".to_string(),
+            backend_level: "owned-native-subset".to_string(),
+            runtime_level: "inrt-jit".to_string(),
             external_invocations: Vec::new(),
             reason_code: None,
             reason: None,
