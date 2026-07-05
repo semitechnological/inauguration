@@ -68,7 +68,7 @@ impl EnvConfig {
     /// Validated GitHub `owner/repo` slug for remote installs, or the default.
     #[must_use]
     pub fn github_repo_slug(&self) -> String {
-        const DEFAULT: &str = "semitechnological/inauguration";
+        const DEFAULT: &str = "tschk/inauguration";
         let raw = self.repo_slug.as_deref().unwrap_or("").trim();
         if raw.is_empty() {
             return DEFAULT.to_string();

@@ -1,43 +1,29 @@
 # inauguration docs-site
 
-Dark, information-dense hub for **inlang** (`.in`) and the **inauguration** compiler. Same layout as [crepuscularity/docs-site](../crepuscularity/docs-site): **`crepus.toml`**, `index.crepus`, `site.json`, `runtime/`, `static/`.
+**https://inauguration.tsc.hk** — crepuscularity web target (`crepus.toml` + `index.crepus`).
 
-Theme: zinc terminal (Chivo Mono), tsc.hk tone; doc grid density like crepuscularity’s landing.
+## Docs hook (`[targets.docs]`)
 
-Footer: **built with crepuscularity + inauguration**.
+Markdown at repo **`docs/`** (symlinks into `architecture/` + `benchmarks/`). Hook:
 
-## Prerequisites
+```toml
+[targets.docs]
+command = "bash"
+args = ["scripts/docs-hook.sh"]
+src = "../docs"
+```
 
-- Sibling **`../crepuscularity`** (`docs-site/runtime/Cargo.toml` path dep).
-- **`crepus`** on `PATH`, or `CREPU_ROOT` + `scripts/build-docs-site.sh` fallback.
-- **wasm32** + matching **wasm-bindgen-cli** (see crepuscularity `docs/cli.md`).
-
-## Markdown sources
-
-`crepus web build` emits **top-level** `docs/*.md` only. Canonical files live under `docs/architecture/` and `docs/benchmarks/`; **symlinks** at `docs/*.md` point there.
-
-Post-build: **`scripts/patch-docs-site-instrument-sans.sh`** themes generated HTML pages.
+Required for **`crepus web dev`** `/docs/` routes.
 
 ## Build
 
 ```bash
-in execute docs-site/backend.in    # inlang: crepus web build + theme patch
-./scripts/build-docs-site.sh       # bash equivalent
+in execute docs-site/backend.in
+./scripts/build-docs-site.sh
 ```
 
-Output: **`docs-site/dist/`** (gitignored).
-
-## Develop
+## Dev
 
 ```bash
-crepus web serve --site /path/to/inauguration/docs-site
+crepus web dev --site "$(pwd)"
 ```
-
-Or from crepuscularity checkout:
-
-```bash
-cargo run -p crepuscularity-cli --manifest-path ../crepuscularity/Cargo.toml -- \
-  web serve --site "$(pwd)/docs-site"
-```
-
-Serve over HTTP (WASM): e.g. `cd docs-site/dist && python3 -m http.server 8765`.

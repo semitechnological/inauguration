@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://semitechnological.dev/inauguration/events.schema.json",
+  "$id": "https://inauguration.tsc.hk/protocol/events.schema.json",
   "title": "HybridMvpProtocol",
   "type": "object",
   "oneOf": [

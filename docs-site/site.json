@@ -4,6 +4,7 @@
   "seo": {
     "title": "inauguration — ultrafast hybrid compiler & JIT pipeline for .in and general OOP/C languages",
     "description": "inlang (.in) and inauguration compiler docs. Built with crepuscularity. Core IR to native JIT—no LLVM, no bytecode VM.",
+    "canonical": "https://inauguration.tsc.hk/",
     "ogImage": null
   },
   "theme": {
