@@ -13,6 +13,7 @@ head_html = """
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Chivo+Mono:ital,wght@0,100..900;1,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet">
+<script src="./static/splash.js" defer></script>
 <style>
 .in-docs-page {
   --cp-bg: #09090b;
@@ -87,6 +88,19 @@ head_html = """
   50% { opacity: 0.65; }
 }
 .in-docs-shimmer { animation: in-docs-shimmer 3s ease-in-out infinite; }
+.in-splash-slot { display: block; min-height: 1.5rem; margin-bottom: 0.75rem; }
+.in-splash {
+  display: inline-block;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-weight: 700;
+  font-size: 1.15rem;
+  line-height: 1.2;
+  color: #fde047;
+  text-shadow: 2px 2px 0 #a16207, 3px 3px 0 rgba(0, 0, 0, 0.35);
+  transform: rotate(-14deg) skewX(-8deg);
+  letter-spacing: 0.03em;
+  user-select: none;
+}
 @keyframes in-docs-terminal-glow {
   0%, 100% { border-color: #27272a; }
   50% { border-color: #3f3f46; box-shadow: 0 0 24px rgba(59, 130, 246, 0.08); }
