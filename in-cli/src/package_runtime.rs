@@ -119,9 +119,9 @@ pub fn run_invoke(spec: &PackageInvokeSpec, install_path: &Path) -> Result<Strin
 
 pub fn binding_return_type(binding: &PackageExportBinding) -> Option<crate::core_ir::Typ> {
     match binding.returns.as_str() {
-        "string" => Some(crate::core_ir::Typ::String),
-        "int" => Some(crate::core_ir::Typ::Int),
-        "bool" => Some(crate::core_ir::Typ::Bool),
+        "int" | "Int" => Some(crate::core_ir::Typ::Int),
+        "string" | "String" => Some(crate::core_ir::Typ::String),
+        "bool" | "Bool" => Some(crate::core_ir::Typ::Bool),
         "void" => Some(crate::core_ir::Typ::Void),
         _ => None,
     }
@@ -130,6 +130,37 @@ pub fn binding_return_type(binding: &PackageExportBinding) -> Option<crate::core
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn binding_return_type_mapping() {
+        let cases = vec![
+            ("int", Some(crate::core_ir::Typ::Int)),
+            ("Int", Some(crate::core_ir::Typ::Int)),
+            ("string", Some(crate::core_ir::Typ::String)),
+            ("String", Some(crate::core_ir::Typ::String)),
+            ("bool", Some(crate::core_ir::Typ::Bool)),
+            ("Bool", Some(crate::core_ir::Typ::Bool)),
+            ("void", Some(crate::core_ir::Typ::Void)),
+            ("float", None),
+        ];
+
+        for (input, expected) in cases {
+            let binding = PackageExportBinding {
+                symbol: "test_sym".to_string(),
+                returns: input.to_string(),
+                invoke: PackageInvokeSpec {
+                    program: "test".to_string(),
+                    args: vec![],
+                },
+            };
+            assert_eq!(
+                binding_return_type(&binding),
+                expected,
+                "failed for input: {}",
+                input
+            );
+        }
+    }
 
     #[test]
     fn invokes_echo_adapter() {
