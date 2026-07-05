@@ -19,3 +19,12 @@ crepus web dev --site docs-site
 ```
 
 Footer: **built with crepuscularity + inauguration**.
+
+## Deploy (Cloudflare)
+
+```bash
+./scripts/build-docs-site.sh
+# Cloudflare Pages: upload docs-site/dist (dashboard or wrangler pages deploy docs-site/dist)
+```
+
+Custom domain **inauguration.tsc.hk** in Cloudflare DNS / Pages settings.

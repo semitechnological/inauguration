@@ -71,7 +71,7 @@ in bench
 ## Release & crates.io
 
 - **Do not** run `cargo publish` locally. Bump `in-cli/Cargo.toml` version, commit, push `master`, tag `v*`, push tag — **`.github/workflows/release.yml`** publishes to crates.io (`secrets.CARGO_REGISTRY_TOKEN`).
-- GitHub Pages: **`.github/workflows/pages.yml`** on `master` / tags.
+- Site hosting: **Cloudflare** (e.g. Pages) — build `docs-site/dist` with `./scripts/build-docs-site.sh`, deploy yourself; no GitHub Pages workflow.
 
 ## Commit style
 
