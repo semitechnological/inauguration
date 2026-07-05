@@ -26,9 +26,5 @@
   ];
   var el = document.getElementById("in-splash");
   if (!el) return;
-  var pick = lines[Math.floor(Math.random() * lines.length)];
-  var span = document.createElement("span");
-  span.className = "in-splash";
-  span.textContent = pick;
-  el.appendChild(span);
+  el.textContent = lines[Math.floor(Math.random() * lines.length)];
 })();
