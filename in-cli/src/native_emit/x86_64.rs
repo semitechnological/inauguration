@@ -26,6 +26,10 @@ pub fn is_32bit() -> bool {
     TL_IS_32BIT.with(|cell| cell.get())
 }
 
+pub fn set_32bit(enabled: bool) {
+    TL_IS_32BIT.with(|cell| cell.set(enabled));
+}
+
 // ── CodeEmitter ─────────────────────────────────────────────────
 
 #[derive(Debug, Default)]
