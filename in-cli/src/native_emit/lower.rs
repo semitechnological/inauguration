@@ -247,12 +247,54 @@ pub(crate) struct PendingString {
     pub(crate) string_index: i64,
 }
 
+pub(crate) struct FunctionBuffer {
+    pub(crate) name: String,
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) pending_calls: Vec<PendingCall>,
+    pub(crate) pending_inrt_calls: Vec<PendingInrtCall>,
+    pub(crate) pending_static_arrays: Vec<PendingStaticArray>,
+    pub(crate) pending_strings: Vec<PendingString>,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct FunctionInfo {
     pub(crate) name: String,
     pub(crate) params: Vec<(String, Typ)>,
     pub(crate) ret: Typ,
     pub(crate) body: Vec<Stmt>,
+}
+
+fn lower_function_to_buffer(
+    func: &FunctionInfo,
+    functions: &HashMap<String, FunctionInfo>,
+    structs: &HashMap<String, Vec<(String, Typ)>>,
+    strings: &HashMap<String, i64>,
+) -> Result<FunctionBuffer, String> {
+    let mut emitter = CodeEmitter::new();
+    let mut pending_calls = Vec::new();
+    let mut pending_inrt_calls = Vec::new();
+    let mut pending_static_arrays = Vec::new();
+    let mut pending_strings = Vec::new();
+    lower_function(
+        &mut emitter,
+        func,
+        functions,
+        structs,
+        strings,
+        &mut pending_calls,
+        &mut pending_inrt_calls,
+        &mut pending_static_arrays,
+        &mut pending_strings,
+        0,
+    )?;
+    Ok(FunctionBuffer {
+        name: func.name.clone(),
+        bytes: emitter.bytes,
+        pending_calls,
+        pending_inrt_calls,
+        pending_static_arrays,
+        pending_strings,
+    })
 }
 
 pub fn lower_module(
@@ -288,39 +330,70 @@ pub fn lower_module(
     let mut emitter = CodeEmitter::new();
     emitter.bytes.resize(ENTRY_STUB_SIZE as usize, 0);
     let mut function_offsets = HashMap::new();
-    let mut pending_calls = Vec::new();
     let mut pending_inrt_calls = Vec::new();
     let mut pending_static_arrays = Vec::new();
     let mut pending_strings = Vec::new();
     let mut names: Vec<String> = functions.keys().cloned().collect();
     names.sort();
 
-    for name in &names {
-        let func = &functions[name];
+    // Lower each function in parallel. Each function gets its own code buffer,
+    // so the per-function work is independent; we merge and patch offsets below.
+    let buffers: Vec<FunctionBuffer> = std::thread::scope(|s| {
+        let functions = &functions;
+        let structs = &structs;
+        let strings = &strings;
+        let mut handles = Vec::with_capacity(names.len());
+        for name in &names {
+            let func = &functions[name];
+            handles.push(s.spawn(move || {
+                lower_function_to_buffer(func, functions, structs, strings)
+                    .map_err(|e| format!("native-lower: function `{name}` unsupported: {e}"))
+            }));
+        }
+        handles
+            .into_iter()
+            .map(|h| h.join().unwrap())
+            .collect::<Result<Vec<_>, _>>()
+    })?;
+
+    // Append all per-function buffers and record global offsets.
+    for buf in &buffers {
         let offset = emitter.len();
-        function_offsets.insert(name.clone(), offset);
-        if let Err(e) = lower_function(
-            &mut emitter,
-            func,
-            &functions,
-            &structs,
-            &strings,
-            &mut pending_calls,
-            &mut pending_inrt_calls,
-            &mut pending_static_arrays,
-            &mut pending_strings,
-            offset,
-        ) {
-            return Err(format!("native-lower: function `{name}` unsupported: {e}"));
+        function_offsets.insert(buf.name.clone(), offset);
+        emitter.bytes.extend_from_slice(&buf.bytes);
+    }
+
+    // Patch internal function calls (BL) using global offsets.
+    for buf in &buffers {
+        let base = *function_offsets.get(&buf.name).expect("function offset");
+        for call in &buf.pending_calls {
+            let target_offset = *function_offsets
+                .get(&call.target)
+                .ok_or_else(|| format!("native-lower: unresolved call target `{}`", call.target))?;
+            let global_site = base + call.site;
+            let rel = target_offset as i32 - global_site as i32;
+            emitter.patch_u32(global_site, aarch64::bl(rel));
         }
     }
 
-    for call in pending_calls {
-        let target_offset = *function_offsets
-            .get(&call.target)
-            .ok_or_else(|| format!("native-lower: unresolved call target `{}`", call.target))?;
-        let offset = target_offset as i32 - call.site as i32;
-        emitter.patch_u32(call.site, aarch64::bl(offset));
+    // Collect pending static arrays, strings, and inrt calls from all buffers,
+    // translating local sites to global offsets.
+    for buf in buffers {
+        let base = *function_offsets.get(&buf.name).expect("function offset");
+        pending_static_arrays.extend(buf.pending_static_arrays.into_iter().map(|a| {
+            PendingStaticArray {
+                adr_site: base + a.adr_site,
+                values: a.values,
+            }
+        }));
+        pending_strings.extend(buf.pending_strings.into_iter().map(|p| PendingString {
+            adr_site: base + p.adr_site,
+            string_index: p.string_index,
+        }));
+        pending_inrt_calls.extend(buf.pending_inrt_calls.into_iter().map(|c| PendingInrtCall {
+            site: base + c.site,
+            target: c.target,
+        }));
     }
 
     append_static_arrays(&mut emitter, pending_static_arrays);
