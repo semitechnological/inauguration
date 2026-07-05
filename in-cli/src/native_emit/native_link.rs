@@ -147,6 +147,14 @@ pub fn bootstrap_jit_native() {
         "in_str_ends_with".to_string(),
         NativePtr(crate::native_stdlib::in_str_ends_with as *const u8),
     );
+    c.insert(
+        "in_print".to_string(),
+        NativePtr(crate::native_stdlib::in_print as *const u8),
+    );
+    c.insert(
+        "in_print_int".to_string(),
+        NativePtr(crate::native_stdlib::in_print_int as *const u8),
+    );
 }
 
 fn dlsym_exact(name: &str) -> Option<*const u8> {
