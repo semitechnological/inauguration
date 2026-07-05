@@ -92,7 +92,6 @@ head_html = """
   50% { border-color: #3f3f46; box-shadow: 0 0 24px rgba(59, 130, 246, 0.08); }
 }
 .in-docs-terminal-glow { animation: in-docs-terminal-glow 5s ease-in-out infinite; }
-.in-docs-shell-pre { line-height: 1.3; }
 .in-docs-card-hover {
   transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
 }
