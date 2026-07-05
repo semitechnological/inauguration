@@ -275,9 +275,9 @@ fn enrich_report_from_surface_info(
                     "AGENT_MISSING_CAPABILITY",
                     AgentDiagnosticSeverity::Warning,
                     None,
-                    parser_id.as_deref(),
+                    parser_id,
                     Some("top-level capability declaration matching an extern binding requirement"),
-                    excerpt_bounds(&source, None),
+                    excerpt_bounds(source, None),
                     Some("Add the missing top-level capability declaration or remove the extern requirement"),
                     &format!(
                         "extern {} fn {} requires missing capability {}",
@@ -329,9 +329,9 @@ fn enrich_report_from_surface_info(
             &diagnostic_fact.code,
             AgentDiagnosticSeverity::Warning,
             None,
-            parser_id.as_deref(),
+            parser_id,
             Some("top-level use declaration matching a dependency in the nearest inauguration.package"),
-            excerpt_bounds(&source, None),
+            excerpt_bounds(source, None),
             Some("Declare the dependency in inauguration.package or remove the semantic import"),
             &diagnostic_fact.message,
         ));
@@ -344,7 +344,7 @@ fn enrich_report_from_surface_info(
             .filter(|binding| binding.status == "resolved")
             .map(|binding| binding.alias.as_str())
             .collect::<std::collections::BTreeSet<_>>(),
-        parser_id.as_deref(),
+        parser_id,
         source,
     ));
     effects.extend(
