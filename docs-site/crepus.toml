@@ -130,11 +130,16 @@ title = "inauguration"
 description = "Compiler toolchain: inlang (.in), Core IR, native JIT, polyglot Tree-sitter fronts."
 sources = [
   { path = "../README.md", href = "https://github.com/tschk/inauguration/blob/master/README.md", title = "Repository README" },
-  { path = "../docs/README.md", href = "https://inauguration.tsc.hk/docs/", title = "Documentation overview" },
+  { path = "../docs/README.md", href = "https://inauguration.tsc.hk/docs/README.html", title = "Documentation overview" },
   { path = "../docs/in-language.md", href = "https://inauguration.tsc.hk/docs/in-language.html", title = "inlang (.in)" },
-  { path = "../docs/languages.md", href = "https://inauguration.tsc.hk/docs/languages.html", title = "Language fronts" },
   { path = "../docs/general-compiler.md", href = "https://inauguration.tsc.hk/docs/general-compiler.html", title = "General compiler" },
+  { path = "../docs/multi-frontend-ir.md", href = "https://inauguration.tsc.hk/docs/multi-frontend-ir.html", title = "Multi-front Core IR" },
+  { path = "../docs/languages.md", href = "https://inauguration.tsc.hk/docs/languages.html", title = "Language fronts" },
+  { path = "../docs/parser-surface.md", href = "https://inauguration.tsc.hk/docs/parser-surface.html", title = "Parser surface" },
   { path = "../docs/native-backend.md", href = "https://inauguration.tsc.hk/docs/native-backend.html", title = "Native backend" },
+  { path = "../docs/docs-site.md", href = "https://inauguration.tsc.hk/docs/docs-site.html", title = "Docs-site" },
+  { path = "../docs/benchmarks-index.md", href = "https://inauguration.tsc.hk/docs/benchmarks-index.html", title = "Benchmarks" },
   { path = "../docs/jit.md", href = "https://inauguration.tsc.hk/docs/jit.html", title = "JIT benchmarks" },
   { path = "../docs/polyglot-compilers.md", href = "https://inauguration.tsc.hk/docs/polyglot-compilers.html", title = "Polyglot benchmarks" },
+  { path = "../docs/self-host-vs-native.md", href = "https://inauguration.tsc.hk/docs/self-host-vs-native.html", title = "Self-host vs rustc" },
 ]

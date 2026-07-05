@@ -316,5 +316,5 @@ Ops: `+`, `-`, `*`, `/`, `%`, `&`, `|`, `^`, `<<`, `>>`, `==`, `!=`, `<`, `>`, `
 ## See also
 
 - `agents/skills/in-lang/SKILL.md` — `.in` source language
-- `docs/architecture/core-ir-extensions.md` — classes, interfaces, closures, exceptions
-- `docs/architecture/multi-frontend-ir.md` — `UnifiedModule`, parser resolution
+- `docs/core-ir-extensions.md` — classes, interfaces, closures, exceptions
+- `docs/multi-frontend-ir.md` — `UnifiedModule`, parser resolution

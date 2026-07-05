@@ -1,8 +1,10 @@
 //! `crepus web dev` / `crepus web build` docs hook (same CLI as crepuscularity `web_docs_hook`).
 
+use std::collections::HashSet;
 use std::env;
+use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use pulldown_cmark::{html, Options, Parser};
 use serde::Deserialize;
@@ -53,6 +55,21 @@ fn arg_value(args: &[String], flag: &str) -> Option<String> {
     args.get(i + 1).cloned()
 }
 
+/// Published doc order (crepuscularity-style flat `docs/`); README is overview only.
+const NAV_ORDER: &[&str] = &[
+    "in-language",
+    "general-compiler",
+    "multi-frontend-ir",
+    "languages",
+    "parser-surface",
+    "native-backend",
+    "docs-site",
+    "benchmarks-index",
+    "jit",
+    "polyglot-compilers",
+    "self-host-vs-native",
+];
+
 fn generate_docs(
     src_dir: &Path,
     out_dir: &Path,
@@ -64,20 +81,7 @@ fn generate_docs(
     }
 
     let mut files: Vec<(String, String)> = Vec::new();
-    for entry in std::fs::read_dir(src_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("md") {
-            continue;
-        }
-        let stem = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .map(String::from)
-            .unwrap_or_default();
-        let content = std::fs::read_to_string(&path)?;
-        files.push((stem, content));
-    }
+    collect_markdown(src_dir, src_dir, &mut files)?;
     files.sort_by(|a, b| a.0.cmp(&b.0));
 
     let pages: Vec<(String, String)> = files
@@ -88,12 +92,12 @@ fn generate_docs(
         })
         .collect();
 
-    std::fs::create_dir_all(out_dir)?;
+    fs::create_dir_all(out_dir)?;
     for (stem, content) in &files {
         let (title, body_html) = render_md(content);
         let nav = render_nav(&pages, stem);
         let page = render_shell(&body_html, &title, &nav, theme, site_name);
-        std::fs::write(out_dir.join(format!("{stem}.html")), page)?;
+        fs::write(out_dir.join(format!("{stem}.html")), page)?;
     }
 
     if pages.is_empty() {
@@ -104,11 +108,63 @@ fn generate_docs(
         .iter()
         .map(|(stem, title)| serde_json::json!({"path": format!("{stem}.html"), "title": title}))
         .collect();
-    std::fs::write(
+    fs::write(
         out_dir.join("docs-search-index.json"),
         serde_json::to_string_pretty(&serde_json::json!(idx))?,
     )?;
 
+    fs::write(
+        out_dir.join("index.html"),
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="0; url=./in-language.html">
+<link rel="canonical" href="./in-language.html">
+<title>Documentation — inauguration</title>
+</head>
+<body><p><a href="./in-language.html">Documentation</a></p></body>
+</html>
+"#,
+    )?;
+
+    Ok(())
+}
+
+fn collect_markdown(
+    root: &Path,
+    dir: &Path,
+    out: &mut Vec<(String, String)>,
+) -> io::Result<()> {
+    let rel = dir.strip_prefix(root).unwrap_or(dir);
+    if rel
+        .components()
+        .any(|c| c.as_os_str() == "internal")
+    {
+        return Ok(());
+    }
+
+    let mut entries: Vec<PathBuf> = fs::read_dir(dir)?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .collect();
+    entries.sort();
+
+    for path in entries {
+        if path.is_dir() {
+            collect_markdown(root, &path, out)?;
+            continue;
+        }
+        if path.extension().and_then(|e| e.to_str()) != Some("md") {
+            continue;
+        }
+        let rel = path.strip_prefix(root).unwrap_or(&path);
+        let stem = rel
+            .with_extension("")
+            .to_string_lossy()
+            .replace(std::path::MAIN_SEPARATOR, "-");
+        let content = fs::read_to_string(&path)?;
+        out.push((stem, content));
+    }
     Ok(())
 }
 
@@ -134,8 +190,26 @@ fn render_md(md: &str) -> (String, String) {
 }
 
 fn render_nav(pages: &[(String, String)], current: &str) -> String {
+    let order: Vec<&(String, String)> = {
+        let mut seen = HashSet::new();
+        let mut ordered = Vec::new();
+        for key in NAV_ORDER {
+            if let Some(p) = pages.iter().find(|(s, _)| s == key) {
+                if seen.insert(p.0.clone()) {
+                    ordered.push(p);
+                }
+            }
+        }
+        for p in pages {
+            if seen.insert(p.0.clone()) {
+                ordered.push(p);
+            }
+        }
+        ordered
+    };
+
     let mut items = String::new();
-    for (stem, page_title) in pages {
+    for (stem, page_title) in order {
         let active = if stem == current {
             " class=\"active\""
         } else {

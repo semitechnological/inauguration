@@ -297,7 +297,7 @@ Alloc returns Int (pointer), arrays are raw pointer + offset.
 
 ## See also
 
-- `docs/architecture/in-language.md` — full grammar spec
-- `docs/architecture/parser-surface.md` — extension → front mapping
-- `docs/architecture/core-ir-extensions.md` — classes, interfaces, closures, exceptions
+- `docs/in-language.md` — full grammar spec
+- `docs/parser-surface.md` — extension → front mapping
+- `docs/core-ir-extensions.md` — classes, interfaces, closures, exceptions
 - `agents/skills/icore/SKILL.md` — `.icore` JSON format

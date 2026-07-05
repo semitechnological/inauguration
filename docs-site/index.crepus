@@ -168,6 +168,16 @@ div min-h-screen bg-zinc-950 text-zinc-300 p-6 sm:p-12 text-sm leading-relaxed i
 						"parser-surface.md"
 					span desc
 						" — ParserId resolution"
+				a doc-item href="./docs/languages.html"
+					span name
+						"languages.md"
+					span desc
+						" — language matrix"
+				a doc-item href="./docs/benchmarks-index.html"
+					span name
+						"benchmarks-index.md"
+					span desc
+						" — JIT, polyglot, self-host"
 				a doc-item href="./docs/jit.html"
 					span name
 						"jit.md"

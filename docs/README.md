@@ -1,20 +1,16 @@
-# inauguration documentation
+# Benchmarks
 
-## Start here
+| Doc | What it measures |
+|-----|------------------|
+| [jit.md](jit.md) | JIT compile + run latency on macOS ARM64 |
+| [polyglot-compilers.md](polyglot-compilers.md) | `in compile` vs installed native compilers on polyglot samples |
+| [self-host-vs-native.md](self-host-vs-native.md) | `in build` vs **rustc** (time, binary size, startup) on `in-cli` |
 
-| Topic | Page |
-|-------|------|
-| **inlang** (`.in`) | [architecture/in-language.md](architecture/in-language.md) |
-| Compiler driver | [architecture/general-compiler.md](architecture/general-compiler.md) |
-| Core IR | [architecture/multi-frontend-ir.md](architecture/multi-frontend-ir.md) |
-| Language list | [architecture/languages.md](architecture/languages.md) |
-| Native / JIT | [architecture/native-backend.md](architecture/native-backend.md) |
-| Parser IDs | [architecture/parser-surface.md](architecture/parser-surface.md) |
-| Docs-site | [architecture/docs-site.md](architecture/docs-site.md) |
-| Benchmarks | [benchmarks/README.md](benchmarks/README.md) |
+Regenerate:
 
-## Site
+```bash
+./scripts/bench-self-host.sh && python3 scripts/render-self-host-bench-md.py
+./scripts/bench_polyglot_compilers.v   # polyglot matrix
+```
 
-Static hub: **`docs-site/`** — `crepus web build` or **`docs-site/backend.in`** via `in execute`.
-
-Live matrix: **`in languages --json`**.
+Swift-vs-in benchmark removed; use **polyglot-compilers** for cross-language compile-time comparison.

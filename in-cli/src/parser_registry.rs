@@ -8,7 +8,7 @@
 //!    - `parser=in` → `.in` front (overrides extension and `IN_PARSER`).
 //!    - `parser=auto` → continue with normal `auto` rules below.
 //!    - `parser=<slug>` for any other known slug → that front (Tree-sitter polyglot or icore-only);
-//!      see [`ParserId::as_str`] and [parser-surface.md](../../docs/architecture/parser-surface.md).
+//!      see [`ParserId::as_str`] and [parser-surface.md](../../docs/parser-surface.md).
 //! 3. **`IN_PARSER=in`** or **`IN_PARSER=icore`** (case-insensitive): force that Core IR front.
 //! 4. **Known extension** (`.in`, `.icore`, `.java`, …): [`ResolvedBuildParser::CoreIr`]
 //!    with the matching [`ParserId`] (full: [`ParserId::In`], [`ParserId::Icore`]; others: Tree-sitter).

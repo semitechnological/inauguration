@@ -119,7 +119,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         capabilities: &["parse", "lower"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR declarations only; Objective-C runtime is not bundled",
-        example: "docs/architecture/parser-surface.md",
+        example: "docs/parser-surface.md",
         next_step: "Add Objective-C method metadata, bounded bodies, and runtime boundary docs",
     },
     LanguageSupport {
@@ -129,7 +129,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         capabilities: &["parse", "lower", "typecheck"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR and textual SIL; Objective-C++ runtime/ABI is not bundled",
-        example: "docs/architecture/parser-surface.md",
+        example: "docs/parser-surface.md",
         next_step: "Add method metadata, C++ interop boundaries, and ABI docs",
     },
     LanguageSupport {
@@ -209,7 +209,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         capabilities: &["parse", "lower"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR declarations only; CLR runtime is not bundled",
-        example: "docs/architecture/parser-surface.md",
+        example: "docs/parser-surface.md",
         next_step: "Add parameters, return types, bounded bodies, and CLR runtime strategy",
     },
     LanguageSupport {
@@ -309,7 +309,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         capabilities: &["parse", "lower"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR declarations only; BEAM runtime is not bundled",
-        example: "docs/architecture/parser-surface.md",
+        example: "docs/parser-surface.md",
         next_step: "Add arity metadata, bounded bodies, and BEAM runtime strategy",
     },
     LanguageSupport {
@@ -319,7 +319,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         capabilities: &["parse", "lower"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR declarations only; BEAM runtime is not bundled",
-        example: "docs/architecture/parser-surface.md",
+        example: "docs/parser-surface.md",
         next_step: "Add arity metadata, bounded bodies, and BEAM runtime strategy",
     },
     LanguageSupport {
@@ -329,7 +329,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         capabilities: &["parse", "lower"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR declarations only; Haskell runtime is not bundled",
-        example: "docs/architecture/parser-surface.md",
+        example: "docs/parser-surface.md",
         next_step: "Add parameters, bounded bodies, and runtime strategy",
     },
     LanguageSupport {
@@ -359,7 +359,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         capabilities: &["parse", "lower"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR declarations only; Julia runtime is not bundled",
-        example: "docs/architecture/parser-surface.md",
+        example: "docs/parser-surface.md",
         next_step: "Add parameters, bounded bodies, and runtime strategy",
     },
     LanguageSupport {
@@ -369,7 +369,7 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         capabilities: &["parse", "lower"],
         front: "compiler::tree_front",
         runtime_boundary: "Core IR declarations only; R runtime is not bundled",
-        example: "docs/architecture/parser-surface.md",
+        example: "docs/parser-surface.md",
         next_step: "Add parameters, bounded bodies, and runtime strategy",
     },
     LanguageSupport {
