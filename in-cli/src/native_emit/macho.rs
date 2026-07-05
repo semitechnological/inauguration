@@ -759,9 +759,7 @@ mod tests {
             .status()
             .expect("codesign");
         assert!(sign.success(), "codesign failed");
-        let status = std::process::Command::new("/bin/sh")
-            .arg("-c")
-            .arg(&path)
+        let status = std::process::Command::new(&path)
             .status()
             .expect("run");
         match status.code() {

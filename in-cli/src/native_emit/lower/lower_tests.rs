@@ -44,9 +44,7 @@ fn run_native_exe(path: &std::path::Path) -> std::process::Output {
         .status()
         .expect("codesign spawn");
     assert!(sign.success(), "codesign failed for native executable");
-    std::process::Command::new("/bin/sh")
-        .arg("-c")
-        .arg(path.to_str().unwrap())
+    std::process::Command::new(path)
         .output()
         .expect("run executable")
 }
