@@ -1061,31 +1061,12 @@ pub fn typecheck_resolved(
 }
 
 pub fn uses_family_typecheck(parser_id: ParserId) -> bool {
-    matches!(
-        parser_id,
-        ParserId::Php
-            | ParserId::Lua
-            | ParserId::Zig
-            | ParserId::Rust
-            | ParserId::Java
-            | ParserId::Kotlin
-            | ParserId::CSharp
-            | ParserId::FSharp
-            | ParserId::JavaScript
-            | ParserId::TypeScript
-            | ParserId::Python
-            | ParserId::Ruby
-            | ParserId::Scala
-            | ParserId::Perl
-            | ParserId::Nim
-            | ParserId::Odin
-            | ParserId::Hare
-            | ParserId::HolyC
-            | ParserId::D
-            | ParserId::Crystal
-            | ParserId::Clojure
-            | ParserId::VbNet
-    )
+    if let Some(row) =
+        crate::language_support::language_support_for_parser(parser_id.as_str())
+    {
+        return row.can_typecheck();
+    }
+    false
 }
 
 fn typecheck_for_parser(parser_id: ParserId, module: &UnifiedModule) -> Result<(), String> {
@@ -1290,7 +1271,8 @@ fn normalize_type(typ: &Typ) -> Typ {
             let lower = name.to_ascii_lowercase();
             match lower.as_str() {
                 "int" | "i8" | "i16" | "i32" | "i64" | "i128" | "isize" | "u8" | "u16" | "u32"
-                | "u64" | "u128" | "usize" | "integer" | "number" | "int32" | "int64" => Typ::Int,
+                | "u64" | "u128" | "usize" | "integer" | "number" | "int32" | "int64" | "long"
+                | "char" | "byte" | "short" | "uintptr" | "size_t" | "ssize_t" => Typ::Int,
                 "float" | "f32" | "f64" | "double" => Typ::Float,
                 "bool" | "boolean" => Typ::Bool,
                 "string" | "str" => Typ::String,
@@ -1317,6 +1299,18 @@ fn normalize_parser_type(parser_id: ParserId, typ: &Typ) -> Typ {
 
 #[cfg(test)]
 mod tests {
+    use super::uses_family_typecheck;
+    use crate::parser_registry::ParserId;
+
+    #[test]
+    fn family_typecheck_follows_language_matrix_go() {
+        assert!(uses_family_typecheck(ParserId::Go));
+    }
+
+    #[test]
+    fn family_typecheck_in_lang_follows_matrix() {
+        assert!(uses_family_typecheck(ParserId::In));
+    }
     use super::*;
     use crate::core_ir::{Decl, Expr, MethodSig, Stmt, Typ, UnifiedModule, Visibility};
 

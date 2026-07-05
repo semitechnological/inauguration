@@ -34,19 +34,20 @@ fn answer_module() -> UnifiedModule {
     }
 }
 
-/// Run a native executable on macOS AArch64: ad-hoc codesign, execute via /bin/sh.
+/// Run a native executable on macOS AArch64: ad-hoc codesign, direct exec (no shell).
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 fn run_native_exe(path: &std::path::Path) -> std::process::Output {
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
     let sign = std::process::Command::new("codesign")
-        .args(["-s", "-", "-f", path.to_str().unwrap()])
+        .arg("-s")
+        .arg("-")
+        .arg("-f")
+        .arg(path)
         .status()
         .expect("codesign spawn");
     assert!(sign.success(), "codesign failed for native executable");
-    std::process::Command::new("/bin/sh")
-        .arg("-c")
-        .arg(path.to_str().unwrap())
+    std::process::Command::new(path)
         .output()
         .expect("run executable")
 }
@@ -64,7 +65,8 @@ fn assert_exit_or_disasm(
         Some(code) => assert_eq!(code, expected, "exit {code} != expected {expected}"),
         None if output.status.signal() == Some(9) => {
             let dump = std::process::Command::new("otool")
-                .args(["-tV", path.to_str().unwrap()])
+                .arg("-tV")
+                .arg(path)
                 .output()
                 .expect("otool");
             let text = String::from_utf8_lossy(&dump.stdout);

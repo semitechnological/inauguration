@@ -541,7 +541,8 @@ pub(super) fn decl_fn(name: String, params: Vec<(String, Typ)>, ret: Typ) -> Dec
 
 pub(super) fn normalize_entry(raw: &str) -> String {
     match raw {
-        "Main" => "main".into(),
+        "Main" | "MAIN" | "_main" => "main".into(),
+        other if other.eq_ignore_ascii_case("main") => "main".into(),
         other => other.to_string(),
     }
 }
