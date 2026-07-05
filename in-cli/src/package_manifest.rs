@@ -1885,4 +1885,50 @@ dependencies:
         assert_eq!(diagnostics[0].severity, "warning");
         assert_eq!(diagnostics[0].import, "cache.redis");
     }
+
+    #[test]
+    fn compile_context_at_root_returns_none_if_no_manifest() {
+        let temp = TempDirGuard::new();
+
+        let context = compile_context_at_root(&temp.path);
+
+        assert!(context.is_none());
+    }
+
+    #[test]
+    fn compile_context_at_root_returns_context_if_manifest_exists() {
+        let temp = TempDirGuard::new();
+        fs::write(
+            temp.path.join(PACKAGE_MANIFEST_FILE),
+            r#"name: test_pkg
+version: 0.1.0
+"#,
+        )
+        .expect("write manifest");
+
+        let context = compile_context_at_root(&temp.path).expect("load context");
+
+        assert_eq!(context.name, "test_pkg");
+        assert_eq!(context.entry, None);
+        assert_eq!(context.dependency_search_paths.len(), 0);
+    }
+
+    #[test]
+    fn compile_context_at_root_returns_context_with_entry() {
+        let temp = TempDirGuard::new();
+        fs::write(
+            temp.path.join(PACKAGE_MANIFEST_FILE),
+            r#"name: test_pkg_entry
+version: 0.1.0
+entry: src/main.in
+"#,
+        )
+        .expect("write manifest");
+
+        let context = compile_context_at_root(&temp.path).expect("load context");
+
+        assert_eq!(context.name, "test_pkg_entry");
+        assert_eq!(context.entry.as_deref(), Some("src/main.in"));
+        assert_eq!(context.dependency_search_paths.len(), 0);
+    }
 }
