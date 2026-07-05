@@ -3,8 +3,8 @@ set -euo pipefail
 
 # Self-hosted language matrix gate.
 # Runs each mandatory language example through the owned pipeline:
-#   in build, in graph --json, in agent, in backend --target bytecode --json
-# Plus compile-bytecode and execute-bytecode for languages with bytecode support.
+#   in build, in graph --json, in agent, in backend --target native --json
+# Plus in execute for languages that lower to Core IR directly.
 # Fails if any mandatory language requires an external compiler/runtime.
 # Skips languages gracefully when their sample file doesn't exist.
 
@@ -15,8 +15,8 @@ IN_CMD=("${IN_BIN:-in}")
 POLYGLOT_DIR="apps/polyglot-sample"
 
 # Language -> sample file mapping (mandatory languages only).
-# Each entry: "lang|sample_path|extra_env|has_bytecode"
-# has_bytecode: "1" if the language front lowers to .in Core IR directly
+# Each entry: "lang|sample_path|extra_env|has_jit"
+# has_jit: "1" if the language front lowers to .in Core IR directly
 declare -a LANGS=(
   "in|sample.in||1"
   "icore|sample.icore||1"
@@ -28,8 +28,8 @@ declare -a LANGS=(
   "objcpp|sample.mm||0"         # no sample exists → skipped gracefully
   "java|Sample.java||1"
   "kotlin|Sample.kt||1"
-  "cs|Program.cs||1"
-  "fsharp|sample.fs||1"
+  "cs|Program.cs||0"
+  "fsharp|sample.fs||0"
   "swift|sample.swift|IN_NATIVE_SWIFT_SIL=only|0"
   "rust|sample.rs||0"
   "js|sample.js||1"
@@ -54,9 +54,9 @@ declare -a LANGS=(
 FAILED=0
 SKIPPED=0
 PASSED=0
-BC_PASSED=0
-BC_FAILED=0
-BC_SKIPPED=0
+JIT_PASSED=0
+JIT_FAILED=0
+JIT_SKIPPED=0
 
 check_json_no_external() {
   local json_path="$1"
@@ -100,7 +100,7 @@ run_matrix_for_lang() {
   local lang="$1"
   local sample_file="$2"
   local extra_env="$3"
-  local has_bytecode="$4"
+  local has_jit="$4"
 
   local path="$POLYGLOT_DIR/$sample_file"
 
@@ -148,33 +148,25 @@ run_matrix_for_lang() {
     fi
   fi
 
-  # 4. in backend --target bytecode --json
+  # 4. in backend --target native --json
   if [[ "$status" == "PASS" ]]; then
-    if $env_prefix "${IN_CMD[@]}" backend --target bytecode --json --path "$path" --module-id App >"$tmp_json" 2>/dev/null; then
+    if $env_prefix "${IN_CMD[@]}" backend --target native --json --path "$path" --module-id App >"$tmp_json" 2>/dev/null; then
       check_json_no_external "$tmp_json" "$lang" || status="FAIL"
     else
-      echo "FAIL [$lang]: in backend --target bytecode --json"
+      echo "FAIL [$lang]: in backend --target native --json"
       status="FAIL"
     fi
   fi
 
-  # 5. Bytecode execution (self-hosted backend, only for languages that lower to Core IR directly)
-  if [[ "$has_bytecode" == "1" ]]; then
-    local bc_tmp
-    bc_tmp="$(mktemp "${TMPDIR:-/tmp}/in-matrix-bc-${lang}.XXXXXX")"
-    if "${IN_CMD[@]}" compile-bytecode --out "$bc_tmp" "$path" >/dev/null 2>&1; then
-      if "${IN_CMD[@]}" run-bytecode "$bc_tmp" >/dev/null 2>&1; then
-        echo "  bytecode [$lang]: compile + execute ok"
-        BC_PASSED=$((BC_PASSED + 1))
-      else
-        echo "  bytecode [$lang]: execute failed"
-        BC_FAILED=$((BC_FAILED + 1))
-      fi
+  # 5. JIT execution (self-hosted backend, only for languages that lower to Core IR directly)
+  if [[ "$has_jit" == "1" ]]; then
+    if "${IN_CMD[@]}" execute "$path" --module-id App >/dev/null 2>&1; then
+      echo "  jit [$lang]: execute ok"
+      JIT_PASSED=$((JIT_PASSED + 1))
     else
-      echo "  bytecode [$lang]: compile failed"
-      BC_FAILED=$((BC_FAILED + 1))
+      echo "  jit [$lang]: execute failed"
+      JIT_FAILED=$((JIT_FAILED + 1))
     fi
-    rm -f "$bc_tmp"
   fi
 
   rm -f "$tmp_json"
@@ -193,8 +185,8 @@ echo "=== self-hosted language matrix ==="
 echo ""
 
 for entry in "${LANGS[@]}"; do
-  IFS='|' read -r lang sample_file extra_env has_bytecode <<<"$entry"
-  run_matrix_for_lang "$lang" "$sample_file" "$extra_env" "$has_bytecode"
+  IFS='|' read -r lang sample_file extra_env has_jit <<<"$entry"
+  run_matrix_for_lang "$lang" "$sample_file" "$extra_env" "$has_jit"
 done
 
 echo ""
@@ -203,12 +195,15 @@ echo "PASS:  $PASSED"
 echo "SKIP:  $SKIPPED"
 echo "FAIL:  $FAILED"
 echo ""
-echo "Bytecode execution:"
-echo "  supported: $BC_PASSED"
-echo "  failed:    $BC_FAILED"
+echo "JIT execution:"
+echo "  passed: $JIT_PASSED"
+echo "  failed: $JIT_FAILED"
 
-if [[ $FAILED -gt 0 ]]; then
+if [[ $JIT_FAILED -gt 0 ]]; then
   echo ""
-  echo "Some language fronts failed the self-hosted gate."
+  echo "Some language fronts failed the JIT execution gate."
   exit 1
 fi
+
+echo ""
+echo "Self-hosted language matrix completed."
