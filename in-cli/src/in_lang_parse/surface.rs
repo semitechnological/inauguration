@@ -208,7 +208,7 @@ pub(crate) fn parse_distributed_fn_name(line: &str) -> Result<String, String> {
     let rest = trim(line)
         .strip_prefix("distributed fn ")
         .ok_or_else(|| ".in: expected `distributed fn name(...)`".to_string())?;
-    let (name, _, _) = parse_fn_header(rest);
+    let (name, _, _) = parse_fn_header(rest)?;
     if name.is_empty() {
         return Err(".in: distributed function name missing".into());
     }
@@ -285,10 +285,10 @@ where
             continue;
         }
         if let Some(rest) = line.strip_prefix("fn ") {
-            return Some(parse_fn_header(rest).0);
+            return parse_fn_header(rest).ok().map(|(n, _, _)| n);
         }
         if let Some(rest) = line.strip_prefix("distributed fn ") {
-            return Some(parse_fn_header(rest).0);
+            return parse_fn_header(rest).ok().map(|(n, _, _)| n);
         }
         return None;
     }

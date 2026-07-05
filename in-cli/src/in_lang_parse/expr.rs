@@ -222,10 +222,11 @@ pub(crate) fn try_parse_closure_expr(s: &str) -> Option<Expr> {
     let params = if param_blob.is_empty() {
         Vec::new()
     } else {
-        split_and_trim(',', param_blob)
-            .into_iter()
-            .map(|t| parse_param(&t))
-            .collect()
+        let mut params = Vec::new();
+        for t in split_and_trim(',', param_blob) {
+            params.push(parse_param(&t).ok()?);
+        }
+        params
     };
     let tail = trim(&rest[close_idx + 1..]);
     let body_start = tail.find('{')?;

@@ -19,14 +19,18 @@ pub(crate) fn parse_in_type(s: &str) -> Typ {
     }
 }
 
-pub(crate) fn parse_param(token: &str) -> (String, Typ) {
+pub(crate) fn parse_param(token: &str) -> Result<(String, Typ), String> {
     match split_and_trim(':', token).as_slice() {
-        [name, ty] => (trim(name).to_string(), parse_in_type(ty)),
-        _ => (trim(token).to_string(), Typ::Named("Unknown".into())),
+        [name, ty] if !trim(name).is_empty() && !trim(ty).is_empty() => {
+            Ok((trim(name).to_string(), parse_in_type(ty)))
+        }
+        _ => Err(format!("parameter must be `name: Type`, got `{token}`")),
     }
 }
 
-pub(crate) fn parse_fn_header(after_fn_keyword: &str) -> (String, Vec<(String, Typ)>, Typ) {
+pub(crate) fn parse_fn_header(
+    after_fn_keyword: &str,
+) -> Result<(String, Vec<(String, Typ)>, Typ), String> {
     let after = trim(after_fn_keyword).trim_end_matches(';').trim();
     let open_idx = after.find('(');
     let close_idx = after.rfind(')');
@@ -38,18 +42,19 @@ pub(crate) fn parse_fn_header(after_fn_keyword: &str) -> (String, Vec<(String, T
         let params = if param_blob.is_empty() {
             Vec::new()
         } else {
-            split_and_trim(',', param_blob)
-                .into_iter()
-                .map(|t| parse_param(&t))
-                .collect()
+            let mut out = Vec::new();
+            for t in split_and_trim(',', param_blob) {
+                out.push(parse_param(&t)?);
+            }
+            out
         };
         let tail = after.get(j + 1..).unwrap_or("");
         let ret = match tail.split('>').collect::<Vec<_>>().as_slice() {
             [left, right] if trim(left).ends_with('-') => parse_in_type(right),
             _ => Typ::Void,
         };
-        (name, params, ret)
+        Ok((name, params, ret))
     } else {
-        (trim(after).to_string(), Vec::new(), Typ::Void)
+        Ok((trim(after).to_string(), Vec::new(), Typ::Void))
     }
 }

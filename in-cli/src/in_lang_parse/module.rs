@@ -62,7 +62,7 @@ pub(crate) fn parse_module_from_blocks(
                 .split_once(" requires ")
                 .map(|(left, _)| left)
                 .unwrap_or(header);
-            let (name, params, ret) = parse_fn_header(header);
+            let (name, params, ret) = parse_fn_header(header)?;
             if name != binding.name {
                 return Err(format!(
                     ".in at line {start_line}: extern binding name mismatch"
