@@ -609,13 +609,34 @@ pub mod bench {
             assert_eq!(stats.min, 10);
             assert_eq!(stats.max, 40);
             assert_eq!(stats.mean, 25);
+            assert_eq!(stats.stddev, 11); // stddev of [10, 20, 30, 40] is sqrt(125) = ~11.18 -> 11
         }
 
         #[test]
         fn aggregate_empty() {
             let stats = aggregate(&[]);
             assert_eq!(stats.min, 0);
+            assert_eq!(stats.max, 0);
             assert_eq!(stats.mean, 0);
+            assert_eq!(stats.stddev, 0);
+        }
+
+        #[test]
+        fn aggregate_single() {
+            let stats = aggregate(&[42]);
+            assert_eq!(stats.min, 42);
+            assert_eq!(stats.max, 42);
+            assert_eq!(stats.mean, 42);
+            assert_eq!(stats.stddev, 0);
+        }
+
+        #[test]
+        fn aggregate_identical() {
+            let stats = aggregate(&[50, 50, 50, 50]);
+            assert_eq!(stats.min, 50);
+            assert_eq!(stats.max, 50);
+            assert_eq!(stats.mean, 50);
+            assert_eq!(stats.stddev, 0);
         }
 
         #[test]
