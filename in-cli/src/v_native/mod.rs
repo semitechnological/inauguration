@@ -371,6 +371,27 @@ pub mod parallel {
         }
 
         #[test]
+        fn wave_plan_zero_waves_or_workers() {
+            assert_eq!(wave_plan(10, 0, 5), vec![10]);
+            assert_eq!(wave_plan(10, 5, 0), vec![10]);
+        }
+
+        #[test]
+        fn wave_plan_less_jobs_than_waves() {
+            assert_eq!(wave_plan(2, 5, 5), vec![1, 2]);
+        }
+
+        #[test]
+        fn wave_plan_more_jobs_than_waves() {
+            assert_eq!(wave_plan(10, 5, 3), vec![4, 7, 10]);
+        }
+
+        #[test]
+        fn wave_plan_exact_multiple() {
+            assert_eq!(wave_plan(9, 5, 3), vec![3, 6, 9]);
+        }
+
+        #[test]
         fn merge_timings_basic() {
             let stats = merge_timings(&[10, 20, 30]);
             assert_eq!(stats.min, 10);
