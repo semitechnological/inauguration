@@ -175,4 +175,30 @@ mod tests {
         let value = invoke_package_export(&runtime, &[]).expect("invoke");
         assert_eq!(value, Value::String("ok".to_string()));
     }
+
+    #[test]
+    fn test_binding_return_type_mapping() {
+        let cases = vec![
+            ("int", Some(crate::core_ir::Typ::Int)),
+            ("Int", Some(crate::core_ir::Typ::Int)),
+            ("string", Some(crate::core_ir::Typ::String)),
+            ("String", Some(crate::core_ir::Typ::String)),
+            ("bool", Some(crate::core_ir::Typ::Bool)),
+            ("Bool", Some(crate::core_ir::Typ::Bool)),
+            ("void", Some(crate::core_ir::Typ::Void)),
+            ("unknown", None),
+        ];
+
+        for (return_str, expected) in cases {
+            let binding = PackageExportBinding {
+                symbol: "test".to_string(),
+                returns: return_str.to_string(),
+                invoke: PackageInvokeSpec {
+                    program: "true".to_string(),
+                    args: vec![],
+                },
+            };
+            assert_eq!(binding_return_type(&binding), expected);
+        }
+    }
 }
