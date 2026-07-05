@@ -24,7 +24,7 @@ div min-h-screen bg-zinc-950 text-zinc-300 p-6 sm:p-12 text-sm leading-relaxed i
 		section flex flex-col lg:flex-row gap-8 items-start justify-between py-4 crepus-entrance crepus-e2
 			div flex-1 max-w-2xl
 				p text-blue-400 font-semibold tracking-widest text-xs uppercase mb-2 in-docs-shimmer
-					"INLANG + CREPUSCULARITY"
+					"CORE IR → NATIVE JIT"
 				h1 text-2xl sm:text-3xl font-semibold text-zinc-100 tracking-tight leading-snug mb-4
 					"Ultrafast compiler pipeline for OOP and systems languages"
 				p text-zinc-400 leading-relaxed mb-6
