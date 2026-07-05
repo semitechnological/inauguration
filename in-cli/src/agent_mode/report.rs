@@ -10,6 +10,7 @@ use super::repair::{micros, repair_plan_for};
 use super::summary::summarize_core_ir;
 use super::types::*;
 use crate::core_ir::UnifiedModule;
+use crate::in_lang_parse::InSurfaceInfo;
 use crate::parser_registry::{self, ParserCli};
 use std::fs;
 use std::path::Path;
@@ -151,164 +152,19 @@ fn build_report(path: &Path, config: &AgentModeConfig) -> Result<AgentReport, Ag
             if parser_id.as_deref() == Some("in")
                 && let Ok(surface) = crate::in_lang_parse::parse_in_surface_info(&source)
             {
-                let declared_capabilities = surface.capabilities.clone();
-                let mut extern_bindings = surface.externs.clone();
-                for import in &surface.imports {
-                    extern_bindings
-                        .extend(crate::in_lang_parse::in_standard_import_bindings(import));
-                }
-                if let Ok((root, manifest)) =
-                    crate::package_manifest::load_package_manifest_from_source(path)
-                {
-                    let lock = crate::package_lock::discover_package_lock(&root.root).and_then(
-                        |lock_root| {
-                            crate::package_lock::load_package_lock(&lock_root.lock_path).ok()
-                        },
-                    );
-                    for import in &surface.semantic_imports {
-                        extern_bindings.extend(
-                            crate::package_extern::package_import_bindings_for_semantic_import(
-                                import,
-                                &root.root,
-                                &manifest,
-                                lock.as_ref(),
-                            ),
-                        );
-                    }
-                }
-                for binding in &extern_bindings {
-                    for required in &binding.required_capabilities {
-                        if !declared_capabilities.contains(required) {
-                            diagnostics.push(diagnostic(
-                                "AGENT_MISSING_CAPABILITY",
-                                AgentDiagnosticSeverity::Warning,
-                                None,
-                                parser_id.as_deref(),
-                                Some("top-level capability declaration matching an extern binding requirement"),
-                                excerpt_bounds(&source, None),
-                                Some("Add the missing top-level capability declaration or remove the extern requirement"),
-                                &format!(
-                                    "extern {} fn {} requires missing capability {}",
-                                    binding.language, binding.name, required
-                                ),
-                            ));
-                        }
-                    }
-                }
-                if let Some(package) = surface.package {
-                    effects.push(format!("package:{package}"));
-                }
-                if let Some(module) = surface.module {
-                    effects.push(format!("module:{module}"));
-                }
-                let package_manifest =
-                    crate::package_manifest::load_package_manifest_from_source(path)
-                        .ok()
-                        .map(|(_, manifest)| manifest);
-                let semantic_imports = crate::package_manifest::resolve_semantic_imports(
-                    &surface.semantic_imports,
-                    package_manifest.as_ref(),
-                );
-                let semantic_bindings = crate::package_manifest::resolve_semantic_bindings(
-                    &surface.semantic_bindings,
-                    &semantic_imports,
-                );
-                package_symbol_index = if let Ok((root, manifest)) =
-                    crate::package_manifest::load_package_manifest_from_source(path)
-                {
-                    let lock = crate::package_lock::discover_package_lock(&root.root).and_then(
-                        |lock_root| {
-                            crate::package_lock::load_package_lock(&lock_root.lock_path).ok()
-                        },
-                    );
-                    crate::package_manifest::symbol_index_for_semantic_imports_with_context(
-                        &semantic_imports,
-                        Some(&root.root),
-                        Some(&manifest),
-                        lock.as_ref(),
-                    )
-                } else {
-                    crate::package_manifest::symbol_index_for_semantic_imports(&semantic_imports)
-                };
-                package_symbol_index.extend(
-                    crate::package_manifest::symbol_index_for_semantic_bindings(&semantic_bindings),
-                );
-                package_diagnostics =
-                    crate::package_manifest::diagnostics_for_semantic_imports(&semantic_imports);
-                for diagnostic_fact in &package_diagnostics {
-                    diagnostics.push(diagnostic(
-                        &diagnostic_fact.code,
-                        AgentDiagnosticSeverity::Warning,
-                        None,
-                        parser_id.as_deref(),
-                        Some("top-level use declaration matching a dependency in the nearest inauguration.package"),
-                        excerpt_bounds(&source, None),
-                        Some("Declare the dependency in inauguration.package or remove the semantic import"),
-                        &diagnostic_fact.message,
-                    ));
-                }
-                diagnostics.extend(dependency_symbol_call_diagnostics(
-                    &module,
-                    &package_symbol_index,
-                    &semantic_bindings
-                        .iter()
-                        .filter(|binding| binding.status == "resolved")
-                        .map(|binding| binding.alias.as_str())
-                        .collect::<std::collections::BTreeSet<_>>(),
-                    parser_id.as_deref(),
+                enrich_report_from_surface_info(
+                    surface,
+                    path,
                     &source,
-                ));
-                effects.extend(
-                    semantic_imports
-                        .into_iter()
-                        .map(|import| format!("use:{}:{}", import.import, import.status)),
+                    parser_id.as_deref(),
+                    &module,
+                    &mut diagnostics,
+                    &mut effects,
+                    &mut capabilities,
+                    &mut orchestration,
+                    &mut package_symbol_index,
+                    &mut package_diagnostics,
                 );
-                effects.extend(semantic_bindings.into_iter().map(|binding| {
-                    format!(
-                        "bind:{}:{}:{}",
-                        binding.import, binding.alias, binding.status
-                    )
-                }));
-                effects.extend(
-                    surface
-                        .imports
-                        .into_iter()
-                        .map(|name| format!("import:{name}")),
-                );
-                effects.extend(extern_bindings.into_iter().map(|binding| {
-                    if binding.required_capabilities.is_empty() {
-                        format!("extern:{}:{}", binding.language, binding.name)
-                    } else {
-                        format!(
-                            "extern:{}:{}:requires={}",
-                            binding.language,
-                            binding.name,
-                            binding.required_capabilities.join(",")
-                        )
-                    }
-                }));
-                effects.extend(
-                    surface
-                        .orchestration
-                        .enabled_extensions
-                        .iter()
-                        .map(|name| format!("enable:{name}")),
-                );
-                effects.extend(
-                    surface
-                        .orchestration
-                        .distributed_functions
-                        .iter()
-                        .map(|name| format!("distributed:{name}")),
-                );
-                if surface.orchestration.parallel_regions > 0 {
-                    effects.push(format!(
-                        "parallel_regions:{}",
-                        surface.orchestration.parallel_regions
-                    ));
-                }
-                capabilities.extend(surface.capabilities);
-                orchestration = orchestration_facts_from_surface(surface.orchestration);
             }
             let summary = summarize_core_ir(&module);
             diagnostics.extend(core_diagnostics(&module, parser_id.as_deref(), &source));
@@ -377,6 +233,171 @@ fn build_report(path: &Path, config: &AgentModeConfig) -> Result<AgentReport, Ag
         },
         repair_plans,
     })
+}
+
+fn enrich_report_from_surface_info(
+    surface: InSurfaceInfo,
+    path: &Path,
+    source: &str,
+    parser_id: Option<&str>,
+    module: &UnifiedModule,
+    diagnostics: &mut Vec<AgentDiagnostic>,
+    effects: &mut Vec<String>,
+    capabilities: &mut Vec<String>,
+    orchestration: &mut OrchestrationFacts,
+    package_symbol_index: &mut Vec<crate::package_manifest::PackageSymbolIndexEntry>,
+    package_diagnostics: &mut Vec<crate::package_manifest::PackageDiagnostic>,
+) {
+    let declared_capabilities = surface.capabilities.clone();
+    let mut extern_bindings = surface.externs.clone();
+    for import in &surface.imports {
+        extern_bindings.extend(crate::in_lang_parse::in_standard_import_bindings(import));
+    }
+    if let Ok((root, manifest)) = crate::package_manifest::load_package_manifest_from_source(path) {
+        let lock = crate::package_lock::discover_package_lock(&root.root).and_then(|lock_root| {
+            crate::package_lock::load_package_lock(&lock_root.lock_path).ok()
+        });
+        for import in &surface.semantic_imports {
+            extern_bindings.extend(
+                crate::package_extern::package_import_bindings_for_semantic_import(
+                    import,
+                    &root.root,
+                    &manifest,
+                    lock.as_ref(),
+                ),
+            );
+        }
+    }
+    for binding in &extern_bindings {
+        for required in &binding.required_capabilities {
+            if !declared_capabilities.contains(required) {
+                diagnostics.push(diagnostic(
+                    "AGENT_MISSING_CAPABILITY",
+                    AgentDiagnosticSeverity::Warning,
+                    None,
+                    parser_id.as_deref(),
+                    Some("top-level capability declaration matching an extern binding requirement"),
+                    excerpt_bounds(&source, None),
+                    Some("Add the missing top-level capability declaration or remove the extern requirement"),
+                    &format!(
+                        "extern {} fn {} requires missing capability {}",
+                        binding.language, binding.name, required
+                    ),
+                ));
+            }
+        }
+    }
+    if let Some(package) = surface.package {
+        effects.push(format!("package:{package}"));
+    }
+    if let Some(module_name) = surface.module {
+        effects.push(format!("module:{module_name}"));
+    }
+    let package_manifest = crate::package_manifest::load_package_manifest_from_source(path)
+        .ok()
+        .map(|(_, manifest)| manifest);
+    let semantic_imports = crate::package_manifest::resolve_semantic_imports(
+        &surface.semantic_imports,
+        package_manifest.as_ref(),
+    );
+    let semantic_bindings = crate::package_manifest::resolve_semantic_bindings(
+        &surface.semantic_bindings,
+        &semantic_imports,
+    );
+    *package_symbol_index = if let Ok((root, manifest)) =
+        crate::package_manifest::load_package_manifest_from_source(path)
+    {
+        let lock = crate::package_lock::discover_package_lock(&root.root).and_then(|lock_root| {
+            crate::package_lock::load_package_lock(&lock_root.lock_path).ok()
+        });
+        crate::package_manifest::symbol_index_for_semantic_imports_with_context(
+            &semantic_imports,
+            Some(&root.root),
+            Some(&manifest),
+            lock.as_ref(),
+        )
+    } else {
+        crate::package_manifest::symbol_index_for_semantic_imports(&semantic_imports)
+    };
+    package_symbol_index.extend(crate::package_manifest::symbol_index_for_semantic_bindings(
+        &semantic_bindings,
+    ));
+    *package_diagnostics =
+        crate::package_manifest::diagnostics_for_semantic_imports(&semantic_imports);
+    for diagnostic_fact in package_diagnostics.iter() {
+        diagnostics.push(diagnostic(
+            &diagnostic_fact.code,
+            AgentDiagnosticSeverity::Warning,
+            None,
+            parser_id.as_deref(),
+            Some("top-level use declaration matching a dependency in the nearest inauguration.package"),
+            excerpt_bounds(&source, None),
+            Some("Declare the dependency in inauguration.package or remove the semantic import"),
+            &diagnostic_fact.message,
+        ));
+    }
+    diagnostics.extend(dependency_symbol_call_diagnostics(
+        module,
+        package_symbol_index,
+        &semantic_bindings
+            .iter()
+            .filter(|binding| binding.status == "resolved")
+            .map(|binding| binding.alias.as_str())
+            .collect::<std::collections::BTreeSet<_>>(),
+        parser_id.as_deref(),
+        source,
+    ));
+    effects.extend(
+        semantic_imports
+            .into_iter()
+            .map(|import| format!("use:{}:{}", import.import, import.status)),
+    );
+    effects.extend(semantic_bindings.into_iter().map(|binding| {
+        format!(
+            "bind:{}:{}:{}",
+            binding.import, binding.alias, binding.status
+        )
+    }));
+    effects.extend(
+        surface
+            .imports
+            .into_iter()
+            .map(|name| format!("import:{name}")),
+    );
+    effects.extend(extern_bindings.into_iter().map(|binding| {
+        if binding.required_capabilities.is_empty() {
+            format!("extern:{}:{}", binding.language, binding.name)
+        } else {
+            format!(
+                "extern:{}:{}:requires={}",
+                binding.language,
+                binding.name,
+                binding.required_capabilities.join(",")
+            )
+        }
+    }));
+    effects.extend(
+        surface
+            .orchestration
+            .enabled_extensions
+            .iter()
+            .map(|name| format!("enable:{name}")),
+    );
+    effects.extend(
+        surface
+            .orchestration
+            .distributed_functions
+            .iter()
+            .map(|name| format!("distributed:{name}")),
+    );
+    if surface.orchestration.parallel_regions > 0 {
+        effects.push(format!(
+            "parallel_regions:{}",
+            surface.orchestration.parallel_regions
+        ));
+    }
+    capabilities.extend(surface.capabilities);
+    *orchestration = orchestration_facts_from_surface(surface.orchestration);
 }
 
 fn io_error_report(path: &Path, config: &AgentModeConfig, err: AgentModeError) -> AgentReport {
