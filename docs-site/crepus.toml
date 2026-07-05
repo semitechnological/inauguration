@@ -1,6 +1,12 @@
-[site]
+[[targets]]
+type = "web"
+id = "docs"
+site = "."
+out = "dist"
+entry = "index.crepus"
 name = "inauguration"
-description = "Documentation site (crepus web build + crepuscularity-web)"
+description = "inlang (.in) and inauguration compiler — documentation and landing (crepus web build)"
+
 head_html = """
 <link rel="icon" href="./static/favicon.svg" type="image/svg+xml">
 <meta name="theme-color" content="#09090b">
@@ -8,7 +14,6 @@ head_html = """
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Chivo+Mono:ital,wght@0,100..900;1,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet">
 <style>
-/* Layout & type: Dark tech UI, Chivo Mono */
 .in-docs-page {
   --cp-bg: #09090b;
   --cp-fg: #f4f4f5;
@@ -58,30 +63,6 @@ head_html = """
   outline: 2px solid var(--cp-accent);
   outline-offset: 3px;
 }
-.in-docs-hero {
-  border: 1px solid var(--cp-border);
-  border-radius: 12px;
-  background: linear-gradient(180deg, var(--cp-elevated) 0%, var(--cp-bg) 100%);
-  box-shadow: var(--cp-shadow);
-}
-.in-docs-kicker {
-  font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--cp-muted);
-}
-.in-docs-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.35rem 0.65rem;
-  border-radius: 4px;
-  border: 1px solid var(--cp-border);
-  background: var(--cp-elevated);
-  font-size: 0.8125rem;
-  color: var(--cp-muted);
-}
 @media (prefers-reduced-motion: reduce) {
   .crepus-entrance { animation: none !important; }
 }
@@ -94,6 +75,50 @@ head_html = """
 .crepus-e2 { animation-delay: 0.06s; }
 .crepus-e3 { animation-delay: 0.1s; }
 .crepus-e4 { animation-delay: 0.14s; }
-.crepus-e6 { animation-delay: 0.18s; }
+.crepus-e5 { animation-delay: 0.16s; }
+.crepus-e6 { animation-delay: 0.2s; }
+@keyframes in-docs-logo-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+  50% { box-shadow: 0 0 20px 2px rgba(59, 130, 246, 0.25); }
+}
+.in-docs-logo-pulse { animation: in-docs-logo-pulse 4s ease-in-out infinite; }
+@keyframes in-docs-shimmer {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.65; }
+}
+.in-docs-shimmer { animation: in-docs-shimmer 3s ease-in-out infinite; }
+@keyframes in-docs-terminal-glow {
+  0%, 100% { border-color: #27272a; }
+  50% { border-color: #3f3f46; box-shadow: 0 0 24px rgba(59, 130, 246, 0.08); }
+}
+.in-docs-terminal-glow { animation: in-docs-terminal-glow 5s ease-in-out infinite; }
+.in-docs-card-hover {
+  transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+}
+.in-docs-card-hover:hover {
+  transform: translateY(-2px);
+  border-color: #3b82f6 !important;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+}
+@keyframes in-docs-chip-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-1px); }
+}
+.in-docs-chip-float:nth-child(odd) { animation: in-docs-chip-float 4s ease-in-out infinite; }
+.in-docs-chip-float:nth-child(even) { animation: in-docs-chip-float 4.5s ease-in-out infinite 0.5s; }
 </style>
 """
+
+[targets.seo]
+title = "inauguration — inlang & hybrid compiler docs"
+description = "Ultrafast Core IR → native JIT pipeline for .in (inlang) and polyglot fronts. Documentation built with crepuscularity."
+robots = "index,follow"
+twitter_card = "summary"
+theme_color = "#09090b"
+generator = "crepuscularity"
+
+[targets.llms]
+enabled = true
+base_url = "https://github.com/tschk/inauguration"
+title = "inauguration"
+description = "Compiler toolchain: inlang (.in), Core IR, native JIT, polyglot Tree-sitter fronts."

@@ -1,0 +1,20 @@
+package inauguration.docs;
+module inauguration.docs.backend;
+
+import std.io;
+import std.process;
+
+capability process.spawn;
+
+fn main() -> void {
+  print("inauguration docs-site · inlang backend");
+  let crepus = process_run("command -v crepus");
+  if crepus == "" {
+    print("error: crepus not on PATH");
+    return;
+  }
+  process_run("crepus web build --site docs-site --out-dir docs-site/dist");
+  process_run("./scripts/patch-docs-site-instrument-sans.sh docs-site/dist");
+  print("ok: docs-site/dist");
+  return;
+}

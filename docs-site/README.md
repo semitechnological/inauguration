@@ -1,32 +1,43 @@
-# inauguration docs site (crepuscularity-web)
+# inauguration docs-site
 
-Light, Vercel-adjacent static site: white surface, crisp borders, black primary actions, blue accents — informed by [Vercel Web Interface Guidelines](https://vercel.com/design/guidelines) (layout, focus rings, motion reduction). **Instrument Sans** loads from Google Fonts for all UI copy; **JetBrains Mono** for code. The `.crepus` landing uses `web.toml` + Uno-style classes; markdown pages are emitted by `crepus` and post-processed with **`scripts/patch-docs-site-instrument-sans.sh`** so body text matches (the generator still embeds an Inter URL by default).
+Dark, information-dense hub for **inlang** (`.in`) and the **inauguration** compiler. Same layout as [crepuscularity/docs-site](../crepuscularity/docs-site): **`crepus.toml`**, `index.crepus`, `site.json`, `runtime/`, `static/`.
+
+Theme: zinc terminal (Chivo Mono), tsc.hk tone; doc grid density like crepuscularity’s landing.
+
+Footer: **built with crepuscularity + inauguration**.
 
 ## Prerequisites
 
-- Sibling clone: **`../crepuscularity`** (path dependency in `runtime/Cargo.toml`).
-- [`crepus`](https://github.com/semitechnological/crepuscularity) CLI on `PATH`, **or** use the build script which falls back to `cargo run` in that repo.
-- **wasm32** target and **wasm-bindgen-cli** whose schema matches the workspace `wasm-bindgen` crate (if the build fails at the wasm-bindgen step, run `cargo install -f wasm-bindgen-cli --version 0.2.121` or the version your `Cargo.lock` uses). See crepuscularity `docs/cli.md`.
+- Sibling **`../crepuscularity`** (`docs-site/runtime/Cargo.toml` path dep).
+- **`crepus`** on `PATH`, or `CREPU_ROOT` + `scripts/build-docs-site.sh` fallback.
+- **wasm32** + matching **wasm-bindgen-cli** (see crepuscularity `docs/cli.md`).
 
-## Markdown layout
+## Markdown sources
 
-`crepus web build` only picks up **top-level** `docs/*.md`. This repo keeps canonical sources under `docs/architecture/` and `docs/benchmarks/`; **symlinks** at `docs/*.md` point at those files so the doc emitter finds them.
+`crepus web build` emits **top-level** `docs/*.md` only. Canonical files live under `docs/architecture/` and `docs/benchmarks/`; **symlinks** at `docs/*.md` point there.
+
+Post-build: **`scripts/patch-docs-site-instrument-sans.sh`** themes generated HTML pages.
 
 ## Build
 
 ```bash
-./scripts/build-docs-site.sh
+in execute docs-site/backend.in    # inlang: crepus web build + theme patch
+./scripts/build-docs-site.sh       # bash equivalent
 ```
 
-Output: **`docs-site/dist/`** (gitignored). Serve over HTTP (WASM modules):
-
-```bash
-cd docs-site/dist && python3 -m http.server 8765
-```
+Output: **`docs-site/dist/`** (gitignored).
 
 ## Develop
 
 ```bash
-cd /path/to/crepuscularity
-cargo run -p crepuscularity-cli -- web serve --site /path/to/inauguration/docs-site
+crepus web serve --site /path/to/inauguration/docs-site
 ```
+
+Or from crepuscularity checkout:
+
+```bash
+cargo run -p crepuscularity-cli --manifest-path ../crepuscularity/Cargo.toml -- \
+  web serve --site "$(pwd)/docs-site"
+```
+
+Serve over HTTP (WASM): e.g. `cd docs-site/dist && python3 -m http.server 8765`.

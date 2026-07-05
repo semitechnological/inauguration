@@ -144,6 +144,10 @@ pub fn bootstrap_jit_native() {
         NativePtr(crate::native_stdlib::in_fs_remove_file as *const u8),
     );
     c.insert(
+        "in_process_run".to_string(),
+        NativePtr(crate::native_stdlib::in_process_run as *const u8),
+    );
+    c.insert(
         "in_env_set_var".to_string(),
         NativePtr(crate::native_stdlib::in_env_set_var as *const u8),
     );

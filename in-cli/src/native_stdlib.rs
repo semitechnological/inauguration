@@ -203,6 +203,47 @@ pub unsafe extern "C" fn in_fs_create_dir(path_ptr: *const u8) -> i64 {
     }
 }
 
+/// `std::process::Command` shell one-liner for `.in` `process_run`.
+/// Returns combined stdout+stderr as an instring; empty when the command fails to start.
+///
+/// # Safety
+/// `command_ptr` must be a valid, non-aliased instring pointer or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn in_process_run(command_ptr: *const u8) -> *const u8 {
+    unsafe {
+        let Some(cmd_bytes) = instring_from_ptr(command_ptr) else {
+            return instring_empty();
+        };
+        let cmd_str = match std::str::from_utf8(cmd_bytes) {
+            Ok(s) => s,
+            Err(_) => return instring_empty(),
+        };
+        let output = if cfg!(unix) {
+            std::process::Command::new("sh")
+                .arg("-c")
+                .arg(cmd_str)
+                .output()
+        } else {
+            std::process::Command::new("cmd")
+                .args(["/C", cmd_str])
+                .output()
+        };
+        match output {
+            Ok(out) => {
+                let mut combined = out.stdout;
+                if !out.stderr.is_empty() {
+                    if !combined.is_empty() {
+                        combined.push(b'\n');
+                    }
+                    combined.extend_from_slice(&out.stderr);
+                }
+                instring_from_bytes(&combined)
+            }
+            Err(_) => instring_empty(),
+        }
+    }
+}
+
 /// `std::fs::remove_file(path)` -> success flag
 /// Returns 1 on success, 0 on error.
 ///
