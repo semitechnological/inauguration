@@ -902,6 +902,21 @@ mod tests {
     use crate::package_manifest::parse_package_manifest_source;
 
     #[test]
+    fn default_packages_root_appends_correct_path() {
+        let empty_path = Path::new("");
+        assert_eq!(
+            default_packages_root(empty_path),
+            PathBuf::from("target/in/packages")
+        );
+
+        let absolute_path = Path::new("/my/project");
+        assert_eq!(
+            default_packages_root(absolute_path),
+            PathBuf::from("/my/project/target/in/packages")
+        );
+    }
+
+    #[test]
     fn installs_path_dependencies_offline() {
         let temp = tempfile_dir("package-install");
         let vendor = temp.join("vendor/cargo/demo");
