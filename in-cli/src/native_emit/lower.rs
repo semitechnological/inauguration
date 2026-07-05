@@ -37,7 +37,9 @@ pub(crate) use lower_boundary::boundary_from_module;
 pub(crate) use lower_collect::{
     collect_functions, collect_strings, collect_structs, entry_return_kind,
 };
-pub(crate) use lower_ctx::{LocalSlot, LowerCtx, alloc_declared_locals, append_static_arrays};
+pub(crate) use lower_ctx::{
+    LocalSlot, LowerCtx, alloc_declared_locals, append_static_arrays, append_string_table,
+};
 pub(crate) use lower_stmt::lower_stmt;
 pub(crate) use lower_util::{
     contains_call, emit_epilogue, emit_failure_return, ensure_return_type, expr_type,
@@ -240,6 +242,11 @@ pub(crate) struct PendingStaticArray {
     pub(crate) values: Vec<i64>,
 }
 
+pub(crate) struct PendingString {
+    pub(crate) adr_site: u32,
+    pub(crate) string_index: i64,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct FunctionInfo {
     pub(crate) name: String,
@@ -284,6 +291,7 @@ pub fn lower_module(
     let mut pending_calls = Vec::new();
     let mut pending_inrt_calls = Vec::new();
     let mut pending_static_arrays = Vec::new();
+    let mut pending_strings = Vec::new();
     let mut names: Vec<String> = functions.keys().cloned().collect();
     names.sort();
 
@@ -300,6 +308,7 @@ pub fn lower_module(
             &mut pending_calls,
             &mut pending_inrt_calls,
             &mut pending_static_arrays,
+            &mut pending_strings,
             offset,
         ) {
             return Err(format!("native-lower: function `{name}` unsupported: {e}"));
@@ -315,6 +324,7 @@ pub fn lower_module(
     }
 
     append_static_arrays(&mut emitter, pending_static_arrays);
+    append_string_table(&mut emitter, &strings, pending_strings);
 
     if !pending_inrt_calls.is_empty() {
         let (runtime_blob, runtime_offsets) = inrt::build_runtime_blob();
@@ -379,6 +389,7 @@ fn lower_function(
     pending_calls: &mut Vec<PendingCall>,
     pending_inrt_calls: &mut Vec<PendingInrtCall>,
     pending_static_arrays: &mut Vec<PendingStaticArray>,
+    pending_strings: &mut Vec<PendingString>,
     _fn_start_offset: u32,
 ) -> Result<(), String> {
     ensure_return_type(&func.ret, &func.name, structs)?;
@@ -394,6 +405,7 @@ fn lower_function(
         strings,
         pending_static_arrays,
         pending_inrt_calls,
+        pending_strings,
         &func.name,
     )?;
     alloc_declared_locals(&mut ctx, &func.body, &func.name)?;

@@ -1,4 +1,4 @@
-use crate::compile::compile_and_run_source_path;
+use crate::compile::compile_and_run_jit_source_path;
 use crate::util::resolve_invocation_path;
 use crate::{InError, Result};
 use inauguration::parser_registry::{self, ParserCli};
@@ -51,7 +51,7 @@ pub(crate) fn cmd_eval(cwd: &Path, code: &str, parser: Option<&str>, verbose: bo
     for plan in eval_plans(parser_id, code) {
         std::fs::write(&path, &plan.wrapped)
             .map_err(|e| InError::Message(format!("write eval temp: {e}")))?;
-        match compile_and_run_source_path(&source_path, "App", ParserCli::Auto) {
+        match compile_and_run_jit_source_path(&source_path, "App", ParserCli::Auto) {
             Ok(run) => {
                 print_result = plan.print_result;
                 execution = Some(run);
@@ -69,16 +69,9 @@ pub(crate) fn cmd_eval(cwd: &Path, code: &str, parser: Option<&str>, verbose: bo
     let result = execution.result;
 
     if verbose {
-        eprintln!("> {:?}", result);
+        eprintln!("> {}", result);
     } else if print_result {
-        match &result {
-            inauguration::bytecode::Value::Int(v) => println!("{}", v),
-            inauguration::bytecode::Value::Bool(b) => println!("{}", b),
-            inauguration::bytecode::Value::String(s) => println!("{}", s),
-            inauguration::bytecode::Value::Array(items) => println!("{:?}", items),
-            inauguration::bytecode::Value::Nil => {}
-            _ => eprintln!("{:?}", result),
-        }
+        println!("{}", result);
     }
     Ok(())
 }

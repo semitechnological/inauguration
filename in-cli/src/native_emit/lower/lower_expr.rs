@@ -32,8 +32,16 @@ pub(crate) fn lower_expr_into(
             Ok(())
         }
         Expr::StringLit(value) => {
+            if value.is_empty() {
+                emitter.emit_insns(&aarch64::load_i64(rd, 0));
+                return Ok(());
+            }
             let id = ctx.string_id(value)?;
-            emitter.emit_insns(&aarch64::load_i64(rd, id));
+            let adr_site = emitter.emit_insn(aarch64::adr(rd, 0));
+            ctx.pending_strings.push(super::PendingString {
+                adr_site,
+                string_index: id,
+            });
             Ok(())
         }
         Expr::Ident(name) => {

@@ -18,6 +18,45 @@ pub(crate) fn append_static_arrays(emitter: &mut CodeEmitter, arrays: Vec<Pendin
     }
 }
 
+pub(crate) fn append_string_table(
+    emitter: &mut CodeEmitter,
+    strings: &HashMap<String, i64>,
+    pending: Vec<super::PendingString>,
+) {
+    if pending.is_empty() {
+        return;
+    }
+    while !emitter.len().is_multiple_of(8) {
+        emitter.bytes.push(0);
+    }
+    // Build an ordered list of (index, string) pairs so we can lay them out by index.
+    let mut ordered: Vec<(i64, &String)> = strings.iter().map(|(s, &idx)| (idx, s)).collect();
+    ordered.sort_by_key(|(idx, _)| *idx);
+
+    // Build map from index -> offset of the string data (after the 8-byte length header).
+    let mut index_offsets: HashMap<i64, i64> = HashMap::new();
+    for (idx, value) in ordered {
+        let data_offset = emitter.len() as i64;
+        index_offsets.insert(idx, data_offset + 8); // point past the length header
+        emitter
+            .bytes
+            .extend_from_slice(&(value.len() as u64).to_le_bytes());
+        emitter.bytes.extend_from_slice(value.as_bytes());
+        // Pad to 8-byte alignment for the next entry.
+        while !emitter.len().is_multiple_of(8) {
+            emitter.bytes.push(0);
+        }
+    }
+
+    for p in pending {
+        let Some(data_offset) = index_offsets.get(&p.string_index) else {
+            continue;
+        };
+        let adr_delta = (*data_offset - p.adr_site as i64) as i32;
+        emitter.patch_u32(p.adr_site, aarch64::adr(0, adr_delta));
+    }
+}
+
 pub(crate) fn alloc_declared_locals(
     ctx: &mut LowerCtx<'_>,
     body: &[Stmt],
@@ -88,6 +127,7 @@ pub(crate) struct LowerCtx<'a> {
     pub(crate) strings: &'a HashMap<String, i64>,
     pub(crate) pending_static_arrays: &'a mut Vec<PendingStaticArray>,
     pub(crate) pending_inrt_calls: &'a mut Vec<PendingInrtCall>,
+    pub(crate) pending_strings: &'a mut Vec<super::PendingString>,
     pub(crate) stack_size: u32,
     pub(crate) emitted_return: bool,
     pub(crate) _params_src: &'a [(String, Typ)],
@@ -207,6 +247,7 @@ impl<'a> LowerCtx<'a> {
         strings: &'a HashMap<String, i64>,
         pending_static_arrays: &'a mut Vec<PendingStaticArray>,
         pending_inrt_calls: &'a mut Vec<PendingInrtCall>,
+        pending_strings: &'a mut Vec<super::PendingString>,
         fn_name: &str,
     ) -> Result<Self, String> {
         let mut ctx = Self {
@@ -218,6 +259,7 @@ impl<'a> LowerCtx<'a> {
             strings,
             pending_static_arrays,
             pending_inrt_calls,
+            pending_strings,
             stack_size: 0,
             emitted_return: false,
             _params_src: params,

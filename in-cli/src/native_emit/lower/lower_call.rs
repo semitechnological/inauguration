@@ -178,9 +178,16 @@ pub(crate) fn lower_inrt_call(
             Expr::BoolLit(v) => {
                 emitter.emit_insns(&aarch64::load_i64(reg, i64::from(*v)));
             }
+            Expr::StringLit(v) if v.is_empty() => {
+                emitter.emit_insns(&aarch64::load_i64(reg, 0));
+            }
             Expr::StringLit(v) => {
                 let id = ctx.string_id(v)?;
-                emitter.emit_insns(&aarch64::load_i64(reg, id));
+                let adr_site = emitter.emit_insn(aarch64::adr(reg, 0));
+                ctx.pending_strings.push(super::PendingString {
+                    adr_site,
+                    string_index: id,
+                });
             }
             Expr::Ident(name) => {
                 if let Some(offset) = ctx.params.get(name) {
