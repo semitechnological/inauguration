@@ -2,9 +2,9 @@ use crate::boundary_emit::emit_abi_manifest;
 use crate::boundary_verify::boundary_ir_verify;
 use crate::compiler::driver;
 use crate::core_ir::{Decl, UnifiedModule};
-use crate::family_typecheck;
 use crate::language_support::LanguageSupport;
 use crate::parser_registry::{self, ParserId, ResolvedBuildParser};
+use crate::typecheck;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
@@ -134,7 +134,7 @@ pub fn evaluate_path(path: &Path, _entry: &LanguageSupport) -> LanguageGateRepor
         return finish(sample_path, passed, blocking);
     }
 
-    if family_typecheck::typecheck_resolved(&resolved, &module).is_ok() {
+    if typecheck::typecheck_resolved(&resolved, &module).is_ok() {
         passed.push(GATE_SEMANTIC_TYPECHECK);
     } else {
         blocking.push(GATE_SEMANTIC_TYPECHECK);

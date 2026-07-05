@@ -40,7 +40,6 @@ pub mod compiler;
 pub mod config;
 pub mod core_ir;
 pub mod core_ir_verifier;
-pub mod core_typecheck;
 pub mod crate_db;
 #[cfg(unix)]
 pub mod daemon_client;
@@ -50,7 +49,6 @@ pub mod dep_resolver;
 pub mod dynamic_module;
 pub mod extension_registry;
 pub mod external_guard;
-pub mod family_typecheck;
 pub mod graph_report;
 pub mod hotreload;
 pub mod hybrid_sil;

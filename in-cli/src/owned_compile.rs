@@ -343,9 +343,9 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
     // Lower module: desugar classes to structs before typecheck
     crate::lower_core::desugar_module(&mut module);
     if let parser_registry::ResolvedBuildParser::CoreIr(parser_id) = resolved
-        && crate::family_typecheck::uses_family_typecheck(parser_id)
+        && crate::typecheck::uses_family_typecheck(parser_id)
     {
-        module = crate::family_typecheck::normalize_module(parser_id, &module);
+        module = crate::typecheck::normalize_module(parser_id, &module);
     }
 
     report.frontend_level = "core-ir-direct".to_string();

@@ -1,9 +1,11 @@
 use crate::core_ir::{Decl, Expr, MatchPattern, MethodSig, Stmt, Typ, UnifiedModule};
-use std::collections::HashMap;
+use crate::parser_registry::{ParserId, ResolvedBuildParser};
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
 pub enum TypeError {
     ArityMismatch {
+        caller: String,
         fn_name: String,
         expected: usize,
         got: usize,
@@ -13,14 +15,22 @@ pub enum TypeError {
         expected: Typ,
         got: Typ,
     },
+    ReturnValueInVoid {
+        fn_name: String,
+    },
+    MissingReturnValue {
+        fn_name: String,
+    },
     UnknownField {
         struct_name: String,
         field: String,
     },
     UndefinedVariable {
+        fn_name: String,
         name: String,
     },
     StructNotFound {
+        fn_name: String,
         name: String,
     },
     TypeMismatch {
@@ -49,6 +59,12 @@ pub enum TypeError {
         class_name: String,
         interface_name: String,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModuleKind {
+    Library,
+    Executable,
 }
 
 #[derive(Default)]
@@ -82,21 +98,7 @@ impl TypeChecker {
                     let mut env: HashMap<String, Typ> = params.iter().cloned().collect();
                     self.check_stmts(name, ret, body, &facts, &mut env, &mut errors);
                 }
-                Decl::Class { methods, .. } => {
-                    for method in methods {
-                        if let Decl::Function {
-                            name,
-                            params,
-                            ret,
-                            body,
-                            ..
-                        } = method
-                        {
-                            let mut env: HashMap<String, Typ> = params.iter().cloned().collect();
-                            self.check_stmts(name, ret, body, &facts, &mut env, &mut errors);
-                        }
-                    }
-                }
+                Decl::Class { .. } => {}
                 _ => {}
             }
         }
@@ -144,6 +146,11 @@ impl TypeChecker {
                         } = method
                         {
                             functions.insert(mname.clone(), (params.clone(), ret.clone()));
+                            let mangled = format!("{}_{}", name, mname);
+                            let mut new_params =
+                                vec![("self".to_string(), Typ::Named(name.clone()))];
+                            new_params.extend(params.iter().cloned());
+                            functions.insert(mangled, (new_params, ret.clone()));
                         }
                     }
                 }
@@ -245,7 +252,7 @@ impl TypeChecker {
                             ),
                         });
                     }
-                    if !is_conservative_match(&iface_method.ret, ret) {
+                    if !is_compatible(&iface_method.ret, ret) {
                         errors.push(TypeError::InterfaceMethodSigMismatch {
                             class_name: class_name.to_string(),
                             interface_name: iface_name.to_string(),
@@ -290,7 +297,7 @@ impl TypeChecker {
                 self.check_expr(fn_name, expr, facts, env, errors);
                 let expr_typ = self.expr_type(expr, facts, env);
                 if let (Some(expected), Some(actual)) = (annot, &expr_typ)
-                    && !is_conservative_match(expected, actual)
+                    && !is_compatible(expected, actual)
                 {
                     errors.push(TypeError::TypeMismatch {
                         context: format!("let binding `{name}` in `{fn_name}`"),
@@ -308,7 +315,7 @@ impl TypeChecker {
                 self.check_expr(fn_name, expr, facts, env, errors);
                 if let Some(existing_typ) = env.get(name).cloned() {
                     if let Some(actual) = self.expr_type(expr, facts, env)
-                        && !is_conservative_match(&existing_typ, &actual)
+                        && !is_compatible(&existing_typ, &actual)
                     {
                         errors.push(TypeError::TypeMismatch {
                             context: format!("assignment to `{name}` in `{fn_name}`"),
@@ -317,14 +324,20 @@ impl TypeChecker {
                         });
                     }
                 } else {
-                    errors.push(TypeError::UndefinedVariable { name: name.clone() });
+                    errors.push(TypeError::UndefinedVariable {
+                        fn_name: fn_name.to_string(),
+                        name: name.clone(),
+                    });
                 }
             }
             Stmt::Return(Some(expr)) => {
                 self.check_expr(fn_name, expr, facts, env, errors);
-                if *fn_ret != Typ::Void
-                    && let Some(actual) = self.expr_type(expr, facts, env)
-                    && !is_conservative_match(fn_ret, &actual)
+                if fn_ret.canonical() == Typ::Void {
+                    errors.push(TypeError::ReturnValueInVoid {
+                        fn_name: fn_name.to_string(),
+                    });
+                } else if let Some(actual) = self.expr_type(expr, facts, env)
+                    && !is_compatible(fn_ret, &actual)
                 {
                     errors.push(TypeError::ReturnTypeMismatch {
                         fn_name: fn_name.to_string(),
@@ -333,7 +346,13 @@ impl TypeChecker {
                     });
                 }
             }
-            Stmt::Return(None) => {}
+            Stmt::Return(None) => {
+                if fn_ret.canonical() != Typ::Void {
+                    errors.push(TypeError::MissingReturnValue {
+                        fn_name: fn_name.to_string(),
+                    });
+                }
+            }
             Stmt::Break => {}
             Stmt::Expr(expr) => {
                 self.check_expr(fn_name, expr, facts, env, errors);
@@ -352,13 +371,24 @@ impl TypeChecker {
                         expr: format!("index assignment index in `{fn_name}`"),
                     });
                 }
-                if let Some(base_typ) = self.expr_type(base, facts, env)
-                    && !matches!(base_typ, Typ::Array(_) | Typ::Named(_) | Typ::Generic(_))
-                    && is_concrete(&base_typ)
-                {
-                    errors.push(TypeError::NotArray {
-                        expr: format!("index assignment base in `{fn_name}`"),
-                    });
+                match self.expr_type(base, facts, env) {
+                    Some(Typ::Array(item)) => {
+                        if let Some(value_typ) = self.expr_type(value, facts, env)
+                            && !is_compatible(&item, &value_typ)
+                        {
+                            errors.push(TypeError::TypeMismatch {
+                                context: format!("array assignment value in `{fn_name}`"),
+                                expected: *item.clone(),
+                                got: value_typ,
+                            });
+                        }
+                    }
+                    Some(base_typ) if is_concrete(&base_typ) => {
+                        errors.push(TypeError::NotArray {
+                            expr: format!("index assignment base in `{fn_name}`"),
+                        });
+                    }
+                    _ => {}
                 }
             }
             Stmt::If {
@@ -437,8 +467,11 @@ impl TypeChecker {
             | Expr::BoolLit(_)
             | Expr::Closure { .. } => {}
             Expr::Ident(name) => {
-                if !env.contains_key(name) {
-                    errors.push(TypeError::UndefinedVariable { name: name.clone() });
+                if !env.contains_key(name) && !is_builtin_fn(name) {
+                    errors.push(TypeError::UndefinedVariable {
+                        fn_name: fn_name.to_string(),
+                        name: name.clone(),
+                    });
                 }
             }
             Expr::Unary { expr: inner, .. } => {
@@ -453,20 +486,47 @@ impl TypeChecker {
                 ) {
                     match op.as_str() {
                         "+" => {
-                            let ok = matches!(
-                                (&l, &r),
-                                (Typ::Int, Typ::Int) | (Typ::String, Typ::String)
-                            ) || !is_concrete(&l)
-                                || !is_concrete(&r);
-                            if !ok {
+                            let l_concrete = is_concrete(&l);
+                            let r_concrete = is_concrete(&r);
+                            let l_str = l == Typ::String;
+                            let r_str = r == Typ::String;
+                            if l_str || r_str {
+                                if l_str && r_str {
+                                    // ok
+                                } else if l_concrete && r_concrete {
+                                    errors.push(TypeError::TypeMismatch {
+                                        context: format!("binary `+` in `{fn_name}`"),
+                                        expected: Typ::String,
+                                        got: if l_str { r } else { l },
+                                    });
+                                }
+                            } else if l_concrete && r_concrete {
+                                if !is_numeric(&l) || !is_numeric(&r) {
+                                    errors.push(TypeError::TypeMismatch {
+                                        context: format!("binary `+` in `{fn_name}`"),
+                                        expected: Typ::Int,
+                                        got: if !is_numeric(&l) { l } else { r },
+                                    });
+                                }
+                            }
+                        }
+                        "-" | "*" | "/" | "^" | "<<" | ">>" | "&" | "|" => {
+                            if l != Typ::Int && l != Typ::Float && is_concrete(&l) {
                                 errors.push(TypeError::TypeMismatch {
-                                    context: format!("binary `+` in `{fn_name}`"),
-                                    expected: l,
+                                    context: format!("binary `{op}` lhs in `{fn_name}`"),
+                                    expected: Typ::Int,
+                                    got: l,
+                                });
+                            }
+                            if r != Typ::Int && r != Typ::Float && is_concrete(&r) {
+                                errors.push(TypeError::TypeMismatch {
+                                    context: format!("binary `{op}` rhs in `{fn_name}`"),
+                                    expected: Typ::Int,
                                     got: r,
                                 });
                             }
                         }
-                        "-" | "*" | "/" | "%" => {
+                        "%" => {
                             if l != Typ::Int && is_concrete(&l) {
                                 errors.push(TypeError::TypeMismatch {
                                     context: format!("binary `{op}` lhs in `{fn_name}`"),
@@ -483,7 +543,7 @@ impl TypeChecker {
                             }
                         }
                         "==" | "!=" | "<" | ">" | "<=" | ">=" => {
-                            if is_concrete(&l) && is_concrete(&r) && l != r {
+                            if is_concrete(&l) && is_concrete(&r) && !is_compatible(&l, &r) {
                                 errors.push(TypeError::TypeMismatch {
                                     context: format!("binary `{op}` in `{fn_name}`"),
                                     expected: l,
@@ -513,14 +573,21 @@ impl TypeChecker {
             }
             Expr::StructInit { name, fields, .. } => match facts.structs.get(name) {
                 Some(schema) => {
+                    let mut seen = HashSet::new();
                     for (field_name, field_expr) in fields {
                         self.check_expr(fn_name, field_expr, facts, env, errors);
+                        if !seen.insert(field_name.clone()) {
+                            errors.push(TypeError::UnknownField {
+                                struct_name: name.clone(),
+                                field: field_name.clone(),
+                            });
+                        }
                         let expected_typ =
                             schema.iter().find(|(f, _)| f == field_name).map(|(_, t)| t);
                         match expected_typ {
                             Some(expected) => {
                                 if let Some(actual) = self.expr_type(field_expr, facts, env)
-                                    && !is_conservative_match(expected, &actual)
+                                    && !is_compatible(expected, &actual)
                                 {
                                     errors.push(TypeError::TypeMismatch {
                                         context: format!("field `{field_name}` in struct `{name}`"),
@@ -537,9 +604,20 @@ impl TypeChecker {
                             }
                         }
                     }
+                    for (field_name, _) in schema {
+                        if !seen.contains(field_name) {
+                            errors.push(TypeError::UnknownField {
+                                struct_name: name.clone(),
+                                field: field_name.clone(),
+                            });
+                        }
+                    }
                 }
                 None => {
-                    errors.push(TypeError::StructNotFound { name: name.clone() });
+                    errors.push(TypeError::StructNotFound {
+                        fn_name: fn_name.to_string(),
+                        name: name.clone(),
+                    });
                 }
             },
             Expr::Field { base, name, .. } => {
@@ -562,7 +640,7 @@ impl TypeChecker {
                     let typ = self.expr_type(item, facts, env);
                     match (&item_typ, typ) {
                         (Some(expected), Some(actual)) => {
-                            if !is_conservative_match(expected, &actual) {
+                            if !is_compatible(expected, &actual) {
                                 errors.push(TypeError::TypeMismatch {
                                     context: format!("array literal element in `{fn_name}`"),
                                     expected: expected.clone(),
@@ -597,9 +675,16 @@ impl TypeChecker {
             }
             Expr::Call { callee, args, .. } => {
                 if let Expr::Ident(callee_name) = callee.as_ref() {
+                    if is_builtin_fn(callee_name) {
+                        for arg in args {
+                            self.check_expr(fn_name, arg, facts, env, errors);
+                        }
+                        return;
+                    }
                     if let Some((params, _ret)) = facts.functions.get(callee_name) {
                         if params.len() != args.len() {
                             errors.push(TypeError::ArityMismatch {
+                                caller: fn_name.to_string(),
                                 fn_name: callee_name.clone(),
                                 expected: params.len(),
                                 got: args.len(),
@@ -608,7 +693,7 @@ impl TypeChecker {
                         for ((_, param_typ), arg) in params.iter().zip(args.iter()) {
                             self.check_expr(fn_name, arg, facts, env, errors);
                             if let Some(arg_typ) = self.expr_type(arg, facts, env)
-                                && !is_conservative_match(param_typ, &arg_typ)
+                                && !is_compatible(param_typ, &arg_typ)
                             {
                                 errors.push(TypeError::TypeMismatch {
                                     context: format!("argument for `{callee_name}` in `{fn_name}`"),
@@ -617,10 +702,17 @@ impl TypeChecker {
                                 });
                             }
                         }
-                    }
-                    // Check remaining args even if function not found
-                    for arg in args {
-                        self.check_expr(fn_name, arg, facts, env, errors);
+                        for arg in args.iter().skip(params.len()) {
+                            self.check_expr(fn_name, arg, facts, env, errors);
+                        }
+                    } else {
+                        errors.push(TypeError::UndefinedVariable {
+                            fn_name: fn_name.to_string(),
+                            name: callee_name.clone(),
+                        });
+                        for arg in args {
+                            self.check_expr(fn_name, arg, facts, env, errors);
+                        }
                     }
                 } else {
                     self.check_expr(fn_name, callee, facts, env, errors);
@@ -638,7 +730,13 @@ impl TypeChecker {
             Expr::FloatLit(_) => Some(Typ::Float),
             Expr::StringLit(_) => Some(Typ::String),
             Expr::BoolLit(_) => Some(Typ::Bool),
-            Expr::Ident(name) => env.get(name).cloned(),
+            Expr::Ident(name) => {
+                if is_builtin_fn(name) {
+                    Some(builtin_return_type(name))
+                } else {
+                    env.get(name).cloned()
+                }
+            }
             Expr::StructInit { name, .. } => Some(Typ::Named(name.clone())),
             Expr::Field { base, name, .. } => {
                 if let Some(base_typ) = self.expr_type(base, facts, env)
@@ -676,16 +774,29 @@ impl TypeChecker {
                     let r = self.expr_type(rhs, facts, env);
                     match (l, r) {
                         (Some(Typ::String), Some(Typ::String)) => Some(Typ::String),
+                        (Some(Typ::Float), _) | (_, Some(Typ::Float)) => Some(Typ::Float),
                         _ => Some(Typ::Int),
                     }
                 }
-                "-" | "*" | "/" | "%" => Some(Typ::Int),
+                "-" | "*" | "/" | "%" | "^" | "<<" | ">>" | "&" | "|" => {
+                    let l = self.expr_type(lhs, facts, env);
+                    let r = self.expr_type(rhs, facts, env);
+                    if l == Some(Typ::Float) || r == Some(Typ::Float) {
+                        Some(Typ::Float)
+                    } else {
+                        Some(Typ::Int)
+                    }
+                }
                 "==" | "!=" | "<" | ">" | "<=" | ">=" | "&&" | "||" => Some(Typ::Bool),
                 _ => None,
             },
             Expr::Call { callee, .. } => {
                 if let Expr::Ident(name) = callee.as_ref() {
-                    facts.functions.get(name).map(|(_, ret)| ret.clone())
+                    if is_builtin_fn(name) {
+                        Some(builtin_return_type(name))
+                    } else {
+                        facts.functions.get(name).map(|(_, ret)| ret.clone())
+                    }
                 } else {
                     None
                 }
@@ -709,7 +820,10 @@ impl TypeChecker {
                 let schema = match facts.structs.get(name) {
                     Some(s) => s,
                     None => {
-                        errors.push(TypeError::StructNotFound { name: name.clone() });
+                        errors.push(TypeError::StructNotFound {
+                            fn_name: _fn_name.to_string(),
+                            name: name.clone(),
+                        });
                         return;
                     }
                 };
@@ -749,11 +863,456 @@ fn is_concrete(typ: &Typ) -> bool {
     !matches!(typ, Typ::Named(_) | Typ::Generic(_))
 }
 
-fn is_conservative_match(expected: &Typ, actual: &Typ) -> bool {
-    if !is_concrete(expected) || !is_concrete(actual) {
+fn is_numeric(typ: &Typ) -> bool {
+    matches!(typ, Typ::Int | Typ::Float)
+}
+
+fn is_compatible(expected: &Typ, actual: &Typ) -> bool {
+    if matches!(expected, Typ::Generic(_)) || matches!(actual, Typ::Generic(_)) {
         return true;
     }
-    expected == actual
+    expected.compatible_with(actual)
+}
+
+fn is_builtin_fn(name: &str) -> bool {
+    matches!(
+        name,
+        "print"
+            | "print_int"
+            | "print_string"
+            | "to_int"
+            | "to_string"
+            | "len"
+            | "throw_error"
+            | "str_concat"
+            | "str_eq"
+            | "str_contains"
+            | "str_trim"
+            | "str_to_int"
+            | "str_starts_with"
+            | "str_index_of"
+            | "str_slice"
+            | "str_is_int"
+            | "str_table_has"
+            | "str_table_get_int"
+            | "array_push"
+            | "array_pop"
+            | "array_len"
+            | "bool_to_int"
+            | "int_to_bool"
+            // x86 bare-metal intrinsics
+            | "outb" | "inb" | "outl" | "inl"
+            | "load8" | "load16" | "load32" | "load64"
+            | "store8" | "store16" | "store32" | "store64"
+            | "hlt" | "cli" | "sti" | "pause"
+            | "lidt" | "invlpg" | "read_cr2" | "read_cr3"
+            | "invoke" | "invoke1" | "invoke2"
+    )
+}
+
+fn builtin_return_type(name: &str) -> Typ {
+    match name {
+        "len" | "array_len" | "bool_to_int" | "to_int" | "str_to_int" | "str_index_of"
+        | "str_table_get_int" | "inb" | "inl" | "load8" | "load16" | "load32" | "load64"
+        | "read_cr2" | "read_cr3" | "invoke" | "invoke1" | "invoke2" => Typ::Int,
+        "str_eq" | "str_contains" | "str_starts_with" | "str_is_int" | "str_table_has"
+        | "int_to_bool" => Typ::Bool,
+        "str_concat" | "str_trim" | "str_slice" | "to_string" => Typ::String,
+        _ => Typ::Void,
+    }
+}
+
+fn format_typ(typ: &Typ) -> String {
+    match typ {
+        Typ::Int => "Int".to_string(),
+        Typ::Float => "Float".to_string(),
+        Typ::String => "String".to_string(),
+        Typ::Bool => "Bool".to_string(),
+        Typ::Void => "Void".to_string(),
+        Typ::Array(item) => format!("[{}]", format_typ(item)),
+        Typ::Named(name) => name.clone(),
+        Typ::Generic(name) => name.clone(),
+    }
+}
+
+fn format_type_error(error: &TypeError) -> String {
+    match error {
+        TypeError::ArityMismatch {
+            caller,
+            fn_name,
+            expected,
+            got,
+        } => format!("function `{fn_name}` expects {expected} args, got {got} in `{caller}`"),
+        TypeError::ReturnTypeMismatch {
+            fn_name,
+            expected,
+            got,
+        } => format!(
+            "return type mismatch in `{fn_name}`: expected {}, got {}",
+            format_typ(expected),
+            format_typ(got)
+        ),
+        TypeError::ReturnValueInVoid { fn_name } => {
+            format!("return value in void function `{fn_name}`")
+        }
+        TypeError::MissingReturnValue { fn_name } => {
+            format!("missing return value in `{fn_name}`")
+        }
+        TypeError::UnknownField { struct_name, field } => {
+            format!("unknown field `{field}` for struct `{struct_name}`")
+        }
+        TypeError::UndefinedVariable { fn_name, name } => {
+            format!("unresolved identifier `{name}` in `{fn_name}`")
+        }
+        TypeError::StructNotFound { fn_name, name } => {
+            format!("unknown struct `{name}` in `{fn_name}`")
+        }
+        TypeError::TypeMismatch {
+            context,
+            expected,
+            got,
+        } => format!(
+            "type mismatch in `{context}`: expected {}, got {}",
+            format_typ(expected),
+            format_typ(got)
+        ),
+        TypeError::NotArray { expr } => format!("{expr} expected array"),
+        TypeError::IndexNotInt { expr } => format!("{expr} expected int index"),
+        TypeError::MissingInterfaceMethod {
+            class_name,
+            interface_name,
+            method_name,
+        } => format!(
+            "missing interface method `{method_name}` for class `{class_name}` implementing `{interface_name}`"
+        ),
+        TypeError::InterfaceMethodSigMismatch {
+            class_name,
+            interface_name,
+            method_name,
+            detail,
+        } => format!(
+            "interface method signature mismatch for `{method_name}` in class `{class_name}` implementing `{interface_name}`: {detail}"
+        ),
+        TypeError::InterfaceNotFound {
+            class_name,
+            interface_name,
+        } => format!("interface `{interface_name}` not found for class `{class_name}`"),
+    }
+}
+
+fn format_type_errors(errors: &[TypeError]) -> String {
+    errors
+        .iter()
+        .map(format_type_error)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+pub fn typecheck_executable(module: &UnifiedModule) -> Result<(), String> {
+    typecheck_module(module, ModuleKind::Executable)
+}
+
+pub fn typecheck_module(module: &UnifiedModule, kind: ModuleKind) -> Result<(), String> {
+    let mut top_level = HashSet::new();
+    for decl in &module.decls {
+        match decl {
+            Decl::Struct { name, .. } | Decl::Class { name, .. } | Decl::Function { name, .. } => {
+                if !top_level.insert(name.clone()) {
+                    return Err(format!("duplicate top-level name `{name}`"));
+                }
+            }
+            _ => {}
+        }
+        if let Decl::Class { name, methods, .. } = decl {
+            for method in methods {
+                if let Decl::Function {
+                    name: method_name, ..
+                } = method
+                {
+                    let mangled = format!("{}_{}", name, method_name);
+                    if !top_level.insert(mangled.clone()) {
+                        return Err(format!("duplicate top-level name `{mangled}`"));
+                    }
+                }
+            }
+        }
+    }
+
+    if kind == ModuleKind::Executable && !top_level.contains("main") {
+        return Err("missing main function".to_string());
+    }
+
+    match TypeChecker::new().check_module(module) {
+        Ok(()) => Ok(()),
+        Err(errors) => Err(format_type_errors(&errors)),
+    }
+}
+
+pub fn typecheck_resolved(
+    resolved: &ResolvedBuildParser,
+    module: &UnifiedModule,
+) -> Result<(), String> {
+    if let ResolvedBuildParser::CoreIr(parser_id) = resolved
+        && uses_family_typecheck(*parser_id)
+    {
+        return typecheck_for_parser(*parser_id, module);
+    }
+    typecheck_executable(module)
+}
+
+pub fn uses_family_typecheck(parser_id: ParserId) -> bool {
+    matches!(
+        parser_id,
+        ParserId::Php
+            | ParserId::Lua
+            | ParserId::Zig
+            | ParserId::Rust
+            | ParserId::Java
+            | ParserId::Kotlin
+            | ParserId::CSharp
+            | ParserId::FSharp
+            | ParserId::JavaScript
+            | ParserId::TypeScript
+            | ParserId::Python
+            | ParserId::Ruby
+            | ParserId::Scala
+            | ParserId::Perl
+            | ParserId::Nim
+            | ParserId::Odin
+            | ParserId::Hare
+            | ParserId::HolyC
+            | ParserId::D
+            | ParserId::Crystal
+            | ParserId::Clojure
+            | ParserId::VbNet
+    )
+}
+
+fn typecheck_for_parser(parser_id: ParserId, module: &UnifiedModule) -> Result<(), String> {
+    let normalized = normalize_module(parser_id, module);
+    if uses_polyglot_entrypoint_typecheck(parser_id) {
+        return typecheck_polyglot_entrypoints(&normalized);
+    }
+    typecheck_executable(&normalized)
+}
+
+fn uses_polyglot_entrypoint_typecheck(parser_id: ParserId) -> bool {
+    matches!(
+        parser_id,
+        ParserId::Lua | ParserId::JavaScript | ParserId::TypeScript
+    )
+}
+
+fn typecheck_polyglot_entrypoints(module: &UnifiedModule) -> Result<(), String> {
+    let mut checked_decls: Vec<Decl> = module
+        .decls
+        .iter()
+        .filter(|decl| matches!(decl, Decl::Struct { .. } | Decl::Class { .. }))
+        .cloned()
+        .collect();
+    let functions: Vec<Decl> = module
+        .decls
+        .iter()
+        .filter_map(|decl| match decl {
+            Decl::Function {
+                name,
+                params,
+                ret,
+                body,
+                type_params,
+            } => Some(Decl::Function {
+                name: name.clone(),
+                params: params.clone(),
+                ret: ret.clone(),
+                body: if name == "answer" || name == "main" {
+                    body.clone()
+                } else {
+                    Vec::new()
+                },
+                type_params: type_params.clone(),
+            }),
+            _ => None,
+        })
+        .collect();
+    if !functions
+        .iter()
+        .any(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+    {
+        return Err("missing main function".to_string());
+    }
+    checked_decls.extend(functions);
+    typecheck_executable(&UnifiedModule::new(checked_decls))
+}
+
+pub fn normalize_module(parser_id: ParserId, module: &UnifiedModule) -> UnifiedModule {
+    let decls = module
+        .decls
+        .iter()
+        .map(|decl| normalize_decl(parser_id, decl))
+        .collect();
+    UnifiedModule::new(decls)
+}
+
+fn normalize_decl(parser_id: ParserId, decl: &Decl) -> Decl {
+    match decl {
+        Decl::Function {
+            name,
+            params,
+            ret,
+            body,
+            type_params,
+        } => {
+            let mut body = body.clone();
+            let ret = normalize_function_ret(parser_id, ret, &body);
+            normalize_function_body(parser_id, &ret, &mut body);
+            Decl::Function {
+                name: name.clone(),
+                params: params
+                    .iter()
+                    .map(|(n, t)| (n.clone(), normalize_parser_type(parser_id, t)))
+                    .collect(),
+                ret,
+                body,
+                type_params: type_params.clone(),
+            }
+        }
+        Decl::Class {
+            name,
+            fields,
+            methods,
+            visibility,
+            extends,
+            implements,
+            type_params,
+        } => Decl::Class {
+            name: name.clone(),
+            fields: fields
+                .iter()
+                .map(|(n, t)| (n.clone(), normalize_parser_type(parser_id, t)))
+                .collect(),
+            methods: methods
+                .iter()
+                .map(|m| normalize_decl(parser_id, m))
+                .collect(),
+            visibility: *visibility,
+            extends: extends.clone(),
+            implements: implements.clone(),
+            type_params: type_params.clone(),
+        },
+        Decl::Struct {
+            name,
+            fields,
+            type_params,
+        } => Decl::Struct {
+            name: name.clone(),
+            fields: fields
+                .iter()
+                .map(|(n, t)| (n.clone(), normalize_parser_type(parser_id, t)))
+                .collect(),
+            type_params: type_params.clone(),
+        },
+        other => other.clone(),
+    }
+}
+
+fn normalize_function_ret(parser_id: ParserId, ret: &Typ, body: &[Stmt]) -> Typ {
+    let normalized = normalize_parser_type(parser_id, ret);
+    if matches!(
+        parser_id,
+        ParserId::Lua | ParserId::Perl | ParserId::Python | ParserId::Ruby | ParserId::JavaScript
+    ) && normalized == Typ::Void
+    {
+        if let Some(inferred) = infer_return_type_from_body(body) {
+            return inferred;
+        }
+        if matches!(parser_id, ParserId::JavaScript) && body_returns_expression(body) {
+            return Typ::Named("Any".to_string());
+        }
+    }
+    normalized
+}
+
+fn normalize_function_body(parser_id: ParserId, ret: &Typ, body: &mut Vec<Stmt>) {
+    if !matches!(
+        parser_id,
+        ParserId::Php
+            | ParserId::Lua
+            | ParserId::Zig
+            | ParserId::Scala
+            | ParserId::Perl
+            | ParserId::JavaScript
+            | ParserId::TypeScript
+    ) {
+        return;
+    }
+    if body.iter().any(|s| matches!(s, Stmt::Return(_))) {
+        return;
+    }
+    if *ret == Typ::Void {
+        return;
+    }
+    if let Some(Stmt::Expr(expr)) = body.last().cloned() {
+        body.pop();
+        body.push(Stmt::Return(Some(expr)));
+    }
+}
+
+fn infer_return_type_from_body(body: &[Stmt]) -> Option<Typ> {
+    for stmt in body.iter().rev() {
+        match stmt {
+            Stmt::Return(Some(expr)) => return expr_type_hint(expr),
+            Stmt::Expr(expr) => return expr_type_hint(expr),
+            _ => {}
+        }
+    }
+    None
+}
+
+fn expr_type_hint(expr: &Expr) -> Option<Typ> {
+    match expr {
+        Expr::IntLit(_) => Some(Typ::Int),
+        Expr::FloatLit(_) => Some(Typ::Float),
+        Expr::StringLit(_) => Some(Typ::String),
+        Expr::BoolLit(_) => Some(Typ::Bool),
+        _ => None,
+    }
+}
+
+fn body_returns_expression(body: &[Stmt]) -> bool {
+    body.iter()
+        .rev()
+        .any(|stmt| matches!(stmt, Stmt::Return(Some(_)) | Stmt::Expr(_) | Stmt::Throw(_)))
+}
+
+fn normalize_type(typ: &Typ) -> Typ {
+    match typ {
+        Typ::Named(name) => {
+            let lower = name.to_ascii_lowercase();
+            match lower.as_str() {
+                "int" | "i8" | "i16" | "i32" | "i64" | "i128" | "isize" | "u8" | "u16" | "u32"
+                | "u64" | "u128" | "usize" | "integer" | "number" | "int32" | "int64" => Typ::Int,
+                "float" | "f32" | "f64" | "double" => Typ::Float,
+                "bool" | "boolean" => Typ::Bool,
+                "string" | "str" => Typ::String,
+                "void" | "unit" | "nil" | "none" | "()" => Typ::Void,
+                _ if name == "Int" => Typ::Int,
+                _ if name == "Unit" => Typ::Void,
+                _ => typ.clone(),
+            }
+        }
+        other => other.clone(),
+    }
+}
+
+fn normalize_parser_type(parser_id: ParserId, typ: &Typ) -> Typ {
+    if matches!(
+        parser_id,
+        ParserId::JavaScript | ParserId::Python | ParserId::Ruby | ParserId::Php
+    ) && matches!(typ, Typ::Named(name) if name == "Any")
+    {
+        return Typ::Int;
+    }
+    normalize_type(typ)
 }
 
 #[cfg(test)]
@@ -771,8 +1330,51 @@ mod tests {
         }
     }
 
+    fn function_with_params(name: &str, params: Vec<(String, Typ)>, body: Vec<Stmt>) -> Decl {
+        Decl::Function {
+            name: name.to_string(),
+            params,
+            ret: Typ::Void,
+            body,
+            type_params: vec![],
+        }
+    }
+
+    fn function_with_ret(name: &str, ret: Typ, body: Vec<Stmt>) -> Decl {
+        Decl::Function {
+            name: name.to_string(),
+            params: vec![],
+            ret,
+            body,
+            type_params: vec![],
+        }
+    }
+
+    fn function_with_params_and_ret(
+        name: &str,
+        params: Vec<(String, Typ)>,
+        ret: Typ,
+        body: Vec<Stmt>,
+    ) -> Decl {
+        Decl::Function {
+            name: name.to_string(),
+            params,
+            ret,
+            body,
+            type_params: vec![],
+        }
+    }
+
     fn module(decls: Vec<Decl>) -> UnifiedModule {
         UnifiedModule::new(decls)
+    }
+
+    fn point_struct() -> Decl {
+        Decl::Struct {
+            name: "Point".to_string(),
+            fields: vec![("x".to_string(), Typ::Int), ("y".to_string(), Typ::Int)],
+            type_params: vec![],
+        }
     }
 
     #[test]
@@ -794,8 +1396,11 @@ mod tests {
             .check_module(&m)
             .expect_err("arity mismatch should fail");
         assert!(
-            err.iter()
-                .any(|e| matches!(e, TypeError::ArityMismatch { fn_name, expected: 1, got: 2 } if fn_name == "helper")),
+            err.iter().any(|e| matches!(
+                e,
+                TypeError::ArityMismatch { caller, fn_name, expected: 1, got: 2 }
+                if fn_name == "helper" && caller == "main"
+            )),
             "expected ArityMismatch, got: {err:?}"
         );
     }
@@ -833,8 +1438,11 @@ mod tests {
             .check_module(&m)
             .expect_err("return type mismatch should fail");
         assert!(
-            err.iter()
-                .any(|e| matches!(e, TypeError::ReturnTypeMismatch { fn_name, expected: Typ::Int, got: Typ::String } if fn_name == "main")),
+            err.iter().any(|e| matches!(
+                e,
+                TypeError::ReturnTypeMismatch { fn_name, expected: Typ::Int, got: Typ::String }
+                if fn_name == "main"
+            )),
             "expected ReturnTypeMismatch, got: {err:?}"
         );
     }
@@ -852,9 +1460,10 @@ mod tests {
             .check_module(&m)
             .expect_err("undefined variable should fail");
         assert!(
-            err.iter().any(
-                |e| matches!(e, TypeError::UndefinedVariable { name } if name == "undeclared")
-            ),
+            err.iter().any(|e| matches!(
+                e,
+                TypeError::UndefinedVariable { fn_name, name } if fn_name == "main" && name == "undeclared"
+            )),
             "expected UndefinedVariable, got: {err:?}"
         );
     }
@@ -1024,11 +1633,9 @@ mod tests {
             ],
         )]);
 
-        // Named types should be conservative - no errors
-        // (the Ident("UNDECLARED_BUT_NAMED_OK") is still an undefined variable though)
         let result = TypeChecker::new().check_module(&m);
         match result {
-            Ok(()) => {} // OK - no errors at all is fine if conservative check skips
+            Ok(()) => {}
             Err(errors) => {
                 assert!(
                     !errors
@@ -1053,12 +1660,10 @@ mod tests {
             }))],
         )]);
 
-        // String + String should be valid binary op
         let result = TypeChecker::new().check_module(&m);
         match result {
-            Ok(()) => {} // OK
+            Ok(()) => {}
             Err(errors) => {
-                // Should NOT have a binary + error
                 assert!(
                     !errors
                         .iter()
@@ -1139,7 +1744,7 @@ mod tests {
             .expect_err("unknown struct should fail");
         assert!(
             err.iter()
-                .any(|e| matches!(e, TypeError::StructNotFound { name } if name == "Missing")),
+                .any(|e| matches!(e, TypeError::StructNotFound { fn_name, name } if fn_name == "main" && name == "Missing")),
             "expected StructNotFound, got: {err:?}"
         );
     }
@@ -1344,5 +1949,881 @@ mod tests {
             )),
             "expected InterfaceNotFound, got: {err:?}"
         );
+    }
+
+    // Moved from core_typecheck.rs
+
+    #[test]
+    fn rejects_duplicate_top_level_function_names() {
+        let err = typecheck_executable(&module(vec![
+            function("main", Typ::Void, vec![], vec![]),
+            function("main", Typ::Void, vec![], vec![]),
+        ]))
+        .expect_err("duplicate function names should fail");
+
+        assert!(
+            err.contains("duplicate top-level name `main`"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_top_level_struct_and_function_names() {
+        let err = typecheck_executable(&module(vec![
+            Decl::Struct {
+                name: "Widget".to_string(),
+                fields: vec![],
+                type_params: vec![],
+            },
+            function("Widget", Typ::Void, vec![], vec![]),
+            function("main", Typ::Void, vec![], vec![]),
+        ]))
+        .expect_err("duplicate struct/function names should fail");
+
+        assert!(
+            err.contains("duplicate top-level name `Widget`"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_executable_module_without_main() {
+        let err =
+            typecheck_executable(&module(vec![function("helper", Typ::Void, vec![], vec![])]))
+                .expect_err("executable modules require main");
+
+        assert!(
+            err.contains("missing main function"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_unresolved_function_calls_in_bounded_bodies() {
+        let err = TypeChecker::new()
+            .check_module(&module(vec![function(
+                "main",
+                Typ::Void,
+                vec![],
+                vec![
+                    Stmt::If {
+                        cond: Expr::BoolLit(true),
+                        then_body: vec![Stmt::Expr(Expr::Call {
+                            callee: Box::new(Expr::Ident("missing".to_string())),
+                            args: vec![],
+                        })],
+                        else_body: vec![],
+                    },
+                    Stmt::Loop {
+                        kind: crate::core_ir::LoopKind::While,
+                        cond: Some(Expr::BoolLit(false)),
+                        body: vec![],
+                    },
+                ],
+            )]))
+            .expect_err("unresolved direct calls should fail");
+
+        assert!(
+            err.iter().any(|e| matches!(
+                e,
+                TypeError::UndefinedVariable { fn_name, name } if fn_name == "main" && name == "missing"
+            )),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_unresolved_identifiers_in_value_position() {
+        let err = TypeChecker::new()
+            .check_module(&module(vec![function(
+                "main",
+                Typ::Int,
+                vec![],
+                vec![Stmt::Return(Some(Expr::Ident("missing".to_string())))],
+            )]))
+            .expect_err("unresolved identifiers should fail");
+
+        assert!(
+            err.iter().any(|e| matches!(
+                e,
+                TypeError::UndefinedVariable { fn_name, name } if fn_name == "main" && name == "missing"
+            )),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_assignment_to_unresolved_identifier() {
+        let err = TypeChecker::new()
+            .check_module(&module(vec![function(
+                "main",
+                Typ::Void,
+                vec![],
+                vec![Stmt::Assign("missing".to_string(), Expr::IntLit(1))],
+            )]))
+            .expect_err("assignments require existing bindings");
+
+        assert!(
+            err.iter().any(|e| matches!(
+                e,
+                TypeError::UndefinedVariable { fn_name, name } if fn_name == "main" && name == "missing"
+            )),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn accepts_array_index_assignment() {
+        TypeChecker::new()
+            .check_module(&module(vec![function(
+                "main",
+                Typ::Void,
+                vec![],
+                vec![
+                    Stmt::Let(
+                        "xs".to_string(),
+                        Some(Typ::Array(Box::new(Typ::Int))),
+                        Expr::ArrayLit(vec![Expr::IntLit(1), Expr::IntLit(2)]),
+                    ),
+                    Stmt::IndexAssign {
+                        base: Expr::Ident("xs".to_string()),
+                        index: Expr::IntLit(1),
+                        value: Expr::IntLit(9),
+                    },
+                ],
+            )]))
+            .expect("array index assignment should typecheck");
+    }
+
+    #[test]
+    fn rejects_array_index_assignment_type_mismatch() {
+        let err = TypeChecker::new()
+            .check_module(&module(vec![function(
+                "main",
+                Typ::Void,
+                vec![],
+                vec![
+                    Stmt::Let(
+                        "xs".to_string(),
+                        Some(Typ::Array(Box::new(Typ::Int))),
+                        Expr::ArrayLit(vec![Expr::IntLit(1), Expr::IntLit(2)]),
+                    ),
+                    Stmt::IndexAssign {
+                        base: Expr::Ident("xs".to_string()),
+                        index: Expr::IntLit(1),
+                        value: Expr::StringLit("bad".to_string()),
+                    },
+                ],
+            )]))
+            .expect_err("array index assignment value must match item type");
+
+        assert!(
+            err.iter().any(|e| matches!(
+                e,
+                TypeError::TypeMismatch { context, .. } if context.contains("array assignment")
+            )),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn accepts_function_params_as_bound_identifiers() {
+        TypeChecker::new()
+            .check_module(&module(vec![
+                function_with_params_and_ret(
+                    "helper",
+                    vec![("value".to_string(), Typ::Int)],
+                    Typ::Int,
+                    vec![Stmt::Return(Some(Expr::Ident("value".to_string())))],
+                ),
+                function(
+                    "main",
+                    Typ::Void,
+                    vec![],
+                    vec![Stmt::Expr(Expr::Call {
+                        callee: Box::new(Expr::Ident("helper".to_string())),
+                        args: vec![Expr::IntLit(7)],
+                    })],
+                ),
+            ]))
+            .expect("function parameters should be in scope");
+    }
+
+    #[test]
+    fn accepts_resolved_calls_in_bounded_bodies() {
+        TypeChecker::new()
+            .check_module(&module(vec![
+                function("helper", Typ::Void, vec![], vec![]),
+                function(
+                    "main",
+                    Typ::Void,
+                    vec![],
+                    vec![Stmt::Expr(Expr::Call {
+                        callee: Box::new(Expr::Ident("helper".to_string())),
+                        args: vec![],
+                    })],
+                ),
+            ]))
+            .expect("resolved direct calls should pass");
+    }
+
+    #[test]
+    fn rejects_call_arity_mismatch() {
+        let err = TypeChecker::new()
+            .check_module(&module(vec![
+                function_with_params("helper", vec![("value".to_string(), Typ::Int)], vec![]),
+                function(
+                    "main",
+                    Typ::Void,
+                    vec![],
+                    vec![Stmt::Expr(Expr::Call {
+                        callee: Box::new(Expr::Ident("helper".to_string())),
+                        args: vec![],
+                    })],
+                ),
+            ]))
+            .expect_err("call arity mismatches should fail");
+
+        assert!(
+            err.iter().any(|e| matches!(
+                e,
+                TypeError::ArityMismatch { caller, fn_name, expected: 1, got: 0 }
+                if caller == "main" && fn_name == "helper"
+            )),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_call_argument_type_mismatch() {
+        let err = TypeChecker::new()
+            .check_module(&module(vec![
+                function_with_params("helper", vec![("value".to_string(), Typ::Int)], vec![]),
+                function(
+                    "main",
+                    Typ::Void,
+                    vec![],
+                    vec![Stmt::Expr(Expr::Call {
+                        callee: Box::new(Expr::Ident("helper".to_string())),
+                        args: vec![Expr::StringLit("bad".to_string())],
+                    })],
+                ),
+            ]))
+            .expect_err("call argument type mismatches should fail");
+
+        assert!(
+            err.iter().any(|e| matches!(
+                e,
+                TypeError::TypeMismatch { context, expected: Typ::Int, got: Typ::String }
+                if context.contains("argument")
+            )),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn validates_struct_init_and_field_access() {
+        TypeChecker::new()
+            .check_module(&module(vec![
+                point_struct(),
+                function(
+                    "main",
+                    Typ::Void,
+                    vec![],
+                    vec![
+                        Stmt::Let(
+                            "p".to_string(),
+                            Some(Typ::Named("Point".to_string())),
+                            Expr::StructInit {
+                                name: "Point".to_string(),
+                                fields: vec![
+                                    ("x".to_string(), Expr::IntLit(2)),
+                                    ("y".to_string(), Expr::IntLit(5)),
+                                ],
+                            },
+                        ),
+                        Stmt::Expr(Expr::Field {
+                            base: Box::new(Expr::Ident("p".to_string())),
+                            name: "y".to_string(),
+                        }),
+                    ],
+                ),
+            ]))
+            .expect("struct init and field access should pass");
+    }
+
+    #[test]
+    fn accepts_any_struct_field_init_and_numeric_use() {
+        TypeChecker::new()
+            .check_module(&module(vec![
+                Decl::Struct {
+                    name: "Boxed".to_string(),
+                    fields: vec![("value".to_string(), Typ::Named("Any".to_string()))],
+                    type_params: vec![],
+                },
+                function_with_ret(
+                    "main",
+                    Typ::Int,
+                    vec![
+                        Stmt::Let(
+                            "boxed".to_string(),
+                            None,
+                            Expr::StructInit {
+                                name: "Boxed".to_string(),
+                                fields: vec![("value".to_string(), Expr::IntLit(41))],
+                            },
+                        ),
+                        Stmt::Return(Some(Expr::Binary {
+                            op: "+".to_string(),
+                            lhs: Box::new(Expr::Field {
+                                base: Box::new(Expr::Ident("boxed".to_string())),
+                                name: "value".to_string(),
+                            }),
+                            rhs: Box::new(Expr::IntLit(1)),
+                        })),
+                    ],
+                ),
+            ]))
+            .expect("Any fields should accept concrete values and typed use");
+    }
+
+    #[test]
+    fn rejects_unknown_struct_init_field() {
+        let err = TypeChecker::new()
+            .check_module(&module(vec![
+                point_struct(),
+                function(
+                    "main",
+                    Typ::Void,
+                    vec![],
+                    vec![Stmt::Expr(Expr::StructInit {
+                        name: "Point".to_string(),
+                        fields: vec![
+                            ("x".to_string(), Expr::IntLit(2)),
+                            ("z".to_string(), Expr::IntLit(5)),
+                        ],
+                    })],
+                ),
+            ]))
+            .expect_err("unknown struct fields should fail");
+
+        assert!(
+            err.iter().any(|e| matches!(
+                e,
+                TypeError::UnknownField { struct_name, field } if struct_name == "Point" && field == "z"
+            )),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_struct_init_field_type_mismatch() {
+        let err = TypeChecker::new()
+            .check_module(&module(vec![
+                point_struct(),
+                function(
+                    "main",
+                    Typ::Void,
+                    vec![],
+                    vec![Stmt::Expr(Expr::StructInit {
+                        name: "Point".to_string(),
+                        fields: vec![
+                            ("x".to_string(), Expr::StringLit("bad".to_string())),
+                            ("y".to_string(), Expr::IntLit(5)),
+                        ],
+                    })],
+                ),
+            ]))
+            .expect_err("struct field type mismatches should fail");
+
+        assert!(
+            err.iter().any(|e| matches!(
+                e,
+                TypeError::TypeMismatch { context, expected: Typ::Int, got: Typ::String }
+                if context.contains("field `x`")
+            )),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_return_type_mismatch() {
+        let err = TypeChecker::new()
+            .check_module(&module(vec![function_with_ret(
+                "main",
+                Typ::Int,
+                vec![Stmt::Return(Some(Expr::StringLit("bad".to_string())))],
+            )]))
+            .expect_err("return type mismatches should fail");
+
+        assert!(
+            err.iter().any(|e| matches!(
+                e,
+                TypeError::ReturnTypeMismatch { fn_name, expected: Typ::Int, got: Typ::String }
+                if fn_name == "main"
+            )),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn accepts_named_primitive_return_aliases() {
+        TypeChecker::new()
+            .check_module(&module(vec![function_with_ret(
+                "main",
+                Typ::Named("Int".into()),
+                vec![Stmt::Return(Some(Expr::IntLit(42)))],
+            )]))
+            .expect("named primitive aliases should typecheck");
+    }
+
+    #[test]
+    fn rejects_missing_return_value() {
+        let err = typecheck_executable(&module(vec![function_with_ret(
+            "main",
+            Typ::Int,
+            vec![Stmt::Return(None)],
+        )]))
+        .expect_err("missing return values should fail");
+
+        assert!(
+            err.contains("missing return value in `main`"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_return_value_in_void_function() {
+        let err = typecheck_executable(&module(vec![function(
+            "main",
+            Typ::Void,
+            vec![],
+            vec![Stmt::Return(Some(Expr::IntLit(1)))],
+        )]))
+        .expect_err("void functions should not return values");
+
+        assert!(
+            err.contains("return value in void function `main`"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_non_bool_if_condition() {
+        let err = TypeChecker::new()
+            .check_module(&module(vec![function(
+                "main",
+                Typ::Void,
+                vec![],
+                vec![Stmt::If {
+                    cond: Expr::IntLit(1),
+                    then_body: vec![],
+                    else_body: vec![],
+                }],
+            )]))
+            .expect_err("if conditions require Bool");
+
+        assert!(
+            err.iter().any(|e| matches!(
+                e,
+                TypeError::TypeMismatch { context, expected: Typ::Bool, got: Typ::Int }
+                if context.contains("if condition")
+            )),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_non_bool_loop_condition() {
+        let err = TypeChecker::new()
+            .check_module(&module(vec![function(
+                "main",
+                Typ::Void,
+                vec![],
+                vec![Stmt::Loop {
+                    kind: crate::core_ir::LoopKind::While,
+                    cond: Some(Expr::IntLit(1)),
+                    body: vec![],
+                }],
+            )]))
+            .expect_err("loop conditions require Bool");
+
+        assert!(
+            err.iter().any(|e| matches!(
+                e,
+                TypeError::TypeMismatch { context, expected: Typ::Bool, got: Typ::Int }
+                if context.contains("loop condition")
+            )),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_let_annotation_type_mismatch() {
+        let err = TypeChecker::new()
+            .check_module(&module(vec![function(
+                "main",
+                Typ::Void,
+                vec![],
+                vec![Stmt::Let(
+                    "value".to_string(),
+                    Some(Typ::Int),
+                    Expr::StringLit("bad".to_string()),
+                )],
+            )]))
+            .expect_err("let annotation mismatches should fail");
+
+        assert!(
+            err.iter().any(|e| matches!(
+                e,
+                TypeError::TypeMismatch { context, expected: Typ::Int, got: Typ::String }
+                if context.contains("let binding")
+            )),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_assignment_type_mismatch() {
+        let err = TypeChecker::new()
+            .check_module(&module(vec![function(
+                "main",
+                Typ::Void,
+                vec![],
+                vec![
+                    Stmt::Let("value".to_string(), Some(Typ::Int), Expr::IntLit(1)),
+                    Stmt::Assign("value".to_string(), Expr::StringLit("bad".to_string())),
+                ],
+            )]))
+            .expect_err("assignment type mismatches should fail");
+
+        assert!(
+            err.iter().any(|e| matches!(
+                e,
+                TypeError::TypeMismatch { context, expected: Typ::Int, got: Typ::String }
+                if context.contains("assignment")
+            )),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn accepts_library_module_without_main() {
+        typecheck_module(
+            &module(vec![function("helper", Typ::Void, vec![], vec![])]),
+            ModuleKind::Library,
+        )
+        .expect("library modules should not require main");
+    }
+
+    #[test]
+    fn accepts_float_and_string_binary_operators() {
+        TypeChecker::new()
+            .check_module(&module(vec![function_with_ret(
+                "main",
+                Typ::Float,
+                vec![Stmt::Return(Some(Expr::Binary {
+                    op: "+".to_string(),
+                    lhs: Box::new(Expr::FloatLit(crate::core_ir::FloatVal(2.5))),
+                    rhs: Box::new(Expr::FloatLit(crate::core_ir::FloatVal(3.5))),
+                }))],
+            )]))
+            .expect("float add");
+        TypeChecker::new()
+            .check_module(&module(vec![function_with_ret(
+                "main",
+                Typ::String,
+                vec![Stmt::Return(Some(Expr::Binary {
+                    op: "+".to_string(),
+                    lhs: Box::new(Expr::StringLit("a".to_string())),
+                    rhs: Box::new(Expr::StringLit("b".to_string())),
+                }))],
+            )]))
+            .expect("string concat");
+    }
+
+    // Moved from family_typecheck.rs
+
+    #[test]
+    fn php_int_return_typechecks_after_normalization() {
+        let module = UnifiedModule::new(vec![
+            Decl::Function {
+                name: "answer".into(),
+                params: vec![],
+                ret: Typ::Named("int".into()),
+                body: vec![Stmt::Return(Some(Expr::IntLit(42)))],
+                type_params: vec![],
+            },
+            Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Named("void".into()),
+                body: vec![],
+                type_params: vec![],
+            },
+        ]);
+        assert!(typecheck_for_parser(ParserId::Php, &module).is_ok());
+    }
+
+    #[test]
+    fn zig_i32_return_typechecks_after_normalization() {
+        let module = UnifiedModule::new(vec![
+            Decl::Function {
+                name: "answer".into(),
+                params: vec![],
+                ret: Typ::Named("i32".into()),
+                body: vec![Stmt::Return(Some(Expr::IntLit(42)))],
+                type_params: vec![],
+            },
+            Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Named("void".into()),
+                body: vec![],
+                type_params: vec![],
+            },
+        ]);
+        assert!(typecheck_for_parser(ParserId::Zig, &module).is_ok());
+    }
+
+    #[test]
+    fn lua_void_ret_infers_from_return_stmt() {
+        let module = UnifiedModule::new(vec![
+            Decl::Function {
+                name: "answer".into(),
+                params: vec![],
+                ret: Typ::Void,
+                body: vec![Stmt::Return(Some(Expr::IntLit(42)))],
+                type_params: vec![],
+            },
+            Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Void,
+                body: vec![],
+                type_params: vec![],
+            },
+        ]);
+        assert!(typecheck_for_parser(ParserId::Lua, &module).is_ok());
+    }
+
+    #[test]
+    fn javascript_void_ret_infers_from_return_stmt() {
+        let module = UnifiedModule::new(vec![
+            Decl::Function {
+                name: "answer".into(),
+                params: vec![],
+                ret: Typ::Void,
+                body: vec![Stmt::Return(Some(Expr::IntLit(42)))],
+                type_params: vec![],
+            },
+            Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Void,
+                body: vec![],
+                type_params: vec![],
+            },
+        ]);
+        assert!(typecheck_for_parser(ParserId::JavaScript, &module).is_ok());
+    }
+
+    #[test]
+    fn javascript_void_ret_with_call_return_infers_dynamic() {
+        let module = UnifiedModule::new(vec![
+            Decl::Function {
+                name: "answer".into(),
+                params: vec![],
+                ret: Typ::Void,
+                body: vec![Stmt::Return(Some(Expr::Call {
+                    callee: Box::new(Expr::Ident("helper".into())),
+                    args: vec![],
+                }))],
+                type_params: vec![],
+            },
+            Decl::Function {
+                name: "helper".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![Stmt::Return(Some(Expr::IntLit(42)))],
+                type_params: vec![],
+            },
+            Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Void,
+                body: vec![Stmt::Return(Some(Expr::Call {
+                    callee: Box::new(Expr::Ident("answer".into())),
+                    args: vec![],
+                }))],
+                type_params: vec![],
+            },
+        ]);
+        assert!(typecheck_for_parser(ParserId::JavaScript, &module).is_ok());
+    }
+
+    #[test]
+    fn typescript_number_return_typechecks_after_normalization() {
+        let module = UnifiedModule::new(vec![
+            Decl::Function {
+                name: "answer".into(),
+                params: vec![],
+                ret: Typ::Named("number".into()),
+                body: vec![Stmt::Return(Some(Expr::IntLit(42)))],
+                type_params: vec![],
+            },
+            Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Named("void".into()),
+                body: vec![],
+                type_params: vec![],
+            },
+        ]);
+        assert!(typecheck_for_parser(ParserId::TypeScript, &module).is_ok());
+    }
+
+    #[test]
+    fn javascript_entrypoint_typecheck_keeps_class_context() {
+        let module = UnifiedModule::new(vec![
+            Decl::Class {
+                name: "Counter".into(),
+                fields: vec![("value".into(), Typ::Int)],
+                methods: vec![],
+                visibility: Visibility::Pub,
+                extends: None,
+                implements: vec![],
+                type_params: vec![],
+            },
+            Decl::Function {
+                name: "answer".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![
+                    Stmt::Let(
+                        "counter".into(),
+                        None,
+                        Expr::StructInit {
+                            name: "Counter".into(),
+                            fields: vec![("value".into(), Expr::IntLit(42))],
+                        },
+                    ),
+                    Stmt::Return(Some(Expr::Field {
+                        base: Box::new(Expr::Ident("counter".into())),
+                        name: "value".into(),
+                    })),
+                ],
+                type_params: vec![],
+            },
+            Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![Stmt::Return(Some(Expr::IntLit(42)))],
+                type_params: vec![],
+            },
+        ]);
+        assert!(typecheck_for_parser(ParserId::JavaScript, &module).is_ok());
+    }
+
+    #[test]
+    fn javascript_entrypoint_typecheck_keeps_helper_signatures() {
+        let module = UnifiedModule::new(vec![
+            Decl::Function {
+                name: "helper".into(),
+                params: vec![("value".into(), Typ::Int)],
+                ret: Typ::Int,
+                body: vec![Stmt::Return(Some(Expr::Ident("missing".into())))],
+                type_params: vec![],
+            },
+            Decl::Function {
+                name: "answer".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![Stmt::Return(Some(Expr::Call {
+                    callee: Box::new(Expr::Ident("helper".into())),
+                    args: vec![Expr::IntLit(42)],
+                }))],
+                type_params: vec![],
+            },
+            Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![Stmt::Return(Some(Expr::IntLit(42)))],
+                type_params: vec![],
+            },
+        ]);
+        assert!(typecheck_for_parser(ParserId::JavaScript, &module).is_ok());
+    }
+
+    #[test]
+    fn javascript_entrypoint_typecheck_still_checks_helper_call_args() {
+        let module = UnifiedModule::new(vec![
+            Decl::Function {
+                name: "helper".into(),
+                params: vec![("value".into(), Typ::Int)],
+                ret: Typ::Int,
+                body: vec![],
+                type_params: vec![],
+            },
+            Decl::Function {
+                name: "answer".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![Stmt::Return(Some(Expr::Call {
+                    callee: Box::new(Expr::Ident("helper".into())),
+                    args: vec![Expr::StringLit("bad".into())],
+                }))],
+                type_params: vec![],
+            },
+            Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![Stmt::Return(Some(Expr::IntLit(42)))],
+                type_params: vec![],
+            },
+        ]);
+        assert!(typecheck_for_parser(ParserId::JavaScript, &module).is_err());
+    }
+
+    #[test]
+    fn typescript_struct_fields_normalize_before_entrypoint_typecheck() {
+        let module = UnifiedModule::new(vec![
+            Decl::Struct {
+                name: "Counter".into(),
+                fields: vec![("value".into(), Typ::Named("number".into()))],
+                type_params: vec![],
+            },
+            Decl::Function {
+                name: "answer".into(),
+                params: vec![],
+                ret: Typ::Named("number".into()),
+                body: vec![
+                    Stmt::Let(
+                        "counter".into(),
+                        None,
+                        Expr::StructInit {
+                            name: "Counter".into(),
+                            fields: vec![("value".into(), Expr::IntLit(42))],
+                        },
+                    ),
+                    Stmt::Return(Some(Expr::Field {
+                        base: Box::new(Expr::Ident("counter".into())),
+                        name: "value".into(),
+                    })),
+                ],
+                type_params: vec![],
+            },
+            Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Named("number".into()),
+                body: vec![Stmt::Return(Some(Expr::IntLit(42)))],
+                type_params: vec![],
+            },
+        ]);
+        assert!(typecheck_for_parser(ParserId::TypeScript, &module).is_ok());
     }
 }

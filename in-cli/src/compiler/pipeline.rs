@@ -7,7 +7,7 @@
 //!   │  Stage 1: Frontend (in_lang_parse → UnifiedModule → IrModule)
 //!   ▼
 //! Type Check
-//!   │  Stage 2: core_typecheck / family_typecheck
+//!   │  Stage 2: typecheck
 //!   ▼
 //! Lower
 //!   │  Stage 3: lower_core (UnifiedModule → textual SIL → IrModule)
