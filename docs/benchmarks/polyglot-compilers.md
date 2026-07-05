@@ -5,7 +5,7 @@ Wall times: median over `3` timed runs; min-max across those runs shown in paren
 
 ## Benchmark Environment
 
-- Generated (UTC): `2026-06-12T07:41:57Z`
+- Generated (UTC): `2026-07-05T03:45:06Z`
 - Host OS: `Darwin`
 - Kernel: `27.0.0`
 - CPU: `Apple M5 Pro`
@@ -18,19 +18,19 @@ Wall times: median over `3` timed runs; min-max across those runs shown in paren
 
 | Language | Native compiler | Native mode | Native median (min-max ms) | in median (min-max ms) | in/native | Status | Reason |
 |---|---|---|---:|---:|---:|---|---|
-| C | `clang` | object | 46.19 (44.55-61.29) | 7.81 (7.74-8.71) | 0.169 | ok |  |
-| C++ | `clang++` | object | 45.23 (45.08-50.08) | 8.23 (8.05-8.38) | 0.182 | ok |  |
-| Rust | `rustc` | object | 33.31 (33.11-33.74) | 8.14 (7.87-8.36) | 0.244 | ok |  |
-| Go | `go` | object | 15.00 (14.41-16.33) | 7.68 (7.56-8.18) | 0.512 | ok |  |
-| Swift | `swiftc` | object | 112.21 (111.98-112.94) | 8.53 (8.18-8.56) | 0.076 | ok |  |
-| V | `v` | syntax | 16.20 (16.18-16.32) | 7.77 (7.74-7.91) | 0.479 | ok |  |
-| JavaScript | `node` | syntax | 27.17 (26.87-28.42) | 8.21 (8.00-8.24) | 0.302 | ok |  |
-| TypeScript | `bun` | typecheck | 409.34 (407.08-412.88) | 8.92 (8.92-9.28) | 0.022 | ok |  |
-| Python | `python3` | bytecode | 27.50 (27.33-27.58) | 8.32 (8.13-8.37) | 0.302 | ok |  |
-| Ruby | `ruby` | syntax | 32.60 (32.33-32.71) | 7.73 (7.56-7.82) | 0.237 | ok |  |
-| Zig | `zig` | syntax | 52.85 (52.85-53.46) | 7.83 (7.78-8.05) | 0.148 | ok |  |
-| PHP | `php` | syntax | 48.40 (47.74-48.76) | 8.13 (7.94-8.20) | 0.168 | ok |  |
-| Java | `javac` | bytecode | 170.56 (169.64-171.50) | 8.92 (8.85-8.92) | 0.052 | ok |  |
-| Nim | `nim` | typecheck | 105.51 (105.51-106.40) | 8.67 (8.51-8.77) | 0.082 | ok |  |
-| D | `ldc2` | object | 34.92 (34.67-35.16) | 8.07 (8.02-8.07) | 0.231 | ok |  |
+| C | `clang` | object | 68.66 (61.93-73.29) | 15.91 (15.82-15.94) | 0.232 | ok |  |
+| C++ | `clang++` | object | 62.49 (58.77-64.44) | 15.90 (14.58-15.91) | 0.254 | ok |  |
+| Rust | `rustc` | object | 56.04 (54.34-59.05) | 15.76 (14.88-16.36) | 0.281 | ok |  |
+| Go | `go` | object | 24.25 (23.64-28.75) | 13.84 (13.83-13.91) | 0.571 | ok |  |
+| Swift | `swiftc` | object | 149.88 (146.75-153.73) | 14.78 (13.52-14.82) | 0.099 | ok |  |
+| V | `v` | syntax | 25.29 (24.43-25.67) | 13.50 (12.52-13.73) | 0.534 | ok |  |
+| JavaScript | `node` | syntax | 35.41 (33.39-36.68) | 12.92 (12.41-13.74) | 0.365 | ok |  |
+| TypeScript | `bun` | typecheck | 1118.70 (1049.15-1224.45) | 13.41 (12.68-14.57) | 0.012 | ok |  |
+| Python | `python3` | bytecode | 36.94 (34.93-38.12) | 12.75 (12.58-13.11) | 0.345 | ok |  |
+| Ruby | `ruby` | syntax | 43.10 (43.08-54.99) | 12.66 (12.25-13.09) | 0.294 | ok |  |
+| Zig | `zig` | syntax | 59.38 (58.09-60.08) | 12.49 (12.47-14.46) | 0.210 | ok |  |
+| PHP | `php` | syntax | 62.34 (60.09-67.66) | 13.90 (13.12-16.18) | 0.223 | ok |  |
+| Java | `javac` | bytecode | 189.66 (181.57-193.15) | 12.29 (12.21-13.33) | 0.065 | ok |  |
+| Nim | `nim` | typecheck | 131.96 (123.77-140.85) | 13.55 (12.36-16.62) | 0.103 | ok |  |
+| D | `ldc2` | object | 42.56 (41.66-44.01) | 13.45 (12.47-13.69) | 0.316 | ok |  |
 
