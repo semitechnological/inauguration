@@ -113,7 +113,7 @@ pub struct CompileResult {
 pub struct Compiler {
     config: super::metadata::ComponentSpec,
     pass_manager: PassManager,
-    // Only read from `#[cfg(test)]` assertions (see `compiler_creates_from_spec`); the
+    // Only read from `#[cfg(test)]` assertions (see `compiler_resolves_backend_kind`); the
     // non-test lib artifact never reads it, so rustc's per-artifact dead-code pass flags it.
     #[allow(dead_code)]
     backend: BackendKind,
@@ -402,7 +402,7 @@ mod tests {
     }
 
     #[test]
-    fn compiler_creates_from_spec() {
+    fn compiler_resolves_backend_kind() {
         let compiler = Compiler::new(test_spec()).unwrap();
         // The host backend must match the actual host triple: macOS (arm64)
         // selects Mach-O, Linux (x86_64/aarch64) selects ELF, anything else
