@@ -24,7 +24,14 @@ pub(crate) fn cmd_eval(cwd: &Path, code: &str, parser: Option<&str>, verbose: bo
     if parser.is_none() && has_polyglot_fences(code) {
         return cmd_polyglot_eval(cwd, code, verbose);
     }
+
     let parser_id = parse_eval_parser(parser, code)?;
+
+    #[cfg(unix)]
+    if inauguration::daemon_client::daemon_is_running() {
+        return cmd_eval_daemon(parser_id, code, parser, verbose);
+    }
+
     let dir = std::env::temp_dir().join(format!(
         "inaug-eval-{}-{}",
         process::id(),
@@ -74,6 +81,37 @@ pub(crate) fn cmd_eval(cwd: &Path, code: &str, parser: Option<&str>, verbose: bo
         }
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn cmd_eval_daemon(
+    parser_id: parser_registry::ParserId,
+    code: &str,
+    parser: Option<&str>,
+    verbose: bool,
+) -> Result<()> {
+    let mut last_err = None;
+    for plan in eval_plans(parser_id, code) {
+        let response =
+            inauguration::daemon_client::daemon_eval_code(&plan.wrapped, parser, verbose)
+                .map_err(|e| InError::Message(format!("daemon eval: {e}")))?;
+        if response.success {
+            if verbose {
+                eprintln!("> {:?}", response.result);
+            } else if plan.print_result {
+                if let Some(result) = response.result {
+                    println!("{}", result);
+                }
+            }
+            return Ok(());
+        }
+        if let Some(err) = response.error {
+            last_err = Some(err);
+        }
+    }
+    Err(InError::Message(
+        last_err.unwrap_or_else(|| "daemon eval failed".to_string()),
+    ))
 }
 
 pub(crate) fn cmd_polyglot_eval(cwd: &Path, code: &str, verbose: bool) -> Result<()> {
