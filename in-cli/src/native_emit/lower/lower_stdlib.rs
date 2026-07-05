@@ -385,6 +385,19 @@ pub(crate) fn lower_stdlib_call(
             )?;
             return Ok(true);
         }
+        "process_run" if args.len() == 1 => {
+            emit_stdlib_wrapper_call(
+                emitter,
+                ctx,
+                "in_process_run",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
         "env_get" if args.len() == 1 => {
             emit_stdlib_wrapper_call(
                 emitter,

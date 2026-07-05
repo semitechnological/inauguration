@@ -1,81 +1,63 @@
-# General multi-language compiler (inauguration)
+# General compiler (inauguration)
 
-`in` is evolving into a **general hybrid compiler driver**: many **source fronts** converge on shared **Core IR** ([`UnifiedModule`](multi-frontend-ir.md)), then one **SIL lowering** path feeds the existing **`hybrid_sil`** pipeline (textual SIL → passes → metrics).
+`in` is a **hybrid compiler driver**: many **source fronts** → shared **Core IR** → **MIR** → **native_emit / JIT**. Scope is compiler infrastructure, agent/graph reports, and owned backends—not UI (that stays in **crepuscularity**).
 
-The scope is compiler and backend infrastructure. Inauguration owns source-front routing, Core IR, textual SIL, graph facts, agent reports, bytecode subset execution, hot reload/compiler orchestration, and runtime-boundary reporting. Crepuscularity owns frontend UI, declarative view trees, rendering, and cross-platform visual abstraction; it should consume this compiler infrastructure rather than move UI ownership into inauguration.
+Status matrix: **`in languages`** / **`in languages --json`**. Roadmap: [universal-compiler-roadmap.md](universal-compiler-roadmap.md).
 
-This is **not** “30 production compilers in one repo overnight.” It is an **architecture** for landing languages incrementally while keeping one observable pipeline. The current source-of-truth matrix is available through **`in languages`** and **`in languages --json`**; the phased universal roadmap lives in [universal-compiler-roadmap.md](universal-compiler-roadmap.md).
+## Pipeline
 
-## Layers
+```
+  .in / .icore / Tree-sitter / rust_front / v_front
+                    │
+                    ▼
+              UnifiedModule (Core IR)
+                    │
+                    ▼
+         compiler::driver → textual SIL / MIR
+                    │
+                    ▼
+           native_emit (AArch64, x86_64) + jit_runtime
+```
 
-| Layer | Role today | Direction |
-|-------|------------|------------|
-| **Resolution** | `parser_registry`: CLI, `IN_PARSER`, magic line, extension → [`ParserId`](../../in-cli/src/parser_registry.rs) | Add `--parser` / env aliases as new fronts stabilize |
-| **Parse** | Per-language modules → `UnifiedModule` | Full parsers: [`.in`](../../in-cli/src/in_lang_parse.rs) with agent-facing imports/capabilities/extern bindings, [**icore** JSON](../../in-cli/src/compiler/icore.rs). Dedicated fronts: [`rust_front`](../../in-cli/src/compiler/rust_front.rs), [`v_front`](../../in-cli/src/compiler/v_front.rs) (real declarations + bounded body-subset lowering). Tree-sitter fronts: [`compiler::tree_front`](../../in-cli/src/compiler/tree_front/mod.rs) covers all other 33 languages with bounded body extraction where wired. |
-| **Driver** | [`compiler::driver`](../../in-cli/src/compiler/driver.rs) — Core IR → textual SIL | Shared by every front that emits `UnifiedModule` |
-| **Emit (unified)** | Core IR → textual SIL via `compiler::driver::lower_unified_module` | Shared by every front — Swift is now a Tree-sitter Core IR front |
-| **Pipeline** | `hybrid_pipeline` / `hybrid_sil` | Merged textual SIL with explicit per-function records while retaining the legacy last-`sil @` single-function view (see [in-language.md](in-language.md)) |
-| **rust-driver** | Mirror of in-cli crates | Same IR/SIL contracts as fronts mature |
-| **Hot reload** | `resolve_parser_id` + `parse_with_resolved` for all languages | Unified compile check through Tree-sitter pipeline |
+| Layer | Location | Notes |
+|-------|----------|-------|
+| Resolution | `parser_registry` | CLI, `IN_PARSER`, shebang, extension → `ParserId` |
+| Parse | `in_lang_parse`, `icore`, `tree_front`, … | → `UnifiedModule` |
+| Lower | `lower_core`, `mir_lower` | Bounded bodies → machine code |
+| CLI | `in-cli` | `build`, `compile`, `execute`, `graph`, `test` |
+| Docs hub | `docs-site/` | `crepus web build` / `web serve` (crepuscularity) |
 
-## v0.4 orchestration/status surfaces
+## inlang + crepuscularity
 
-The general compiler roadmap should expose orchestration in strict surfaces before widening execution claims:
-
-| Surface | Compiler role | Status rule |
-|---------|---------------|-------------|
-| Canonicalization | Use the parser/IR path to produce deterministic source or a rejected diagnostic set. | `in canonicalize --path <file> [--check]` is the shipped source-format surface. |
-| Graph command | Report parser decision, declarations, textual SIL functions, call edges, effects, capabilities, package/module identity, orchestration facts, and timing. | `in graph --path <file> [--imports] [--capabilities] [--symbols] [--calls] [--json]` matches the stable Core IR graph facts and reports `package_identity` for `.in` source paths. |
-| Package manifest report | Report package identity, source package/module identity, targets, dependencies, capabilities, extensions, package graph nodes, target selection, and capability policy. | `in package --path <dir\|manifest\|source> [--json]` reports package metadata and graph facts, with `source_identity` for source paths. It does not perform dependency installation or extension loading. |
-| Orchestration facts | Surface `.in` extension, annotation, distributed-function, parallel-region, local plan, and local distributed job facts in agent/graph JSON. | `in agent` and `in graph --json` expose orchestration facts. `distributed-workers` has a deterministic local simulator boundary; GPU/native execution remains unavailable until runtime code and tests land. |
-| Backend report | Report owned executable backend support without delegating to language toolchains. | `in backend --path <file> --target bytecode --json` compiles supported Core IR paths to bytecode facts and reports package/module identity metadata for `.in` sources without renaming SIL or bytecode functions. `--target native` reports `native-backend-not-implemented` where unsupported. |
-| Self-hosted test runner | Validate compiler-owned paths without rebuilding through Cargo or invoking reference language compilers. | `in test` runs polyglot, bytecode, and orchestration/package checks through the installed `in` binary in parallel by default. |
-| External compiler parity | Compare checked-in polyglot examples against installed reference toolchains where present. | `in test --external-parity` and `scripts/check-external-compiler-parity.sh` run `in build` plus native compiler syntax/compile checks and report missing tools as skips. |
-
-GPU execution, native machine-code execution, remote distributed execution, and non-owned language runtimes are status/contract-only until in-tree runtime code and tests back the claim. See [orchestration-compiler.md](orchestration-compiler.md) and [native-backend.md](native-backend.md).
+- **inlang** (`.in`): orchestration, capabilities, polyglot driver, JIT programs.
+- **crepuscularity** (`.crepus`): declarative UI, `docs-site/` web target (`crepus.toml`), WASM shell.
 
 ## icore (JSON Core IR)
 
-Versioned schemas (see samples under `apps/icore-sample/`):
+- **v1**: declarations only; empty function bodies.
+- **v2**: bounded statement/expression bodies for tools.
+- **v3**: boundary ABI (`boundary_ir`) for layout/symbol export.
 
-- `icoreVersion: 1`: stable declaration interchange. Top-level `decls` contains `{"kind":"struct",...}` or `{"kind":"function",...}`. Function `body` must be **`[]`**; non-empty bodies are rejected with a v1-specific diagnostic.
-- `icoreVersion: 2`: bounded body interchange for tools and plugins that can emit Core IR directly. Function `body` accepts statement objects:
-  - `{ "kind": "return" }` or `{ "kind": "return", "value": <expr> }`
-  - `{ "kind": "assign", "target": "name", "value": <expr> }`
-  - `{ "kind": "let", "name": "name", "type": "Int", "value": <expr> }`
-  - `{ "kind": "expr", "expr": <expr> }` or a direct call statement
-- v2 expressions accept int/string/bool scalar literals, typed literal objects (`int`, `string`, `bool`), identifiers (`ident` / `identifier`), and calls (`{ "kind": "call", "callee": "name", "args": [...] }`). Unsupported shapes fail closed instead of inventing semantics.
+Samples: `apps/icore-sample/`.
 
-Any tool may emit **icore** so inauguration runs **without** a native lexer for that language yet.
+## Orchestration surfaces (v0.4)
 
-## Per-language roadmap (signatures → semantics)
+| Surface | CLI |
+|---------|-----|
+| Canonicalize | `in canonicalize` |
+| Graph | `in graph` |
+| Package report | `in package` |
+| Backend facts | `in backend` |
+| Self-hosted tests | `in test` |
 
-Tree-sitter fronts should share one generic AST convention layer for common scalar bodies before adding language-specific lowering. The shared convention covers returns, locals, assignment, calls, literals, unary/binary expressions, `if`, and `while`; individual fronts keep their own declaration, type, and runtime-boundary rules where the source language actually differs. `.in` remains the first-class convention target for agent-facing source, but its bodies lower to the same `UnifiedModule` statement and expression shapes as compatible Tree-sitter examples.
+GPU, remote workers, and non-owned runtimes stay **status-only** until in-tree runtime + tests exist. See [orchestration-compiler.md](orchestration-compiler.md), [native-backend.md](native-backend.md).
 
-For each [`ParserId`](parser-surface.md) where Tree-sitter extraction is signature-only today (most polyglot ids):
+## Per-language landing
 
-1. **Lex + parse** (hand-rolled, `logos`, `tree-sitter`, or bridge to an external AST).
-2. **Lower to `UnifiedModule`** (or extend IR if the language cannot map — prefer extending `Decl` / `Stmt` rarely; add side tables instead).
-3. **Reuse** `compiler::driver::lower_unified_module` until SIL needs richer ops; then extend `lower_core` with shared lowering helpers.
-4. **Tests**: parser corpus + SIL substring / graph assertions.
-5. **Extend** [`compiler::tree_front`](../../in-cli/src/compiler/tree_front/mod.rs) extraction (or replace it with a hand-rolled front) until statements and types round-trip into `Stmt` / richer `Typ`.
-
-Swift-shaped work in parallel: [native-swift-master-plan.md](native-swift-master-plan.md).
-
-## “Do the other stuff”
-
-| Track | Work |
-|-------|------|
-| **hybrid_sil** | Multi-function `function_id` / graph fidelity if emitters stop relying on “`main` last” |
-| **Hot reload** | Further tighten patch / graph semantics beyond compile-check gating |
-| **rust-driver** | Deeper SIL / batch path; keep hybrid mirror in sync |
-| **Types** | Cross-front typecheck on `UnifiedModule` or a future TIR |
+Tree-sitter fronts share scalar body conventions (`return`, `let`, `if`, `while`, calls). Extend each `ParserId` with tests in `in test` / polyglot corpora before raising maturity in `in languages`.
 
 ## See also
 
-- [future-work-roadmap.md](future-work-roadmap.md) — phased backlog (parsers, driver, SIL, hot reload)
-- [orchestration-compiler.md](orchestration-compiler.md) — v0.4 orchestration/status contract
-- [universal-compiler-roadmap.md](universal-compiler-roadmap.md) — full language/runtime ambition and compatibility ladder
-- [parser-surface.md](parser-surface.md) — extensions, magic line, routing matrix  
-- [multi-frontend-ir.md](multi-frontend-ir.md) — `UnifiedModule` schema  
-- [README · Core Commands](../../README.md#core-commands) — CLI flags
+- [in-language.md](in-language.md)
+- [multi-frontend-ir.md](multi-frontend-ir.md)
+- [docs-site.md](docs-site.md)

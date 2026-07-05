@@ -1,1 +1,0 @@
-architecture/hybrid-mvp.md

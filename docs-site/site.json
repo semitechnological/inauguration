@@ -3,7 +3,7 @@
   "title": "inauguration",
   "seo": {
     "title": "inauguration — ultrafast hybrid compiler & JIT pipeline for .in and general OOP/C languages",
-    "description": "High performance compiler and JIT compiler for the .in (inlang) language, integrated with crepuscularity. Zero VM or LLVM dependencies.",
+    "description": "inlang (.in) and inauguration compiler docs. Built with crepuscularity. Core IR to native JIT—no LLVM, no bytecode VM.",
     "ogImage": null
   },
   "theme": {
