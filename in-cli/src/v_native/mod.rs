@@ -591,7 +591,7 @@ pub mod bench {
         }
         #[cfg(not(has_v_native))]
         {
-            if baseline_mean == 0 {
+            if baseline_mean == 0 || current_mean <= baseline_mean {
                 return false;
             }
             let increase_pct = ((current_mean - baseline_mean) * 100 / baseline_mean) as i32;
@@ -626,6 +626,21 @@ pub mod bench {
         #[test]
         fn regression_detected() {
             assert!(regression(120, 100, 10));
+        }
+
+        #[test]
+        fn regression_baseline_zero() {
+            assert!(!regression(100, 0, 10));
+        }
+
+        #[test]
+        fn regression_improvement() {
+            assert!(!regression(80, 100, 10));
+        }
+
+        #[test]
+        fn regression_exact_threshold() {
+            assert!(!regression(110, 100, 10));
         }
     }
 }
