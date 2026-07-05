@@ -30,12 +30,6 @@ fn emit_u32(code: &mut Vec<u8>, insn: u32) {
     code.extend_from_slice(&insn.to_le_bytes());
 }
 
-fn emit_insns(code: &mut Vec<u8>, insns: &[u32]) {
-    for insn in insns {
-        emit_u32(code, *insn);
-    }
-}
-
 fn emit_function(func: &MirFunction, code: &mut Vec<u8>) -> Result<(), String> {
     // ponytail: naive stack frame + per-instruction lowering.
     // Prologue: stp x29, x30, [sp, #-16]!

@@ -283,19 +283,3 @@ pub(crate) fn expr_contains_call(expr: &Expr) -> bool {
         | Expr::Closure { .. } => false,
     }
 }
-
-pub(crate) fn value_to_i64(expr: &Expr) -> Option<i64> {
-    match expr {
-        Expr::IntLit(v) => Some(*v),
-        Expr::BoolLit(v) => Some(i64::from(*v)),
-        Expr::StringLit(v) if v.is_empty() => Some(0),
-        _ => None,
-    }
-}
-
-pub(crate) fn method_call_name(callee: &Expr) -> Option<String> {
-    match callee {
-        Expr::Ident(name) => Some(name.clone()),
-        _ => None,
-    }
-}

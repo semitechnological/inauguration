@@ -25,8 +25,8 @@ unsafe extern "C" {
 struct JitFunction {
     /// Raw pointer to the first instruction in the JIT code page.
     entry: *const u8,
-    /// Size of the function in bytes.
-    size: u32,
+    /// Size of the function in bytes (for debugging / future stack walking).
+    _size: u32,
     /// Stack frame size (for debugging / future stack walking).
     _frame_size: u32,
 }
@@ -181,15 +181,6 @@ impl CodePage {
         }
         make_executable(self.ptr, self.size);
     }
-
-    fn allocate(&mut self, len: usize) -> Option<*mut u8> {
-        if self.used + len > self.size {
-            return None;
-        }
-        let ptr = unsafe { self.ptr.add(self.used) };
-        self.used += len;
-        Some(ptr)
-    }
 }
 
 impl Drop for CodePage {
@@ -290,7 +281,7 @@ impl JitRuntime {
                 name.clone(),
                 JitFunction {
                     entry: unsafe { base.add(*offset as usize) },
-                    size: *size,
+                    _size: *size,
                     _frame_size: 0,
                 },
             );
