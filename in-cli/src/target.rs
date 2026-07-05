@@ -5,28 +5,6 @@ pub const NATIVE_BACKEND_NOT_IMPLEMENTED: &str = "native-backend-not-implemented
 pub const NATIVE_AARCH64_SUBSET: &str = "native-aarch64-subset";
 pub const NATIVE_OBJECT_SUBSET: &str = "native-object-subset";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TargetId {
-    Native,
-}
-
-impl TargetId {
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            TargetId::Native => "native",
-        }
-    }
-
-    #[must_use]
-    pub fn parse(name: &str) -> Option<Self> {
-        match name {
-            "native" => Some(TargetId::Native),
-            _ => None,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TargetSpec {
     pub name: &'static str,
@@ -387,13 +365,6 @@ pub fn all_target_specs() -> &'static [TargetSpec] {
 }
 
 #[must_use]
-pub fn target_spec(id: TargetId) -> TargetSpec {
-    match id {
-        TargetId::Native => NATIVE_TARGET,
-    }
-}
-
-#[must_use]
 pub fn native_target_spec() -> TargetSpec {
     NATIVE_TARGET
 }
@@ -587,11 +558,5 @@ mod tests {
         assert_eq!(spec.artifact_kind, "mach-o-executable");
         assert_eq!(spec.host_triple, Some("aarch64-apple-darwin"));
         assert!(!spec.backend_artifact_supported);
-    }
-
-    #[test]
-    fn target_id_round_trips_known_names() {
-        assert_eq!(TargetId::parse("native"), Some(TargetId::Native));
-        assert_eq!(TargetId::parse("wasm"), None);
     }
 }
