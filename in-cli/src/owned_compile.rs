@@ -387,7 +387,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
     // Also skip for JIT (development speed) and when IN_SKIP_VERIFY env var is set.
     let effective_entry = request.entry.clone().or(pkg_entry);
     let skip_verify =
-        request.target == CompileTarget::Jit || std::env::var("IN_SKIP_VERIFY").is_ok();
+        request.target == CompileTarget::Jit || crate::config::env_config().skip_verify;
     if !is_rust_source && !skip_verify {
         let verify_opts = core_ir_verifier::VerifyOptions {
             entry: effective_entry.clone(),

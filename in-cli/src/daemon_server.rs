@@ -15,9 +15,10 @@ use std::time::Instant;
 pub const DEFAULT_SOCKET_NAME: &str = "inauguration-daemon.sock";
 
 pub fn default_socket_path() -> PathBuf {
-    std::env::var("IN_DAEMON_SOCKET")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| std::env::temp_dir().join(DEFAULT_SOCKET_NAME))
+    crate::config::env_config()
+        .daemon_socket
+        .clone()
+        .unwrap_or_else(|| std::env::temp_dir().join(DEFAULT_SOCKET_NAME))
 }
 
 #[derive(Debug, Serialize, Deserialize)]
