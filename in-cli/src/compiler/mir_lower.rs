@@ -227,10 +227,18 @@ fn lower_expr(expr: &Expr, func: &mut MirFunction) {
 pub fn lower_boot_image(
     module: &UnifiedModule,
     entry: &str,
+    target_triple: Option<&str>,
 ) -> Result<(MirModule, Vec<u8>), String> {
-    let result = crate::native_emit::x86_64_lower::lower_module(module, entry)?;
+    let triple = target_triple.unwrap_or("x86_64-unknown-none");
+    let code = if triple.contains("aarch64") || triple.contains("arm64") {
+        let result = crate::native_emit::lower::lower_module(module, entry, crate::native_emit::NativeLinkage::Executable)?;
+        result.code
+    } else {
+        let result = crate::native_emit::x86_64_lower::lower_module(module, entry)?;
+        result.code
+    };
     let mir_module = MirModule::new();
-    Ok((mir_module, result.code))
+    Ok((mir_module, code))
 }
 
 #[cfg(test)]

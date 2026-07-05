@@ -58,7 +58,7 @@ pub(crate) fn cmd_compile(
     }
 
     if matches!(emit, Some(EmitKindCli::Boot)) {
-        return cmd_emit_boot(cwd, &source_path, &out_path, entry, trampoline, metadata);
+        return cmd_emit_boot(cwd, &source_path, &out_path, entry, trampoline, target_triple, metadata);
     }
     let request = OwnedCompileRequest {
         path: source_path,
@@ -158,6 +158,7 @@ fn cmd_emit_boot(
     out_path: &Path,
     entry: Option<&str>,
     trampoline: Option<&str>,
+    target_triple: Option<&str>,
     _metadata: Option<&str>,
 ) -> Result<()> {
     let trampoline_path = trampoline
@@ -174,15 +175,8 @@ fn cmd_emit_boot(
 
     inauguration::core_opt::optimize(&mut module.decls);
 
-    let (_mir, code) = inauguration::compiler::mir_lower::lower_boot_image(&module, entry_name)
+    let (_mir, code) = inauguration::compiler::mir_lower::lower_boot_image(&module, entry_name, target_triple)
         .map_err(|e| InError::Message(format!("lower: {e}")))?;
-    let result = inauguration::native_emit::x86_64_lower::X86_64CompileResult {
-        code,
-        entry_offset: 0,
-        exports: vec![],
-        relocations: vec![],
-        codegen_base: 0x101100,
-    };
 
     let tramp_size = trampoline_bytes.len();
     if tramp_size != 0x1000 {
@@ -191,13 +185,21 @@ fn cmd_emit_boot(
         )));
     }
 
-    let code = result.code;
+    let code = code;
     const SCI_HEADER_SIZE: usize = 256;
     const SCI_CODE_OFFSET: usize = 0x100;
     let mut sci_header = vec![0u8; SCI_HEADER_SIZE];
-    let jmp_disp = SCI_CODE_OFFSET as i32 - 5;
-    sci_header[0] = 0xE9;
-    sci_header[1..5].copy_from_slice(&jmp_disp.to_le_bytes());
+
+    let target_is_aarch64 = target_triple.map(|t| t.contains("aarch64") || t.contains("arm64")).unwrap_or(false);
+    if target_is_aarch64 {
+        // Encode an AArch64 unconditional branch 'b' to SCI_CODE_OFFSET (which is 256 bytes = 0x100)
+        let branch_inst = inauguration::native_emit::aarch64::b(SCI_CODE_OFFSET as i32);
+        sci_header[0..4].copy_from_slice(&branch_inst.to_le_bytes());
+    } else {
+        let jmp_disp = SCI_CODE_OFFSET as i32 - 5;
+        sci_header[0] = 0xE9;
+        sci_header[1..5].copy_from_slice(&jmp_disp.to_le_bytes());
+    }
     sci_header[8..16].copy_from_slice(b"SCI\0\0\0\0\x01");
     sci_header[16..24].copy_from_slice(&1u64.to_le_bytes());
     sci_header[24..32].copy_from_slice(&(SCI_CODE_OFFSET as u64).to_le_bytes());
