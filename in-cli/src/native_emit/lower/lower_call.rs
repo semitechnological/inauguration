@@ -187,6 +187,7 @@ pub(crate) fn lower_inrt_call(
                 ctx.pending_strings.push(super::PendingString {
                     adr_site,
                     string_index: id,
+                    rd: reg,
                 });
             }
             Expr::Ident(name) => {

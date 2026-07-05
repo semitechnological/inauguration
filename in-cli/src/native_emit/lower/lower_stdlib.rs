@@ -356,6 +356,327 @@ pub(crate) fn lower_stdlib_call(
         _ => {}
     }
 
+    // Bare function names used by the .in compiler bootstrap and stdlib imports.
+    // These are matched before the suffix-based method dispatch below.
+    match cleaned.as_str() {
+        "read_file" if args.len() == 1 => {
+            emit_stdlib_wrapper_call(
+                emitter,
+                ctx,
+                "in_fs_read_to_string",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
+        "write_file" if args.len() == 2 => {
+            emit_stdlib_wrapper_call(
+                emitter,
+                ctx,
+                "in_fs_write",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
+        "env_get" if args.len() == 1 => {
+            emit_stdlib_wrapper_call(
+                emitter,
+                ctx,
+                "in_env_var",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
+        "env_set" if args.len() == 2 => {
+            emit_stdlib_wrapper_call(
+                emitter,
+                ctx,
+                "in_env_set_var",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
+        "env_has" if args.len() == 1 => {
+            emit_stdlib_wrapper_call(
+                emitter,
+                ctx,
+                "in_env_has",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
+        "path_join" if args.len() == 2 => {
+            emit_stdlib_wrapper_call(
+                emitter,
+                ctx,
+                "in_path_join",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
+        "path_dirname" if args.len() == 1 => {
+            emit_stdlib_wrapper_call(
+                emitter,
+                ctx,
+                "in_path_dirname",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
+        "path_basename" if args.len() == 1 => {
+            emit_stdlib_wrapper_call(
+                emitter,
+                ctx,
+                "in_path_basename",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
+        "path_extname" if args.len() == 1 => {
+            emit_stdlib_wrapper_call(
+                emitter,
+                ctx,
+                "in_path_extname",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
+        "path_normalize" if args.len() == 1 => {
+            emit_stdlib_wrapper_call(
+                emitter,
+                ctx,
+                "in_path_normalize",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
+        "str_concat" if args.len() == 2 => {
+            emit_stdlib_wrapper_call(
+                emitter,
+                ctx,
+                "in_str_concat",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
+        "str_contains" if args.len() == 2 => {
+            emit_stdlib_wrapper_call(
+                emitter,
+                ctx,
+                "in_str_contains",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
+        "str_starts_with" if args.len() == 2 => {
+            emit_stdlib_wrapper_call(
+                emitter,
+                ctx,
+                "in_str_starts_with",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
+        "str_ends_with" if args.len() == 2 => {
+            emit_stdlib_wrapper_call(
+                emitter,
+                ctx,
+                "in_str_ends_with",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
+        "str_trim" if args.len() == 1 => {
+            emit_stdlib_wrapper_call(
+                emitter,
+                ctx,
+                "in_str_trim",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
+        "str_split_lines" if args.len() == 1 => {
+            emit_stdlib_wrapper_call(
+                emitter,
+                ctx,
+                "in_str_split_lines",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
+        "str_split_spaces" if args.len() == 1 => {
+            emit_stdlib_wrapper_call(
+                emitter,
+                ctx,
+                "in_str_split_spaces",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
+        "str_tokenize_expr" if args.len() == 1 => {
+            emit_stdlib_wrapper_call(
+                emitter,
+                ctx,
+                "in_str_tokenize_expr",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
+        "str_to_int" if args.len() == 1 => {
+            emit_stdlib_wrapper_call(
+                emitter,
+                ctx,
+                "in_str_to_int",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
+        "str_is_int" if args.len() == 1 => {
+            emit_stdlib_wrapper_call(
+                emitter,
+                ctx,
+                "in_str_is_int",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
+        "str_index_of" if args.len() == 2 => {
+            emit_stdlib_wrapper_call(
+                emitter,
+                ctx,
+                "in_str_index_of",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
+        "str_slice" if args.len() == 3 => {
+            emit_stdlib_wrapper_call(
+                emitter,
+                ctx,
+                "in_str_slice",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
+        "to_string" if args.len() == 1 => {
+            emit_stdlib_wrapper_call(
+                emitter,
+                ctx,
+                "in_int_to_string",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
+        "array_len" if args.len() == 1 => {
+            lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?;
+            emitter.emit_u32(aarch64::ldr64(0, 0, 0));
+            return Ok(true);
+        }
+        "array_push" if args.len() == 2 => {
+            lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?;
+            lower_expr_into(emitter, ctx, &args[1], 1, functions, pending_calls, fn_name)?;
+            emitter.emit_u32(aarch64::ldr64(2, 0, 0));
+            emitter.emit_u32(aarch64::add_imm64(3, 0, 16));
+            emitter.emit_u32(aarch64::str64_reg_offset(1, 3, 2));
+            emitter.emit_u32(aarch64::add_imm64(2, 2, 1));
+            emitter.emit_u32(aarch64::str64(2, 0, 0));
+            emitter.emit_insns(&aarch64::load_i64(0, 0));
+            return Ok(true);
+        }
+        _ => {}
+    }
+
     // Strip type qualifier prefix if present (e.g., "Option::unwrap" → "unwrap")
     let base = target.rsplit("::").next().unwrap_or(target);
     match base {

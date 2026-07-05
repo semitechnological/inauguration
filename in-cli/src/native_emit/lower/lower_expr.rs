@@ -41,6 +41,7 @@ pub(crate) fn lower_expr_into(
             ctx.pending_strings.push(super::PendingString {
                 adr_site,
                 string_index: id,
+                rd,
             });
             Ok(())
         }
@@ -377,6 +378,21 @@ pub(crate) fn lower_binary(
             fn_name,
         );
     }
+    if op == "+"
+        && (matches!(expr_type(lhs), Some(Typ::String))
+            || matches!(expr_type(rhs), Some(Typ::String)))
+    {
+        return lower_string_concat(
+            emitter,
+            ctx,
+            lhs,
+            rhs,
+            rd,
+            functions,
+            pending_calls,
+            fn_name,
+        );
+    }
     lower_expr_into(emitter, ctx, lhs, rd, functions, pending_calls, fn_name)?;
     let lhs_reg = rd;
     let rhs_reg = if rd == 1 { 2 } else { 1 };
@@ -438,6 +454,57 @@ pub(crate) fn lower_binary(
         }
     };
     emitter.emit_u32(insn);
+    Ok(())
+}
+
+fn lower_string_concat(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    lhs: &Expr,
+    rhs: &Expr,
+    rd: u8,
+    functions: &HashMap<String, FunctionInfo>,
+    pending_calls: &mut Vec<PendingCall>,
+    fn_name: &str,
+) -> Result<(), String> {
+    let wrapper = "in_str_concat";
+    let is_native = super::TL_NATIVE_MODE.with(|m| *m.borrow());
+    // Save any caller-saved register that might be in use; use x14 as scratch.
+    let rhs_reg = if rd == 0 { 1 } else { 0 };
+    lower_expr_into(emitter, ctx, lhs, 0, functions, pending_calls, fn_name)?;
+    let lhs_in_x0 = rd == 0;
+    if !lhs_in_x0 {
+        emitter.emit_u32(aarch64::mov_reg64(14, 0));
+    }
+    lower_expr_into(
+        emitter,
+        ctx,
+        rhs,
+        rhs_reg,
+        functions,
+        pending_calls,
+        fn_name,
+    )?;
+    if rhs_reg != 1 {
+        emitter.emit_u32(aarch64::mov_reg64(1, rhs_reg));
+    }
+    if !lhs_in_x0 {
+        emitter.emit_u32(aarch64::mov_reg64(0, 14));
+    }
+    if is_native {
+        let call_site = emitter.len() as u32;
+        emitter.emit_u32(aarch64::bl(0));
+        super::TL_EXTERNAL_REFS
+            .with(|refs| refs.borrow_mut().push((call_site, wrapper.to_string())));
+    } else if let Some(native_ptr) = crate::native_emit::native_link::resolve_native_fn(wrapper) {
+        emitter.emit_insns(&aarch64::load_i64(15, native_ptr as usize as i64));
+        emitter.emit_u32(0xD63F_01E0u32 | (15 << 5));
+    } else {
+        emitter.emit_insns(&aarch64::load_i64(0, 0));
+    }
+    if rd != 0 {
+        emitter.emit_u32(aarch64::mov_reg64(rd, 0));
+    }
     Ok(())
 }
 

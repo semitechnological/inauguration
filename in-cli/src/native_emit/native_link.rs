@@ -30,6 +30,7 @@ const DLSYM_ALLOWLIST: &[&str] = &[
     "putchar",
     "printf",
     "in_env_var",
+    "in_env_has",
     "in_env_temp_dir",
     "in_env_current_dir",
     "in_env_set_var",
@@ -42,6 +43,21 @@ const DLSYM_ALLOWLIST: &[&str] = &[
     "in_str_contains",
     "in_str_starts_with",
     "in_str_ends_with",
+    "in_str_concat",
+    "in_str_trim",
+    "in_str_split_lines",
+    "in_str_split_spaces",
+    "in_str_tokenize_expr",
+    "in_str_to_int",
+    "in_str_is_int",
+    "in_str_index_of",
+    "in_str_slice",
+    "in_int_to_string",
+    "in_path_join",
+    "in_path_dirname",
+    "in_path_basename",
+    "in_path_extname",
+    "in_path_normalize",
 ];
 
 pub fn resolve_native_fn(name: &str) -> Option<*const u8> {
@@ -148,12 +164,76 @@ pub fn bootstrap_jit_native() {
         NativePtr(crate::native_stdlib::in_str_ends_with as *const u8),
     );
     c.insert(
+        "in_str_concat".to_string(),
+        NativePtr(crate::native_stdlib::in_str_concat as *const u8),
+    );
+    c.insert(
         "in_print".to_string(),
         NativePtr(crate::native_stdlib::in_print as *const u8),
     );
     c.insert(
         "in_print_int".to_string(),
         NativePtr(crate::native_stdlib::in_print_int as *const u8),
+    );
+    c.insert(
+        "in_str_trim".to_string(),
+        NativePtr(crate::native_stdlib::in_str_trim as *const u8),
+    );
+    c.insert(
+        "in_str_split_lines".to_string(),
+        NativePtr(crate::native_stdlib::in_str_split_lines as *const u8),
+    );
+    c.insert(
+        "in_str_split_spaces".to_string(),
+        NativePtr(crate::native_stdlib::in_str_split_spaces as *const u8),
+    );
+    c.insert(
+        "in_str_tokenize_expr".to_string(),
+        NativePtr(crate::native_stdlib::in_str_tokenize_expr as *const u8),
+    );
+    c.insert(
+        "in_str_to_int".to_string(),
+        NativePtr(crate::native_stdlib::in_str_to_int as *const u8),
+    );
+    c.insert(
+        "in_str_is_int".to_string(),
+        NativePtr(crate::native_stdlib::in_str_is_int as *const u8),
+    );
+    c.insert(
+        "in_str_index_of".to_string(),
+        NativePtr(crate::native_stdlib::in_str_index_of as *const u8),
+    );
+    c.insert(
+        "in_str_slice".to_string(),
+        NativePtr(crate::native_stdlib::in_str_slice as *const u8),
+    );
+    c.insert(
+        "in_int_to_string".to_string(),
+        NativePtr(crate::native_stdlib::in_int_to_string as *const u8),
+    );
+    c.insert(
+        "in_path_join".to_string(),
+        NativePtr(crate::native_stdlib::in_path_join as *const u8),
+    );
+    c.insert(
+        "in_path_dirname".to_string(),
+        NativePtr(crate::native_stdlib::in_path_dirname as *const u8),
+    );
+    c.insert(
+        "in_path_basename".to_string(),
+        NativePtr(crate::native_stdlib::in_path_basename as *const u8),
+    );
+    c.insert(
+        "in_path_extname".to_string(),
+        NativePtr(crate::native_stdlib::in_path_extname as *const u8),
+    );
+    c.insert(
+        "in_path_normalize".to_string(),
+        NativePtr(crate::native_stdlib::in_path_normalize as *const u8),
+    );
+    c.insert(
+        "in_env_has".to_string(),
+        NativePtr(crate::native_stdlib::in_env_has as *const u8),
     );
 }
 

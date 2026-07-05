@@ -1185,13 +1185,8 @@ fn answer_native_artifact_and_const_eval_exit_42() {
     let path = temp_executable("answer-exe");
     compile_native_executable(&module, "answer", &path).expect("compile");
     assert!(path.exists());
-    let sil = crate::compiler::driver::lower_unified_module(&module, "App");
-    let artifact = crate::hybrid_sil::parse_textual_sil(&sil);
-    let mut bytecode_module =
-        crate::sil_to_bytecode::lower_sil_to_bytecode(&artifact).expect("bytecode");
-    bytecode_module.entry_point = "answer".to_string();
-    let mut vm = crate::vm::BytecodeVM::new(bytecode_module);
-    assert_eq!(vm.run().expect("run").to_int(), 42);
+    let output = run_native_exe(&path);
+    assert_exit_or_disasm(&output, 42, &path, &["mov\tx0, #0x2a"]);
     let _ = std::fs::remove_file(path);
 }
 
@@ -1620,4 +1615,42 @@ fn lowers_option_unwrap_or_none_to_default_inline() {
         "Option::unwrap_or should be lowered inline"
     );
     assert!(code_contains_insn(&lowered.code, aarch64::cmp_reg64(1, 2)));
+}
+
+#[test]
+fn jit_executes_string_concat() {
+    let module = UnifiedModule {
+        identity: Default::default(),
+        decls: vec![Decl::Function {
+            name: "main".into(),
+            params: vec![],
+            ret: Typ::String,
+            body: vec![Stmt::Return(Some(Expr::Binary {
+                op: "+".into(),
+                lhs: Box::new(Expr::StringLit("hello".into())),
+                rhs: Box::new(Expr::StringLit("world".into())),
+            }))],
+            type_params: vec![],
+        }],
+    };
+    let lowered = lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
+    let function_offsets: Vec<(String, u32, u32)> = vec![(
+        "main".into(),
+        ENTRY_STUB_SIZE as u32,
+        lowered.code.len() as u32 - ENTRY_STUB_SIZE as u32,
+    )];
+    crate::native_emit::native_link::bootstrap_jit_native();
+    let mut rt = crate::jit_runtime::JitRuntime::new();
+    rt.load(&lowered.code, &function_offsets, &lowered.relocations)
+        .expect("jit load");
+    let raw = unsafe { rt.invoke("main", &[]).expect("invoke") };
+    assert_ne!(raw, 0, "string concat returned null pointer");
+    let ptr = raw as *const u8;
+    let result = unsafe {
+        let len = *(ptr as *const u64) as usize;
+        let data = ptr.add(8);
+        let bytes = std::slice::from_raw_parts(data, len);
+        String::from_utf8_lossy(bytes).to_string()
+    };
+    assert_eq!(result, "helloworld");
 }
