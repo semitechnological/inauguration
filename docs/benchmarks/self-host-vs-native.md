@@ -1,42 +1,50 @@
 # Self-host vs native benchmarks
 
-Measured on macOS ARM64 (M3), `in` v0.7.1.
+**Regenerate:** `./scripts/bench-self-host.sh` → [`self-host-vs-native.json`](self-host-vs-native.json)
 
-## Self-host parse
+Live numbers below are filled from the JSON when you run the script. Stale static tables were removed so the site does not show v0.7.1 fiction.
 
-| Metric | `in build --path in-cli/src/main.rs` |
-|--------|--------------------------------------:|
-| Functions parsed | 1,965 |
-| Functions typed | 1,965 |
-| Call edges | 4,815 |
-| Wall time | ~175 ms |
-| Backend | owned Core IR path (no `--out`) |
+## What we measure
 
-A full native self-build (`--out /tmp/in`) is currently blocked by stdlib surface
-coverage; the parser/typechecker path through the owned Core IR backend exercises
-the full front end.
+| Stage | Command | Meaning |
+|-------|---------|---------|
+| Self-host front + JIT | `in build --path in-cli/src/main.rs --verbose` | Rust `main.rs` parsed/typed through owned Core IR; JIT lowering when it succeeds |
+| Native artifact | `in build --path in-cli/src/main.rs --out /tmp/in` | Same front; Mach-O link when stdlib/native surface allows |
+| Call graph | `in compile --path … --target jit --json` | `call_edge_count` from SIL (when compile succeeds) |
+
+## Latest run (from JSON)
+
+<!-- BENCH:SELF_HOST_START -->
+| Field | Value |
+|-------|------:|
+| Generated (UTC) | 2026-07-05T13:32:04Z |
+| `in` version | in 0.7.4 |
+| Host / CPU | Darwin / Apple M5 Pro |
+| Functions parsed | 1,879 |
+| Functions typed | 1,879 |
+| Call edges | 4,268 |
+| Wall ms (avg / runs) | 156.8 / [156.822] |
+| JIT compile µs | 35,753 |
+| Front+JIT OK | True |
+| Native `--out` | blocked — in build: native compilation failed (native-lowering-failed) |
+<!-- BENCH:SELF_HOST_END -->
 
 ## Language coverage
 
 | Language | Compile | Execute | Notes |
 |----------|:-------:|:-------:|-------|
-| `.in` | ✅ | ✅ | full language subset, JIT |
-| `.icore` | ✅ | ✅ | direct Core IR, JIT |
-| `.rs` (simple) | ✅ | ✅ | native Mach-O via as+ld |
-| `.rs` (self-host) | ✅ | ⚠️ | parses/types; native blocked by stdlib |
-| `.zig` | ✅ | ✅ | simple functions |
-| `.go` | ✅ | ✅ | answer example |
-| `.swift` | ✅ | ✅ | with `--features extended` |
-| `.poly` | ✅ | ✅ | polyglot eval |
+| `.in` | ✅ | ✅ | language subset, JIT |
+| `.icore` | ✅ | ✅ | Core IR JSON, JIT |
+| `.rs` (samples) | ✅ | ✅ | simple fns → native Mach-O |
+| `.rs` (in-cli `main.rs`) | ✅ | ⚠️ | parse/type; JIT/native blocked on stdlib types (e.g. atomics) |
+| `.zig` / `.go` / `.swift` | ✅ | ✅ | polyglot samples + gates |
+| `.poly` | ✅ | ✅ | eval harness |
 
-## Optimization opportunities
+See [polyglot-compilers.md](polyglot-compilers.md) for cross-compiler timings.
 
-1. **Process startup** — `in` cold invocations spend ~30 ms in binary load. Use
-   `in daemon start` to keep the compiler resident for repeated self-host checks.
-2. **Rust front** — parallel per-file parsing of external modules is now enabled;
-   next step is incremental re-parse from the Core IR cache.
-3. **Compile cache** — source-hash caching works; next step is to cache the
-   lowered native code and avoid re-linking inrt builtins.
-4. **Stdlib surface** — native self-host needs thin C-ABI wrappers for the
-   remaining stdlib calls instead of resolving them through the Rust standard
-   library.
+## Next optimizations
+
+1. **Daemon** — `in daemon start` for repeated self-host checks (cold binary ~tens of ms).
+2. **Family typecheck** — matrix `can_typecheck()` now drives `uses_family_typecheck` (Go, Swift, C, … gates align with docs).
+3. **Native self-host** — C-ABI / `Named` type coverage for remaining Rust stdlib shapes in `native_emit`.
+4. **Bench CI** — optional workflow step to commit JSON on release tags.

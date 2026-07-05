@@ -6,10 +6,11 @@
 | [polyglot-compilers.md](polyglot-compilers.md) | `in compile` vs installed native compilers on polyglot samples |
 | [self-host-vs-native.md](self-host-vs-native.md) | Self-host parse/compile vs native artifact path |
 
-Regenerate polyglot numbers:
+Regenerate:
 
 ```bash
-./scripts/bench_polyglot_compilers.v   # or project bench script
+./scripts/bench-self-host.sh && python3 scripts/render-self-host-bench-md.py
+./scripts/bench_polyglot_compilers.v   # polyglot matrix
 ```
 
 Swift-vs-in benchmark removed; use **polyglot-compilers** for cross-language compile-time comparison.

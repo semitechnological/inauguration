@@ -1,0 +1,40 @@
+# inauguration docs-site
+
+**https://inauguration.tsc.hk** — crepuscularity web target (`crepus.toml` + `index.crepus`).
+
+## Docs hook (`[targets.docs]`)
+
+Markdown at repo **`docs/`** (symlinks into `architecture/` + `benchmarks/`). Hook:
+
+```toml
+[targets.docs]
+command = "bash"
+args = ["scripts/docs-hook.sh"]
+src = "../docs"
+```
+
+Required for **`crepus web dev`** `/docs/` routes.
+
+## Build
+
+```bash
+in execute docs-site/backend.in
+./scripts/build-docs-site.sh
+```
+
+## Deploy (Cloudflare Pages)
+
+```bash
+./scripts/deploy-docs-cloudflare.sh
+# or: cd docs-site && wrangler pages deploy dist --project-name inauguration
+```
+
+Production URL: `https://inauguration-dwr.pages.dev` (until custom domain is attached).
+
+**Custom domain `inauguration.tsc.hk`:** Cloudflare dashboard → Workers & Pages → **inauguration** → Custom domains → add `inauguration.tsc.hk` (zone already on your account, same as `alpenglow.tsc.hk`).
+
+## Dev
+
+```bash
+crepus web dev --site "$(pwd)"
+```

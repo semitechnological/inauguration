@@ -1,0 +1,25 @@
+{
+  "generated_at_utc": "2026-07-05T13:32:04Z",
+  "in_version": "in 0.7.4",
+  "host_os": "Darwin",
+  "cpu": "Apple M5 Pro",
+  "bench_runs": 1,
+  "self_host_parse": {
+    "command": "in build --path in-cli/src/main.rs",
+    "functions_parsed": 1879,
+    "functions_typed": 1879,
+    "call_edges": 4268,
+    "wall_ms_avg": 156.822,
+    "wall_ms_runs": [
+      156.822
+    ],
+    "jit_compile_us": 35753,
+    "front_ok": true,
+    "backend": "owned Core IR \u2192 JIT (no --out)"
+  },
+  "native_self_build": {
+    "command": "in build --path in-cli/src/main.rs --out /tmp/in",
+    "status": "blocked",
+    "note": "in build: native compilation failed (native-lowering-failed)"
+  }
+}
