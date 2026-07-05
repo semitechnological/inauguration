@@ -79,6 +79,18 @@ pub struct PackageTargetSelection {
     pub unknown: Vec<String>,
 }
 
+impl PackageTargetSelection {
+    pub fn target_enabled(&self, target: &str) -> bool {
+        if self.disabled.iter().any(|d| d == target) {
+            return false;
+        }
+        if self.enabled.is_empty() {
+            return true;
+        }
+        self.enabled.iter().any(|e| e == target)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CapabilityPolicyValidation {
     pub valid: bool,
@@ -1849,6 +1861,45 @@ dependencies:
         assert_eq!(imports[1].status, "resolved");
         assert_eq!(imports[1].dependency.as_deref(), Some("npm:hono"));
         assert_eq!(imports[2].status, "unresolved");
+    }
+
+    #[test]
+    fn package_target_selection_target_enabled() {
+        // Test disabled target returns false
+        let selection_disabled = PackageTargetSelection {
+            requested: vec!["macos".to_string()],
+            enabled: vec![],
+            disabled: vec!["macos".to_string()],
+            unknown: vec![],
+        };
+        assert_eq!(selection_disabled.target_enabled("macos"), false);
+
+        // Test empty enabled list returns true (when not disabled)
+        let selection_empty_enabled = PackageTargetSelection {
+            requested: vec!["linux".to_string()],
+            enabled: vec![],
+            disabled: vec!["windows".to_string()],
+            unknown: vec!["linux".to_string()],
+        };
+        assert_eq!(selection_empty_enabled.target_enabled("linux"), true);
+
+        // Test target in enabled list returns true
+        let selection_enabled = PackageTargetSelection {
+            requested: vec!["web".to_string()],
+            enabled: vec!["web".to_string()],
+            disabled: vec![],
+            unknown: vec![],
+        };
+        assert_eq!(selection_enabled.target_enabled("web"), true);
+
+        // Test non-empty enabled list but target not enabled returns false
+        let selection_not_enabled = PackageTargetSelection {
+            requested: vec!["linux".to_string()],
+            enabled: vec!["windows".to_string()],
+            disabled: vec![],
+            unknown: vec!["linux".to_string()],
+        };
+        assert_eq!(selection_not_enabled.target_enabled("linux"), false);
     }
 
     #[test]
