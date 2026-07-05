@@ -422,6 +422,40 @@ pub(crate) fn compile_and_run_source_path(
     Ok(SourceExecution { output, result })
 }
 
+pub(crate) struct JitExecution {
+    pub(crate) result: i64,
+}
+
+pub(crate) fn compile_and_run_jit_source_path(
+    source_path: &Path,
+    module_id: &str,
+    parser: ParserCli,
+) -> Result<JitExecution> {
+    use inauguration::native_emit::NativeLinkage;
+    use inauguration::owned_compile::{CompileTarget, OwnedCompileRequest};
+    let request = OwnedCompileRequest {
+        path: source_path.to_path_buf(),
+        module_id: module_id.to_string(),
+        parser,
+        target: CompileTarget::Jit,
+        entry: Some("main".to_string()),
+        out: None,
+        linkage: NativeLinkage::Executable,
+        target_triple: None,
+        jobs: 1,
+    };
+    let report = inauguration::owned_compile::compile_owned(&request);
+    if !report.success {
+        return Err(InError::Message(
+            report
+                .error
+                .unwrap_or_else(|| "jit eval failed".to_string()),
+        ));
+    }
+    let result = report.eval_result.unwrap_or(0);
+    Ok(JitExecution { result })
+}
+
 pub(crate) fn cmd_execute_bytecode(
     cwd: &Path,
     path: &str,

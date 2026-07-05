@@ -276,12 +276,14 @@ fn lowers_string_len_to_aarch64_ldr_offset_8() {
     let strings = HashMap::new();
     let mut pending_static_arrays = Vec::new();
     let mut pending_inrt_calls = Vec::new();
+    let mut pending_strings = Vec::new();
     let mut ctx = LowerCtx::new(
         &[],
         &structs,
         &strings,
         &mut pending_static_arrays,
         &mut pending_inrt_calls,
+        &mut pending_strings,
         "test",
     )
     .unwrap();
@@ -308,12 +310,14 @@ fn lowers_string_contains_to_native_wrapper_call() {
     let strings = HashMap::new();
     let mut pending_static_arrays = Vec::new();
     let mut pending_inrt_calls = Vec::new();
+    let mut pending_strings = Vec::new();
     let mut ctx = LowerCtx::new(
         &[],
         &structs,
         &strings,
         &mut pending_static_arrays,
         &mut pending_inrt_calls,
+        &mut pending_strings,
         "test",
     )
     .unwrap();
