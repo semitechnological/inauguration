@@ -59,29 +59,7 @@ div min-h-screen bg-zinc-950 text-zinc-300 p-6 sm:p-12 text-sm leading-relaxed i
 						span w-2 h-2 rounded-full bg-amber-900/80
 						span w-2 h-2 rounded-full bg-emerald-900/80
 				pre p-4 m-0 font-mono text-xs leading-relaxed text-zinc-400 overflow-x-auto
-					span text-zinc-500
-						"# install"
-					br
-					"$ cargo install inauguration"
-					br
-					br
-					span text-zinc-500
-						"# build this repo"
-					br
-					"$ in ."
-					br
-					br
-					span text-zinc-500
-						"# eval: .in, ~40 polyglot fronts, cargo/npm deps"
-					br
-					"$ in eval \"print('hello world')\""
-					br
-					br
-					span text-zinc-500
-						"# matrix + docs site"
-					br
-					"$ in languages --json"
-					br
+					"# install\n$ cargo install inauguration\n\n# build this repo\n$ in .\n\n# eval: .in, ~40 polyglot fronts, cargo/npm deps\n$ in eval \"print('hello world')\"\n\n# matrix + docs site\n$ in languages --json\n"
 
 		section border-t border-zinc-800 pt-8 crepus-entrance crepus-e3
 			div text-zinc-100 font-semibold tracking-wider mb-4
