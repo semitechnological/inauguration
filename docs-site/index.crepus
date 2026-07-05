@@ -60,19 +60,27 @@ div min-h-screen bg-zinc-950 text-zinc-300 p-6 sm:p-12 text-sm leading-relaxed i
 						span w-2 h-2 rounded-full bg-emerald-900/80
 				pre p-4 m-0 font-mono text-xs leading-relaxed text-zinc-400 overflow-x-auto
 					span text-zinc-500
-						"# Build site (inlang)"
+						"# install"
 					br
-					"$ in execute docs-site/backend.in"
+					"$ cargo install inauguration"
 					br
 					br
 					span text-zinc-500
-						"# Language matrix"
+						"# build this repo"
+					br
+					"$ in ."
+					br
+					br
+					span text-zinc-500
+						"# eval: .in, ~40 polyglot fronts, cargo/npm deps"
+					br
+					"$ in eval \"print('hello world')\""
+					br
+					br
+					span text-zinc-500
+						"# matrix + docs site"
 					br
 					"$ in languages --json"
-					br
-					br
-					span text-zinc-500
-						"# Serve (crepuscularity)"
 					br
 					"$ crepus web serve --site docs-site"
 

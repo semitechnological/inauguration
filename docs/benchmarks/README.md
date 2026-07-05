@@ -4,7 +4,7 @@
 |-----|------------------|
 | [jit.md](jit.md) | JIT compile + run latency on macOS ARM64 |
 | [polyglot-compilers.md](polyglot-compilers.md) | `in compile` vs installed native compilers on polyglot samples |
-| [self-host-vs-native.md](self-host-vs-native.md) | Self-host parse/compile vs native artifact path |
+| [self-host-vs-native.md](self-host-vs-native.md) | `in build` vs **rustc** (time, binary size, startup) on `in-cli` |
 
 Regenerate:
 
