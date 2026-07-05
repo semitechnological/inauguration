@@ -88,7 +88,7 @@ head_html = """
   50% { opacity: 0.65; }
 }
 .in-docs-shimmer { animation: in-docs-shimmer 3s ease-in-out infinite; }
-.in-splash-slot { display: block; min-height: 1.5rem; margin-bottom: 0.75rem; }
+.in-splash-slot { display: block; min-height: 1.5rem; margin: 0.35rem 0 0.65rem -0.5rem; }
 .in-splash {
   display: inline-block;
   font-family: "JetBrains Mono", ui-monospace, monospace;
@@ -97,7 +97,7 @@ head_html = """
   line-height: 1.2;
   color: #fde047;
   text-shadow: 2px 2px 0 #a16207, 3px 3px 0 rgba(0, 0, 0, 0.35);
-  transform: rotate(-14deg) skewX(-8deg);
+  transform: translate(-6px, 10px) rotate(-14deg) skewX(-8deg);
   letter-spacing: 0.03em;
   user-select: none;
 }
