@@ -88,11 +88,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Publish inauguration to crates.io
+      - name: Publish inauguration to crates.io (CI only — do not cargo publish locally)
         working-directory: in-cli
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish --locked
+        run: |
+          if [[ -z "${CARGO_REGISTRY_TOKEN}" ]]; then
+            echo "::error::Set repository secret CARGO_REGISTRY_TOKEN for crates.io publish"
+            exit 1
+          fi
+          cargo publish --locked
 
   publish:
     runs-on: ubuntu-latest

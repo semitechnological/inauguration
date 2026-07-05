@@ -68,6 +68,11 @@ in bench
 - Expose stage timing whenever behavior gets slower.
 - Keep benchmark outputs checked in under `docs/benchmarks` when meaningful.
 
+## Release & crates.io
+
+- **Do not** run `cargo publish` locally. Bump `in-cli/Cargo.toml` version, commit, push `master`, tag `v*`, push tag — **`.github/workflows/release.yml`** publishes to crates.io (`secrets.CARGO_REGISTRY_TOKEN`).
+- GitHub Pages: **`.github/workflows/pages.yml`** on `master` / tags.
+
 ## Commit style
 
 - Use concise imperative subject.
