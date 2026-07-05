@@ -44,6 +44,8 @@ struct CachedOwnedCompileReport {
     cache_hit: bool,
     frontend_hash: Option<String>,
     eval_exit_code: Option<u8>,
+    #[serde(default)]
+    eval_result: Option<i64>,
     error: Option<String>,
 }
 
@@ -80,6 +82,7 @@ impl From<&OwnedCompileReport> for CachedOwnedCompileReport {
             cache_hit: report.cache_hit,
             frontend_hash: report.frontend_hash.clone(),
             eval_exit_code: report.eval_exit_code,
+            eval_result: report.eval_result,
             error: report.error.clone(),
         }
     }
@@ -118,6 +121,7 @@ impl From<CachedOwnedCompileReport> for OwnedCompileReport {
             cache_hit: cached.cache_hit,
             frontend_hash: cached.frontend_hash,
             eval_exit_code: cached.eval_exit_code,
+            eval_result: cached.eval_result,
             error: cached.error,
         }
     }
@@ -296,6 +300,7 @@ mod tests {
             cache_hit: false,
             frontend_hash: Some(hash.to_string()),
             eval_exit_code: None,
+            eval_result: None,
             error: None,
         };
         write_cached_report(&cwd, hash, &report).unwrap();
