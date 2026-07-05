@@ -602,12 +602,15 @@ fn parse_lock_list_item(
     section: &str,
     values: &mut Vec<String>,
 ) -> Result<(), String> {
-    let Some(value) = line.strip_prefix("- ") else {
+    let value = if let Some(rest) = line.strip_prefix("- ") {
+        rest.trim()
+    } else if line.trim() == "-" {
+        ""
+    } else {
         return Err(format!(
             "line {line_number}: section `{section}` only supports list items"
         ));
     };
-    let value = value.trim();
     if value.is_empty() {
         return Err(format!(
             "line {line_number}: section `{section}` contains an empty list item"
