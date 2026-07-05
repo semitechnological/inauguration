@@ -886,4 +886,208 @@ dependencies:
         );
         assert!(validation.valid);
     }
+
+    #[test]
+    fn parse_valid_complex_lock() {
+        let source = "\
+lock-version: 1
+name: my-app
+version: 1.0.0
+dependencies:
+  dep1:
+    version: 1.2.3
+    kind: registry
+    source: https://registry.com
+    rev: abc
+    checksum: sha256:123
+    install_path: /opt/dep1
+    targets:
+      - linux
+      - macos
+    capabilities:
+      - fs
+    build:
+      mode: release
+";
+        let lock = parse_text(source).expect("valid parse");
+        assert_eq!(lock.lock_version, "1");
+        assert_eq!(lock.name, "my-app");
+        assert_eq!(lock.version, "1.0.0");
+        let dep = lock.dependencies.get("dep1").unwrap();
+        assert_eq!(dep.version, "1.2.3");
+        assert_eq!(dep.kind.as_deref(), Some("registry"));
+        assert_eq!(dep.source.as_deref(), Some("https://registry.com"));
+        assert_eq!(dep.rev.as_deref(), Some("abc"));
+        assert_eq!(dep.checksum.as_deref(), Some("sha256:123"));
+        assert_eq!(dep.install_path.as_deref(), Some("/opt/dep1"));
+        assert_eq!(dep.targets, vec!["linux", "macos"]);
+        assert_eq!(dep.capabilities, vec!["fs"]);
+        assert_eq!(dep.build.get("mode").map(|s| s.as_str()), Some("release"));
+    }
+
+    #[test]
+    fn parse_invalid_indentation() {
+        let tabs = "\
+lock-version: 1
+\tname: my-app
+";
+        assert!(parse_text(tabs).unwrap_err().contains("tabs are not valid indentation"));
+
+        let odd_spaces = "\
+lock-version: 1
+name: my-app
+version: 1.0.0
+dependencies:
+   dep1:
+";
+        assert!(parse_text(odd_spaces).unwrap_err().contains("malformed indentation"));
+
+        let indent_outside_section = "\
+lock-version: 1
+  name: my-app
+";
+        assert!(parse_text(indent_outside_section).unwrap_err().contains("indentation is only valid inside a section"));
+
+        let deep_indent_outside_deps = "\
+lock-version: 1
+name: my-app
+version: 1.0.0
+dependencies:
+  dep1:
+    version: 1.0.0
+        extra:
+";
+        assert!(parse_text(deep_indent_outside_deps).unwrap_err().contains("malformed indentation"));
+    }
+
+    #[test]
+    fn parse_missing_required_fields() {
+        let no_lock_version = "\
+name: my-app
+version: 1.0.0
+";
+        assert!(parse_text(no_lock_version).unwrap_err().contains("missing required field `lock-version`"));
+
+        let no_name = "\
+lock-version: 1
+version: 1.0.0
+";
+        assert!(parse_text(no_name).unwrap_err().contains("missing required field `name`"));
+
+        let no_version = "\
+lock-version: 1
+name: my-app
+";
+        assert!(parse_text(no_version).unwrap_err().contains("missing required field `version`"));
+
+        let no_dep_version = "\
+lock-version: 1
+name: my-app
+version: 1.0.0
+dependencies:
+  dep1:
+    kind: registry
+";
+        assert!(parse_text(no_dep_version).unwrap_err().contains("missing required field `version`"));
+    }
+
+    #[test]
+    fn parse_duplicates() {
+        let dup_dep = "\
+lock-version: 1
+name: my-app
+version: 1.0.0
+dependencies:
+  dep1:
+    version: 1.0.0
+  dep1:
+    version: 2.0.0
+";
+        assert!(parse_text(dup_dep).unwrap_err().contains("duplicate dependency `dep1`"));
+
+        let dup_version = "\
+lock-version: 1
+name: my-app
+version: 1.0.0
+dependencies:
+  dep1:
+    version: 1.0.0
+    version: 2.0.0
+";
+        assert!(parse_text(dup_version).unwrap_err().contains("duplicate version"));
+
+        let dup_build = "\
+lock-version: 1
+name: my-app
+version: 1.0.0
+dependencies:
+  dep1:
+    version: 1.0.0
+    build:
+      mode: release
+      mode: debug
+";
+        assert!(parse_text(dup_build).unwrap_err().contains("duplicate build field `mode`"));
+
+        let dup_kind = "\
+lock-version: 1
+name: my-app
+version: 1.0.0
+dependencies:
+  dep1:
+    version: 1.0.0
+    kind: git
+    kind: registry
+";
+        assert!(parse_text(dup_kind).unwrap_err().contains("duplicate kind"));
+    }
+
+    #[test]
+    fn parse_invalid_section_headers() {
+        let inline_deps = "\
+lock-version: 1
+name: my-app
+version: 1.0.0
+dependencies: { dep1: 1.0.0 }
+";
+        assert!(parse_text(inline_deps).unwrap_err().contains("must not have an inline value"));
+
+        let inline_build = "\
+lock-version: 1
+name: my-app
+version: 1.0.0
+dependencies:
+  dep1:
+    version: 1.0.0
+    build: mode
+";
+        assert!(parse_text(inline_build).unwrap_err().contains("must not have an inline value"));
+    }
+
+    #[test]
+    fn parse_invalid_list_items() {
+        let empty_item = "\
+lock-version: 1
+name: my-app
+version: 1.0.0
+dependencies:
+  dep1:
+    version: 1.0.0
+    targets:
+      -
+";
+        assert!(parse_text(empty_item).unwrap_err().contains("empty list item"));
+
+        let not_item = "\
+lock-version: 1
+name: my-app
+version: 1.0.0
+dependencies:
+  dep1:
+    version: 1.0.0
+    targets:
+      linux
+";
+        assert!(parse_text(not_item).unwrap_err().contains("only supports list items"));
+    }
 }
