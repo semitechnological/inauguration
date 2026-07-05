@@ -9,6 +9,8 @@ MD = ROOT / "docs/benchmarks/self-host-vs-native.md"
 JSON = ROOT / "docs/benchmarks/self-host-vs-native.json"
 START = "<!-- BENCH:SELF_HOST_START -->"
 END = "<!-- BENCH:SELF_HOST_END -->"
+CMP_START = "<!-- BENCH:RUSTC_CMP_START -->"
+CMP_END = "<!-- BENCH:RUSTC_CMP_END -->"
 
 
 def main() -> int:
@@ -26,17 +28,40 @@ def main() -> int:
 | Functions parsed | {sh.get("functions_parsed", 0):,} |
 | Functions typed | {sh.get("functions_typed", 0):,} |
 | Call edges | {sh.get("call_edges", 0):,} |
-| Wall ms (avg / runs) | {sh.get("wall_ms_avg", 0):.1f} / {sh.get("wall_ms_runs", [])} |
-| JIT compile µs | {sh.get("jit_compile_us", 0):,} |
-| Front+JIT OK | {sh.get("front_ok", False)} |
-| Native `--out` | {nat.get("status", "?")} — {nat.get("note", "")[:120]} |"""
+| `in build` wall ms (avg) | {sh.get("wall_ms_avg", 0):.1f} |
+| JIT lowering µs (last run) | {sh.get("jit_compile_us", 0):,} |
+| Front stats OK | {sh.get("front_ok", False)} |
+| Native `--out` | {nat.get("status", "?")} — {str(nat.get("note", ""))[:100]} |"""
+
+    cmp = data.get("comparison") or {}
+    rustc = data.get("rustc_release") or {}
+    ratio = cmp.get("compile_speed_ratio_in_over_rustc")
+    ratio_s = f"{ratio:.3f}×" if ratio is not None else "n/a"
+    br = cmp.get("binary_size_ratio")
+    br_s = f"{br:.3f}×" if br is not None else "1.000×"
+    exec_d = cmp.get("cold_exec_version_ms_avg") or {}
+    cmp_block = f"""| Metric | `in` (owned front) | `rustc` / Cargo (release) |
+|--------|-------------------:|-------------------------:|
+| Compile wall (avg ms) | {cmp.get("in_front_wall_ms_avg", 0):.1f} | {cmp.get("rustc_release_wall_ms_avg", 0):.1f} |
+| Speed ratio (in ÷ rustc) | {ratio_s} | 1.000× (baseline) |
+| Shipped binary size | {cmp.get("binary_human", "?")} ({cmp.get("binary_bytes_in", 0):,} B) | {rustc.get("binary_human", "?")} ({cmp.get("binary_bytes_rustc", 0):,} B) |
+| Size ratio (in ÷ rustc) | {br_s} | same artifact today |
+| Cold `in --version` (ms) | {exec_d.get("in", 0):.2f} | {exec_d.get("rustc_binary", 0):.2f} |
+
+**Notes:** `in build` parses/types **main.rs** through Core IR (JIT often fails on atomics); **Cargo** rebuilds the **whole** `inauguration` crate after `touch main.rs`. Binary row is the **same** `target/release/in` until native self-link works. Execution row is **CLI startup**, not compile throughput."""
+
     text = MD.read_text()
     if START not in text or END not in text:
         print("markers missing in md", file=sys.stderr)
         return 1
     pre, rest = text.split(START, 1)
     _, post = rest.split(END, 1)
-    MD.write_text(f"{pre}{START}\n{block}\n{END}{post}")
+    text = f"{pre}{START}\n{block}\n{END}{post}"
+    if CMP_START in text and CMP_END in text:
+        pre2, rest2 = text.split(CMP_START, 1)
+        _, post2 = rest2.split(CMP_END, 1)
+        text = f"{pre2}{CMP_START}\n{cmp_block}\n{CMP_END}{post2}"
+    MD.write_text(text)
     print(MD)
     return 0
 

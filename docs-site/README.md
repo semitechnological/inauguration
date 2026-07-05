@@ -15,11 +15,20 @@ src = "../docs"
 
 Required for **`crepus web dev`** `/docs/` routes.
 
-## Build
+## Quick start (CLI)
 
 ```bash
-in execute docs-site/backend.in
+cargo install inauguration
+in .                                    # build from checkout
+in eval "print('hello world')"          # .in + ~40 languages, crates & libs
+in languages --json
+```
+
+## Build site
+
+```bash
 ./scripts/build-docs-site.sh
+# or: in execute docs-site/backend.in
 ```
 
 ## Deploy (Cloudflare Pages)
