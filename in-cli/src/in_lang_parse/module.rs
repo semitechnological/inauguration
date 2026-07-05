@@ -326,8 +326,40 @@ pub(crate) fn parse_in_file_inner(
     );
     let surface = parse_in_surface_info(&source)?;
     let mut decls = Vec::new();
-    for import in surface.imports {
-        if let Some(import_path) = local_in_import_path(path, &import) {
+    let imports: Vec<_> = surface
+        .imports
+        .into_iter()
+        .filter_map(|import| local_in_import_path(path, &import))
+        .collect();
+    if imports.len() > 1 {
+        std::thread::scope(|s| {
+            let mut handles = Vec::with_capacity(imports.len());
+            for import_path in imports {
+                let key = import_path
+                    .canonicalize()
+                    .unwrap_or_else(|_| import_path.clone());
+                if !seen.insert(key) {
+                    continue;
+                }
+                handles.push(s.spawn(move || {
+                    let mut local_seen = std::collections::HashSet::new();
+                    parse_in_file_inner(&import_path, &mut local_seen)
+                }));
+            }
+            let mut results = Vec::with_capacity(handles.len());
+            for handle in handles {
+                let imported = handle
+                    .join()
+                    .map_err(|e| format!("import parse thread panicked: {e:?}"))?;
+                results.push(imported?);
+            }
+            for imported in results {
+                decls.extend(imported.decls);
+            }
+            Ok::<(), String>(())
+        })?;
+    } else {
+        for import_path in imports {
             let imported = parse_in_file_inner(&import_path, seen)?;
             decls.extend(imported.decls);
         }

@@ -64,6 +64,7 @@ fn lower_file_items(file: &syn::File) -> Result<UnifiedModule, String> {
 
 fn lower_file_items_at(file: &syn::File, base_dir: &Path) -> Result<UnifiedModule, String> {
     let mut decls = Vec::new();
+    let mut external_modules: Vec<(String, PathBuf)> = Vec::new();
 
     for item in &file.items {
         match item {
@@ -101,28 +102,54 @@ fn lower_file_items_at(file: &syn::File, base_dir: &Path) -> Result<UnifiedModul
                         decls.extend(inner.decls);
                     }
                 } else {
-                    // External module: look for <base>/<mod_name>.rs or <base>/<mod_name>/mod.rs
+                    // External module: record candidate path for parallel parsing
                     let mod_name = m.ident.to_string();
                     let candidate_rs = base_dir.join(format!("{mod_name}.rs"));
                     let candidate_mod = base_dir.join(format!("{mod_name}/mod.rs"));
-                    for candidate in [&candidate_rs, &candidate_mod] {
-                        if candidate.exists() {
-                            if let Ok(src) = std::fs::read_to_string(candidate) {
-                                if let Ok(sub_file) = syn::parse_file(&src) {
-                                    let sub_dir = candidate.parent().unwrap_or(base_dir);
-                                    if let Ok(inner) = lower_file_items_at(&sub_file, sub_dir) {
-                                        decls.extend(inner.decls);
-                                    }
-                                }
-                            }
-                            break;
-                        }
+                    if candidate_rs.exists() {
+                        external_modules.push((mod_name, candidate_rs));
+                    } else if candidate_mod.exists() {
+                        external_modules.push((mod_name, candidate_mod));
                     }
                 }
             }
             _ => {}
         }
     }
+
+    // Parse external modules in parallel; they are independent subtrees.
+    if external_modules.len() > 1 {
+        std::thread::scope(|s| {
+            let mut handles = Vec::with_capacity(external_modules.len());
+            for (_name, candidate) in external_modules {
+                let base = base_dir.to_path_buf();
+                handles.push(s.spawn(move || {
+                    std::fs::read_to_string(&candidate)
+                        .ok()
+                        .and_then(|src| syn::parse_file(&src).ok())
+                        .and_then(|sub_file| {
+                            let sub_dir = candidate.parent().unwrap_or(&base);
+                            lower_file_items_at(&sub_file, sub_dir).ok()
+                        })
+                }));
+            }
+            for handle in handles {
+                if let Ok(Some(inner)) = handle.join() {
+                    decls.extend(inner.decls);
+                }
+            }
+        });
+    } else if let Some((_name, candidate)) = external_modules.first() {
+        if let Ok(src) = std::fs::read_to_string(candidate) {
+            if let Ok(sub_file) = syn::parse_file(&src) {
+                let sub_dir = candidate.parent().unwrap_or(base_dir);
+                if let Ok(inner) = lower_file_items_at(&sub_file, sub_dir) {
+                    decls.extend(inner.decls);
+                }
+            }
+        }
+    }
+
     if decls.is_empty() {
         return Err("rust front parsed file but found no top-level structs/functions".to_string());
     }

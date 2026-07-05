@@ -109,33 +109,66 @@ run_icore_redirect() {
   rm -f "$json_path"
 }
 
-run_compile_owned apps/polyglot-sample/sample.in
-run_compile_owned apps/polyglot-sample/sample.icore
-run_swift_subset_ok apps/polyglot-sample/sample.swift
-run_compile_owned apps/polyglot-sample/sample.rs
-run_compile_owned apps/polyglot-sample/sample.go
-run_compile_owned apps/polyglot-sample/sample.v
-run_compile_owned apps/polyglot-sample/sample.c
-run_compile_owned apps/polyglot-sample/sample.cpp
-run_compile_owned apps/polyglot-sample/Sample.java
-run_compile_owned apps/polyglot-sample/Sample.groovy
-run_compile_owned apps/polyglot-sample/sample.js
-run_compile_owned apps/polyglot-sample/sample.ts
-run_compile_owned apps/polyglot-sample/Sample.kt
-run_compile_owned apps/polyglot-sample/Program.cs
-run_compile_owned apps/polyglot-sample/sample.py
-run_compile_owned apps/polyglot-sample/sample.rb
-run_compile_owned apps/polyglot-sample/sample.zig
-run_compile_owned apps/polyglot-sample/sample.dart
-run_compile_owned apps/polyglot-sample/sample.ml
-run_compile_owned apps/polyglot-sample/sample.php
-run_compile_owned apps/polyglot-sample/sample.lua
-run_compile_owned apps/polyglot-sample/sample.scala
-run_compile_owned apps/polyglot-sample/sample.nim
-run_compile_owned apps/polyglot-sample/sample.odin
-run_compile_owned apps/polyglot-sample/sample.ha
-run_compile_owned apps/polyglot-sample/sample.hc
-run_compile_owned apps/polyglot-sample/sample.d
-run_compile_owned apps/polyglot-sample/sample.cr
-run_compile_owned apps/polyglot-sample/sample.clj
-run_compile_owned apps/polyglot-sample/sample.vb
+NPROC="${NPROC:-$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)}"
+JOBS=0
+PIDS=()
+
+wait_for_jobs() {
+  while [ ${#PIDS[@]} -ge "$NPROC" ]; do
+    for i in "${!PIDS[@]}"; do
+      if ! kill -0 "${PIDS[$i]}" 2>/dev/null; then
+        wait "${PIDS[$i]}" || { echo "FAIL: polyglot compile failed"; exit 1; }
+        unset 'PIDS[$i]'
+        break
+      fi
+    done
+    sleep 0.01
+  done
+}
+
+run_compile_owned_bg() {
+  wait_for_jobs
+  run_compile_owned "$1" &
+  PIDS+=("$!")
+}
+
+run_swift_subset_ok_bg() {
+  wait_for_jobs
+  run_swift_subset_ok "$1" &
+  PIDS+=("$!")
+}
+
+run_compile_owned_bg apps/polyglot-sample/sample.in
+run_compile_owned_bg apps/polyglot-sample/sample.icore
+run_swift_subset_ok_bg apps/polyglot-sample/sample.swift
+run_compile_owned_bg apps/polyglot-sample/sample.rs
+run_compile_owned_bg apps/polyglot-sample/sample.go
+run_compile_owned_bg apps/polyglot-sample/sample.v
+run_compile_owned_bg apps/polyglot-sample/sample.c
+run_compile_owned_bg apps/polyglot-sample/sample.cpp
+run_compile_owned_bg apps/polyglot-sample/Sample.java
+run_compile_owned_bg apps/polyglot-sample/Sample.groovy
+run_compile_owned_bg apps/polyglot-sample/sample.js
+run_compile_owned_bg apps/polyglot-sample/sample.ts
+run_compile_owned_bg apps/polyglot-sample/Sample.kt
+run_compile_owned_bg apps/polyglot-sample/Program.cs
+run_compile_owned_bg apps/polyglot-sample/sample.py
+run_compile_owned_bg apps/polyglot-sample/sample.rb
+run_compile_owned_bg apps/polyglot-sample/sample.zig
+run_compile_owned_bg apps/polyglot-sample/sample.dart
+run_compile_owned_bg apps/polyglot-sample/sample.ml
+run_compile_owned_bg apps/polyglot-sample/sample.php
+run_compile_owned_bg apps/polyglot-sample/sample.lua
+run_compile_owned_bg apps/polyglot-sample/sample.scala
+run_compile_owned_bg apps/polyglot-sample/sample.nim
+run_compile_owned_bg apps/polyglot-sample/sample.odin
+run_compile_owned_bg apps/polyglot-sample/sample.ha
+run_compile_owned_bg apps/polyglot-sample/sample.hc
+run_compile_owned_bg apps/polyglot-sample/sample.d
+run_compile_owned_bg apps/polyglot-sample/sample.cr
+run_compile_owned_bg apps/polyglot-sample/sample.clj
+run_compile_owned_bg apps/polyglot-sample/sample.vb
+
+for pid in "${PIDS[@]}"; do
+  wait "$pid" || { echo "FAIL: polyglot compile failed"; exit 1; }
+done
