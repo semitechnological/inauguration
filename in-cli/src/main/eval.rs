@@ -95,10 +95,8 @@ fn cmd_eval_daemon(
         if response.success {
             if verbose {
                 eprintln!("> {:?}", response.result);
-            } else if plan.print_result {
-                if let Some(result) = response.result {
-                    println!("{}", result);
-                }
+            } else if plan.print_result && let Some(result) = response.result {
+                println!("{}", result);
             }
             return Ok(());
         }
