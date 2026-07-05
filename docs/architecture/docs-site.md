@@ -1,30 +1,21 @@
 # Docs-site
 
-Public docs live in **`docs-site/`**, same shape as **crepuscularity/docs-site** (`crepus.toml`, `index.crepus`, WASM runtime).
+Public site: **`https://inauguration.tsc.hk`** (source in **`docs-site/`**).
 
-| Piece | Owner |
-|-------|--------|
-| `.crepus` landing, `crepus web build` / `web serve` | **Crepuscularity** |
-| Markdown canon | **`docs/architecture/`**, **`docs/benchmarks/`** (symlinks at `docs/*.md`) |
-| HTML theme patch | **`scripts/patch-docs-site-instrument-sans.sh`** |
+| Piece | Tool |
+|-------|------|
+| Landing WASM | `crepus web build` / `crepus web dev` |
+| Markdown HTML | **`[targets.docs]`** in `docs-site/crepus.toml` → `scripts/docs-hook.sh` → `docs-gen` |
+| Full dist | `in execute docs-site/backend.in` or `./scripts/build-docs-site.sh` |
 
-**Inlang** content is markdown + landing copy; **inauguration** does not add docs-specific `in` subcommands—use **`crepus`** like any other crepuscularity web site.
+`crepus web dev` needs **`[targets.docs]`** so `/docs/` is populated (not “No generated docs output yet”).
 
-## Build (inlang)
+## Commands
 
 ```bash
+# from repo root
 in execute docs-site/backend.in
-```
-
-## Serve
-
-```bash
-crepus web serve --site docs-site
+crepus web dev --site docs-site
 ```
 
 Footer: **built with crepuscularity + inauguration**.
-
-## See also
-
-- `docs-site/README.md`
-- [in-language.md](in-language.md)

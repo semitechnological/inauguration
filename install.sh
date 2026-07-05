@@ -6,7 +6,7 @@
 #
 set -euo pipefail
 
-REPO="${IN_REPO:-semitechnological/inauguration}"
+REPO="${IN_REPO:-tschk/inauguration}"
 INSTALL_DIR="${IN_INSTALL_DIR:-$HOME/.local/bin}"
 VERSION="${IN_VERSION:-}"
 

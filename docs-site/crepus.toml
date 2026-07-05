@@ -109,6 +109,11 @@ head_html = """
 </style>
 """
 
+[targets.docs]
+command = "bash"
+args = ["scripts/docs-hook.sh"]
+src = "../docs"
+
 [targets.seo]
 title = "inauguration — inlang & hybrid compiler docs"
 description = "Ultrafast Core IR → native JIT pipeline for .in (inlang) and polyglot fronts. Documentation built with crepuscularity."
@@ -116,9 +121,20 @@ robots = "index,follow"
 twitter_card = "summary"
 theme_color = "#09090b"
 generator = "crepuscularity"
+canonical = "https://inauguration.tsc.hk/"
 
 [targets.llms]
 enabled = true
-base_url = "https://github.com/tschk/inauguration"
+base_url = "https://inauguration.tsc.hk"
 title = "inauguration"
 description = "Compiler toolchain: inlang (.in), Core IR, native JIT, polyglot Tree-sitter fronts."
+sources = [
+  { path = "../README.md", href = "https://github.com/tschk/inauguration/blob/master/README.md", title = "Repository README" },
+  { path = "../docs/README.md", href = "https://inauguration.tsc.hk/docs/", title = "Documentation overview" },
+  { path = "../docs/in-language.md", href = "https://inauguration.tsc.hk/docs/in-language.html", title = "inlang (.in)" },
+  { path = "../docs/languages.md", href = "https://inauguration.tsc.hk/docs/languages.html", title = "Language fronts" },
+  { path = "../docs/general-compiler.md", href = "https://inauguration.tsc.hk/docs/general-compiler.html", title = "General compiler" },
+  { path = "../docs/native-backend.md", href = "https://inauguration.tsc.hk/docs/native-backend.html", title = "Native backend" },
+  { path = "../docs/jit.md", href = "https://inauguration.tsc.hk/docs/jit.html", title = "JIT benchmarks" },
+  { path = "../docs/polyglot-compilers.md", href = "https://inauguration.tsc.hk/docs/polyglot-compilers.html", title = "Polyglot benchmarks" },
+]

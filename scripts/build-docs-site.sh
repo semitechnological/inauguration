@@ -5,9 +5,15 @@ SITE="$ROOT/docs-site"
 OUT="${OUT:-$SITE/dist}"
 CREPUS_BIN="${CREPUS_BIN:-crepus}"
 
+finish() {
+  "$ROOT/scripts/patch-docs-site-instrument-sans.sh" "$OUT"
+  echo "inauguration.tsc.hk" >"$OUT/CNAME"
+}
+
 if command -v "$CREPUS_BIN" >/dev/null 2>&1; then
   "$CREPUS_BIN" web build --site "$SITE" --out-dir "$OUT"
-  exec "$ROOT/scripts/patch-docs-site-instrument-sans.sh" "$OUT"
+  finish
+  exit 0
 fi
 
 CREPU_ROOT="${CREPU_ROOT:-$ROOT/../crepuscularity}"
@@ -21,4 +27,4 @@ fi
 cargo run --manifest-path "$CREPU_ROOT/Cargo.toml" -p crepuscularity-cli -- \
   web build --site "$SITE" --out-dir "$OUT"
 
-"$ROOT/scripts/patch-docs-site-instrument-sans.sh" "$OUT"
+finish
