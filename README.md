@@ -21,6 +21,9 @@ it in a JIT. It targets its own backends for AArch64 and x86_64.
   the Rust source (1965 functions) via the owned Core IR path. A full native
   self-build is still blocked by stdlib surface coverage; see the language support
   table below.
+- **Bytecode VM**: retired from the default path. `in eval` and `in build` use
+  the JIT. The bytecode backend remains available via `in compile --target
+  bytecode` and `in execute-bytecode` for the conformance suite and legacy tests.
 
 ## Unified stdlib
 
@@ -74,6 +77,7 @@ Measured on macOS ARM64 (M3), `in` v0.7.1.
 - The JIT is the default execution path; the bytecode VM is being retired and is
   no longer used for hot loops.
 - `.in` imports and external Rust modules are parsed in parallel.
+- AArch64 function lowering is now parallel (one thread per function).
 - The compile cache already works by source hash; the next win is avoiding
   re-linking the runtime builtins when the source hasn't changed.
 
