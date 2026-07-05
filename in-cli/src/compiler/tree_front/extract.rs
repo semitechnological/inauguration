@@ -1450,7 +1450,6 @@ mod tests {
     use crate::core_ir::Visibility;
     use std::path::PathBuf;
 
-    #[cfg(feature = "tree-sitter-r")]
     fn repo_sample(name: &str) -> String {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent()
@@ -1459,7 +1458,6 @@ mod tests {
         std::fs::read_to_string(root.join("apps/polyglot-sample").join(name)).expect(name)
     }
 
-    #[cfg(feature = "tree-sitter-r")]
     fn main_body(module: &UnifiedModule) -> &[Stmt] {
         module
             .decls
@@ -1471,7 +1469,6 @@ mod tests {
             .expect("main body")
     }
 
-    #[cfg(feature = "tree-sitter-r")]
     fn body_shape(body: &[Stmt]) -> Vec<&'static str> {
         body.iter()
             .map(|stmt| match stmt {
@@ -1498,7 +1495,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn java_main_method_extracted() {
         let src = "class X { public static void main(String[] a) { } }\n";
         let m = parse_lang(
@@ -1516,7 +1512,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-dart")]
     fn generic_ast_examples_converge_with_inlang_control_flow() {
         let expected = vec!["let", "assign", "call", "if", "while", "return-ident"];
 
@@ -1558,7 +1553,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn java_methods_with_bounded_bodies_extract_declarations() {
         let src = r#"
 class X {
@@ -1677,7 +1671,6 @@ class X {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn java_literal_return_bodies_extract() {
         let src = r#"
 class X {
@@ -1712,7 +1705,6 @@ class X {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn java_lowers_scalar_body_shapes() {
         let src = r#"
 class X {
@@ -1781,7 +1773,6 @@ class X {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn rust_main_extracted() {
         let src = "fn main() {}\n";
         let m = parse_lang(try_lang_for(ParserId::Rust).unwrap(), src, extract_rust).expect("ok");
@@ -1789,7 +1780,6 @@ class X {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-holyc")]
     fn extract_holyc_eval_return_shape() {
         let src = "I64 Main()\n{\n  return 1 + 2;\n}\nMain;\n";
         let m = parse_lang(try_lang_for(ParserId::HolyC).unwrap(), src, extract_holyc).expect("ok");
@@ -1811,7 +1801,6 @@ class X {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn extract_rust_eval_print_shape() {
         let src = "fn main() -> i64 {\nprint(\"hi\");\n0\n}\n";
         let m = parse_lang(try_lang_for(ParserId::Rust).unwrap(), src, extract_rust).expect("ok");
@@ -1837,7 +1826,6 @@ class X {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn extract_rust_if_else() {
         let src = "fn main() -> i64 { if true { return 1; } else { return 0; } }";
         let m = parse_lang(try_lang_for(ParserId::Rust).unwrap(), src, extract_rust).expect("ok");
@@ -1863,7 +1851,6 @@ class X {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn zig_function_declarations_extract() {
         let src =
             "fn helper(value: i32) i32 { return value; }\npub fn main() void { _ = helper(1); }\n";
@@ -1883,7 +1870,6 @@ class X {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn extract_zig_eval_print_shape() {
         let src = "pub fn main() void {\n    print(\"hi\");\n}\n";
         let m = parse_lang(try_lang_for(ParserId::Zig).unwrap(), src, extract_zig).expect("ok");
@@ -1906,7 +1892,6 @@ class X {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn extract_zig_empty_main_body_stays_empty() {
         let src = "pub fn main() void {}\n";
         let m = parse_lang(try_lang_for(ParserId::Zig).unwrap(), src, extract_zig).expect("ok");
@@ -1922,7 +1907,6 @@ class X {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn javascript_function_bodies_extract_calls() {
         let src = "function helper(value) { return value; }\nfunction main() { helper(1); }\n";
         let m = parse_lang(
@@ -1951,7 +1935,6 @@ class X {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn typescript_function_bodies_extract_calls() {
         let src = "function helper(value: number): number { return value; }\nfunction main(): void { helper(1); }\n";
         let m = parse_lang(
@@ -1980,7 +1963,6 @@ class X {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn javascript_lowers_scalar_body_shapes() {
         let src = r#"
 function helper(value) { return value; }
@@ -2043,7 +2025,6 @@ function main() {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn typescript_lowers_scalar_body_shapes() {
         let src = r#"
 function helper(value: number): number { return value; }
@@ -2080,7 +2061,6 @@ function main(): void {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn typescript_functions_extract_params_return_and_body() {
         let src = "function helper(value: number, label: string): number { return value; }\nfunction declared(value: number): boolean;\n";
         let m = parse_lang(
@@ -2128,7 +2108,6 @@ function main(): void {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-c-sharp")]
     fn csharp_methods_extract_bounded_bodies() {
         let src = r#"
 class X {
@@ -2179,7 +2158,6 @@ class X {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-c-sharp")]
     fn csharp_lowers_scalar_body_shapes() {
         let src = r#"
 class X {
@@ -2244,7 +2222,6 @@ class X {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn python_functions_extract_bounded_bodies() {
         let src = r#"
 def helper(value: int) -> int:
@@ -2303,7 +2280,6 @@ def main():
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn python_lowers_scalar_body_shapes() {
         let src = r#"
 def helper(value: int) -> int:
@@ -2371,7 +2347,6 @@ def main():
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn ruby_methods_extract_scalar_bodies() {
         let src = r#"
 def helper(value)
@@ -2438,7 +2413,6 @@ end
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn zig_extracts_extern_struct_boundary_module() {
         let src = r#"
 pub const InSliceU8 = extern struct {
@@ -2489,7 +2463,6 @@ pub fn main() void {}
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn zig_artifact_without_boundary_markers_has_no_boundary() {
         let src = "fn helper(value: i32) i32 { return value; }\npub fn main() void { return; }\n";
         let artifact = parse_zig_artifact_source(src, "point").expect("parse zig artifact");
@@ -2497,7 +2470,6 @@ pub fn main() void {}
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn zig_fixture_extracts_extern_struct_boundary() {
         let path =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../conformance/abi/zig-extern-struct.zig");
@@ -2519,7 +2491,6 @@ pub fn main() void {}
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn zig_functions_extract_params_return_and_body() {
         let src = "fn helper(value: i32) i32 { return value; }\npub fn main() void { value = helper(2); helper(value); return; }\n";
         let m = parse_lang(try_lang_for(ParserId::Zig).unwrap(), src, extract_zig).expect("ok");
@@ -2569,7 +2540,6 @@ pub fn main() void {}
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn zig_lowers_scalar_body_shapes() {
         let src = r#"
 fn helper(value: i32) i32 { return value; }
@@ -2637,7 +2607,6 @@ pub fn main() void {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-kotlin-ng")]
     fn kotlin_functions_extract_bounded_bodies() {
         let src = "fun helper(value: Int): Int { return value }\nfun main() { value = helper(2); helper(value); return }\n";
         let m =
@@ -2683,7 +2652,6 @@ pub fn main() void {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-kotlin-ng")]
     fn kotlin_lowers_scalar_body_shapes() {
         let src = r#"
 fun helper(value: Int): Int { return value }
@@ -2752,7 +2720,6 @@ fun main() {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn c_binary_return_lowers_function_body() {
         let src = "int f(void) { return 1 + 2; }\nint main(void) { return 0; }\n";
         let m = parse_lang(try_lang_for(ParserId::C).unwrap(), src, |b, r| {
@@ -2774,7 +2741,6 @@ fun main() {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn c_lowers_locals_assignments_calls_if_and_while() {
         let src = r#"
 int helper(int value) { return value; }
@@ -2835,7 +2801,6 @@ int main(void) {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn cpp_uses_c_like_body_lowering() {
         let src = "int main() { int value = 1; value = value + 1; return value; }\n";
         let m = parse_lang(try_lang_for(ParserId::Cpp).unwrap(), src, |b, r| {
@@ -2856,7 +2821,6 @@ int main(void) {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-dart")]
     fn dart_functions_extract_params_return_and_body() {
         let src = r#"
 int helper(int value) { return value; }
@@ -2937,7 +2901,6 @@ int main() {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn java_class_declarations_extract_with_fields_and_methods() {
         let src = r#"
 public class Counter {
@@ -3004,7 +2967,6 @@ public class Counter {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn java_interface_declarations_extract_with_method_sigs() {
         let src = r#"
 interface Printable {
@@ -3043,7 +3005,6 @@ interface Printable {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn java_class_with_extends_and_implements_extracts() {
         let src = r#"
 class Child extends Parent implements Runnable, Serializable {
@@ -3079,7 +3040,6 @@ class Child extends Parent implements Runnable, Serializable {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn cpp_class_declarations_extract_with_fields_and_methods() {
         let src = r#"
 class Calculator {
@@ -3127,7 +3087,6 @@ public:
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn cpp_class_with_base_class_extracts_extends() {
         let src = r#"
 class Child : public Parent {
@@ -3154,7 +3113,6 @@ public:
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn cpp_top_level_functions_still_extracted_with_class_extractor() {
         let src = r#"
 class Helper {
@@ -3188,7 +3146,6 @@ int answer() {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn java_constructors_extracted_as_functions() {
         let src = r#"
 class Counter {
@@ -3240,7 +3197,6 @@ class Counter {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-c-sharp")]
     fn csharp_class_declarations_extract_with_fields_and_methods() {
         let src = r#"
 class Accumulator {
@@ -3293,7 +3249,6 @@ class Accumulator {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-c-sharp")]
     fn csharp_interface_declarations_extract_with_method_sigs() {
         let src = r#"
 interface IResettable {
@@ -3328,14 +3283,12 @@ interface IResettable {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn c_return_statement_child_kinds_for_param_return() {
         let src = "int echo(int x) { return x; }\n";
         let mut p = Parser::new();
         p.set_language(&try_lang_for(ParserId::C).unwrap()).unwrap();
         let tree = p.parse(src, None).unwrap();
         let mut found = false;
-        #[cfg(feature = "tree-sitter-r")]
         fn visit(n: Node<'_>, src: &str, found: &mut bool) {
             if n.kind() == "return_statement" {
                 *found = true;
@@ -3362,7 +3315,6 @@ interface IResettable {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn js_class_extraction_produces_decl_class() {
         let src = r#"
 class Calculator {
@@ -3413,7 +3365,6 @@ class Calculator {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn js_arrow_and_function_expr_extracted_from_vars() {
         let src = r#"
 const add = (a, b) => { return a + b; };
@@ -3443,7 +3394,6 @@ var multiply = function(a, b) { return a * b; };
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn js_member_new_and_method_call_lower_to_core_ir() {
         let src = r#"
 class Counter {
@@ -3505,7 +3455,6 @@ function main() {}
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn ts_interface_extraction_produces_decl_interface() {
         let src = r#"
 interface Drawable {
@@ -3544,7 +3493,6 @@ interface Drawable {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn ts_class_extraction_preserves_type_annotations() {
         let src = r#"
 class TypedCounter {
@@ -3597,7 +3545,6 @@ class TypedCounter {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn ts_member_new_and_method_call_lower_to_core_ir() {
         let src = r#"
 class Counter {
@@ -3642,7 +3589,6 @@ function main(): void {}
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn python_class_extraction_produces_decl_class() {
         let src = r#"
 class Counter:
@@ -3690,7 +3636,6 @@ class Counter:
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn python_lambda_extracted_as_function() {
         let src = r#"
 double = lambda x: x * 2
@@ -3718,7 +3663,6 @@ double = lambda x: x * 2
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn python_try_except_lowered_to_stmt_try() {
         let src = r#"
 def risky(x):
@@ -3757,7 +3701,6 @@ def risky(x):
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-php")]
     fn php_function_with_body_extracts() {
         let src = "<?php\nfunction helper($value) {\n    return $value;\n}\nfunction main() {\n    $value = 1;\n    helper($value);\n    return;\n}\n";
         let m = parse_lang(try_lang_for(ParserId::Php).unwrap(), src, extract_php).expect("ok");
@@ -3797,7 +3740,6 @@ def risky(x):
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-php")]
     fn php_class_with_method_extracts_decl_class() {
         let src = r#"<?php
 class Calculator {
@@ -3842,7 +3784,6 @@ class Calculator {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-php")]
     fn php_echo_statement_extracts_as_expression() {
         let src = "<?php\nfunction main() {\n    echo \"hello\";\n}\n";
         let m = parse_lang(try_lang_for(ParserId::Php).unwrap(), src, extract_php).expect("ok");
@@ -3858,7 +3799,6 @@ class Calculator {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-php")]
     fn php_eval_main_body_extracts() {
         let src = "<?php\nfunction main() {\n    print(\"hi\");\n}\n";
         let m = parse_lang(try_lang_for(ParserId::Php).unwrap(), src, extract_php).expect("ok");
@@ -3874,7 +3814,6 @@ class Calculator {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-php")]
     fn php_eval_print_shape_extracts() {
         let src = "<?php\nfunction main() {\n    print(1 + 2);\n}\n";
         let m = parse_lang(try_lang_for(ParserId::Php).unwrap(), src, extract_php).expect("ok");
@@ -3897,7 +3836,6 @@ class Calculator {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-php")]
     fn php_interface_with_method_sigs_extracts() {
         let src = "<?php\ninterface Printable {\n    public function format(): string;\n    public function version(): int;\n}\n";
         let m = parse_lang(try_lang_for(ParserId::Php).unwrap(), src, extract_php).expect("ok");
@@ -3925,7 +3863,6 @@ class Calculator {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-lua")]
     fn lua_function_with_body_extracts() {
         let src = r#"
 function helper(value)
@@ -3980,7 +3917,6 @@ end
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-lua")]
     fn lua_local_function_extracts_as_decl() {
         let src = r#"
 local function helper(value)
@@ -4003,7 +3939,6 @@ end
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn scala_function_with_body_extracts() {
         let src = r#"
 def helper(value: Int): Int = {
@@ -4043,7 +3978,6 @@ def main(): Unit = {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn scala_class_with_val_field_extracts() {
         let src = r#"
 class Counter(val value: Int) {
@@ -4083,7 +4017,6 @@ class Counter(val value: Int) {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn scala_trait_with_method_sigs_extracts() {
         let src = r#"
 trait Drawable {
@@ -4108,7 +4041,6 @@ trait Drawable {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-php")]
     fn php_functions_extract_bounded_bodies() {
         let src = r#"<?php
 function helper($value): int {
@@ -4162,7 +4094,6 @@ function main() {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-fsharp")]
     fn extract_fsharp_function_with_body() {
         let src = r#"let answer x = x + 42
 
@@ -4187,7 +4118,6 @@ let main _ =
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-fsharp")]
     fn extract_fsharp_eval_main_body() {
         let src = r#"let main _ =
     let value = print("hi")
@@ -4207,7 +4137,6 @@ let main _ =
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-erlang")]
     fn extract_erlang_function_clause() {
         let src = r#"-module(calculator).
 -export([answer/0, main/0]).
@@ -4241,7 +4170,6 @@ main() ->
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-erlang")]
     fn extract_erlang_eval_print_shape() {
         let src = "-module(app).\n-export([main/0]).\n\nmain() ->\n    print(\"hi\").\n";
         let m =
@@ -4266,7 +4194,6 @@ main() ->
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-elixir")]
     fn extract_elixir_defmodule() {
         let src = r#"defmodule Calculator do
   def answer do
@@ -4300,7 +4227,6 @@ end
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-julia")]
     fn extract_julia_struct() {
         let src = r#"mutable struct Point
     x::Int
@@ -4330,7 +4256,6 @@ end
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-julia")]
     fn extract_julia_eval_main_body() {
         let src = r#"function main()
     print("hi")
@@ -4349,7 +4274,6 @@ end
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-ocaml")]
     fn extract_ocaml_eval_print_shape() {
         let src = "let main () =\n  print \"hi\"\n";
         let m = parse_lang(try_lang_for(ParserId::OCaml).unwrap(), src, extract_ocaml).expect("ok");
@@ -4373,7 +4297,6 @@ end
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn extract_r_function() {
         let src = r#"answer <- function(x) {
     return(x + 42)
@@ -4406,7 +4329,6 @@ main <- function() {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn extract_r_eval_main_body() {
         let src = r#"main <- function() {
     print("hi")
@@ -4425,7 +4347,6 @@ main <- function() {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-julia")]
     fn extract_julia_eval_print_shape() {
         let src = r#"function main()
     print("hi")
@@ -4450,7 +4371,6 @@ end
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn extract_r_eval_print_shape() {
         let src = r#"main <- function() {
     print("hi")
@@ -4475,7 +4395,6 @@ end
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn extract_r_eval_numeric_print_shape() {
         let src = r#"main <- function() {
     print(1 + 2)
@@ -4501,7 +4420,6 @@ end
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn extract_swift_eval_main_body() {
         let src = r#"func main() -> Void {
   print("hi")
@@ -4520,7 +4438,6 @@ end
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn extract_swift_eval_print_shape() {
         let src = r#"func main() -> Void {
   print(1 + 2)
@@ -4546,7 +4463,6 @@ end
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn extract_go_eval_main_body() {
         let src = "package main\n\nfunc main() {\n\tprint(\"hi\")\n}\n";
         let m = parse_lang(try_lang_for(ParserId::Go).unwrap(), src, |b, r| {
@@ -4585,7 +4501,6 @@ end
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn extract_go_eval_print_shape() {
         let src = "package main\n\nfunc main() {\n\tprint(1 + 2)\n}\n";
         let m = parse_lang(try_lang_for(ParserId::Go).unwrap(), src, |b, r| {
@@ -4632,7 +4547,6 @@ end
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn extract_go_function_return_type() {
         let src = "package main\n\nfunc answer() int {\n\treturn 42\n}\n";
         let m = parse_lang(try_lang_for(ParserId::Go).unwrap(), src, |b, r| {
@@ -4672,7 +4586,6 @@ end
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-r")]
     fn extract_v_function_return_type() {
         let src = "module main\n\nfn answer() int {\n\treturn 42\n}\n";
         let m = parse_lang(try_lang_for(ParserId::V).unwrap(), src, |b, r| {
@@ -4707,7 +4620,6 @@ end
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-perl")]
     fn extract_perl_subroutine() {
         let src = r#"sub answer {
     my ($x) = @_;
@@ -4738,7 +4650,6 @@ sub main {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-perl")]
     fn extract_perl_eval_main_body() {
         let src = r#"sub main {
     print("hi");
@@ -4757,7 +4668,6 @@ sub main {
     }
 
     #[test]
-    #[cfg(feature = "tree-sitter-perl")]
     fn extract_perl_eval_print_shape() {
         let src = r#"sub main {
     print(1 + 2);

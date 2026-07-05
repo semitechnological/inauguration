@@ -58,7 +58,15 @@ pub(crate) fn cmd_compile(
     }
 
     if matches!(emit, Some(EmitKindCli::Boot)) {
-        return cmd_emit_boot(cwd, &source_path, &out_path, entry, trampoline, target_triple, metadata);
+        return cmd_emit_boot(
+            cwd,
+            &source_path,
+            &out_path,
+            entry,
+            trampoline,
+            target_triple,
+            metadata,
+        );
     }
     let request = OwnedCompileRequest {
         path: source_path,
@@ -175,8 +183,9 @@ fn cmd_emit_boot(
 
     inauguration::core_opt::optimize(&mut module.decls);
 
-    let (_mir, code) = inauguration::compiler::mir_lower::lower_boot_image(&module, entry_name, target_triple)
-        .map_err(|e| InError::Message(format!("lower: {e}")))?;
+    let (_mir, code) =
+        inauguration::compiler::mir_lower::lower_boot_image(&module, entry_name, target_triple)
+            .map_err(|e| InError::Message(format!("lower: {e}")))?;
 
     let tramp_size = trampoline_bytes.len();
     if tramp_size != 0x1000 {
@@ -184,13 +193,13 @@ fn cmd_emit_boot(
             "trampoline size {tramp_size} != expected 4096 (0x1000)"
         )));
     }
-
-    let code = code;
     const SCI_HEADER_SIZE: usize = 256;
     const SCI_CODE_OFFSET: usize = 0x100;
     let mut sci_header = vec![0u8; SCI_HEADER_SIZE];
 
-    let target_is_aarch64 = target_triple.map(|t| t.contains("aarch64") || t.contains("arm64")).unwrap_or(false);
+    let target_is_aarch64 = target_triple
+        .map(|t| t.contains("aarch64") || t.contains("arm64"))
+        .unwrap_or(false);
     if target_is_aarch64 {
         // Encode an AArch64 unconditional branch 'b' to SCI_CODE_OFFSET (which is 256 bytes = 0x100)
         let branch_inst = inauguration::native_emit::aarch64::b(SCI_CODE_OFFSET as i32);

@@ -36,11 +36,8 @@ fn ruby_return_type(body: &[Stmt]) -> Typ {
     if let Some(expr) = find_return_expr(body) {
         return infer_expr_type(expr);
     }
-    if let Some(last) = body.last() {
-        match last {
-            Stmt::Expr(expr) | Stmt::Return(Some(expr)) => return infer_expr_type(expr),
-            _ => {}
-        }
+    if let Some(Stmt::Expr(expr) | Stmt::Return(Some(expr))) = body.last() {
+        return infer_expr_type(expr);
     }
     Typ::Void
 }
