@@ -8,7 +8,8 @@ use crate::native_emit::elf::{
     aarch64_linux_exit_code, aarch64_return_i32_object_code, arm32_linux_exit_code,
     arm32_return_i32_object_code, write_aarch64_executable, write_aarch64_relocatable_object,
     write_arm32_executable, write_arm32_relocatable_object, write_executable,
-    write_x86_64_relocatable_object, x86_64_linux_exit_code, x86_64_return_i32_object_code,
+    write_i386_relocatable_object, write_x86_64_relocatable_object, x86_64_linux_exit_code,
+    x86_64_return_i32_object_code,
 };
 use crate::native_emit::macho::{ExportSymbol, MachOImage, MachOLinkage, write_image};
 use crate::native_emit::target::AARCH64_NONE_TRIPLE;
@@ -271,14 +272,26 @@ fn emit_x86_64_freestanding_object(request: &NativeObjectRequest<'_>) -> NativeO
                 code: result.code,
                 export_name: request.entry.to_string(),
             };
-            write_x86_64_relocatable_object(&object, &mut bytes);
+            if is_i386 {
+                write_i386_relocatable_object(&object, &mut bytes);
+            } else {
+                write_x86_64_relocatable_object(&object, &mut bytes);
+            }
             NativeObjectArtifact {
                 bytes,
                 artifact_kind: "elf-relocatable-object",
                 backend_level: "owned-native-subset-freestanding",
                 runtime_level: "freestanding-none",
-                reason_code: "native-x86_64-unknown-none-freestanding",
-                reason: "inauguration owns ELF64 relocatable object emission for real x86_64 freestanding function bodies",
+                reason_code: if is_i386 {
+                    "native-i386-unknown-none-freestanding"
+                } else {
+                    "native-x86_64-unknown-none-freestanding"
+                },
+                reason: if is_i386 {
+                    "inauguration owns ELF32 i386 relocatable object emission for real i386 freestanding function bodies"
+                } else {
+                    "inauguration owns ELF64 relocatable object emission for real x86_64 freestanding function bodies"
+                },
                 abi_manifest: Some(object_abi_manifest(request)),
             }
         }
@@ -289,14 +302,22 @@ fn emit_x86_64_freestanding_object(request: &NativeObjectRequest<'_>) -> NativeO
                 export_name: request.entry.to_string(),
             };
             let mut bytes = Vec::new();
-            write_x86_64_relocatable_object(&object, &mut bytes);
+            if is_i386 {
+                write_i386_relocatable_object(&object, &mut bytes);
+            } else {
+                write_x86_64_relocatable_object(&object, &mut bytes);
+            }
             NativeObjectArtifact {
                 bytes,
                 artifact_kind: "elf-relocatable-object",
                 backend_level: "owned-object-subset",
                 runtime_level: "freestanding-none",
                 reason_code: "native-object-subset",
-                reason: "inauguration owns ELF64 relocatable object emission for const-evaluable scalar entry functions on freestanding target",
+                reason: if is_i386 {
+                    "inauguration owns ELF32 i386 relocatable object emission for const-evaluable scalar entry functions on freestanding target"
+                } else {
+                    "inauguration owns ELF64 relocatable object emission for const-evaluable scalar entry functions on freestanding target"
+                },
                 abi_manifest: Some(object_abi_manifest(request)),
             }
         }

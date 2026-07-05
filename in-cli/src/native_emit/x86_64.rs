@@ -87,16 +87,30 @@ impl CodeEmitter {
     pub fn patch_u8(&mut self, offset: u32, value: u8) {
         self.bytes[offset as usize] = value;
     }
+
+    /// Emit a 32-bit or 64-bit encoding depending on the current mode.
+    pub fn emit_width(&mut self, bytes_32: &[u8], bytes_64: &[u8]) {
+        if is_32bit() {
+            self.emit_insns(bytes_32);
+        } else {
+            self.emit_insns(bytes_64);
+        }
+    }
 }
 
 // ── REX prefix helpers ──────────────────────────────────────────
+// In 32-bit protected mode REX prefixes are illegal and must be omitted.
 
-fn rex_wb(rm: u8) -> u8 {
-    0x48 | (if rm >= 8 { 1 } else { 0 })
+fn push_rex_w(code: &mut Vec<u8>, rm: u8) {
+    if !is_32bit() {
+        code.push(0x48 | (if rm >= 8 { 1 } else { 0 }));
+    }
 }
 
-fn rex_wr(reg: u8, rm: u8) -> u8 {
-    0x48 | (if reg >= 8 { 1 << 2 } else { 0 }) | (if rm >= 8 { 1 } else { 0 })
+fn push_rex_wr(code: &mut Vec<u8>, reg: u8, rm: u8) {
+    if !is_32bit() {
+        code.push(0x48 | (if reg >= 8 { 1 << 2 } else { 0 }) | (if rm >= 8 { 1 } else { 0 }));
+    }
 }
 
 // ── ModRM byte ──────────────────────────────────────────────────
@@ -130,26 +144,34 @@ pub fn pop_r(reg: u8) -> Vec<u8> {
     }
 }
 
-/// mov r64, imm64  (REX.W + B8+rd io)
+/// mov r32/r64, imm32/imm64  (REX.W + B8+rd io)
 pub fn mov_ri64(reg: u8, imm: i64) -> Vec<u8> {
-    let mut code = vec![rex_wb(reg), 0xB8 + (reg & 7)];
-    code.extend_from_slice(&imm.to_le_bytes());
+    let mut code = Vec::new();
+    push_rex_w(&mut code, reg);
+    code.push(0xB8 + (reg & 7));
+    if is_32bit() {
+        code.extend_from_slice(&(imm as i32).to_le_bytes());
+    } else {
+        code.extend_from_slice(&imm.to_le_bytes());
+    }
     code
 }
 
-/// mov r/m64, r64  (REX.W + 89 /r, reg=src, rm=dst)
+/// mov r/m32/r/m64, r32/r64  (REX.W + 89 /r, reg=src, rm=dst)
 pub fn mov_rr(dst: u8, src: u8) -> Vec<u8> {
-    let mut code = vec![rex_wr(dst, src), 0x89];
+    let mut code = Vec::new();
+    push_rex_wr(&mut code, src, dst);
+    code.push(0x89);
     code.push(modrm(3, src & 7, dst & 7));
     code
 }
 
-/// mov r/m64, r64  (REX.W + 89 /r) — alias for mov_rr
+/// mov r/m32/r/m64, r32/r64  (REX.W + 89 /r) — alias for mov_rr
 pub fn mov_mr(dst: u8, src: u8) -> Vec<u8> {
     mov_rr(dst, src)
 }
 
-/// mov r64, [r/m64 + disp8]  (REX.W + 8B /r with ModRM)
+/// mov r32/r64, [r/m32/r/m64 + disp]  (REX.W + 8B /r with ModRM)
 /// Emit a SIB byte for [RSP + disp] addressing when base is RSP (4) or RBP (5).
 /// Returns None if no SIB is needed.
 fn sib_for_base(base: u8) -> Option<u8> {
@@ -166,10 +188,11 @@ fn sib_for_base(base: u8) -> Option<u8> {
     }
 }
 
-/// mov [r/m64 + disp8], r64  (REX.W + 89 /r with ModRM)
+/// mov [r/m32/r/m64 + disp], r32/r64  (REX.W + 89 /r with ModRM)
 /// When base is RSP (4), a SIB byte must follow ModRM.
 pub fn mov_m_r(base: u8, disp: i32, reg: u8) -> Vec<u8> {
-    let mut code = vec![rex_wr(reg, base)];
+    let mut code = Vec::new();
+    push_rex_wr(&mut code, reg, base);
     code.push(0x89);
     // SIB needed only for RSP (rm=4 always requires SIB). RBP with Mod=01 works without SIB.
     let needs_sib = base == RSP;
@@ -191,10 +214,11 @@ pub fn mov_m_r(base: u8, disp: i32, reg: u8) -> Vec<u8> {
     code
 }
 
-/// mov r64, [r/m64 + disp8]  (REX.W + 8B /r with ModRM)
+/// mov r32/r64, [r/m32/r/m64 + disp]  (REX.W + 8B /r with ModRM)
 /// When base is RSP (4), a SIB byte must follow ModRM.
 pub fn mov_r_m(reg: u8, base: u8, disp: i32) -> Vec<u8> {
-    let mut code = vec![rex_wr(reg, base)];
+    let mut code = Vec::new();
+    push_rex_wr(&mut code, reg, base);
     code.push(0x8B);
     let needs_sib = base == RSP;
     if disp == 0 && !needs_sib && base != RBP {
@@ -225,23 +249,39 @@ pub fn ldr64(reg: u8, disp: u16) -> Vec<u8> {
     mov_r_m(reg, RBP, -(disp as i32 + 8))
 }
 
-/// mov rax, [abs64] — load from absolute 64-bit address (uses moffs form, rax only)
+/// mov eax/rax, [abs] — load from absolute address (uses moffs form, eax/rax only)
 pub fn mov_rax_from_abs(addr: u64) -> Vec<u8> {
-    let mut code = vec![0x48, 0xA1]; // REX.W + MOV RAX, moffs64
-    code.extend_from_slice(&addr.to_le_bytes());
+    let mut code = Vec::new();
+    if is_32bit() {
+        code.push(0xA1); // MOV EAX, moffs32
+        code.extend_from_slice(&(addr as u32).to_le_bytes());
+    } else {
+        code.push(0x48); // REX.W
+        code.push(0xA1); // MOV RAX, moffs64
+        code.extend_from_slice(&addr.to_le_bytes());
+    }
     code
 }
 
-/// mov [abs64], rax — store to absolute 64-bit address (uses moffs form, rax only)
+/// mov [abs], eax/rax — store to absolute address (uses moffs form, eax/rax only)
 pub fn mov_abs_from_rax(addr: u64) -> Vec<u8> {
-    let mut code = vec![0x48, 0xA3]; // REX.W + MOV moffs64, RAX
-    code.extend_from_slice(&addr.to_le_bytes());
+    let mut code = Vec::new();
+    if is_32bit() {
+        code.push(0xA3); // MOV moffs32, EAX
+        code.extend_from_slice(&(addr as u32).to_le_bytes());
+    } else {
+        code.push(0x48); // REX.W
+        code.push(0xA3); // MOV moffs64, RAX
+        code.extend_from_slice(&addr.to_le_bytes());
+    }
     code
 }
 
-/// mov r64, [abs32] — load from absolute 32-bit address (any register)
+/// mov r32/r64, [abs32] — load from absolute 32-bit address (any register)
 pub fn mov_r_from_abs32(reg: u8, addr: u32) -> Vec<u8> {
-    let mut code = vec![rex_wr(reg, 0), 0x8B];
+    let mut code = Vec::new();
+    push_rex_wr(&mut code, reg, 0);
+    code.push(0x8B);
     // ModRM: mod=00, reg=reg, r/m=100 (SIB)
     code.push(modrm(0, reg & 7, 4));
     // SIB: scale=0, index=4 (none), base=5 (disp32 = absolute)
@@ -250,103 +290,146 @@ pub fn mov_r_from_abs32(reg: u8, addr: u32) -> Vec<u8> {
     code
 }
 
-/// mov [abs32], r64 — store to absolute 32-bit address (any register)
+/// mov [abs32], r32/r64 — store to absolute 32-bit address (any register)
 pub fn mov_abs32_from_r(reg: u8, addr: u32) -> Vec<u8> {
-    let mut code = vec![rex_wr(reg, 0), 0x89];
+    let mut code = Vec::new();
+    push_rex_wr(&mut code, reg, 0);
+    code.push(0x89);
     code.push(modrm(0, reg & 7, 4));
     code.push(0x25);
     code.extend_from_slice(&addr.to_le_bytes());
     code
 }
 
-/// sub r/m64, imm8  (REX.W + 83 /5 ib)
+/// sub r/m32/r/m64, imm8  (REX.W + 83 /5 ib)
 pub fn sub_rmi8(dst: u8, imm: u8) -> Vec<u8> {
-    let mut code = vec![rex_wb(dst), 0x83];
+    let mut code = Vec::new();
+    push_rex_w(&mut code, dst);
+    code.push(0x83);
     code.push(modrm(3, 5, dst & 7));
     code.push(imm);
     code
 }
 
-/// sub r/m64, imm32  (REX.W + 81 /5 id)
+/// sub r/m32/r/m64, imm32  (REX.W + 81 /5 id)
 pub fn sub_rmi32(dst: u8, imm: i32) -> Vec<u8> {
-    let mut code = vec![rex_wb(dst), 0x81];
+    let mut code = Vec::new();
+    push_rex_w(&mut code, dst);
+    code.push(0x81);
     code.push(modrm(3, 5, dst & 7));
     code.extend_from_slice(&imm.to_le_bytes());
     code
 }
 
-/// add r/m64, imm8  (REX.W + 83 /0 ib)
+/// add r/m32/r/m64, imm8  (REX.W + 83 /0 ib)
 pub fn add_rmi8(dst: u8, imm: u8) -> Vec<u8> {
-    let mut code = vec![rex_wb(dst), 0x83];
+    let mut code = Vec::new();
+    push_rex_w(&mut code, dst);
+    code.push(0x83);
     code.push(modrm(3, 0, dst & 7));
     code.push(imm);
     code
 }
 
-/// sub rsp, imm8  — stack frame allocation
+/// sub esp/rsp, imm8  — stack frame allocation
 pub fn sub_rsp_i8(imm: u8) -> Vec<u8> {
     sub_rmi8(RSP, imm)
 }
 
-/// sub rsp, imm32  — stack frame allocation (large frames)
+/// sub esp/rsp, imm32  — stack frame allocation (large frames)
 pub fn sub_rsp_i32(imm: i32) -> Vec<u8> {
     sub_rmi32(RSP, imm)
 }
 
-/// lea r64, [rsp + disp8]
+/// lea r32/r64, [rsp + disp8]
 pub fn lea_rsp_disp(reg: u8, disp: u8) -> Vec<u8> {
-    let mut code = vec![rex_wr(reg, RSP), 0x8D];
+    let mut code = Vec::new();
+    push_rex_wr(&mut code, reg, RSP);
+    code.push(0x8D);
     code.push(modrm(1, reg & 7, RSP & 7));
     code.push(disp);
     code
 }
 
-/// add r/m64, r64  (REX.W + 01 /r, reg=src, rm=dst)
+/// add r/m32/r/m64, r32/r64  (REX.W + 01 /r, reg=src, rm=dst)
 pub fn add_rr(dst: u8, src: u8) -> Vec<u8> {
-    let mut code = vec![rex_wr(dst, src), 0x01];
+    let mut code = Vec::new();
+    push_rex_wr(&mut code, src, dst);
+    code.push(0x01);
     code.push(modrm(3, src & 7, dst & 7));
     code
 }
 
-/// sub r/m64, r64  (REX.W + 29 /r, reg=src, rm=dst)
+/// sub r/m32/r/m64, r32/r64  (REX.W + 29 /r, reg=src, rm=dst)
 pub fn sub_rr(dst: u8, src: u8) -> Vec<u8> {
-    let mut code = vec![rex_wr(dst, src), 0x29];
+    let mut code = Vec::new();
+    push_rex_wr(&mut code, src, dst);
+    code.push(0x29);
     code.push(modrm(3, src & 7, dst & 7));
     code
 }
 
-/// imul r64, r/m64  (REX.W + 0F AF /r, reg=dst, rm=src)
+/// imul r32/r64, r/m32/r/m64  (REX.W + 0F AF /r, reg=dst, rm=src)
 pub fn imul_rr(dst: u8, src: u8) -> Vec<u8> {
-    let mut code = vec![rex_wr(dst, src), 0x0F, 0xAF];
+    let mut code = Vec::new();
+    push_rex_wr(&mut code, dst, src);
+    code.push(0x0F);
+    code.push(0xAF);
     code.push(modrm(3, dst & 7, src & 7));
     code
 }
 
-/// xor r64, r/m64 (REX.W + 33 /r, reg=src, rm=dst) — also used for zero idiom
+/// xor r32/r64, r/m32/r/m64 (REX.W + 33 /r, reg=src, rm=dst) — also used for zero idiom
 pub fn xor_rr(dst: u8, src: u8) -> Vec<u8> {
-    let mut code = vec![rex_wr(dst, src), 0x33];
+    let mut code = Vec::new();
+    push_rex_wr(&mut code, src, dst);
+    code.push(0x33);
     code.push(modrm(3, src & 7, dst & 7));
     code
 }
 
-/// cmp r/m64, r64  (REX.W + 39 /r, reg=src, rm=dst)
+/// and r32/r64, r/m32/r/m64 (REX.W + 23 /r, reg=src, rm=dst)
+pub fn and_rr(dst: u8, src: u8) -> Vec<u8> {
+    let mut code = Vec::new();
+    push_rex_wr(&mut code, src, dst);
+    code.push(0x23);
+    code.push(modrm(3, src & 7, dst & 7));
+    code
+}
+
+/// or r32/r64, r/m32/r/m64 (REX.W + 0B /r, reg=src, rm=dst)
+pub fn or_rr(dst: u8, src: u8) -> Vec<u8> {
+    let mut code = Vec::new();
+    push_rex_wr(&mut code, src, dst);
+    code.push(0x0B);
+    code.push(modrm(3, src & 7, dst & 7));
+    code
+}
+
+/// cmp r/m32/r/m64, r32/r64  (REX.W + 39 /r, reg=src, rm=dst)
 pub fn cmp_rr(a: u8, b: u8) -> Vec<u8> {
-    let mut code = vec![rex_wr(a, b), 0x39];
+    let mut code = Vec::new();
+    push_rex_wr(&mut code, b, a);
+    code.push(0x39);
     code.push(modrm(3, b & 7, a & 7));
     code
 }
 
-/// cmp r/m64, imm8 (REX.W + 83 /7 ib)
+/// cmp r/m32/r/m64, imm8 (REX.W + 83 /7 ib)
 pub fn cmp_rmi8(rm: u8, imm: u8) -> Vec<u8> {
-    let mut code = vec![rex_wb(rm), 0x83];
+    let mut code = Vec::new();
+    push_rex_w(&mut code, rm);
+    code.push(0x83);
     code.push(modrm(3, 7, rm & 7));
     code.push(imm);
     code
 }
 
-/// cmp r/m64, imm32 (REX.W + 81 /7 id)
+/// cmp r/m32/r/m64, imm32 (REX.W + 81 /7 id)
 pub fn cmp_rmi32(rm: u8, imm: i32) -> Vec<u8> {
-    let mut code = vec![rex_wb(rm), 0x81];
+    let mut code = Vec::new();
+    push_rex_w(&mut code, rm);
+    code.push(0x81);
     code.push(modrm(3, 7, rm & 7));
     code.extend_from_slice(&imm.to_le_bytes());
     code
@@ -393,9 +476,11 @@ pub fn call_rel32(rel_offset: i32) -> Vec<u8> {
     code
 }
 
-/// test r/m64, r64  (REX.W + 85 /r, reg=src, rm=dst)
+/// test r/m32/r/m64, r32/r64  (REX.W + 85 /r, reg=src, rm=dst)
 pub fn test_rr(a: u8, b: u8) -> Vec<u8> {
-    let mut code = vec![rex_wr(a, b), 0x85];
+    let mut code = Vec::new();
+    push_rex_wr(&mut code, b, a);
+    code.push(0x85);
     code.push(modrm(3, b & 7, a & 7));
     code
 }
@@ -405,6 +490,138 @@ pub fn nop() -> Vec<u8> {
     vec![0x90]
 }
 
+// ── Width-agnostic helpers used by the lowerer ─────────────────────
+
+/// mov [dst], src — store register to register-indirect address.
+pub fn mov_ptr_reg(dst: u8, src: u8) -> Vec<u8> {
+    let mut code = Vec::new();
+    push_rex_wr(&mut code, src, dst);
+    code.push(0x89);
+    code.push(modrm(0, src & 7, dst & 7));
+    code
+}
+
+/// mov reg, [base] — load from register-indirect address.
+pub fn mov_reg_ptr(reg: u8, base: u8) -> Vec<u8> {
+    let mut code = Vec::new();
+    push_rex_wr(&mut code, reg, base);
+    code.push(0x8B);
+    code.push(modrm(0, reg & 7, base & 7));
+    code
+}
+
+/// shl reg, imm8
+pub fn shl_reg_imm(reg: u8, imm: u8) -> Vec<u8> {
+    let mut code = Vec::new();
+    push_rex_w(&mut code, reg);
+    code.push(0xC1);
+    code.push(modrm(3, 4, reg & 7));
+    code.push(imm);
+    code
+}
+
+/// shr reg, imm8
+pub fn shr_reg_imm(reg: u8, imm: u8) -> Vec<u8> {
+    let mut code = Vec::new();
+    push_rex_w(&mut code, reg);
+    code.push(0xC1);
+    code.push(modrm(3, 5, reg & 7));
+    code.push(imm);
+    code
+}
+
+/// shl reg, cl
+pub fn shl_reg_cl(reg: u8) -> Vec<u8> {
+    let mut code = Vec::new();
+    push_rex_w(&mut code, reg);
+    code.push(0xD3);
+    code.push(modrm(3, 4, reg & 7));
+    code
+}
+
+/// shr reg, cl
+pub fn shr_reg_cl(reg: u8) -> Vec<u8> {
+    let mut code = Vec::new();
+    push_rex_w(&mut code, reg);
+    code.push(0xD3);
+    code.push(modrm(3, 5, reg & 7));
+    code
+}
+
+/// neg reg
+pub fn neg_reg(reg: u8) -> Vec<u8> {
+    let mut code = Vec::new();
+    push_rex_w(&mut code, reg);
+    code.push(0xF7);
+    code.push(modrm(3, 3, reg & 7));
+    code
+}
+
+/// not reg
+pub fn not_reg(reg: u8) -> Vec<u8> {
+    let mut code = Vec::new();
+    push_rex_w(&mut code, reg);
+    code.push(0xF7);
+    code.push(modrm(3, 2, reg & 7));
+    code
+}
+
+/// div reg  (unsigned divide: edx:eax / reg)
+pub fn div_reg(reg: u8) -> Vec<u8> {
+    let mut code = Vec::new();
+    push_rex_w(&mut code, reg);
+    code.push(0xF7);
+    code.push(modrm(3, 6, reg & 7));
+    code
+}
+
+/// setcc reg (8-bit). condition is the second opcode byte (e.g. 0x94 sete, 0x95 setne).
+pub fn setcc(condition: u8, reg: u8) -> Vec<u8> {
+    let mut code = vec![0x0F, condition];
+    code.push(modrm(3, 0, reg & 7));
+    code
+}
+
+/// movzx reg, src8
+pub fn movzx_r8(reg: u8, src: u8) -> Vec<u8> {
+    let mut code = Vec::new();
+    push_rex_wr(&mut code, reg, src);
+    code.push(0x0F);
+    code.push(0xB6);
+    code.push(modrm(3, reg & 7, src & 7));
+    code
+}
+
+/// movzx reg, src16
+pub fn movzx_r16(reg: u8, src: u8) -> Vec<u8> {
+    let mut code = Vec::new();
+    push_rex_wr(&mut code, reg, src);
+    code.push(0x0F);
+    code.push(0xB7);
+    code.push(modrm(3, reg & 7, src & 7));
+    code
+}
+
+/// movzx reg, byte [base]
+pub fn movzx_m8(reg: u8, base: u8) -> Vec<u8> {
+    let mut code = Vec::new();
+    push_rex_wr(&mut code, reg, base);
+    code.push(0x0F);
+    code.push(0xB6);
+    code.push(modrm(0, reg & 7, base & 7));
+    code
+}
+
+/// movzx reg, word [base]
+pub fn movzx_m16(reg: u8, base: u8) -> Vec<u8> {
+    let mut code = Vec::new();
+    push_rex_wr(&mut code, reg, base);
+    code.push(0x0F);
+    code.push(0xB7);
+    code.push(modrm(0, reg & 7, base & 7));
+    code
+}
+
 // ── Compound sequences ──────────────────────────────────────────
 
 /// Zero a register using `xor reg, reg`
@@ -412,8 +629,8 @@ pub fn zero_reg(reg: u8) -> Vec<u8> {
     xor_rr(reg, reg)
 }
 
-/// Load a 64-bit immediate into a register.
-/// Uses `mov r64, imm64` for the general case.
+/// Load a 32-bit/64-bit immediate into a register.
+/// Uses `mov r64, imm64` in 64-bit mode and `mov r32, imm32` in 32-bit mode.
 pub fn load_i64(reg: u8, value: i64) -> Vec<u8> {
     if value == 0 {
         zero_reg(reg)
@@ -422,12 +639,18 @@ pub fn load_i64(reg: u8, value: i64) -> Vec<u8> {
     }
 }
 
-/// Load a 32-bit immediate (sign-extended) into a register.
+/// Load a 32-bit immediate into a register.
 pub fn load_i32(reg: u8, value: i32) -> Vec<u8> {
     if value == 0 {
         zero_reg(reg)
     } else {
-        let mut code = vec![if reg >= 8 { 0x41 } else { 0x40 }, 0xB8 + (reg & 7)];
+        let mut code = Vec::new();
+        if !is_32bit() && reg >= 8 {
+            code.push(0x41); // REX.B for r8-r15
+        } else if !is_32bit() {
+            code.push(0x40); // REX prefix with no flags (operand-size 32)
+        }
+        code.push(0xB8 + (reg & 7));
         code.extend_from_slice(&value.to_le_bytes());
         code
     }

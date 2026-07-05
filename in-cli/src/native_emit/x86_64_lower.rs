@@ -222,7 +222,13 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
             if let Some(&func_offset) = function_offsets.get(fn_name) {
                 let abs_addr = KERNEL_BASE + func_offset as u64;
                 let site = call.site as usize;
-                if site + 8 <= emitter.bytes.len() {
+                if x86_64::is_32bit() {
+                    if site + 4 <= emitter.bytes.len() {
+                        emitter.bytes[site..site + 4]
+                            .copy_from_slice(&(abs_addr as u32).to_le_bytes());
+                        relocations.push(call.site);
+                    }
+                } else if site + 8 <= emitter.bytes.len() {
                     emitter.bytes[site..site + 8].copy_from_slice(&abs_addr.to_le_bytes());
                     relocations.push(call.site);
                 }
@@ -247,7 +253,13 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
             for &(site, ref content) in &str_refs {
                 if content == s {
                     let site_u = site as usize;
-                    if site_u + 8 <= emitter.bytes.len() {
+                    if x86_64::is_32bit() {
+                        if site_u + 4 <= emitter.bytes.len() {
+                            emitter.bytes[site_u..site_u + 4]
+                                .copy_from_slice(&(abs_addr as u32).to_le_bytes());
+                            relocations.push(site);
+                        }
+                    } else if site_u + 8 <= emitter.bytes.len() {
                         emitter.bytes[site_u..site_u + 8].copy_from_slice(&abs_addr.to_le_bytes());
                         relocations.push(site);
                     }
@@ -676,26 +688,44 @@ fn lower_function(
         // Save clobbered params before zero-fill destroys them
         for (i, (name, _)) in func.params.iter().enumerate() {
             if i < 6 && ctx.locals.contains_key(name) && stosq_clobbers[i] {
-                let temp_disp = 16 + i as i32 * 8;
+                let temp_disp = if x86_64::is_32bit() {
+                    8 + i as i32 * 4
+                } else {
+                    16 + i as i32 * 8
+                };
                 emitter.emit_insns(&x86_64::mov_m_r(RBP, temp_disp, param_regs[i]));
             }
         }
         // Zero-fill the allocated stack frame
         if frame_size >= 8 {
-            let qwords = frame_size / 8;
-            emitter.emit_bytes(&[0x48, 0x31, 0xC0]); // xor eax, eax
-            let mut mov_rcx = vec![0x48, 0xC7, 0xC1];
-            mov_rcx.extend_from_slice(&qwords.to_le_bytes());
-            emitter.emit_insns(&mov_rcx);
-            emitter.emit_bytes(&[0x48, 0x8D, 0x3C, 0x24]); // lea rdi, [rsp]
-            emitter.emit_bytes(&[0xF3, 0x48, 0xAB]); // rep stosq
+            if x86_64::is_32bit() {
+                let dwords = frame_size / 4;
+                emitter.emit_bytes(&[0x31, 0xC0]); // xor eax, eax
+                let mut mov_ecx = vec![0xB9];
+                mov_ecx.extend_from_slice(&dwords.to_le_bytes());
+                emitter.emit_insns(&mov_ecx);
+                emitter.emit_bytes(&[0x8D, 0x3C, 0x24]); // lea edi, [esp]
+                emitter.emit_bytes(&[0xF3, 0xAB]); // rep stosd
+            } else {
+                let qwords = frame_size / 8;
+                emitter.emit_bytes(&[0x48, 0x31, 0xC0]); // xor eax, eax
+                let mut mov_rcx = vec![0x48, 0xC7, 0xC1];
+                mov_rcx.extend_from_slice(&qwords.to_le_bytes());
+                emitter.emit_insns(&mov_rcx);
+                emitter.emit_bytes(&[0x48, 0x8D, 0x3C, 0x24]); // lea rdi, [rsp]
+                emitter.emit_bytes(&[0xF3, 0x48, 0xAB]); // rep stosq
+            }
         }
         // Restore clobbered params, then store ALL params to stack slots
         for (i, (name, _)) in func.params.iter().enumerate() {
             if i < 6 {
                 if let Some(StackSlot::Scalar(offset)) = ctx.locals.get(name) {
                     if stosq_clobbers[i] {
-                        let temp_disp = 16 + i as i32 * 8;
+                        let temp_disp = if x86_64::is_32bit() {
+                            8 + i as i32 * 4
+                        } else {
+                            16 + i as i32 * 8
+                        };
                         emitter.emit_insns(&x86_64::mov_r_m(param_regs[i], RBP, temp_disp));
                     }
                     emitter.emit_insns(&x86_64::str64(param_regs[i], *offset as u16));
@@ -745,8 +775,8 @@ fn lower_function(
             ] {
                 emitter.emit_insns(&x86_64::pop_r(reg));
             }
-            // iretq pops RIP/CS/RFLAGS from interrupt stack frame
-            emitter.emit_bytes(&[0x48, 0xCF]);
+            // iret/iretq pops RIP/CS/RFLAGS from interrupt stack frame
+            emitter.emit_width(&[0xCF], &[0x48, 0xCF]);
         } else {
             emitter.emit_insns(&x86_64::epilogue());
         }
@@ -831,7 +861,7 @@ fn lower_stmt(
                 ] {
                     emitter.emit_insns(&x86_64::pop_r(reg));
                 }
-                emitter.emit_bytes(&[0x48, 0xCF]);
+                emitter.emit_width(&[0xCF], &[0x48, 0xCF]); // iret/iretq
             } else {
                 emitter.emit_insns(&x86_64::epilogue());
             }
@@ -928,13 +958,13 @@ fn lower_stmt(
             lower_expr_into(emitter, ctx, base, RDI, pending_calls)?;
             lower_expr_into(emitter, ctx, index, RAX, pending_calls)?;
             // RAX = index; shl rax, 3 (multiply by 8 for Int)
-            emitter.emit_bytes(&[0x48, 0xC1, 0xE0, 0x03]); // shl rax, 3
+            emitter.emit_insns(&x86_64::shl_reg_imm(RAX, 3));
             // add rdi, rax
-            emitter.emit_bytes(&[0x48, 0x01, 0xC7]);
+            emitter.emit_insns(&x86_64::add_rr(RDI, RAX));
             // value into rsi
             lower_expr_into(emitter, ctx, value, RSI, pending_calls)?;
-            // mov [rdi], rsi  → 48 89 37
-            emitter.emit_bytes(&[0x48, 0x89, 0x37]);
+            // mov [rdi], rsi
+            emitter.emit_insns(&x86_64::mov_ptr_reg(RDI, RSI));
             Ok(())
         }
         Stmt::Break => {
@@ -1342,14 +1372,22 @@ fn lower_ident_ref(
     // Check if this is a function name (used as address/pointer)
     if ctx.functions.contains_key(name) {
         // Emit placeholder address (will be patched after all functions are laid out).
-        let placeholder = if target_reg == RAX {
-            let mut code = vec![0x48, 0xB8];
-            code.extend_from_slice(&[0xEF, 0xBE, 0xAD, 0xDE, 0x00, 0x00, 0x00, 0x00]);
-            code
+        let (placeholder, site_offset) = if target_reg == RAX {
+            if x86_64::is_32bit() {
+                let mut code = vec![0xB8];
+                code.extend_from_slice(&[0xEF, 0xBE, 0xAD, 0xDE]);
+                (code, emitter.len() + 1)
+            } else {
+                let mut code = vec![0x48, 0xB8];
+                code.extend_from_slice(&[0xEF, 0xBE, 0xAD, 0xDE, 0x00, 0x00, 0x00, 0x00]);
+                (code, emitter.len() + 2)
+            }
         } else {
-            x86_64::mov_ri64(target_reg, 0xDEADBEEF)
+            (
+                x86_64::mov_ri64(target_reg, 0xDEADBEEF),
+                emitter.len() + if x86_64::is_32bit() { 1 } else { 2 },
+            )
         };
-        let site_offset = emitter.len() + 2;
         emitter.emit_insns(&placeholder);
         pending_calls.push(PendingCall {
             site: site_offset as u32,
@@ -1401,81 +1439,81 @@ fn lower_binary_expr(
         }
         ">" => {
             emitter.emit_insns(&x86_64::cmp_rr(RBX, RAX));
-            emitter.emit_bytes(&[0x0F, 0x9F, 0xC0]); // setg al
-            emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]); // movzx rax, al
+            emitter.emit_insns(&x86_64::setcc(0x9F, RAX)); // setg al
+            emitter.emit_insns(&x86_64::movzx_r8(RAX, RAX));
         }
         ">=" => {
             emitter.emit_insns(&x86_64::cmp_rr(RBX, RAX));
-            emitter.emit_bytes(&[0x0F, 0x9D, 0xC0]); // setge al
-            emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]); // movzx rax, al
+            emitter.emit_insns(&x86_64::setcc(0x9D, RAX)); // setge al
+            emitter.emit_insns(&x86_64::movzx_r8(RAX, RAX));
         }
         "&&" => {
             emitter.emit_insns(&x86_64::test_rr(RAX, RAX));
-            emitter.emit_bytes(&[0x0F, 0x95, 0xC0]); // setne al
-            emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]); // movzx rax, al
-            emitter.emit_bytes(&[0x48, 0x89, 0xC1]); // mov rcx, rax
-            emitter.emit_bytes(&[0x48, 0x85, 0xDB]); // test rbx, rbx
-            emitter.emit_bytes(&[0x0F, 0x95, 0xC3]); // setne bl
-            emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC3]); // movzx rbx, bl
-            emitter.emit_bytes(&[0x48, 0x21, 0xD9]); // and rcx, rbx
-            emitter.emit_bytes(&[0x48, 0x89, 0xC8]); // mov rax, rcx
+            emitter.emit_insns(&x86_64::setcc(0x95, RAX)); // setne al
+            emitter.emit_insns(&x86_64::movzx_r8(RAX, RAX));
+            emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
+            emitter.emit_insns(&x86_64::test_rr(RBX, RBX));
+            emitter.emit_insns(&x86_64::setcc(0x95, RBX)); // setne bl
+            emitter.emit_insns(&x86_64::movzx_r8(RBX, RBX));
+            emitter.emit_insns(&x86_64::and_rr(RCX, RBX));
+            emitter.emit_insns(&x86_64::mov_rr(RAX, RCX));
         }
         "||" => {
             emitter.emit_insns(&x86_64::test_rr(RAX, RAX));
-            emitter.emit_bytes(&[0x0F, 0x95, 0xC0]); // setne al
-            emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]); // movzx rax, al
-            emitter.emit_bytes(&[0x48, 0x89, 0xC1]); // mov rcx, rax
-            emitter.emit_bytes(&[0x48, 0x85, 0xDB]); // test rbx, rbx
-            emitter.emit_bytes(&[0x0F, 0x95, 0xC3]); // setne bl
-            emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC3]); // movzx rbx, bl
-            emitter.emit_bytes(&[0x48, 0x09, 0xD9]); // or rcx, rbx
-            emitter.emit_bytes(&[0x48, 0x89, 0xC8]); // mov rax, rcx
+            emitter.emit_insns(&x86_64::setcc(0x95, RAX)); // setne al
+            emitter.emit_insns(&x86_64::movzx_r8(RAX, RAX));
+            emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
+            emitter.emit_insns(&x86_64::test_rr(RBX, RBX));
+            emitter.emit_insns(&x86_64::setcc(0x95, RBX)); // setne bl
+            emitter.emit_insns(&x86_64::movzx_r8(RBX, RBX));
+            emitter.emit_insns(&x86_64::or_rr(RCX, RBX));
+            emitter.emit_insns(&x86_64::mov_rr(RAX, RCX));
         }
         "<=" => {
             emitter.emit_insns(&x86_64::cmp_rr(RBX, RAX));
-            emitter.emit_bytes(&[0x0F, 0x9E, 0xC0]); // setle al
-            emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]); // movzx rax, al
+            emitter.emit_insns(&x86_64::setcc(0x9E, RAX)); // setle al
+            emitter.emit_insns(&x86_64::movzx_r8(RAX, RAX));
         }
         "/" => {
             emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
             emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
-            emitter.emit_bytes(&[0x48, 0x31, 0xD2]); // xor rdx, rdx
-            emitter.emit_bytes(&[0x48, 0xF7, 0xF1]); // div rcx
+            emitter.emit_insns(&x86_64::zero_reg(RDX));
+            emitter.emit_insns(&x86_64::div_reg(RCX));
         }
         "<" => {
             emitter.emit_insns(&x86_64::cmp_rr(RBX, RAX));
-            emitter.emit_bytes(&[0x0F, 0x9C, 0xC0]); // setl al
-            emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]); // movzx rax, al
+            emitter.emit_insns(&x86_64::setcc(0x9C, RAX)); // setl al
+            emitter.emit_insns(&x86_64::movzx_r8(RAX, RAX));
         }
         "==" | "=" => {
             emitter.emit_insns(&x86_64::cmp_rr(RBX, RAX));
-            emitter.emit_bytes(&[0x0F, 0x94, 0xC0]); // sete al
-            emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]); // movzx rax, al
+            emitter.emit_insns(&x86_64::setcc(0x94, RAX)); // sete al
+            emitter.emit_insns(&x86_64::movzx_r8(RAX, RAX));
         }
         "!=" => {
             emitter.emit_insns(&x86_64::cmp_rr(RBX, RAX));
-            emitter.emit_bytes(&[0x0F, 0x95, 0xC0]); // setne al
-            emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]); // movzx rax, al
+            emitter.emit_insns(&x86_64::setcc(0x95, RAX)); // setne al
+            emitter.emit_insns(&x86_64::movzx_r8(RAX, RAX));
         }
         "^" => {
             emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
             emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
-            emitter.emit_bytes(&[0x48, 0x31, 0xC8]); // xor rax, rcx
+            emitter.emit_insns(&x86_64::xor_rr(RAX, RCX));
         }
         "<<" => {
             emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
             emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
-            emitter.emit_bytes(&[0x48, 0xD3, 0xE0]); // shl rax, cl
+            emitter.emit_insns(&x86_64::shl_reg_cl(RAX));
         }
         ">>" => {
             emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
             emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
-            emitter.emit_bytes(&[0x48, 0xD3, 0xE8]); // shr rax, cl
+            emitter.emit_insns(&x86_64::shr_reg_cl(RAX));
         }
         "&" => {
             emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
             emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
-            emitter.emit_bytes(&[0x48, 0x21, 0xC8]); // and rax, rcx
+            emitter.emit_insns(&x86_64::and_rr(RAX, RCX));
         }
         "+=" => {
             emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
@@ -1490,7 +1528,7 @@ fn lower_binary_expr(
         "|" => {
             emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
             emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
-            emitter.emit_bytes(&[0x48, 0x09, 0xC8]); // or rax, rcx
+            emitter.emit_insns(&x86_64::or_rr(RAX, RCX));
         }
         "*=" => {
             emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
@@ -1500,47 +1538,47 @@ fn lower_binary_expr(
         "/=" => {
             emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
             emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
-            emitter.emit_bytes(&[0x48, 0x31, 0xD2]); // xor rdx, rdx
-            emitter.emit_bytes(&[0x48, 0xF7, 0xF1]); // div rcx
+            emitter.emit_insns(&x86_64::zero_reg(RDX));
+            emitter.emit_insns(&x86_64::div_reg(RCX));
         }
         "%=" => {
             emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
             emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
-            emitter.emit_bytes(&[0x48, 0x31, 0xD2]); // xor rdx, rdx
-            emitter.emit_bytes(&[0x48, 0xF7, 0xF1]); // div rcx
-            emitter.emit_bytes(&[0x48, 0x89, 0xD0]); // mov rax, rdx
+            emitter.emit_insns(&x86_64::zero_reg(RDX));
+            emitter.emit_insns(&x86_64::div_reg(RCX));
+            emitter.emit_insns(&x86_64::mov_rr(RAX, RDX));
         }
         "&=" => {
             emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
             emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
-            emitter.emit_bytes(&[0x48, 0x21, 0xC8]); // and rax, rcx
+            emitter.emit_insns(&x86_64::and_rr(RAX, RCX));
         }
         "|=" => {
             emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
             emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
-            emitter.emit_bytes(&[0x48, 0x09, 0xC8]); // or rax, rcx
+            emitter.emit_insns(&x86_64::or_rr(RAX, RCX));
         }
         "^=" => {
             emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
             emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
-            emitter.emit_bytes(&[0x48, 0x31, 0xC8]); // xor rax, rcx
+            emitter.emit_insns(&x86_64::xor_rr(RAX, RCX));
         }
         "<<=" => {
             emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
             emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
-            emitter.emit_bytes(&[0x48, 0xD3, 0xE0]); // shl rax, cl
+            emitter.emit_insns(&x86_64::shl_reg_cl(RAX));
         }
         ">>=" => {
             emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
             emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
-            emitter.emit_bytes(&[0x48, 0xD3, 0xE8]); // shr rax, cl
+            emitter.emit_insns(&x86_64::shr_reg_cl(RAX));
         }
         "%" => {
             emitter.emit_insns(&x86_64::mov_rr(RCX, RAX));
             emitter.emit_insns(&x86_64::mov_rr(RAX, RBX));
-            emitter.emit_bytes(&[0x48, 0x31, 0xD2]); // xor rdx, rdx
-            emitter.emit_bytes(&[0x48, 0xF7, 0xF1]); // div rcx
-            emitter.emit_bytes(&[0x48, 0x89, 0xD0]); // mov rax, rdx
+            emitter.emit_insns(&x86_64::zero_reg(RDX));
+            emitter.emit_insns(&x86_64::div_reg(RCX));
+            emitter.emit_insns(&x86_64::mov_rr(RAX, RDX));
         }
         _ => {
             return Err(format!(
@@ -1600,9 +1638,14 @@ fn lower_call_expr(
         "outb" => {
             if args.len() >= 2 {
                 lower_expr_into(emitter, ctx, &args[0], RBX, pending_calls)?;
-                lower_expr_into(emitter, ctx, &args[1], RSI, pending_calls)?;
+                let val_reg = if x86_64::is_32bit() { RCX } else { RSI };
+                lower_expr_into(emitter, ctx, &args[1], val_reg, pending_calls)?;
                 emitter.emit_bytes(&[0x66, 0x89, 0xDA]); // mov dx, bx
-                emitter.emit_bytes(&[0x40, 0x88, 0xF0]); // mov al, sil
+                if x86_64::is_32bit() {
+                    emitter.emit_bytes(&[0x88, 0xC8]); // mov al, cl
+                } else {
+                    emitter.emit_bytes(&[0x40, 0x88, 0xF0]); // mov al, sil
+                }
                 emitter.emit_bytes(&[0xEE]); // out dx, al
             } else {
                 return Err(format!(
@@ -1617,7 +1660,7 @@ fn lower_call_expr(
                 lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
                 emitter.emit_bytes(&[0x66, 0x89, 0xFA]); // mov dx, di
                 emitter.emit_bytes(&[0xEC]); // in al, dx
-                emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]); // movzx rax, al
+                emitter.emit_insns(&x86_64::movzx_r8(RAX, RAX));
             } else {
                 return Err(format!(
                     "x86_64-lower: `inb` requires 1 argument in `{}`",
@@ -1672,7 +1715,7 @@ fn lower_call_expr(
                 lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
                 emitter.emit_bytes(&[0x66, 0x89, 0xFA]); // mov dx, di
                 emitter.emit_bytes(&[0x66, 0xED]); // in ax, dx (16-bit)
-                emitter.emit_bytes(&[0x48, 0x0F, 0xB7, 0xC0]); // movzx rax, ax
+                emitter.emit_insns(&x86_64::movzx_r16(RAX, RAX));
             } else {
                 return Err(format!(
                     "x86_64-lower: `inw` requires 1 argument in `{}`",
@@ -1684,7 +1727,7 @@ fn lower_call_expr(
         "load8" => {
             if args.len() >= 1 {
                 lower_expr_into(emitter, ctx, &args[0], RCX, pending_calls)?;
-                emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0x01]); // movzx rax, byte [rcx]
+                emitter.emit_insns(&x86_64::movzx_m8(RAX, RCX));
                 if target_reg != RAX {
                     emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
                 }
@@ -1700,9 +1743,14 @@ fn lower_call_expr(
             if args.len() >= 2 {
                 lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
                 emitter.emit_insns(&x86_64::push_r(RDI));
-                lower_expr_into(emitter, ctx, &args[1], RSI, pending_calls)?;
+                let val_reg = if x86_64::is_32bit() { RCX } else { RSI };
+                lower_expr_into(emitter, ctx, &args[1], val_reg, pending_calls)?;
                 emitter.emit_insns(&x86_64::pop_r(RDI));
-                emitter.emit_bytes(&[0x40, 0x88, 0x37]); // mov [rdi], sil
+                if x86_64::is_32bit() {
+                    emitter.emit_bytes(&[0x88, 0x0F]); // mov [edi], cl
+                } else {
+                    emitter.emit_bytes(&[0x40, 0x88, 0x37]); // mov [rdi], sil
+                }
             } else {
                 return Err(format!(
                     "x86_64-lower: `store8` requires 2 arguments in `{}`",
@@ -1714,7 +1762,7 @@ fn lower_call_expr(
         "load16" => {
             if args.len() >= 1 {
                 lower_expr_into(emitter, ctx, &args[0], RCX, pending_calls)?;
-                emitter.emit_bytes(&[0x48, 0x0F, 0xB7, 0x01]); // movzx rax, word [rcx]
+                emitter.emit_insns(&x86_64::movzx_m16(RAX, RCX));
                 if target_reg != RAX {
                     emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
                 }
@@ -1774,7 +1822,7 @@ fn lower_call_expr(
         "load64" => {
             if args.len() >= 1 {
                 lower_expr_into(emitter, ctx, &args[0], RCX, pending_calls)?;
-                emitter.emit_bytes(&[0x48, 0x8B, 0x01]); // mov rax, [rcx]
+                emitter.emit_insns(&x86_64::mov_reg_ptr(RAX, RCX)); // mov rax, [rcx]
                 if target_reg != RAX {
                     emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
                 }
@@ -1792,7 +1840,7 @@ fn lower_call_expr(
                 emitter.emit_insns(&x86_64::push_r(RDI));
                 lower_expr_into(emitter, ctx, &args[1], RSI, pending_calls)?;
                 emitter.emit_insns(&x86_64::pop_r(RDI));
-                emitter.emit_bytes(&[0x48, 0x89, 0x37]); // mov [rdi], rsi
+                emitter.emit_insns(&x86_64::mov_ptr_reg(RDI, RSI)); // mov [rdi], rsi
             } else {
                 return Err(format!(
                     "x86_64-lower: `store64` requires 2 arguments in `{}`",
@@ -1802,14 +1850,14 @@ fn lower_call_expr(
             return Ok(());
         }
         "read_cr2" => {
-            emitter.emit_bytes(&[0x48, 0x0F, 0x20, 0xD0]); // mov rax, cr2
+            emitter.emit_width(&[0x0F, 0x20, 0xD0], &[0x48, 0x0F, 0x20, 0xD0]); // mov eax/rax, cr2
             if target_reg != RAX {
                 emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
             }
             return Ok(());
         }
         "read_cr3" => {
-            emitter.emit_bytes(&[0x48, 0x0F, 0x20, 0xD8]); // mov rax, cr3
+            emitter.emit_width(&[0x0F, 0x20, 0xD8], &[0x48, 0x0F, 0x20, 0xD8]); // mov eax/rax, cr3
             if target_reg != RAX {
                 emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
             }
@@ -1818,14 +1866,14 @@ fn lower_call_expr(
         "write_cr3" => {
             if args.len() >= 1 {
                 lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
-                emitter.emit_bytes(&[0x0F, 0x22, 0xC7]); // mov cr3, rdi
+                emitter.emit_bytes(&[0x0F, 0x22, 0xC7]); // mov cr3, edi/rdi
             }
             return Ok(());
         }
         "invlpg" => {
             if args.len() >= 1 {
                 lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
-                emitter.emit_bytes(&[0x48, 0x0F, 0x01, 0x3F]); // invlpg [rdi]
+                emitter.emit_width(&[0x0F, 0x01, 0x3F], &[0x48, 0x0F, 0x01, 0x3F]); // invlpg [edi/rdi]
             } else {
                 return Err(format!(
                     "x86_64-lower: `invlpg` requires 1 argument in `{}`",
@@ -1856,15 +1904,15 @@ fn lower_call_expr(
                     lower_expr_into(emitter, ctx, &args[2], RDX, pending_calls)?;
                 }
                 if args.len() == 1 {
-                    emitter.emit_bytes(&[0x48, 0x89, 0xF8]); // mov rax, rdi
-                    emitter.emit_bytes(&[0xFF, 0xD0]); // call rax
+                    emitter.emit_width(&[0x89, 0xF8, 0xFF, 0xD0], &[0x48, 0x89, 0xF8, 0xFF, 0xD0]); // mov eax/rax, edi/rdi; call eax/rax
                 } else if args.len() >= 2 {
-                    emitter.emit_bytes(&[0x48, 0x89, 0xF8]); // mov rax, rdi
-                    emitter.emit_bytes(&[0x48, 0x89, 0xF7]); // mov rdi, rsi
+                    emitter.emit_width(
+                        &[0x89, 0xF8, 0x89, 0xF7, 0xFF, 0xD0],
+                        &[0x48, 0x89, 0xF8, 0x48, 0x89, 0xF7, 0xFF, 0xD0],
+                    ); // mov eax/rax, edi/rdi; mov edi/rdi, esi/rsi; call eax/rax
                     if args.len() >= 3 {
-                        emitter.emit_bytes(&[0x48, 0x89, 0xD6]); // mov rsi, rdx
+                        emitter.emit_width(&[0x89, 0xD6], &[0x48, 0x89, 0xD6]); // mov esi/rsi, edx/rdx
                     }
-                    emitter.emit_bytes(&[0xFF, 0xD0]); // call rax
                 }
             } else {
                 return Err(format!(
@@ -1906,15 +1954,18 @@ fn lower_call_expr(
 
     if !ctx.functions.contains_key(&target_name) {
         if args.len() > 6 {
-            let stack_bytes = (args.len() - 6) * 8;
-            emitter.emit_bytes(&[0x48, 0x81, 0xC4]); // add rsp, imm32
+            let stack_bytes = (args.len() - 6) * if x86_64::is_32bit() { 4 } else { 8 };
+            emitter.emit_width(&[0x81, 0xC4], &[0x48, 0x81, 0xC4]); // add esp/rsp, imm32
             emitter.emit_bytes(&(stack_bytes as u32).to_le_bytes());
         }
         if target_name.ends_with("process :: exit")
             || target_name == "exit"
             || target_name.ends_with("process :: abort")
         {
-            emitter.emit_bytes(&[0x48, 0xC7, 0xC0, 0x3C, 0x00, 0x00, 0x00]); // mov rax, 60
+            emitter.emit_width(
+                &[0xB8, 0x3C, 0x00, 0x00, 0x00],
+                &[0x48, 0xC7, 0xC0, 0x3C, 0x00, 0x00, 0x00],
+            ); // mov eax/rax, 60
             emitter.emit_bytes(&[0x0F, 0x05]); // syscall
         }
         emitter.emit_insns(&x86_64::load_i64(target_reg, 0));
@@ -1929,8 +1980,8 @@ fn lower_call_expr(
     });
 
     if args.len() > 6 {
-        let stack_bytes = (args.len() - 6) * 8;
-        emitter.emit_bytes(&[0x48, 0x81, 0xC4]); // add rsp, imm32
+        let stack_bytes = (args.len() - 6) * if x86_64::is_32bit() { 4 } else { 8 };
+        emitter.emit_width(&[0x81, 0xC4], &[0x48, 0x81, 0xC4]); // add esp/rsp, imm32
         emitter.emit_bytes(&(stack_bytes as u32).to_le_bytes());
     }
 
@@ -2034,18 +2085,18 @@ fn lower_unary_expr(
     lower_expr_into(emitter, ctx, expr, RAX, pending_calls)?;
     match op {
         "-" => {
-            emitter.emit_bytes(&[0x48, 0xF7, 0xD8]); // neg rax
+            emitter.emit_insns(&x86_64::neg_reg(RAX));
         }
         "!" => {
             emitter.emit_insns(&x86_64::test_rr(RAX, RAX));
-            emitter.emit_bytes(&[0x0F, 0x94, 0xC0]); // sete al
-            emitter.emit_bytes(&[0x48, 0x0F, 0xB6, 0xC0]); // movzx rax, al
+            emitter.emit_insns(&x86_64::setcc(0x94, RAX)); // sete al
+            emitter.emit_insns(&x86_64::movzx_r8(RAX, RAX));
         }
         "~" => {
-            emitter.emit_bytes(&[0x48, 0xF7, 0xD0]); // not rax
+            emitter.emit_insns(&x86_64::not_reg(RAX));
         }
         "*" => {
-            emitter.emit_bytes(&[0x48, 0x8B, 0x00]); // mov rax, [rax]
+            emitter.emit_insns(&x86_64::mov_reg_ptr(RAX, RAX)); // mov rax, [rax]
         }
         "&" => {}
         _ => {
@@ -2071,9 +2122,9 @@ fn lower_index_expr(
 ) -> Result<(), String> {
     lower_expr_into(emitter, ctx, base, RDI, pending_calls)?;
     lower_expr_into(emitter, ctx, index, RAX, pending_calls)?;
-    emitter.emit_bytes(&[0x48, 0xC1, 0xE0, 0x03]); // shl rax, 3
-    emitter.emit_bytes(&[0x48, 0x01, 0xC7]); // add rdi, rax
-    emitter.emit_bytes(&[0x48, 0x8B, 0x07]); // mov rax, [rdi]
+    emitter.emit_insns(&x86_64::shl_reg_imm(RAX, 3)); // shl rax, 3
+    emitter.emit_insns(&x86_64::add_rr(RDI, RAX)); // add rdi, rax
+    emitter.emit_insns(&x86_64::mov_reg_ptr(RAX, RDI)); // mov rax, [rdi]
     if target_reg != RAX {
         emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
     }
@@ -2086,7 +2137,9 @@ fn lower_string_lit(
     content: &str,
     pending_calls: &mut Vec<PendingCall>,
 ) -> Result<(), String> {
-    let site = emitter.len() + 2;
+    // In 32-bit mode mov_ri64 emits 1-byte opcode + 4-byte immediate; in 64-bit it emits
+    // 1-byte REX + 1-byte opcode + 8-byte immediate. The immediate starts after the opcode.
+    let site = emitter.len() + if x86_64::is_32bit() { 1 } else { 2 };
     emitter.emit_insns(&x86_64::mov_ri64(target_reg, 0xDEADBEEF));
     pending_calls.push(PendingCall {
         site: site as u32,

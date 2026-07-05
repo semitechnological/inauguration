@@ -238,6 +238,8 @@ pub fn lower_boot_image(
         )?;
         result.code
     } else {
+        let is_32bit = triple.starts_with("i386-") || triple.starts_with("i686-");
+        crate::native_emit::x86_64::set_32bit(is_32bit);
         let result = crate::native_emit::x86_64_lower::lower_module(module, entry)?;
         result.code
     };

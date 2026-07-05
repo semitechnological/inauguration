@@ -5,6 +5,7 @@ const ELFDATA2LSB: u8 = 1;
 const EV_CURRENT: u8 = 1;
 const ET_EXEC: u16 = 2;
 const ET_REL: u16 = 1;
+const EM_386: u16 = 3;
 const EM_ARM: u16 = 40;
 const EM_X86_64: u16 = 62;
 const EM_AARCH64: u16 = 183;
@@ -407,6 +408,101 @@ fn write_elf64_executable(exe: &ElfExecutable, machine: u16, out: &mut Vec<u8>) 
     while (out.len() as u64) < file_size {
         out.push(0);
     }
+}
+
+pub fn write_i386_relocatable_object(object: &ElfObject, out: &mut Vec<u8>) {
+    let shstrtab = b"\0.text\0.symtab\0.strtab\0.shstrtab\0";
+    let strtab = format!("\0{}\0", object.export_name).into_bytes();
+    let symtab_size = 32u32;
+    let text_name = 1u32;
+    let symtab_name = 7u32;
+    let strtab_name = 15u32;
+    let shstrtab_name = 23u32;
+    let text_offset = EHDR32_SIZE;
+    let symtab_offset = text_offset + object.code.len() as u32;
+    let strtab_offset = symtab_offset + symtab_size;
+    let shstrtab_offset = strtab_offset + strtab.len() as u32;
+    let shoff = shstrtab_offset + shstrtab.len() as u32;
+
+    out.clear();
+    out.extend_from_slice(&ELF_MAGIC);
+    out.push(ELFCLASS32);
+    out.push(ELFDATA2LSB);
+    out.push(EV_CURRENT);
+    out.extend_from_slice(&[0u8; 9]);
+    out.extend_from_slice(&ET_REL.to_le_bytes());
+    out.extend_from_slice(&EM_386.to_le_bytes());
+    out.extend_from_slice(&1u32.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&shoff.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&(EHDR32_SIZE as u16).to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&40u16.to_le_bytes());
+    out.extend_from_slice(&5u16.to_le_bytes());
+    out.extend_from_slice(&4u16.to_le_bytes());
+
+    out.extend_from_slice(&object.code);
+    write_symbol32(out, 0, 0, 0, 0, 0, 0);
+    write_symbol32(out, 1, 0, object.code.len() as u32, 0x12, 0, 1);
+    out.extend_from_slice(&strtab);
+    out.extend_from_slice(shstrtab);
+
+    write_section_header32(out, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    write_section_header32(
+        out,
+        text_name,
+        1,
+        0x6,
+        0,
+        text_offset,
+        object.code.len() as u32,
+        0,
+        0,
+        4,
+        0,
+    );
+    write_section_header32(
+        out,
+        symtab_name,
+        2,
+        0,
+        0,
+        symtab_offset,
+        symtab_size,
+        3,
+        1,
+        4,
+        16,
+    );
+    write_section_header32(
+        out,
+        strtab_name,
+        3,
+        0,
+        0,
+        strtab_offset,
+        strtab.len() as u32,
+        0,
+        0,
+        1,
+        0,
+    );
+    write_section_header32(
+        out,
+        shstrtab_name,
+        3,
+        0,
+        0,
+        shstrtab_offset,
+        shstrtab.len() as u32,
+        0,
+        0,
+        1,
+        0,
+    );
 }
 
 pub fn write_arm32_executable(exe: &ElfExecutable, out: &mut Vec<u8>) {
