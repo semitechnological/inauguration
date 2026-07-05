@@ -684,6 +684,12 @@ mod tests {
     }
 
     #[test]
+    fn reports_error_for_empty_lock_file() {
+        let result = parse_text("");
+        assert_eq!(result, Err("missing required field `lock-version`".into()));
+    }
+
+    #[test]
     fn resolves_lock_from_manifest() {
         let manifest = crate::package_manifest::load_package_manifest_from_source(Path::new("."))
             .ok()
