@@ -264,6 +264,96 @@ mod tests {
     }
 
     #[test]
+    fn extract_call_graph_legacy_mismatched_callers_falls_back_to_function_id_edge_case() {
+        let artifact = SilArtifact {
+            function_id: "main".into(),
+            cfg_blocks: vec![],
+            instructions: vec![
+                "%0 = function_ref @a : $@convention(thin)".into(),
+                "%1 = function_ref @b : $@convention(thin)".into(),
+            ],
+            instruction_callers: vec!["caller_a".into()],
+            functions: vec![],
+        };
+        let report = extract_call_graph(&artifact);
+        assert_eq!(
+            report.call_edges,
+            vec![
+                ("main".to_string(), "a".to_string()),
+                ("main".to_string(), "b".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn extract_call_graph_uses_functions_array() {
+        let artifact = SilArtifact {
+            function_id: "main".into(),
+            cfg_blocks: vec![],
+            instructions: vec![],
+            instruction_callers: vec![],
+            functions: vec![
+                SilFunctionRecord {
+                    function_id: "func1".into(),
+                    cfg_blocks: vec![],
+                    instructions: vec!["%0 = function_ref @callee1".into()],
+                },
+                SilFunctionRecord {
+                    function_id: "func2".into(),
+                    cfg_blocks: vec![],
+                    instructions: vec!["%1 = function_ref @callee2 : $@convention(thin)".into()],
+                },
+            ],
+        };
+        let report = extract_call_graph(&artifact);
+        assert_eq!(
+            report.call_edges,
+            vec![
+                ("func1".to_string(), "callee1".to_string()),
+                ("func2".to_string(), "callee2".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn extract_call_graph_handles_no_whitespace_after_callee() {
+        let artifact = SilArtifact {
+            function_id: "main".into(),
+            cfg_blocks: vec![],
+            instructions: vec!["%0 = function_ref @callee".into()],
+            instruction_callers: vec![],
+            functions: vec![],
+        };
+        let report = extract_call_graph(&artifact);
+        assert_eq!(
+            report.call_edges,
+            vec![("main".to_string(), "callee".to_string())]
+        );
+    }
+
+    #[test]
+    fn extract_call_graph_legacy_uses_instruction_callers_when_lengths_match() {
+        let artifact = SilArtifact {
+            function_id: "main".into(),
+            cfg_blocks: vec![],
+            instructions: vec![
+                "%0 = function_ref @a : $@convention(thin)".into(),
+                "%1 = function_ref @b : $@convention(thin)".into(),
+            ],
+            instruction_callers: vec!["caller_a".into(), "caller_b".into()],
+            functions: vec![],
+        };
+        let report = extract_call_graph(&artifact);
+        assert_eq!(
+            report.call_edges,
+            vec![
+                ("caller_a".to_string(), "a".to_string()),
+                ("caller_b".to_string(), "b".to_string()),
+            ]
+        );
+    }
+
+    #[test]
     fn extract_call_graph_legacy_missing_instruction_callers_falls_back_to_function_id() {
         let artifact = SilArtifact {
             function_id: "main".into(),
