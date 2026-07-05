@@ -153,7 +153,12 @@ mod tests {
                     args: vec![],
                 },
             };
-            assert_eq!(binding_return_type(&binding), expected, "failed for input: {}", input);
+            assert_eq!(
+                binding_return_type(&binding),
+                expected,
+                "failed for input: {}",
+                input
+            );
         }
     }
 
