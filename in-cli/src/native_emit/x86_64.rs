@@ -18,6 +18,14 @@ pub const REG_FP: u8 = RBP;
 pub const REG_XZR: u8 = 0; // alias for zero idiom (xor same)
 pub const REG_RET: u8 = RAX;
 
+thread_local! {
+    pub static TL_IS_32BIT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+pub fn is_32bit() -> bool {
+    TL_IS_32BIT.with(|cell| cell.get())
+}
+
 // ── CodeEmitter ─────────────────────────────────────────────────
 
 #[derive(Debug, Default)]

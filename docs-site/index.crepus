@@ -1,167 +1,227 @@
-div min-h-screen overflow-x-hidden in-docs-page
-	main max-w-[896px] sm:max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 min-w-0
-		div flex items-center justify-between gap-3 pt-8 sm:pt-10 pb-6 crepus-entrance crepus-e1
-			a href="./index.html" flex items-center gap-3 shrink-0 no-underline crepus-t-text hover:opacity-80
-				img src="./static/favicon.svg" alt="" w-9 h-9 shrink-0 rounded-md
-				span text-sm font-semibold tracking-tight
-					"inauguration"
-			span text-xs crepus-t-muted hidden sm:block
-				"Docs · hybrid compile · hot reload"
+google-fonts "Chivo Mono"
 
-		section mb-12 sm:mb-16 crepus-entrance crepus-e2
-			div in-docs-hero p-6 sm:p-10 lg:p-12
-				div grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_min(100%,400px)] gap-8 lg:gap-12 items-start
-					div max-w-2xl min-w-0
-						p in-docs-kicker m-0 mb-3
-							"Toolchain"
-						h1 text-4xl sm:text-5xl font-semibold crepus-t-text tracking-tight leading-[1.1] mb-5 text-pretty
-							"Ship faster Swift workflows"
-						p text-lg sm:text-xl crepus-t-muted leading-relaxed m-0 mb-8 max-w-xl
-							"Hybrid compiler pipeline, SIL work, SwiftUI hot reload, and the "
-							code text-sm px-1.5 py-0.5 rounded border crepus-t-border bg-[var(--cp-elevated)] crepus-t-text
-								"in"
-							" CLI — with "
-							code text-sm px-1.5 py-0.5 rounded border crepus-t-border bg-[var(--cp-elevated)] crepus-t-text
-								".in"
-							" and Core IR experiments."
-						div flex flex-wrap gap-3
-							a href="./docs/index.html" no-underline inline-flex items-center gap-2 px-5 py-2.5 rounded-md crepus-t-btn-primary text-sm font-medium
-								"Read the docs"
-							a href="https://github.com/semitechnological/inauguration" no-underline inline-flex items-center px-5 py-2.5 rounded-md crepus-t-btn-ghost text-sm font-medium rel="noopener noreferrer" target="_blank"
-								"View on GitHub"
-						div mt-10 flex flex-wrap gap-2
-							span in-docs-pill
-								"in-cli"
-							span in-docs-pill
-								"rust-driver"
-							span in-docs-pill
-								"runtime"
-							span in-docs-pill
-								".in / Core IR"
-					div w-full min-w-0
-						div rounded-lg border overflow-hidden crepus-t-border bg-[var(--cp-bg)] shadow-[var(--cp-shadow)]
-							div flex items-center gap-2 px-3 py-2.5 border-b crepus-t-border bg-[var(--cp-elevated)]
-								span flex gap-1.5 shrink-0
-									span w-2.5 h-2.5 rounded-full bg-[#ff5f57]
-									span w-2.5 h-2.5 rounded-full bg-[#febc2e]
-									span w-2.5 h-2.5 rounded-full bg-[#28c840]
-								span text-xs font-mono crepus-t-muted ml-1 truncate
-									"zsh"
-							pre font-mono text-[12px] sm:text-[13px] leading-relaxed p-4 m-0 crepus-t-pre whitespace-pre overflow-x-auto
-								"# Native hybrid build
-$ in build --path apps/sample-swiftui
-
-# .in front (no swiftc)
-$ in build --path apps/in-sample/hello.in --module-id App
-
-# Full test suite
-$ in test"
-
-		section py-10 sm:py-12 border-t crepus-t-border crepus-entrance crepus-e3
-			div max-w-3xl mb-8
-				p in-docs-kicker m-0 mb-2
-					"Focus"
-				h2 text-2xl sm:text-3xl font-semibold crepus-t-text tracking-tight m-0 mb-3
-					"Roadmap and constraints"
-				p text-sm sm:text-base crepus-t-muted m-0 leading-relaxed
-					"Architecture notes cover .in v0.2, Core IR lowering, stub SIL, and hybrid_sil behavior (last "
-					code text-xs px-1 rounded bg-[var(--cp-elevated)] border crepus-t-border
-						"sil @"
-					" wins). UI patterns follow "
-					a href="https://vercel.com/design/guidelines" no-underline crepus-t-icon border-b border-transparent hover:border-[var(--cp-accent)] rel="noopener noreferrer" target="_blank"
-						"Vercel Web Interface Guidelines"
-					" where applicable."
-			div grid gap-4 sm:grid-cols-2
-				div rounded-lg p-5 sm:p-6 crepus-t-card
-					h3 text-sm font-semibold crepus-t-text m-0 mb-2
-						"Static docs"
-					p text-sm crepus-t-muted m-0 leading-relaxed
-						"Markdown from the repo is compiled to HTML on each crepus web build. Instrument Sans for UI copy; monospace for code."
-				div rounded-lg p-5 sm:p-6 crepus-t-card
-					h3 text-sm font-semibold crepus-t-text m-0 mb-2
-						"Hermetic checks"
-					p text-sm crepus-t-muted m-0 leading-relaxed
-						"Scripts exercise the Swift subset and .in samples; CI stays aligned with local expectations."
-				div rounded-lg p-5 sm:p-6 crepus-t-card
-					h3 text-sm font-semibold crepus-t-text m-0 mb-2
-						"Protocol"
-					p text-sm crepus-t-muted m-0 leading-relaxed
-						"Rust protocol-gen is canonical; V drivers remain for benchmarks and parity tooling."
-				div rounded-lg p-5 sm:p-6 crepus-t-card
-					h3 text-sm font-semibold crepus-t-text m-0 mb-2
-						"Plugins"
-					p text-sm crepus-t-muted m-0 leading-relaxed
-						"Registry profiles (aurorality, crepuscularity) ship next to the core CLI."
-
-		section py-10 sm:py-12 border-t crepus-t-border crepus-entrance crepus-e4
-			div flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-8
+div min-h-screen bg-zinc-950 text-zinc-300 p-6 sm:p-12 text-sm leading-relaxed in-docs-page
+	div max-w-4xl mx-auto flex flex-col gap-10
+		
+		# Header
+		div flex items-center justify-between border-b border-zinc-800 pb-6 crepus-entrance crepus-e1
+			div flex items-center gap-3
+				img src="./static/favicon.svg" alt="" w-8 h-8 rounded bg-zinc-900 border border-zinc-800 p-1
 				div
-					h2 text-xl font-semibold crepus-t-text m-0 mb-1
-						"Documentation"
-					p text-sm crepus-t-muted m-0 max-w-lg
-						"Guides live in the repository; symlinks under docs/ expose nested paths to the static generator."
-				a href="./docs/index.html" no-underline text-sm font-medium crepus-t-text hover:opacity-80 border-b border-[var(--cp-border)] hover:border-[var(--cp-fg)] transition-colors pb-0.5
-					"All pages"
-			div grid gap-3 sm:grid-cols-2 lg:grid-cols-3
-				a href="./docs/in-language.html" doc-card no-underline crepus-t-text
-					span text-xs font-mono crepus-t-muted
-						"in-language.md"
-					span text-base font-semibold mt-2 block
-						".in language"
-					span text-sm crepus-t-muted mt-1 block
-						"v0 and v0.2 surface"
-				a href="./docs/multi-frontend-ir.html" doc-card no-underline crepus-t-text
-					span text-xs font-mono crepus-t-muted
-						"multi-frontend-ir.md"
-					span text-base font-semibold mt-2 block
-						"Multi-frontend IR"
-					span text-sm crepus-t-muted mt-1 block
-						"Unified module"
-				a href="./docs/native-swift-master-plan.html" doc-card no-underline crepus-t-text
-					span text-xs font-mono crepus-t-muted
-						"native-swift-master-plan.md"
-					span text-base font-semibold mt-2 block
-						"Native Swift plan"
-					span text-sm crepus-t-muted mt-1 block
-						"Pipeline goals"
-				a href="./docs/subset-grammar.html" doc-card no-underline crepus-t-text
-					span text-xs font-mono crepus-t-muted
-						"subset-grammar.md"
-					span text-base font-semibold mt-2 block
-						"Swift subset"
-					span text-sm crepus-t-muted mt-1 block
-						"Contracted syntax"
-				a href="./docs/interop-roadmap.html" doc-card no-underline crepus-t-text
-					span text-xs font-mono crepus-t-muted
-						"interop-roadmap.md"
-					span text-base font-semibold mt-2 block
-						"Interop roadmap"
-					span text-sm crepus-t-muted mt-1 block
-						"Future bridges"
-				a href="./docs/contributing-hybrid-mirror.html" doc-card no-underline crepus-t-text
-					span text-xs font-mono crepus-t-muted
-						"contributing-hybrid-mirror.md"
-					span text-base font-semibold mt-2 block
-						"Hybrid mirror"
-					span text-sm crepus-t-muted mt-1 block
-						"in-cli ↔ rust-driver"
-
-	footer border-t py-10 crepus-t-border crepus-entrance crepus-e6 bg-[var(--cp-elevated)]
-		div max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 footer-row
-			div flex flex-col gap-2
-				a href="./index.html" flex items-center gap-2 no-underline crepus-t-text hover:opacity-80
-					img src="./static/favicon.svg" alt="" w-7 h-7 shrink-0 rounded-md
-					span text-sm font-medium
+					div text-zinc-100 text-base font-semibold tracking-wider
 						"inauguration"
-				span text-xs crepus-t-muted
-					"Built with crepuscularity-web · UI informed by Vercel’s Web Interface Guidelines"
-			nav flex flex-wrap gap-x-5 gap-y-2 text-xs crepus-t-muted items-center
-				a href="./docs/index.html" no-underline crepus-t-muted hover:text-[var(--cp-fg)] transition-colors
+					div text-xs text-zinc-500 mt-0.5
+						"ultrafast hybrid compile · hot reload · JIT"
+			nav flex gap-4 text-xs
+				a href="./docs/in-language.html" no-underline text-zinc-400 hover:text-white transition-colors
 					"Docs"
-				a href="https://crates.io/crates/inauguration" no-underline crepus-t-muted hover:text-[var(--cp-fg)] transition-colors rel="noopener noreferrer" target="_blank"
-					"Crates.io"
-				a href="https://github.com/semitechnological/inauguration" no-underline crepus-t-muted hover:text-[var(--cp-fg)] transition-colors rel="noopener noreferrer" target="_blank"
+				a href="https://github.com/semitechnological/inauguration" no-underline text-zinc-400 hover:text-white transition-colors rel="noopener noreferrer" target="_blank"
 					"GitHub"
+				a href="https://crates.io/crates/inauguration" no-underline text-zinc-400 hover:text-white transition-colors rel="noopener noreferrer" target="_blank"
+					"Crates.io"
 
-.footer-row flex flex-col sm:flex-row justify-between gap-6 sm:items-center
-.doc-card group flex flex-col rounded-lg p-5 transition-shadow duration-200 crepus-t-card hover:shadow-[0_4px_16px_rgba(0,0,0,0.08)]
+		# Hero Section
+		section flex flex-col lg:flex-row gap-8 items-start justify-between py-4 crepus-entrance crepus-e2
+			div flex-1 max-w-2xl
+				p text-blue-400 font-semibold tracking-widest text-xs uppercase mb-2
+					"THE STACK: INLANG + CREPUSCULARITY"
+				h1 text-2xl sm:text-3xl font-semibold text-zinc-100 tracking-tight leading-snug mb-4
+					"Ultrafast compiler pipeline for OOP and systems languages"
+				p text-zinc-400 leading-relaxed mb-6
+					"A single unified Core IR → MIR → native JIT emitter. No LLVM, no bytecode VM. Experience sub-millisecond compile loops, live code injection, and seamless GUI integration using the "
+					span text-zinc-200 font-semibold
+						"inlang (.in)"
+					" systems language coupled with "
+					span text-zinc-200 font-semibold
+						"crepuscularity"
+					" for hardware-accelerated declarative UI everywhere."
+				div flex gap-3
+					a href="./docs/in-language.html" no-underline inline-flex items-center px-4 py-2 bg-zinc-100 text-zinc-950 hover:bg-white text-xs font-semibold rounded transition-colors
+						"Get Started"
+					a href="https://github.com/semitechnological/inauguration" no-underline inline-flex items-center px-4 py-2 border border-zinc-800 hover:bg-zinc-900 text-zinc-300 hover:text-white text-xs font-semibold rounded transition-colors
+						"View GitHub"
+			
+			# Terminal preview
+			div w-full lg:w-[350px] shrink-0 border border-zinc-800 rounded bg-zinc-900 overflow-hidden
+				div flex items-center justify-between px-3 py-2 border-b border-zinc-800 bg-zinc-950
+					span text-xs text-zinc-500 font-mono
+						"inauguration-shell"
+					div flex gap-1
+						span w-2 h-2 rounded-full bg-zinc-800
+						span w-2 h-2 rounded-full bg-zinc-800
+						span w-2 h-2 rounded-full bg-zinc-800
+				pre p-4 m-0 font-mono text-xs leading-relaxed text-zinc-400 overflow-x-auto
+					span text-zinc-500
+						"# Build .in program"
+					br
+					"$ in build --path hello.in"
+					br
+					br
+					span text-zinc-500
+						"# Run the test suite"
+					br
+					"$ in test"
+					br
+					br
+					span text-zinc-500
+						"# Update the compiler toolchain"
+					br
+					"$ in self-update"
+
+		# Tech Specs / Core Design Section (Density from crepuscularity docs)
+		section border-t border-zinc-800 pt-8 crepus-entrance crepus-e3
+			div text-zinc-100 font-semibold tracking-wider mb-6
+				"PIPELINE CAPABILITIES"
+			div grid grid-cols-1 md:grid-cols-3 gap-6
+				div border border-zinc-800 rounded p-4 bg-zinc-900/50
+					div text-zinc-100 font-semibold text-xs mb-2 uppercase tracking-wide
+						"1. Multi-Frontend Parser"
+					p text-zinc-400 text-xs leading-relaxed m-0
+						"Uses Tree-sitter polyglot fronts to ingest Swift, C, Rust, Go, Python, Zig, and Java. Lowers source files directly into a unified Core IR AST, mapping structural semantics cleanly."
+				div border border-zinc-800 rounded p-4 bg-zinc-900/50
+					div text-zinc-100 font-semibold text-xs mb-2 uppercase tracking-wide
+						"2. MIR & Offset Assembly"
+					p text-zinc-400 text-xs leading-relaxed m-0
+						"Translates Core IR to MIR (Mid IR). MIR defers relative address offsets, performing label resolution and instruction alignment before assembling to binary buffers."
+				div border border-zinc-800 rounded p-4 bg-zinc-900/50
+					div text-zinc-100 font-semibold text-xs mb-2 uppercase tracking-wide
+						"3. Native JIT Emitters"
+					p text-zinc-400 text-xs leading-relaxed m-0
+						"Direct machine code emission for AArch64 (ARM64) and x86_64. Native page allocation maps binary targets to executable memory, running JIT compiles in microseconds."
+
+		# Docs Directory
+		section border-t border-zinc-800 pt-8 crepus-entrance crepus-e4
+			div text-zinc-100 font-semibold tracking-wider mb-6
+				"DOCUMENTATION DIRECTORY"
+			
+			div grid grid-cols-1 md:grid-cols-2 gap-8
+				
+				# Col 1: Language & Architecture
+				div flex flex-col gap-6
+					div
+						div text-blue-400 font-semibold text-xs uppercase tracking-widest border-b border-zinc-800 pb-2 mb-3
+							"Language & Core IR"
+						div flex flex-col gap-3
+							a doc-item href="./docs/in-language.html"
+								span name
+									"in-language.md"
+								span desc
+									" — learn the brace + line-oriented syntax and type surface of .in"
+							a doc-item href="./docs/multi-frontend-ir.html"
+								span name
+									"multi-frontend-ir.md"
+								span desc
+									" — design of the unified Core IR representation"
+							a doc-item href="./docs/core-ir-extensions.html"
+								span name
+									"core-ir-extensions.md"
+								span desc
+									" — design specs for SIL representation and VM execution"
+							a doc-item href="./docs/parser-surface.html"
+								span name
+									"parser-surface.md"
+								span desc
+									" — extension resolution and shebang registry details"
+
+					div
+						div text-blue-400 font-semibold text-xs uppercase tracking-widest border-b border-zinc-800 pb-2 mb-3
+							"Compiler Implementation"
+						div flex flex-col gap-3
+							a doc-item href="./docs/general-compiler.html"
+								span name
+									"general-compiler.md"
+								span desc
+									" — orchestration stages, compiler entry points, and FFI bindings"
+							a doc-item href="./docs/native-backend.html"
+								span name
+									"native-backend.md"
+								span desc
+									" — binary emission mechanics for AArch64 and x86_64 JIT"
+							a doc-item href="./docs/orchestration-compiler.html"
+								span name
+									"orchestration-compiler.md"
+								span desc
+									" — driver pipeline and multi-front orchestration contract"
+							a doc-item href="./docs/contributing-hybrid-mirror.html"
+								span name
+									"contributing-hybrid-mirror.md"
+								span desc
+									" — workflow to develop in-cli and rust-driver concurrently"
+
+				# Col 2: Benchmarks & Roadmaps
+				div flex flex-col gap-6
+					div
+						div text-blue-400 font-semibold text-xs uppercase tracking-widest border-b border-zinc-800 pb-2 mb-3
+							"Benchmarks & Performance"
+						div flex flex-col gap-3
+							a doc-item href="./docs/jit.html"
+								span name
+									"jit.md"
+								span desc
+									" — latency comparison between interpretive and machine code runtimes"
+							a doc-item href="./docs/swift-vs-in.html"
+								span name
+									"swift-vs-in.md"
+								span desc
+									" — performance benchmarks compiling swift files via .in"
+							a doc-item href="./docs/polyglot-compilers.html"
+								span name
+									"polyglot-compilers.md"
+								span desc
+									" — execution metrics across diverse tree-sitter parser targets"
+							a doc-item href="./docs/self-host-vs-native.html"
+								span name
+									"self-host-vs-native.md"
+								span desc
+									" — comparisons of compiled artifacts and compiler self-hosting"
+
+					div
+						div text-blue-400 font-semibold text-xs uppercase tracking-widest border-b border-zinc-800 pb-2 mb-3
+							"Roadmaps & Planning"
+						div flex flex-col gap-3
+							a doc-item href="./docs/roadmap-execution-plan.html"
+								span name
+									"roadmap-execution-plan.md"
+								span desc
+									" — development phases, targets, and language specifications"
+							a doc-item href="./docs/universal-compiler-roadmap.html"
+								span name
+									"universal-compiler-roadmap.md"
+								span desc
+									" — plan for multi-frontend and cross-architecture expansion"
+							a doc-item href="./docs/interop-roadmap.html"
+								span name
+									"interop-roadmap.md"
+								span desc
+									" — roadmap for direct C/Rust FFI and interoperability mechanics"
+							a doc-item href="./docs/local-mvp-runbook.html"
+								span name
+									"local-mvp-runbook.md"
+								span desc
+									" — developer testing protocols and verification checklist"
+							a doc-item href="./docs/conformance-matrix.html"
+								span name
+									"conformance-matrix.md"
+								span desc
+									" — validation test suite and feature conformance mapping"
+							a doc-item href="./docs/future-work-roadmap.html"
+								span name
+									"future-work-roadmap.md"
+								span desc
+									" — future type assertions and native bridge improvements"
+
+		# Footer
+		footer border-t border-zinc-800 pt-8 pb-12 flex flex-col sm:flex-row justify-between items-center gap-4 text-xs text-zinc-500 crepus-entrance crepus-e6
+			div flex items-center gap-2
+				img src="./static/favicon.svg" alt="" w-6 h-6 rounded opacity-50 bg-zinc-900 border border-zinc-800 p-1
+				span
+					"inauguration docs-site · built with crepuscularity"
+			div flex gap-4
+				a href="https://github.com/semitechnological/inauguration" no-underline text-zinc-500 hover:text-zinc-300 transition-colors rel="noopener noreferrer" target="_blank"
+					"GitHub"
+				a href="https://crates.io/crates/inauguration" no-underline text-zinc-500 hover:text-zinc-300 transition-colors rel="noopener noreferrer" target="_blank"
+					"Crates.io"
+
+.doc-item no-underline transition-all duration-200 ease-in-out block group text-zinc-400 hover:text-zinc-200
+.name text-zinc-100 group-hover:text-blue-400 transition-colors duration-200 font-semibold font-mono
+.desc text-zinc-500 group-hover:text-zinc-400 transition-colors duration-200
