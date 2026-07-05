@@ -1,4 +1,7 @@
-use super::extract::{AstShape, ast_body, collect_kinds, decl_fn, first_named, named_descendant, node_txt, normalize_entry};
+use super::extract::{
+    AstShape, ast_body, collect_kinds, decl_fn, first_named, named_descendant, node_txt,
+    normalize_entry,
+};
 use crate::core_ir::{Decl, Stmt, Typ, Visibility};
 use tree_sitter::Node;
 
@@ -260,4 +263,3 @@ fn elixir_function_decl<'a>(src: &[u8], c: Node<'a>) -> Option<Decl> {
 fn elixir_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
     ast_body(src, body, ELIXIRAST)
 }
-

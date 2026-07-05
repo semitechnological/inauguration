@@ -1,7 +1,6 @@
 //! Tree-sitter grammars → [`UnifiedModule`] with per-language declaration extraction and bounded
 //! scalar body lowering where wired.
 
-use super::ruby::extract_ruby;
 use super::c_family::{c_like_function_decl, extract_cpp_with_classes, objc_like};
 use super::csharp::extract_csharp;
 use super::dart::extract_dart;
@@ -21,6 +20,7 @@ use super::perl::extract_perl;
 use super::php::extract_php;
 use super::python::extract_python_with_classes;
 use super::r_lang::extract_r_lang;
+use super::ruby::extract_ruby;
 use super::rust::extract_rust;
 use super::scala::extract_scala;
 use super::swift::extract_swift;
@@ -1529,6 +1529,7 @@ pub(super) fn simple_bounded_expr(text: &str) -> Option<Expr> {
 }
 
 #[cfg(test)]
+#[allow(unused_imports)]
 mod tests {
     use super::*;
     use crate::boundary_ir::{BoundaryRepr, BoundaryTransfer};

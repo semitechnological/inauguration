@@ -1,6 +1,6 @@
-use crate::compile::{JitExecution, compile_and_run_jit_source_path};
-use crate::util::resolve_invocation_path;
-use crate::{InError, Result};
+use crate::compile::{JitExecution, cmd_compile, cmd_execute, compile_and_run_jit_source_path};
+use crate::util::{extract_cargo_bin_path, resolve_invocation_path};
+use crate::{CompileTargetCli, InError, NativeLinkageCli, Result};
 use inauguration::parser_registry::{self, ParserCli};
 use std::path::Path;
 use std::process;
@@ -18,6 +18,98 @@ pub(crate) fn cmd_eval_dispatch(
         }
     }
     cmd_eval(cwd, code, parser, verbose)
+}
+
+pub(crate) fn cmd_eval_source_or_path(
+    invocation_cwd: &Path,
+    source: Option<String>,
+    parser: Option<String>,
+    verbose: bool,
+) -> Result<()> {
+    let code = match source {
+        Some(ref s) => {
+            let resolved = resolve_invocation_path(invocation_cwd, s);
+            if resolved.is_dir() {
+                let cargo_toml = resolved.join("Cargo.toml");
+                if cargo_toml.exists() {
+                    let contents = std::fs::read_to_string(&cargo_toml)
+                        .map_err(|e| InError::Message(format!("read Cargo.toml: {e}")))?;
+                    let bin_path = extract_cargo_bin_path(&contents, &resolved)?;
+                    let module_id = bin_path
+                        .file_stem()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string();
+                    let out = std::env::temp_dir().join(format!("in-cargo-{}.bin", module_id));
+                    let bin_str = bin_path.to_string_lossy().to_string();
+                    cmd_compile(
+                        invocation_cwd,
+                        &bin_str,
+                        CompileTargetCli::Jit,
+                        &out.to_string_lossy(),
+                        &module_id,
+                        parser_registry::ParserCli::Auto,
+                        None,
+                        None,
+                        NativeLinkageCli::Executable,
+                        1,
+                        false,
+                        None,
+                        None,
+                        None,
+                        None,
+                    )?;
+                    return cmd_execute(invocation_cwd, &bin_str, &module_id, verbose);
+                }
+            }
+            if resolved.exists() {
+                let ext = resolved.extension().and_then(|e| e.to_str()).unwrap_or("");
+                if ext == "in"
+                    || ext == "rs"
+                    || ext == "zig"
+                    || ext == "go"
+                    || ext == "v"
+                    || ext == "swift"
+                {
+                    let out = std::env::temp_dir().join(format!(
+                        "in-eval-{}.bin",
+                        resolved.file_stem().unwrap_or_default().to_string_lossy()
+                    ));
+                    let module_id = resolved
+                        .file_stem()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string();
+                    cmd_compile(
+                        invocation_cwd,
+                        s,
+                        CompileTargetCli::Jit,
+                        &out.to_string_lossy(),
+                        &module_id,
+                        parser_registry::ParserCli::Auto,
+                        None,
+                        None,
+                        NativeLinkageCli::Executable,
+                        1,
+                        false,
+                        None,
+                        None,
+                        None,
+                        None,
+                    )?;
+                    return cmd_execute(invocation_cwd, s, &module_id, verbose);
+                }
+                std::fs::read_to_string(&resolved)
+                    .map_err(|e| InError::Message(format!("read {}: {e}", resolved.display())))?
+            } else {
+                s.clone()
+            }
+        }
+        None => {
+            return Err(InError::Message("eval requires code or file path".into()));
+        }
+    };
+    cmd_eval_dispatch(invocation_cwd, &code, parser.as_deref(), verbose)
 }
 
 pub(crate) fn cmd_eval(cwd: &Path, code: &str, parser: Option<&str>, verbose: bool) -> Result<()> {

@@ -1,4 +1,7 @@
-use super::extract::{AstShape, ast_body, ast_expr, ast_stmt, collect_kinds, decl_fn, extract_fn_nodes, first_named, node_txt, normalize_entry, simple_bounded_body};
+use super::extract::{
+    AstShape, ast_body, ast_expr, ast_stmt, collect_kinds, decl_fn, extract_fn_nodes, first_named,
+    node_txt, normalize_entry, simple_bounded_body,
+};
 use crate::core_ir::{Decl, Stmt, Typ, Visibility};
 use std::collections::HashSet;
 use tree_sitter::Node;
@@ -258,4 +261,3 @@ fn fsharp_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
             .unwrap_or_default()
     }
 }
-

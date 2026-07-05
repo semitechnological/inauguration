@@ -1,4 +1,7 @@
-use super::extract::{AstShape, ast_body, ast_expr, collect_kinds, decl_fn, extract_fn_nodes, first_named, last_named, named_descendant, node_txt, normalize_entry, simple_bounded_body};
+use super::extract::{
+    AstShape, ast_body, ast_expr, collect_kinds, decl_fn, extract_fn_nodes, first_named,
+    last_named, named_descendant, node_txt, normalize_entry, simple_bounded_body,
+};
 use crate::core_ir::{Decl, Stmt, Typ, Visibility};
 use tree_sitter::Node;
 
@@ -222,4 +225,3 @@ fn julia_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
         .or_else(|| ast_expr(src, body, JULIAAST).map(|expr| vec![Stmt::Expr(expr)]))
         .unwrap_or_default()
 }
-

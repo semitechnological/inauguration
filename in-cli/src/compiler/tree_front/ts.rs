@@ -1,7 +1,9 @@
-use super::extract::{collect_kinds, decl_fn, first_named, named_descendant, node_txt, normalize_entry};
+use super::extract::{
+    collect_kinds, decl_fn, first_named, named_descendant, node_txt, normalize_entry,
+};
+use super::js::{js_body, rewrite_constructor_calls, rewrite_this_receiver_in_body};
 use crate::core_ir::{Decl, MethodSig, Typ, Visibility};
 use tree_sitter::Node;
-use super::js::{js_body, rewrite_constructor_calls, rewrite_this_receiver_in_body};
 
 pub(super) fn extract_ts_with_classes(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
     let mut decls = Vec::new();
@@ -315,4 +317,3 @@ fn ts_return_type(src: &[u8], n: Node<'_>) -> Typ {
 }
 
 // Go uses dedicated compiler::go_front.
-

@@ -1,4 +1,6 @@
-use super::extract::{AstShape, ast_body, collect_kinds, first_named, named_descendant, node_txt, normalize_entry};
+use super::extract::{
+    AstShape, ast_body, collect_kinds, first_named, named_descendant, node_txt, normalize_entry,
+};
 use crate::core_ir::{Decl, Stmt, Typ};
 use tree_sitter::Node;
 
@@ -133,4 +135,3 @@ fn lua_params<'a>(src: &[u8], n: Node<'a>) -> Vec<(String, Typ)> {
 fn lua_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
     ast_body(src, body, LUAAST)
 }
-

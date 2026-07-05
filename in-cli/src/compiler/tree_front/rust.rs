@@ -1,4 +1,6 @@
-use super::extract::{extract_fn_nodes, first_named, named_descendant, node_txt, normalize_entry, simple_bounded_expr};
+use super::extract::{
+    extract_fn_nodes, first_named, named_descendant, node_txt, normalize_entry, simple_bounded_expr,
+};
 use crate::core_ir::{Decl, Expr, LoopKind, MatchArm, Stmt, Typ};
 use tree_sitter::Node;
 
@@ -417,4 +419,3 @@ fn rust_pattern_name<'a>(src: &[u8], pat: Node<'a>) -> Option<String> {
     let id = named_descendant(pat, "identifier")?;
     Some(node_txt(src, id).trim().to_string())
 }
-

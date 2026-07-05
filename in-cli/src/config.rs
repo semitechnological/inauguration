@@ -76,7 +76,8 @@ impl EnvConfig {
         let ok = raw.contains('/')
             && raw.matches('/').count() == 1
             && !raw.starts_with('/')
-            && raw.chars()
+            && raw
+                .chars()
                 .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '/');
         if ok {
             raw.to_string()

@@ -208,4 +208,3 @@ fn csharp_params<'a>(src: &[u8], plist: Node<'a>) -> Vec<(String, Typ)> {
 fn csharp_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
     ast_body(src, body, CSHARP_AST)
 }
-

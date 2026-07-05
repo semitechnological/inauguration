@@ -1,4 +1,6 @@
-use super::extract::{AstShape, ast_body, collect_kinds, first_named, named_descendant, node_txt, normalize_entry};
+use super::extract::{
+    AstShape, ast_body, collect_kinds, first_named, named_descendant, node_txt, normalize_entry,
+};
 use crate::core_ir::{Decl, MethodSig, Stmt, Typ, Visibility};
 use tree_sitter::Node;
 
@@ -265,4 +267,3 @@ fn find_field_deep<'a>(n: Node<'a>, field: &str) -> Option<Node<'a>> {
     }
     None
 }
-

@@ -1,5 +1,11 @@
-use super::extract::{AstShape, ast_body, collect_kinds, extract_fn_nodes, first_named, last_named, named_descendant, node_txt, normalize_entry, simple_bounded_body, strict_simple_bounded_body};
-use crate::boundary_ir::{BoundaryField, BoundaryLayout, BoundaryModule, BoundaryOwnership, BoundaryRepr, BoundarySymbol, BoundaryTransfer, IN_ABI_VERSION};
+use super::extract::{
+    AstShape, ast_body, collect_kinds, extract_fn_nodes, first_named, last_named, named_descendant,
+    node_txt, normalize_entry, simple_bounded_body, strict_simple_bounded_body,
+};
+use crate::boundary_ir::{
+    BoundaryField, BoundaryLayout, BoundaryModule, BoundaryOwnership, BoundaryRepr, BoundarySymbol,
+    BoundaryTransfer, IN_ABI_VERSION,
+};
 use crate::boundary_verify::boundary_ir_verify;
 use crate::core_ir::{Decl, Stmt, Typ};
 use std::collections::HashMap;
@@ -429,4 +435,3 @@ fn zig_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
     }
     simple_bounded_body(node_txt(src, body), "=").unwrap_or_default()
 }
-

@@ -873,7 +873,6 @@ mod tests {
         assert_eq!(empty.edge_count(), Some(0));
     }
 
-
     #[test]
     fn content_view_prefers_view_body_patch() {
         let patch = plan_patch("ContentView.swift", &["body".to_string()]);

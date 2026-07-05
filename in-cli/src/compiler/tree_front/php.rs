@@ -1,4 +1,7 @@
-use super::extract::{AstShape, ast_body, ast_expr, collect_kinds, first_named, named_descendant, node_txt, normalize_entry, simple_bounded_expr};
+use super::extract::{
+    AstShape, ast_body, ast_expr, collect_kinds, first_named, named_descendant, node_txt,
+    normalize_entry, simple_bounded_expr,
+};
 use crate::core_ir::{Decl, MethodSig, Stmt, Typ, Visibility};
 use tree_sitter::Node;
 
@@ -288,4 +291,3 @@ fn php_body(src: &[u8], body: Node<'_>) -> Vec<Stmt> {
     }
     out
 }
-

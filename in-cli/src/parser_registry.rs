@@ -389,7 +389,11 @@ fn parse_magic_parser_first_line(line: &str) -> Option<MagicParserDirective> {
 }
 
 pub fn resolve_parser_id(path: &Path, cli: ParserCli) -> ResolvedBuildParser {
-    resolve_parser_id_with_env(path, cli, crate::config::env_config().parser_override.as_deref())
+    resolve_parser_id_with_env(
+        path,
+        cli,
+        crate::config::env_config().parser_override.as_deref(),
+    )
 }
 
 pub fn resolve_parser_id_with_env(
