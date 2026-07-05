@@ -192,7 +192,9 @@ fn cmd_eval_daemon(
         if response.success {
             if verbose {
                 eprintln!("> {:?}", response.result);
-            } else if plan.print_result && let Some(result) = response.result {
+            } else if plan.print_result
+                && let Some(result) = response.result
+            {
                 println!("{}", result);
             }
             return Ok(());
@@ -615,8 +617,7 @@ pub(crate) fn eval_return_type(parser_id: parser_registry::ParserId, ret: &str) 
             "Bool" => "bool".to_string(),
             _ => "int".to_string(),
         },
-        parser_registry::ParserId::Java
-        | parser_registry::ParserId::Groovy => match ret {
+        parser_registry::ParserId::Java | parser_registry::ParserId::Groovy => match ret {
             "Bool" => "boolean".to_string(),
             "String" => "String".to_string(),
             _ => "int".to_string(),
@@ -681,29 +682,23 @@ pub(crate) fn wrap_eval_expression(
             Some(format!("main = {}", render_haskell_eval_expr(code)))
         }
         parser_registry::ParserId::Nim => Some(format!("proc main(): {ret} =\n  return {code}")),
-        parser_registry::ParserId::FSharp => {
-            Some(format!("let main _ : {ret} = {code}"))
-        }
+        parser_registry::ParserId::FSharp => Some(format!("let main _ : {ret} = {code}")),
         parser_registry::ParserId::Odin => Some(format!(
             "package main\n\nmain :: proc() -> {ret} {{\n\treturn {code}\n}}\n"
         )),
         parser_registry::ParserId::D => Some(format!("{ret} main() {{ return {code}; }}")),
         parser_registry::ParserId::Crystal => Some(format!("def main : {ret}\n  {code}\nend")),
-        parser_registry::ParserId::Julia => Some(format!(
-            "function main()\n    return {code}\nend\n"
-        )),
-        parser_registry::ParserId::R => Some(format!(
-            "main <- function() {{\n    {code}\n}}\n"
-        )),
+        parser_registry::ParserId::Julia => {
+            Some(format!("function main()\n    return {code}\nend\n"))
+        }
+        parser_registry::ParserId::R => Some(format!("main <- function() {{\n    {code}\n}}\n")),
         parser_registry::ParserId::Ruby => Some(format!("def main\n  {code}\nend")),
         parser_registry::ParserId::Lua => Some(format!("function main()\n  return {code}\nend")),
         parser_registry::ParserId::Perl => Some(format!("sub main {{\n    return {code};\n}}\n")),
         parser_registry::ParserId::Php => Some(format!(
             "<?php\nfunction main() {{\n    return {code};\n}}\n"
         )),
-        parser_registry::ParserId::Elixir => Some(format!(
-            "def main do\n  {code}\nend\n"
-        )),
+        parser_registry::ParserId::Elixir => Some(format!("def main do\n  {code}\nend\n")),
         parser_registry::ParserId::Erlang => Some(format!(
             "-module(app).\n-export([main/0]).\n\nmain() ->\n    {code}.\n"
         )),
@@ -801,9 +796,7 @@ pub(crate) fn wrap_eval_statement(
             let trimmed = code.trim_end().trim_end_matches(';');
             Some(format!("<?php\nfunction main() {{\n    {trimmed};\n}}\n"))
         }
-        parser_registry::ParserId::Elixir => Some(format!(
-            "def main do\n  {code}\nend\n"
-        )),
+        parser_registry::ParserId::Elixir => Some(format!("def main do\n  {code}\nend\n")),
         parser_registry::ParserId::Erlang => Some(format!(
             "-module(app).\n-export([main/0]).\n\nmain() ->\n    {code}.\n"
         )),
