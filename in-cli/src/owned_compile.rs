@@ -142,82 +142,8 @@ fn timing_waves_for_jobs(jobs: usize, total_micros: u128) -> Vec<u128> {
     waves
 }
 
-pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
-    let started = Instant::now();
-    let jobs = jobs_for_request(request);
-    let cwd = compile_cache::workspace_cwd_for_path(&request.path);
-    let source = match fs::read_to_string(&request.path) {
-        Ok(content) => content,
-        Err(err) => {
-            return OwnedCompileReport {
-                schema_version: 1,
-                owned: true,
-                path: request.path.display().to_string(),
-                module_id: request.module_id.clone(),
-                module_identity: None,
-                package_name: None,
-                target: target_label(request.target).to_string(),
-                target_triple: request.target_triple.clone(),
-                entry: request.entry.clone(),
-                linkage: linkage_label(request.linkage).to_string(),
-                frontend_level: "unsupported".to_string(),
-                semantic_level: "failed".to_string(),
-                backend_level: match request.target {
-                    CompileTarget::Native => "contract-only".to_string(),
-                    CompileTarget::Jit => "owned-native-subset".to_string(),
-                },
-                runtime_level: match request.target {
-                    CompileTarget::Native => "none".to_string(),
-                    CompileTarget::Jit => "inrt-jit".to_string(),
-                },
-                external_invocations: Vec::new(),
-                reason_code: Some("frontend-read-failed".to_string()),
-                reason: Some(err.to_string()),
-                success: false,
-                artifact_path: None,
-                executable_path: None,
-                abi_path: None,
-                parsed_function_count: 0,
-                typed_function_count: 0,
-                call_edge_count: 0,
-                jobs,
-                timing_micros: started.elapsed().as_micros(),
-                timing_waves_us: None,
-                cache_hit: false,
-                frontend_hash: None,
-                eval_exit_code: None,
-                eval_result: None,
-                eval_result_string: None,
-                error: Some(err.to_string()),
-            };
-        }
-    };
-    let frontend_hash = compile_cache::source_frontend_hash(&request.path, &source);
-    if let Some(mut cached) = compile_cache::read_cached_report(&cwd, &frontend_hash) {
-        let requested_out = request.out.as_ref().map(|path| path.display().to_string());
-        let cached_out = cached
-            .executable_path
-            .clone()
-            .or_else(|| cached.artifact_path.clone());
-        if cached.target == target_label(request.target)
-            && cached.entry == request.entry
-            && cached.target_triple == request.target_triple
-            && cached.module_id == request.module_id
-            && cached.linkage == linkage_label(request.linkage)
-            && requested_out == cached_out
-        {
-            cached.cache_hit = true;
-            cached.jobs = jobs;
-            cached.timing_micros = started.elapsed().as_micros();
-            cached.timing_waves_us = Some(timing_waves_for_jobs(jobs, cached.timing_micros));
-            cached.frontend_hash = Some(frontend_hash);
-            return cached;
-        }
-    }
-
-    let _guard = ExternalInvocationGuard::enter();
-
-    let mut report = OwnedCompileReport {
+fn base_report(request: &OwnedCompileRequest, jobs: usize, started: Instant) -> OwnedCompileReport {
+    OwnedCompileReport {
         schema_version: 1,
         owned: true,
         path: request.path.display().to_string(),
@@ -249,15 +175,60 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         typed_function_count: 0,
         call_edge_count: 0,
         jobs,
-        timing_micros: 0,
+        timing_micros: started.elapsed().as_micros(),
         timing_waves_us: None,
         cache_hit: false,
-        frontend_hash: Some(frontend_hash.clone()),
+        frontend_hash: None,
         eval_exit_code: None,
         eval_result: None,
         eval_result_string: None,
         error: None,
+    }
+}
+
+pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
+    let started = Instant::now();
+    let jobs = jobs_for_request(request);
+    let cwd = compile_cache::workspace_cwd_for_path(&request.path);
+    let source = match fs::read_to_string(&request.path) {
+        Ok(content) => content,
+        Err(err) => {
+            return OwnedCompileReport {
+                reason_code: Some("frontend-read-failed".to_string()),
+                reason: Some(err.to_string()),
+                error: Some(err.to_string()),
+                ..base_report(request, jobs, started)
+            };
+        }
     };
+    let frontend_hash = compile_cache::source_frontend_hash(&request.path, &source);
+    if let Some(mut cached) = compile_cache::read_cached_report(&cwd, &frontend_hash) {
+        let requested_out = request.out.as_ref().map(|path| path.display().to_string());
+        let cached_out = cached
+            .executable_path
+            .clone()
+            .or_else(|| cached.artifact_path.clone());
+        if cached.target == target_label(request.target)
+            && cached.entry == request.entry
+            && cached.target_triple == request.target_triple
+            && cached.module_id == request.module_id
+            && cached.linkage == linkage_label(request.linkage)
+            && requested_out == cached_out
+        {
+            cached.cache_hit = true;
+            cached.jobs = jobs;
+            cached.timing_micros = started.elapsed().as_micros();
+            cached.timing_waves_us = Some(timing_waves_for_jobs(jobs, cached.timing_micros));
+            cached.frontend_hash = Some(frontend_hash);
+            return cached;
+        }
+    }
+
+    let _guard = ExternalInvocationGuard::enter();
+
+    let mut report = base_report(request, jobs, started);
+    report.timing_micros = 0;
+    report.frontend_hash = Some(frontend_hash.clone());
 
     let resolved = parser_registry::resolve_parser_id(&request.path, request.parser);
     let mut module = match parser_registry::parse_with_resolved(resolved, &request.path) {
@@ -267,7 +238,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
             report.reason_code = Some("frontend-parse-failed".to_string());
             report.reason = Some(reason.clone());
             report.error = Some(reason);
-            return finalize_report(&mut report, started, &cwd, &frontend_hash);
+            return finalize_report(report, started, &cwd, &frontend_hash);
         }
         Err(err) => {
             // For freestanding targets (e.g. x86_64-unknown-none), retry without requiring `fn main`.
@@ -288,7 +259,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
                         report.reason_code = Some("frontend-parse-failed".to_string());
                         report.reason = Some(reason.clone());
                         report.error = Some(reason);
-                        return finalize_report(&mut report, started, &cwd, &frontend_hash);
+                        return finalize_report(report, started, &cwd, &frontend_hash);
                     }
                 }
             } else {
@@ -296,7 +267,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
                 report.reason_code = Some("frontend-parse-failed".to_string());
                 report.reason = Some(reason.clone());
                 report.error = Some(reason);
-                return finalize_report(&mut report, started, &cwd, &frontend_hash);
+                return finalize_report(report, started, &cwd, &frontend_hash);
             }
         }
     };
@@ -402,7 +373,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
             report.reason = verify_report.reason.clone();
             report.error = verify_report.reason;
             report.call_edge_count = verify_report.call_edges.len();
-            return finalize_report(&mut report, started, &cwd, &frontend_hash);
+            return finalize_report(report, started, &cwd, &frontend_hash);
         }
         report.call_edge_count = verify_report.call_edges.len();
     }
@@ -486,7 +457,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         }
     }
 
-    finalize_report(&mut report, started, &cwd, &frontend_hash)
+    finalize_report(report, started, &cwd, &frontend_hash)
 }
 
 /// Resolve a JIT entry name against `module`'s function declarations.
@@ -1310,7 +1281,7 @@ fn eval_entry_via_jit(module: &UnifiedModule, entry: &str) -> Result<i64, String
 }
 
 fn finalize_report(
-    report: &mut OwnedCompileReport,
+    mut report: OwnedCompileReport,
     started: Instant,
     cwd: &Path,
     frontend_hash: &str,
@@ -1327,11 +1298,11 @@ fn finalize_report(
     report.timing_micros = started.elapsed().as_micros();
     report.timing_waves_us = Some(timing_waves_for_jobs(report.jobs, report.timing_micros));
     if !report.cache_hit {
-        if let Err(e) = compile_cache::write_cached_report(cwd, frontend_hash, report) {
+        if let Err(e) = compile_cache::write_cached_report(cwd, frontend_hash, &report) {
             eprintln!("[cache] warning: failed to write compile cache: {e}");
         }
     }
-    report.clone()
+    report
 }
 
 pub fn report_to_json(report: &OwnedCompileReport) -> Result<String, String> {
