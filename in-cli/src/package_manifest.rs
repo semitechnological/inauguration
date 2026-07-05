@@ -1885,4 +1885,36 @@ dependencies:
         assert_eq!(diagnostics[0].severity, "warning");
         assert_eq!(diagnostics[0].import, "cache.redis");
     }
+
+    #[test]
+    fn test_diagnostics_for_semantic_imports_formatting() {
+        let imports = vec![
+            PackageSemanticImport {
+                import: "std.io".to_string(),
+                dependency: None,
+                status: "resolved".to_string(),
+                reason: "core".to_string(),
+            },
+            PackageSemanticImport {
+                import: "missing.pkg".to_string(),
+                dependency: None,
+                status: "unresolved".to_string(),
+                reason: "dependency-not-declared".to_string(),
+            },
+        ];
+
+        let diagnostics = diagnostics_for_semantic_imports(&imports);
+
+        assert_eq!(diagnostics.len(), 1);
+
+        let diag = &diagnostics[0];
+        assert_eq!(diag.code, "INPKG001");
+        assert_eq!(diag.severity, "warning");
+        assert_eq!(diag.import, "missing.pkg");
+        assert_eq!(diag.reason, "dependency-not-declared");
+        assert_eq!(
+            diag.message,
+            "semantic import `missing.pkg` is not declared in the nearest inauguration.package"
+        );
+    }
 }
