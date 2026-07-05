@@ -1,6 +1,15 @@
-use crate::bytecode::Value;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+
+/// Runtime value used by the native function registry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Value {
+    Int(i64),
+    Bool(bool),
+    String(String),
+    Array(Vec<Value>),
+    Nil,
+}
 
 /// Native function type: takes args, returns Value or error.
 pub type NativeFn = Box<dyn Fn(&[Value]) -> Result<Value, String> + Send + Sync>;
@@ -483,6 +492,5 @@ fn value_to_string(v: &Value) -> String {
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
-        _ => format!("{:?}", v),
     }
 }

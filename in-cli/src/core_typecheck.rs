@@ -61,9 +61,6 @@ fn is_builtin_fn(name: &str) -> bool {
             | "str_eq"
             | "str_contains"
             | "str_trim"
-            | "str_split_lines"
-            | "str_split_spaces"
-            | "str_tokenize_expr"
             | "str_to_int"
             | "str_starts_with"
             | "str_index_of"
@@ -94,9 +91,6 @@ fn builtin_return_type(name: &str) -> Typ {
         "str_eq" | "str_contains" | "str_starts_with" | "str_is_int" | "str_table_has"
         | "int_to_bool" => Typ::Bool,
         "str_concat" | "str_trim" | "str_slice" | "to_string" => Typ::String,
-        "str_split_lines" | "str_split_spaces" | "str_tokenize_expr" => {
-            Typ::Array(Box::new(Typ::String))
-        }
         _ => Typ::Void,
     }
 }

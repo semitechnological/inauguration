@@ -4,7 +4,7 @@ use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
-use crate::bytecode::Value;
+use crate::native_runtime::Value;
 use crate::package_install::{
     INSTALLED_PACKAGE_METADATA, InstalledPackageMetadata, PackageExportBinding, PackageInvokeSpec,
 };

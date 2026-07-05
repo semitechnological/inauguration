@@ -34,8 +34,6 @@ pub mod boundary_capability;
 pub mod boundary_emit;
 pub mod boundary_ir;
 pub mod boundary_verify;
-pub mod bytecode;
-pub mod bytecode_compiler;
 pub mod cargo_linker;
 pub mod compile_cache;
 pub mod compile_error;
@@ -78,12 +76,10 @@ pub mod package_manifest;
 pub mod package_ref;
 pub mod package_runtime;
 pub mod parser_registry;
-pub mod sil_to_bytecode;
 pub mod target;
 pub mod typecheck;
 #[cfg(feature = "v-native")]
 pub mod v_native;
-pub mod vm;
 
 #[cfg(test)]
 mod in_pipeline_tests {
@@ -371,133 +367,6 @@ int main(void) { return 0; }
         }
         let sil = driver::lower_unified_module(&module, "App");
         assert!(sil.contains("sil @echo"), "sil:\n{sil}");
-    }
-
-    #[test]
-    fn bytecode_backend_from_sil() {
-        // Test the full pipeline: .in → Core IR → SIL → Bytecode → VM
-        let src = "fn main() -> void { return; }";
-        let module = in_lang_parse::parse_in_source(src).expect("parse .in");
-        let sil = lower_core::lower_to_textual_sil(&module, "App");
-
-        // Parse SIL into artifact
-        let artifact = hybrid_sil::parse_textual_sil(&sil);
-        assert!(
-            artifact.function_id.contains("main"),
-            "should identify main function"
-        );
-
-        // Lower to bytecode
-        let bytecode_module = crate::sil_to_bytecode::lower_sil_to_bytecode(&artifact)
-            .expect("lower SIL to bytecode");
-        assert_eq!(bytecode_module.functions.len(), 1);
-        assert_eq!(bytecode_module.functions[0].name, "main");
-
-        // Execute bytecode
-        let mut vm = crate::vm::BytecodeVM::new(bytecode_module);
-        let result = vm.run().expect("bytecode execution");
-        assert!(matches!(result, crate::bytecode::Value::Int(0)));
-    }
-
-    #[test]
-    fn bytecode_with_helper_function() {
-        // Test multi-function compilation
-        let src = r#"
-fn helper(x: Int) -> Int {
-  return x
-}
-fn main() -> void {
-  return
-}
-"#;
-        let module = in_lang_parse::parse_in_source(src).expect("parse .in");
-        let sil = lower_core::lower_to_textual_sil(&module, "App");
-
-        // Parse SIL into artifact
-        let artifact = hybrid_sil::parse_textual_sil(&sil);
-
-        // Lower to bytecode
-        let bytecode_module = crate::sil_to_bytecode::lower_sil_to_bytecode(&artifact)
-            .expect("lower SIL to bytecode");
-
-        // Should have at least 1 function (main)
-        assert!(
-            !bytecode_module.functions.is_empty(),
-            "expected at least main function, got {} functions",
-            bytecode_module.functions.len()
-        );
-
-        // Find main function
-        let main_func = bytecode_module
-            .functions
-            .iter()
-            .find(|f| f.name == "main")
-            .expect("main function");
-        assert!(
-            !main_func.instructions.is_empty(),
-            "main should have instructions"
-        );
-
-        // Execute
-        let mut vm = crate::vm::BytecodeVM::new(bytecode_module);
-        let result = vm.run().expect("bytecode execution");
-        // Just verify it executes without error
-        let _ = result;
-    }
-
-    #[test]
-    fn bytecode_arithmetic_expression() {
-        // Test that arithmetic SIL lowers to bytecode operations
-        let src = "fn main() -> Int { let x: Int = 2 + 3; return x; }";
-        let module = in_lang_parse::parse_in_source(src).expect("parse .in");
-        let sil = lower_core::lower_to_textual_sil(&module, "App");
-        assert!(
-            sil.contains("integer_literal $Builtin.Int64"),
-            "SIL should contain integer literals"
-        );
-
-        let artifact = hybrid_sil::parse_textual_sil(&sil);
-        let bytecode_module = crate::sil_to_bytecode::lower_sil_to_bytecode(&artifact)
-            .expect("lower SIL to bytecode");
-
-        let mut vm = crate::vm::BytecodeVM::new(bytecode_module);
-        let result = vm.run().expect("bytecode execution");
-        // Should execute successfully
-        let _ = result;
-    }
-
-    #[test]
-    fn bytecode_unary_expression_from_in_source() {
-        let src =
-            "fn main() -> Int { let x: Int = 1; if !(x == 1) { return 0; } return -(x + 4); }";
-        let module = in_lang_parse::parse_in_source(src).expect("parse .in");
-        let sil = lower_core::lower_to_textual_sil(&module, "App");
-        assert!(sil.contains("builtin_unop"));
-
-        let artifact = hybrid_sil::parse_textual_sil(&sil);
-        let bytecode_module = crate::sil_to_bytecode::lower_sil_to_bytecode(&artifact)
-            .expect("lower SIL to bytecode");
-
-        let mut vm = crate::vm::BytecodeVM::new(bytecode_module);
-        let result = vm.run().expect("bytecode execution");
-        assert_eq!(result.to_int(), -5);
-    }
-
-    #[test]
-    fn bytecode_logical_expression_from_in_source() {
-        let src = "fn main() -> Int { let x: Int = 2; if false || true && x == 2 { return 7; } return 0; }";
-        let module = in_lang_parse::parse_in_source(src).expect("parse .in");
-        let sil = lower_core::lower_to_textual_sil(&module, "App");
-        assert!(sil.contains("builtin_binop \"||\""));
-        assert!(sil.contains("builtin_binop \"&&\""));
-
-        let artifact = hybrid_sil::parse_textual_sil(&sil);
-        let bytecode_module = crate::sil_to_bytecode::lower_sil_to_bytecode(&artifact)
-            .expect("lower SIL to bytecode");
-
-        let mut vm = crate::vm::BytecodeVM::new(bytecode_module);
-        let result = vm.run().expect("bytecode execution");
-        assert_eq!(result.to_int(), 7);
     }
 }
 pub mod core_opt;

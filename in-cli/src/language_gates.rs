@@ -1,4 +1,4 @@
-use crate::boundary_emit::{emit_abi_manifest, emit_layout_probes};
+use crate::boundary_emit::emit_abi_manifest;
 use crate::boundary_verify::boundary_ir_verify;
 use crate::compiler::driver;
 use crate::core_ir::{Decl, UnifiedModule};
@@ -18,7 +18,6 @@ pub const GATE_BOUNDARY_IR_ATTACH: &str = "boundary-ir-attach";
 pub const GATE_BOUNDARY_EXTRACT: &str = "boundary-extract";
 pub const GATE_ABI_LAYOUT_HASH: &str = "abi-layout-hash";
 pub const GATE_ABI_EMIT: &str = "abi-emit";
-pub const GATE_BYTECODE_VM: &str = "bytecode-vm";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct LanguageGateReport {
@@ -157,13 +156,6 @@ pub fn evaluate_path(path: &Path, _entry: &LanguageSupport) -> LanguageGateRepor
             if !manifest.is_empty() {
                 passed.push(GATE_ABI_EMIT);
             }
-            if emit_layout_probes(&boundary).is_ok() {
-                if bytecode_gate(path).is_ok() {
-                    passed.push(GATE_BYTECODE_VM);
-                } else {
-                    blocking.push(GATE_BYTECODE_VM);
-                }
-            }
         } else {
             blocking.push(GATE_BOUNDARY_IR_VERIFY);
         }
@@ -213,12 +205,6 @@ fn load_boundary(
         _ => None,
     }?;
     artifact.boundary
-}
-
-fn bytecode_gate(path: &Path) -> Result<(), String> {
-    crate::bytecode_compiler::compile_source_path(path, "answer", parser_registry::ParserCli::Auto)
-        .map(|_| ())
-        .map_err(|e| e.to_string())
 }
 
 fn module_has_bodies(module: &UnifiedModule) -> bool {
@@ -303,29 +289,19 @@ mod tests {
     }
 
     #[test]
-    fn javascript_sample_reaches_bytecode_vm_gate() {
+    fn javascript_sample_reaches_boundary_ir_attach_gate() {
         let entry = language_support_for_parser("javascript").expect("javascript");
         let report = evaluate_language_gates(entry, &repo_root());
-        assert!(
-            report.passed_gates.contains(&GATE_BYTECODE_VM),
-            "{report:?}"
-        );
         assert!(report.passed_gates.contains(&GATE_SEMANTIC_TYPECHECK));
         assert!(report.passed_gates.contains(&GATE_BOUNDARY_IR_ATTACH));
-        assert!(report.passed_gates.contains(&GATE_BYTECODE_VM));
     }
 
     #[test]
-    fn typescript_sample_reaches_bytecode_vm_gate() {
+    fn typescript_sample_reaches_boundary_ir_attach_gate() {
         let entry = language_support_for_parser("typescript").expect("typescript");
         let report = evaluate_language_gates(entry, &repo_root());
-        assert!(
-            report.passed_gates.contains(&GATE_BYTECODE_VM),
-            "{report:?}"
-        );
         assert!(report.passed_gates.contains(&GATE_SEMANTIC_TYPECHECK));
         assert!(report.passed_gates.contains(&GATE_BOUNDARY_IR_ATTACH));
-        assert!(report.passed_gates.contains(&GATE_BYTECODE_VM));
     }
 
     #[test]

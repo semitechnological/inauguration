@@ -8,7 +8,7 @@ pub struct BoundaryCapability {
     pub can_lower: bool,
     pub can_typecheck: bool,
     pub can_boundary: bool,
-    pub can_bytecode: bool,
+    pub can_jit: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -36,7 +36,7 @@ pub fn boundary_capability_for(entry: &LanguageSupport) -> BoundaryCapability {
         can_lower: entry.can_lower(),
         can_typecheck: entry.can_typecheck(),
         can_boundary: entry.can_boundary(),
-        can_bytecode: entry.can_bytecode(),
+        can_jit: entry.can_jit(),
     }
 }
 
@@ -71,7 +71,7 @@ mod tests {
         assert!(cap.can_lower);
         assert!(cap.can_typecheck);
         assert!(cap.can_boundary);
-        assert!(cap.can_bytecode);
+        assert!(!cap.can_jit);
     }
 
     #[test]
@@ -79,7 +79,7 @@ mod tests {
         let entry = language_support_for_parser(ParserId::Icore.as_str()).expect("icore");
         let cap = boundary_capability_for(entry);
         assert!(cap.can_boundary);
-        assert!(cap.can_bytecode);
+        assert!(!cap.can_jit);
     }
 
     #[test]
@@ -142,7 +142,6 @@ mod tests {
             .expect("in");
         let json = language_support_json(entry);
         assert!(json.capabilities.contains(&"boundary"));
-        assert!(json.capabilities.contains(&"bytecode"));
         assert!(!json.passed_gates.is_empty());
     }
 

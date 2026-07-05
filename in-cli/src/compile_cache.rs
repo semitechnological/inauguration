@@ -46,6 +46,8 @@ struct CachedOwnedCompileReport {
     eval_exit_code: Option<u8>,
     #[serde(default)]
     eval_result: Option<i64>,
+    #[serde(default)]
+    eval_result_string: Option<String>,
     error: Option<String>,
 }
 
@@ -83,6 +85,7 @@ impl From<&OwnedCompileReport> for CachedOwnedCompileReport {
             frontend_hash: report.frontend_hash.clone(),
             eval_exit_code: report.eval_exit_code,
             eval_result: report.eval_result,
+            eval_result_string: report.eval_result_string.clone(),
             error: report.error.clone(),
         }
     }
@@ -122,6 +125,7 @@ impl From<CachedOwnedCompileReport> for OwnedCompileReport {
             frontend_hash: cached.frontend_hash,
             eval_exit_code: cached.eval_exit_code,
             eval_result: cached.eval_result,
+            eval_result_string: cached.eval_result_string,
             error: cached.error,
         }
     }
@@ -276,14 +280,14 @@ mod tests {
                 requested_module_id: "App".to_string(),
                 effective_module_id: "agents.video.main".to_string(),
             }),
-            target: "bytecode".to_string(),
+            target: "jit".to_string(),
             target_triple: None,
             entry: None,
             linkage: "executable".to_string(),
             frontend_level: "core-ir-direct",
             semantic_level: "typed-subset",
-            backend_level: "bytecode-vm-subset",
-            runtime_level: "inrt-bytecode",
+            backend_level: "owned-native-subset",
+            runtime_level: "inrt-jit",
             external_invocations: Vec::new(),
             reason_code: None,
             reason: None,
@@ -301,6 +305,7 @@ mod tests {
             frontend_hash: Some(hash.to_string()),
             eval_exit_code: None,
             eval_result: None,
+            eval_result_string: None,
             error: None,
         };
         write_cached_report(&cwd, hash, &report).unwrap();
