@@ -1,4 +1,6 @@
-use super::extract::{AstShape, ast_expr, extract_fn_nodes, infer_expr_type, node_txt, normalize_entry};
+use super::extract::{
+    AstShape, ast_expr, extract_fn_nodes, infer_expr_type, node_txt, normalize_entry,
+};
 use crate::core_ir::{Decl, Expr, Stmt, Typ};
 use tree_sitter::Node;
 

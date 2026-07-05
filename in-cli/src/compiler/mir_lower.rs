@@ -231,7 +231,11 @@ pub fn lower_boot_image(
 ) -> Result<(MirModule, Vec<u8>), String> {
     let triple = target_triple.unwrap_or("x86_64-unknown-none");
     let code = if triple.contains("aarch64") || triple.contains("arm64") {
-        let result = crate::native_emit::lower::lower_module(module, entry, crate::native_emit::NativeLinkage::Executable)?;
+        let result = crate::native_emit::lower::lower_module(
+            module,
+            entry,
+            crate::native_emit::NativeLinkage::Executable,
+        )?;
         result.code
     } else {
         let result = crate::native_emit::x86_64_lower::lower_module(module, entry)?;

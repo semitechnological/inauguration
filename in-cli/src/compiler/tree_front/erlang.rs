@@ -1,6 +1,6 @@
 use super::extract::{
-    AstShape, ast_body, collect_kinds, decl_fn, extract_fn_nodes, infer_expr_type, named_descendant,
-    node_txt, normalize_entry, simple_bounded_body, strict_simple_bounded_body,
+    AstShape, ast_body, collect_kinds, decl_fn, extract_fn_nodes, infer_expr_type,
+    named_descendant, node_txt, normalize_entry, simple_bounded_body, strict_simple_bounded_body,
 };
 use crate::core_ir::{Decl, Expr, Stmt, Typ, Visibility};
 use tree_sitter::Node;

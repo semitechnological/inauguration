@@ -1,6 +1,6 @@
 use super::extract::{
-    AstShape, ast_body, ast_expr, ast_stmt, collect_kinds, decl_fn, extract_fn_nodes, find_return_expr,
-    first_named, infer_expr_type, node_txt, normalize_entry, simple_bounded_body,
+    AstShape, ast_body, ast_expr, ast_stmt, collect_kinds, decl_fn, extract_fn_nodes,
+    find_return_expr, first_named, infer_expr_type, node_txt, normalize_entry, simple_bounded_body,
 };
 use crate::core_ir::{Decl, Stmt, Typ, Visibility};
 use std::collections::HashSet;

@@ -800,10 +800,7 @@ fn eval_wraps_rust_statement() {
         "println!(\"hi\")",
     );
     assert_eq!(plans.len(), 1);
-    assert_eq!(
-        plans[0].wrapped,
-        "fn main() -> i64 { print(\"hi\");\n0\n}"
-    );
+    assert_eq!(plans[0].wrapped, "fn main() -> i64 { print(\"hi\");\n0\n}");
     assert!(!plans[0].print_result);
 }
 
@@ -969,10 +966,7 @@ fn eval_wraps_scala_statement() {
         "println(\"hi\")",
     );
     assert_eq!(plans.len(), 1);
-    assert_eq!(
-        plans[0].wrapped,
-        "def main(): Unit = {\n  print(\"hi\")\n}"
-    );
+    assert_eq!(plans[0].wrapped, "def main(): Unit = {\n  print(\"hi\")\n}");
     assert!(!plans[0].print_result);
 }
 
@@ -1335,10 +1329,7 @@ fn eval_wraps_clojure_statement_in_main() {
 fn eval_prefers_printed_elixir_expression() {
     let plans = crate::eval::eval_plans(inauguration::parser_registry::ParserId::Elixir, "1 + 2");
     assert_eq!(plans.len(), 2);
-    assert_eq!(
-        plans[0].wrapped,
-        "def main do\n  1 + 2\nend\n"
-    );
+    assert_eq!(plans[0].wrapped, "def main do\n  1 + 2\nend\n");
     assert!(plans[0].print_result);
 }
 
@@ -1349,10 +1340,7 @@ fn eval_wraps_elixir_statement_in_main() {
         "print(\"hi\")",
     );
     assert_eq!(plans.len(), 1);
-    assert_eq!(
-        plans[0].wrapped,
-        "def main do\n  print(\"hi\")\nend\n"
-    );
+    assert_eq!(plans[0].wrapped, "def main do\n  print(\"hi\")\nend\n");
     assert!(!plans[0].print_result);
 }
 
@@ -1417,10 +1405,7 @@ fn eval_wraps_holyc_statement_in_main() {
         "print(\"hi\")",
     );
     assert_eq!(plans.len(), 1);
-    assert_eq!(
-        plans[0].wrapped,
-        "U0 Main()\n{\n  print(\"hi\");\n}\nMain;"
-    );
+    assert_eq!(plans[0].wrapped, "U0 Main()\n{\n  print(\"hi\");\n}\nMain;");
     assert!(!plans[0].print_result);
 }
 
