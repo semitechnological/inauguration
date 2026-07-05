@@ -1913,7 +1913,6 @@ fn lower_builtin_call(
             return Ok(true);
         }
         _ => return Ok(false),
-
     }
 }
 

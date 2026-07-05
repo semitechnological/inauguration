@@ -55,7 +55,7 @@ fn arg_value(args: &[String], flag: &str) -> Option<String> {
     args.get(i + 1).cloned()
 }
 
-/// Published doc order (crepuscularity-style flat `docs/`); README is overview only.
+/// Published doc order; `benchmarks/*` is a section like crepuscularity topic groups.
 const NAV_ORDER: &[&str] = &[
     "in-language",
     "general-compiler",
@@ -64,10 +64,10 @@ const NAV_ORDER: &[&str] = &[
     "parser-surface",
     "native-backend",
     "docs-site",
-    "benchmarks-index",
-    "jit",
-    "polyglot-compilers",
-    "self-host-vs-native",
+    "benchmarks/README",
+    "benchmarks/jit",
+    "benchmarks/polyglot-compilers",
+    "benchmarks/self-host-vs-native",
 ];
 
 fn generate_docs(
@@ -93,11 +93,15 @@ fn generate_docs(
         .collect();
 
     fs::create_dir_all(out_dir)?;
-    for (stem, content) in &files {
+    for (web_key, content) in &files {
         let (title, body_html) = render_md(content);
-        let nav = render_nav(&pages, stem);
-        let page = render_shell(&body_html, &title, &nav, theme, site_name);
-        fs::write(out_dir.join(format!("{stem}.html")), page)?;
+        let nav = render_nav(&pages, web_key);
+        let page = render_shell(&body_html, &title, &nav, theme, site_name, web_key);
+        let out_path = out_dir.join(format!("{web_key}.html"));
+        if let Some(parent) = out_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(out_path, page)?;
     }
 
     if pages.is_empty() {
@@ -106,7 +110,7 @@ fn generate_docs(
 
     let idx: Vec<serde_json::Value> = pages
         .iter()
-        .map(|(stem, title)| serde_json::json!({"path": format!("{stem}.html"), "title": title}))
+        .map(|(web_key, title)| serde_json::json!({"path": format!("{web_key}.html"), "title": title}))
         .collect();
     fs::write(
         out_dir.join("docs-search-index.json"),
@@ -158,12 +162,15 @@ fn collect_markdown(
             continue;
         }
         let rel = path.strip_prefix(root).unwrap_or(&path);
-        let stem = rel
+        let web_key = rel
             .with_extension("")
             .to_string_lossy()
-            .replace(std::path::MAIN_SEPARATOR, "-");
+            .replace(std::path::MAIN_SEPARATOR, "/");
+        if web_key == "README" {
+            continue;
+        }
         let content = fs::read_to_string(&path)?;
-        out.push((stem, content));
+        out.push((web_key, content));
     }
     Ok(())
 }
@@ -189,6 +196,31 @@ fn render_md(md: &str) -> (String, String) {
     (title, body)
 }
 
+fn doc_href(from_key: &str, to_key: &str) -> String {
+    let from_depth = from_key.matches('/').count();
+    let to_depth = to_key.matches('/').count();
+    if from_depth == 0 && to_depth == 0 {
+        return format!("{to_key}.html");
+    }
+    if from_depth == 0 && to_depth > 0 {
+        return format!("{to_key}.html");
+    }
+    if from_depth > 0 && to_depth == 0 {
+        return format!("../{to_key}.html");
+    }
+    let (from_dir, _) = from_key.rsplit_once('/').unwrap_or(("", from_key));
+    let (to_dir, to_file) = to_key.rsplit_once('/').unwrap_or(("", to_key));
+    if from_dir == to_dir {
+        return format!("{to_file}.html");
+    }
+    format!("../{to_key}.html")
+}
+
+fn brand_href(web_key: &str) -> String {
+    let ups = web_key.matches('/').count() + 1;
+    format!("{}index.html", "../".repeat(ups))
+}
+
 fn render_nav(pages: &[(String, String)], current: &str) -> String {
     let order: Vec<&(String, String)> = {
         let mut seen = HashSet::new();
@@ -209,21 +241,29 @@ fn render_nav(pages: &[(String, String)], current: &str) -> String {
     };
 
     let mut items = String::new();
-    for (stem, page_title) in order {
-        let active = if stem == current {
+    for (web_key, page_title) in order {
+        let active = if web_key == current {
             " class=\"active\""
         } else {
             ""
         };
+        let href = doc_href(current, web_key);
         items.push_str(&format!(
-            "<li><a href=\"{stem}.html\"{active}>{}</a></li>",
+            "<li><a href=\"{href}\"{active}>{}</a></li>",
             esc(page_title)
         ));
     }
     format!("<nav aria-label=\"Documentation\"><ul class=\"doc-nav\">{items}</ul></nav>")
 }
 
-fn render_shell(body: &str, title: &str, nav: &str, theme: &ThemeCss, site_name: &str) -> String {
+fn render_shell(
+    body: &str,
+    title: &str,
+    nav: &str,
+    theme: &ThemeCss,
+    site_name: &str,
+    web_key: &str,
+) -> String {
     let ttl = esc(title);
     let site = esc(site_name);
     let a = esc(&theme.accent);
@@ -231,6 +271,7 @@ fn render_shell(body: &str, title: &str, nav: &str, theme: &ThemeCss, site_name:
     let t = esc(&theme.text);
     let m = esc(&theme.muted);
     let b = esc(&theme.border);
+    let brand = esc(&brand_href(web_key));
 
     format!(
         "<!DOCTYPE html>
@@ -270,7 +311,7 @@ fn render_shell(body: &str, title: &str, nav: &str, theme: &ThemeCss, site_name:
 </head>
 <body>
 <div class=\"doc-shell\">
-<aside><a class=\"brand\" href=\"../index.html\">{site}</a>{nav}</aside>
+<aside><a class=\"brand\" href=\"{brand}\">{site}</a>{nav}</aside>
 <article>{body}</article>
 </div>
 </body>

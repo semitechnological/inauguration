@@ -998,7 +998,11 @@ dependencies:
 lock-version: 1
 \tname: my-app
 ";
-        assert!(parse_text(tabs).unwrap_err().contains("tabs are not valid indentation"));
+        assert!(
+            parse_text(tabs)
+                .unwrap_err()
+                .contains("tabs are not valid indentation")
+        );
 
         let odd_spaces = "\
 lock-version: 1
@@ -1007,13 +1011,21 @@ version: 1.0.0
 dependencies:
    dep1:
 ";
-        assert!(parse_text(odd_spaces).unwrap_err().contains("malformed indentation"));
+        assert!(
+            parse_text(odd_spaces)
+                .unwrap_err()
+                .contains("malformed indentation")
+        );
 
         let indent_outside_section = "\
 lock-version: 1
   name: my-app
 ";
-        assert!(parse_text(indent_outside_section).unwrap_err().contains("indentation is only valid inside a section"));
+        assert!(
+            parse_text(indent_outside_section)
+                .unwrap_err()
+                .contains("indentation is only valid inside a section")
+        );
 
         let deep_indent_outside_deps = "\
 lock-version: 1
@@ -1024,7 +1036,11 @@ dependencies:
     version: 1.0.0
         extra:
 ";
-        assert!(parse_text(deep_indent_outside_deps).unwrap_err().contains("malformed indentation"));
+        assert!(
+            parse_text(deep_indent_outside_deps)
+                .unwrap_err()
+                .contains("malformed indentation")
+        );
     }
 
     #[test]
@@ -1033,19 +1049,31 @@ dependencies:
 name: my-app
 version: 1.0.0
 ";
-        assert!(parse_text(no_lock_version).unwrap_err().contains("missing required field `lock-version`"));
+        assert!(
+            parse_text(no_lock_version)
+                .unwrap_err()
+                .contains("missing required field `lock-version`")
+        );
 
         let no_name = "\
 lock-version: 1
 version: 1.0.0
 ";
-        assert!(parse_text(no_name).unwrap_err().contains("missing required field `name`"));
+        assert!(
+            parse_text(no_name)
+                .unwrap_err()
+                .contains("missing required field `name`")
+        );
 
         let no_version = "\
 lock-version: 1
 name: my-app
 ";
-        assert!(parse_text(no_version).unwrap_err().contains("missing required field `version`"));
+        assert!(
+            parse_text(no_version)
+                .unwrap_err()
+                .contains("missing required field `version`")
+        );
 
         let no_dep_version = "\
 lock-version: 1
@@ -1055,7 +1083,11 @@ dependencies:
   dep1:
     kind: registry
 ";
-        assert!(parse_text(no_dep_version).unwrap_err().contains("missing required field `version`"));
+        assert!(
+            parse_text(no_dep_version)
+                .unwrap_err()
+                .contains("missing required field `version`")
+        );
     }
 
     #[test]
@@ -1070,7 +1102,11 @@ dependencies:
   dep1:
     version: 2.0.0
 ";
-        assert!(parse_text(dup_dep).unwrap_err().contains("duplicate dependency `dep1`"));
+        assert!(
+            parse_text(dup_dep)
+                .unwrap_err()
+                .contains("duplicate dependency `dep1`")
+        );
 
         let dup_version = "\
 lock-version: 1
@@ -1081,7 +1117,11 @@ dependencies:
     version: 1.0.0
     version: 2.0.0
 ";
-        assert!(parse_text(dup_version).unwrap_err().contains("duplicate version"));
+        assert!(
+            parse_text(dup_version)
+                .unwrap_err()
+                .contains("duplicate version")
+        );
 
         let dup_build = "\
 lock-version: 1
@@ -1094,7 +1134,11 @@ dependencies:
       mode: release
       mode: debug
 ";
-        assert!(parse_text(dup_build).unwrap_err().contains("duplicate build field `mode`"));
+        assert!(
+            parse_text(dup_build)
+                .unwrap_err()
+                .contains("duplicate build field `mode`")
+        );
 
         let dup_kind = "\
 lock-version: 1
@@ -1117,7 +1161,11 @@ name: my-app
 version: 1.0.0
 dependencies: { dep1: 1.0.0 }
 ";
-        assert!(parse_text(inline_deps).unwrap_err().contains("must not have an inline value"));
+        assert!(
+            parse_text(inline_deps)
+                .unwrap_err()
+                .contains("must not have an inline value")
+        );
 
         let inline_build = "\
 lock-version: 1
@@ -1128,7 +1176,11 @@ dependencies:
     version: 1.0.0
     build: mode
 ";
-        assert!(parse_text(inline_build).unwrap_err().contains("must not have an inline value"));
+        assert!(
+            parse_text(inline_build)
+                .unwrap_err()
+                .contains("must not have an inline value")
+        );
     }
 
     #[test]
@@ -1143,7 +1195,11 @@ dependencies:
     targets:
       -
 ";
-        assert!(parse_text(empty_item).unwrap_err().contains("empty list item"));
+        assert!(
+            parse_text(empty_item)
+                .unwrap_err()
+                .contains("empty list item")
+        );
 
         let not_item = "\
 lock-version: 1
@@ -1155,6 +1211,10 @@ dependencies:
     targets:
       linux
 ";
-        assert!(parse_text(not_item).unwrap_err().contains("only supports list items"));
+        assert!(
+            parse_text(not_item)
+                .unwrap_err()
+                .contains("only supports list items")
+        );
     }
 }

@@ -1694,7 +1694,10 @@ capabilities:
         let validation = manifest.validate_capability_policy(["process.stdout", "network.http"]);
 
         assert!(validation.valid);
-        assert_eq!(validation.allowed, vec!["fs.read", "process.stdout", "network.http"]);
+        assert_eq!(
+            validation.allowed,
+            vec!["fs.read", "process.stdout", "network.http"]
+        );
         assert_eq!(validation.required, vec!["process.stdout", "network.http"]);
         assert_eq!(validation.missing, Vec::<String>::new());
     }
@@ -1747,7 +1750,8 @@ capabilities:
         )
         .expect("parse manifest");
 
-        let validation = manifest.validate_capability_policy(["fs.read", "fs.read", "network.http"]);
+        let validation =
+            manifest.validate_capability_policy(["fs.read", "fs.read", "network.http"]);
 
         assert!(!validation.valid);
         assert_eq!(validation.allowed, vec!["fs.read"]);

@@ -759,9 +759,7 @@ mod tests {
             .status()
             .expect("codesign");
         assert!(sign.success(), "codesign failed");
-        let status = std::process::Command::new(&path)
-            .status()
-            .expect("run");
+        let status = std::process::Command::new(&path).status().expect("run");
         match status.code() {
             Some(42) => {}
             None if status.signal() == Some(9) => {

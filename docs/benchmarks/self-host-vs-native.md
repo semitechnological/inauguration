@@ -33,15 +33,15 @@ Compares **inauguration’s owned Rust front** (`in build` on `in-cli/src/main.r
 ## vs rustc (same shipped binary today)
 
 <!-- BENCH:RUSTC_CMP_START -->
-| Metric | `in` (owned front) | `rustc` / Cargo (release) |
-|--------|-------------------:|-------------------------:|
-| Compile wall (avg ms) | 197.0 | 49950.0 |
-| Speed ratio (in ÷ rustc) | 0.004× | 1.000× (baseline) |
-| Shipped binary size | 69.17 MiB (72,531,952 B) | 69.17 MiB (72,531,952 B) |
-| Size ratio (in ÷ rustc) | 1.000× | same artifact today |
-| Cold `in --version` (ms) | 157.35 | 7.33 |
+| Metric | `in` owned front (`in build` on `main.rs`) | `rustc` / Cargo release (full crate) |
+|--------|----------------------------------------:|----------------------------------:|
+| Compile wall avg (ms) | 197.0 | 49950.0 |
+| Relative compile time | 0.004× wall (in ÷ rustc); **in front** on this incremental compile | baseline (incremental `touch main.rs`) |
+| Shipped `in` binary | 69.17 MiB (72,531,952 B) | 69.17 MiB (72,531,952 B) |
+| Binary size ratio (in ÷ rustc) | 1.000× | same artifact until native self-link |
+| Cold `--version` startup (ms) | 157.35 | 7.33 |
 
-**Notes:** `in build` parses/types **main.rs** through Core IR (JIT often fails on atomics); **Cargo** rebuilds the **whole** `inauguration` crate after `touch main.rs`. Binary row is the **same** `target/release/in` until native self-link works. Execution row is **CLI startup**, not compile throughput.
+**Notes:** Compares **front-only** parse/type/JIT attempt on `in-cli/src/main.rs` vs **Cargo** linking the whole `inauguration` crate (not a clean `cargo clean` build). Binary row is today's single `target/release/in`. Startup row is process launch, not compiler throughput.
 <!-- BENCH:RUSTC_CMP_END -->
 
 ## Language coverage
@@ -52,7 +52,7 @@ Compares **inauguration’s owned Rust front** (`in build` on `in-cli/src/main.r
 | `.rs` (in-cli `main.rs`) | ✅ | ⚠️ | front OK; JIT/native blocked on `AtomicPtr` etc. |
 | `.rs` (samples) | ✅ | ✅ | native Mach-O |
 
-[Polyglot compile times](polyglot-compilers.md).
+[Polyglot compile times](polyglot-compilers.md) (under **Benchmarks**).
 
 ## Optimization roadmap
 
