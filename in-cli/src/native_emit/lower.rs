@@ -302,6 +302,15 @@ pub fn lower_module(
     entry: &str,
     linkage: NativeLinkage,
 ) -> Result<LoweredModule, String> {
+    lower_module_with_jobs(module, entry, linkage, 1)
+}
+
+pub fn lower_module_with_jobs(
+    module: &UnifiedModule,
+    entry: &str,
+    linkage: NativeLinkage,
+    jobs: usize,
+) -> Result<LoweredModule, String> {
     // Clear any stale external refs from previous invocations
     TL_EXTERNAL_REFS.with(|refs| refs.borrow_mut().clear());
     let functions = collect_functions(module)?;
@@ -338,23 +347,52 @@ pub fn lower_module(
 
     // Lower each function in parallel. Each function gets its own code buffer,
     // so the per-function work is independent; we merge and patch offsets below.
-    let buffers: Vec<FunctionBuffer> = std::thread::scope(|s| {
-        let functions = &functions;
-        let structs = &structs;
-        let strings = &strings;
-        let mut handles = Vec::with_capacity(names.len());
-        for name in &names {
-            let func = &functions[name];
-            handles.push(s.spawn(move || {
-                lower_function_to_buffer(func, functions, structs, strings)
+    let jobs = jobs.max(1);
+    let buffers: Vec<FunctionBuffer> = if jobs == 1 || names.len() <= 1 {
+        names
+            .iter()
+            .map(|name| {
+                let func = &functions[name];
+                lower_function_to_buffer(func, &functions, &structs, &strings)
                     .map_err(|e| format!("native-lower: function `{name}` unsupported: {e}"))
-            }));
-        }
-        handles
-            .into_iter()
-            .map(|h| h.join().unwrap())
-            .collect::<Result<Vec<_>, _>>()
-    })?;
+            })
+            .collect::<Result<Vec<_>, _>>()?
+    } else {
+        std::thread::scope(|s| {
+            let functions = &functions;
+            let structs = &structs;
+            let strings = &strings;
+            let chunks: Vec<Vec<String>> = names
+                .chunks((names.len() + jobs - 1) / jobs)
+                .map(|c| c.to_vec())
+                .collect();
+            let mut handles = Vec::with_capacity(chunks.len());
+            for chunk in chunks {
+                handles.push(s.spawn(move || {
+                    chunk
+                        .into_iter()
+                        .map(|name| {
+                            let func = &functions[&name];
+                            lower_function_to_buffer(func, functions, structs, strings)
+                                .map_err(|e| {
+                                    format!("native-lower: function `{name}` unsupported: {e}")
+                                })
+                                .map(|buf| (name, buf))
+                        })
+                        .collect::<Result<Vec<_>, _>>()
+                }));
+            }
+            let mut results: Vec<(String, FunctionBuffer)> = Vec::with_capacity(names.len());
+            for h in handles {
+                results.extend(h.join().unwrap()?);
+            }
+            // Sort back to original name order so the buffer layout is deterministic.
+            results.sort_by(|(a, _), (b, _)| a.cmp(b));
+            let buffers: Vec<FunctionBuffer> =
+                results.into_iter().map(|(_, b)| b).collect();
+            Result::<Vec<FunctionBuffer>, String>::Ok(buffers)
+        })?
+    };
 
     // Append all per-function buffers and record global offsets.
     for buf in &buffers {
