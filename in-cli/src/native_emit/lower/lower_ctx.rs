@@ -39,7 +39,7 @@ pub(crate) fn append_string_table(
     let mut index_offsets: HashMap<i64, i64> = HashMap::new();
     for (idx, value) in ordered {
         assert!(
-            emitter.len() % 8 == 0,
+            emitter.len().is_multiple_of(8),
             "string table entry must be 8-byte aligned"
         );
         let header_offset = emitter.len() as i64;

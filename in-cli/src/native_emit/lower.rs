@@ -364,7 +364,7 @@ pub fn lower_module_with_jobs(
             let structs = &structs;
             let strings = &strings;
             let chunks: Vec<Vec<String>> = names
-                .chunks((names.len() + jobs - 1) / jobs)
+                .chunks(names.len().div_ceil(jobs))
                 .map(|c| c.to_vec())
                 .collect();
             let mut handles = Vec::with_capacity(chunks.len());

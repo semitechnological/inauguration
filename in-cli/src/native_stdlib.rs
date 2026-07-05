@@ -23,7 +23,7 @@ const INSTRING_LEN_SIZE: usize = 8;
 const INSTRING_ALIGN: usize = 8;
 
 unsafe fn instring_from_ptr(ptr: *const u8) -> Option<&'static [u8]> {
-    if ptr.is_null() || (ptr as usize) % INSTRING_ALIGN != 0 {
+    if ptr.is_null() || !(ptr as usize).is_multiple_of(INSTRING_ALIGN) {
         return None;
     }
     unsafe {
@@ -561,7 +561,7 @@ pub unsafe extern "C" fn in_str_slice(text_ptr: *const u8, start: i64, end: i64)
         let start = start.clamp(0, len) as usize;
         let end = end.clamp(0, len) as usize;
         let (start, end) = (start.min(end), start.max(end));
-        instring_from_bytes(s[start..end].as_bytes())
+        instring_from_bytes(&s.as_bytes()[start..end])
     }
 }
 
