@@ -45,7 +45,7 @@ tree-sitter-java = "0.23.5"
 tree-sitter-javascript = "0.25.0"
 tree-sitter-python = "0.25.0"
 tree-sitter-rust = "0.24.2"
-tree-sitter-swift = { version = "0.7.3", optional = true }
+tree-sitter-swift = "0.7.3"
 tree-sitter-typescript = "0.23.2"
 tree-sitter-zig = { version = "1.1.2", optional = true }
 # Extended parsers (opt-in via feature "extended")
@@ -72,7 +72,7 @@ tree-sitter-v = { version = "0.0.2", optional = true }
 default = []
 v-native = []  # Build V native runtime (requires `v` compiler on PATH)
 extended = [
-    "tree-sitter-cpp", "tree-sitter-swift", "tree-sitter-zig",
+    "tree-sitter-cpp", "tree-sitter-zig",
     "tree-sitter-c-sharp", "tree-sitter-dart", "tree-sitter-elixir",
     "tree-sitter-erlang", "tree-sitter-fsharp", "tree-sitter-groovy",
     "tree-sitter-haskell", "tree-sitter-holyc", "tree-sitter-julia",

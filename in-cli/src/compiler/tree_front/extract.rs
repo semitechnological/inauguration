@@ -92,10 +92,7 @@ fn try_lang_for(id: ParserId) -> Option<Language> {
         #[cfg(not(feature = "tree-sitter-zig"))]
         ParserId::Zig => return None,
         ParserId::Go => tree_sitter_go::LANGUAGE.into(),
-        #[cfg(feature = "tree-sitter-swift")]
         ParserId::Swift => tree_sitter_swift::LANGUAGE.into(),
-        #[cfg(not(feature = "tree-sitter-swift"))]
-        ParserId::Swift => return None,
         ParserId::TypeScript => tree_sitter_typescript::LANGUAGE_TSX.into(),
         #[cfg(feature = "tree-sitter-objc")]
         ParserId::ObjC => tree_sitter_objc::LANGUAGE.into(),
