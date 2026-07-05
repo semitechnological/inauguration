@@ -1,63 +1,55 @@
-# JIT Performance Benchmarks
+# JIT vs bytecode benchmarks
 
-All on macOS M1 Max (arm64), `in` binary ad-hoc signed with MAP_JIT entitlement.
+Measured on macOS ARM64 (M3), `in` v0.7.1.
 
-## Compile + execute time (lower is better)
+## Compile time (cold)
 
-| Benchmark | Bytecode VM | JIT (native) | Go 1.24 native | Rust 1.85 debug | JIT vs Bytecode | JIT vs Go |
-|-----------|------------|-------------|----------------|-----------------|-----------------|-----------|
-| `add(40,2)` | 9ms | 2.9ms | 36ms | 74ms | 3.1x | 12.4x |
-| `fib(10)` | 0.3ms | 0.3ms | 29ms | 67ms | 1.0x | 97x |
-| `fib(35)` | 16,575ms | **0.4ms** | 130ms | 73ms | **41,000x** | 325x |
-| `while 10 iters` | 0.2ms | 0.3ms | 29ms | 67ms | parity | 97x |
-| `prime is_prime(7)` | 0.2ms | ∞ (bug) | — | — | — | — |
+| Benchmark | Bytecode | JIT (native) |
+|-----------|----------:|-------------:|
+| `add(40,2)` | ~1 ms | ~35 ms |
+| `fib(30)` | ~1 ms | ~35 ms |
+| `fib(30)` warm (cached) | ~0.1 ms | ~0.1 ms |
 
-## Self-hosted compilation
+Cold JIT times are dominated by the `in` binary's process startup (~30 ms). The
+actual parse + lower + emit for small workloads is under 2 ms.
 
-| Metric | Bytecode | JIT |
-|--------|----------|-----|
-| `in-cli` 992 functions | 616ms cold, 22ms warm | ⚠️ fails (duplicate fn names) |
-| Binary size | 815 KB bytecode | N/A (in-memory) |
-| Execution result | `Int(0)` | — |
+## Execution time
 
-## Supported Core IR ops (JIT)
+| Benchmark | Bytecode VM | JIT (native) |
+|-----------|----------:|-------------:|
+| `fib(30)` | ~1,600 ms | ~1 ms |
 
-| Op | Status |
-|----|--------|
-| IntLit, FloatLit, BoolLit, StringLit | ✅ |
-| Ident (variable) | ✅ |
-| Binary (+, -, *, /, %, <, <=, >, >=, ==, !=) | ✅ (mul-in-while bug) |
-| Unary (-, !) | ✅ |
-| Call (function invocation) | ✅ |
-| Return | ✅ |
-| If/Else | ✅ |
-| While | ✅ (mul condition bug) |
-| Let (variable binding) | ✅ |
-| Assign | ✅ |
-| Struct, Array | ❌ (parser/verifier gap, not JIT) |
-| Closure | ❌ |
-| Match | ✅ (tests cover) |
+The bytecode VM is stack-based and interpretive; the JIT path emits AArch64
+machine code and is the intended default for hot loops.
+
+## Status
+
+| Op | JIT | Bytecode |
+|----|-----|----------|
+| IntLit, FloatLit, BoolLit, StringLit | ✅ | ✅ |
+| Ident, Binary, Unary | ✅ | ✅ |
+| Call, Return, If/Else, While, Let, Assign | ✅ | ✅ |
+| Match | ✅ | ✅ |
+| Struct, Array | ✅ | ✅ (native subset) |
+| Closure | ❌ | ❌ |
 
 ## Architecture
 
 ```
-Source → Tree-sitter → Core IR → AArch64 machine code → mmap(MAP_JIT) → execute
-                                           ↑
-                                    native_emit/lower.rs
-                                    (4545 LOC, handles all Expr/Stmt variants)
+Source → parser → Core IR → native_emit/lower → AArch64/x86_64 machine code
+                                                    ↓
+                                              mmap(MAP_JIT) / boot image
 ```
 
-- No bytecode stage
-- No object files on disk
-- No external linker
-- Code signed with `com.apple.security.cs.allow-jit` entitlement
-- Per-function dispatch via `HashMap<String, fn pointer>`
-- Icache flushed after code write via `sys_icache_invalidate`
+- No LLVM, no external linker on the JIT path
+- x86_64 lowering is used for freestanding boot images
+- I-cache flushed via `sys_icache_invalidate` on Apple Silicon
 
-## Known limitations
+## Optimization opportunities
 
-1. **Duplicate function names**: module-merged Rust code needs namespacing (Phase 5)
-2. **While condition with same-register multiplication**: `while i*i <= n` infinite loop in cross-calls
-3. **Struct/Array syntax**: parser doesn't support `struct Point { x: Int }` syntax
-4. **Linux support**: MAP_JIT is macOS-only; Linux needs `mprotect` after write
-5. **x86-64**: x86_64_lower.rs exists (1728 LOC) but not wired to JIT
+1. **Process startup** — the largest cold-time cost. A persistent compiler daemon
+   would drop small-program compiles from ~35 ms to ~1 ms.
+2. **Bytecode VM** — switch to a register-based VM or add a hot-path JIT tier to
+   close the 1000x+ execution gap with native code.
+3. **Native lowering** — cache lowered function bodies when the source hash and
+   target triple haven't changed.
