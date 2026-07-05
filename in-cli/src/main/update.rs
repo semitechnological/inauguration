@@ -1,6 +1,6 @@
 use crate::util::run_cmd;
 use crate::{InError, Result};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 use std::time::Instant;
 
@@ -22,7 +22,7 @@ pub(crate) fn cmd_update(root: &Path) -> Result<()> {
     if in_cli.join("Cargo.lock").is_file() {
         cmd.arg("--locked");
     }
-    if let Some(root_dir) = crate::config::env_config().install_root() {
+    if let Some(root_dir) = inauguration::config::env_config().install_root() {
         cmd.arg("--root").arg(root_dir);
     }
 
@@ -36,7 +36,7 @@ pub(crate) fn cmd_update(root: &Path) -> Result<()> {
 }
 
 pub(crate) fn github_repo_slug_for_remote_install() -> String {
-    crate::config::env_config().github_repo_slug()
+    inauguration::config::env_config().github_repo_slug()
 }
 
 pub(crate) fn cmd_update_remote() -> Result<()> {

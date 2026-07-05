@@ -29,7 +29,7 @@ pub(crate) fn cmd_build(
         && resolved
             .extension()
             .is_some_and(|ext| ext == "swift" || ext == "swiftpm")
-        && crate::config::env_config().native_swift_sil_enabled
+        && inauguration::config::env_config().native_swift_sil_enabled
     {
         return Err(InError::Message(
             "in: owned build path rejects external Swift toolchain; pass --allow-external-toolchain to permit swiftc/SwiftPM fallback on `in build`"
