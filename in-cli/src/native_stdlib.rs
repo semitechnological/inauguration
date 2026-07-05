@@ -323,6 +323,32 @@ pub unsafe extern "C" fn in_str_starts_with(self_ptr: *const u8, pattern_ptr: *c
     }
 }
 
+/// `print(text)` -> void
+/// Prints the instring to stdout without a trailing newline.
+///
+/// # Safety
+/// `text_ptr` must be a valid, non-aliased instring pointer or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn in_print(text_ptr: *const u8) {
+    unsafe {
+        if let Some(text) = instring_from_ptr(text_ptr) {
+            if let Ok(s) = std::str::from_utf8(text) {
+                print!("{}", s);
+            }
+        }
+    }
+}
+
+/// `print_int(n)` -> void
+/// Prints the signed integer to stdout without a trailing newline.
+///
+/// # Safety
+/// No raw pointer arguments; safe to call from JIT with the standard C ABI.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn in_print_int(n: i64) {
+    print!("{}", n);
+}
+
 /// `String::ends_with(&self, pattern)` -> `bool`
 ///
 /// # Safety

@@ -334,6 +334,25 @@ pub(crate) fn lower_stdlib_call(
             )?;
             return Ok(true);
         }
+        // Built-in print: dispatch to string or int wrapper based on the argument.
+        "print" if args.len() == 1 => {
+            let wrapper = if matches!(&args[0], Expr::IntLit(_) | Expr::BoolLit(_)) {
+                "in_print_int"
+            } else {
+                "in_print"
+            };
+            emit_stdlib_wrapper_call(
+                emitter,
+                ctx,
+                wrapper,
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
         _ => {}
     }
 
