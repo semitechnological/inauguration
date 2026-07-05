@@ -48,14 +48,10 @@ struct LowerCtx<'a> {
     structs: &'a HashMap<String, Vec<(String, Typ)>>,
     /// All functions by name (for call resolution)
     functions: &'a HashMap<String, FunctionInfo>,
-    /// Pending call fixups: (site_offset, target_name)
-    pending_calls: Vec<PendingCall>,
     /// Current function name (for error messages)
     fn_name: String,
     /// Global variable addresses: name → absolute physical address
     globals: HashMap<String, u64>,
-    /// String literal content → fixed absolute address
-    string_addrs: HashMap<String, u64>,
     /// Error handling: offset for error flag byte (Throw/Try)
     error_flag_offset: u32,
     /// Error handling: offset for error value (Throw/Try)
@@ -67,7 +63,6 @@ struct LowerCtx<'a> {
 #[derive(Debug, Clone)]
 enum StackSlot {
     Scalar(u32), // offset from RBP (negative)
-    Array { offsets: Vec<u32> },
     Struct { fields: HashMap<String, u32> },
 }
 
@@ -77,11 +72,6 @@ struct PendingCall {
     target: String,
 }
 
-struct PendingAddr {
-    site_offset: u32, // offset within a `mov rax, imm64` instruction (byte 2 of 10)
-    target: String,   // function name
-}
-
 impl<'a> LowerCtx<'a> {
     fn new(
         fn_name: &str,
@@ -89,7 +79,6 @@ impl<'a> LowerCtx<'a> {
         structs: &'a HashMap<String, Vec<(String, Typ)>>,
         functions: &'a HashMap<String, FunctionInfo>,
         globals: HashMap<String, u64>,
-        string_addrs: HashMap<String, u64>,
     ) -> Self {
         let mut ctx = Self {
             locals: HashMap::new(),
@@ -98,10 +87,8 @@ impl<'a> LowerCtx<'a> {
             is_interrupt: false,
             structs,
             functions,
-            pending_calls: Vec::new(),
             fn_name: fn_name.to_string(),
             globals,
-            string_addrs,
             error_flag_offset: 0,
             error_value_offset: 0,
             ret_typ: Typ::Int,
@@ -186,8 +173,6 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
     let structs = collect_structs(module);
     let globals = collect_globals(module);
 
-    // ponytail: string literals not implemented for boot images; returns NULL address
-    let string_addrs: HashMap<String, u64> = HashMap::new();
     let all_strings = collect_string_literals(module);
 
     let mut emitter = CodeEmitter::new();
@@ -218,7 +203,6 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
             &structs,
             &functions,
             &globals,
-            &string_addrs,
             &mut all_pending_calls,
             is_interrupt,
         )?;
@@ -632,7 +616,6 @@ fn lower_function(
     structs: &HashMap<String, Vec<(String, Typ)>>,
     functions: &HashMap<String, FunctionInfo>,
     globals: &HashMap<String, u64>,
-    string_addrs: &HashMap<String, u64>,
     pending_calls: &mut Vec<PendingCall>,
     is_interrupt: bool,
 ) -> Result<(), String> {
@@ -654,7 +637,6 @@ fn lower_function(
         structs,
         functions,
         globals.clone(),
-        string_addrs.clone(),
     );
     ctx.is_interrupt = is_interrupt;
     ctx.ret_typ = func.ret.clone();

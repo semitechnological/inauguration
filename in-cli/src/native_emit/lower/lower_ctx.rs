@@ -143,10 +143,6 @@ pub(crate) struct LowerCtx<'a> {
     pub(crate) binop_temp: u32,
 }
 
-pub(crate) fn alloc_slot_for_ctx(ctx: &mut LowerCtx<'_>) -> u32 {
-    ctx.alloc_slot()
-}
-
 #[allow(clippy::only_used_in_recursion)]
 pub(crate) fn alloc_nested_struct_slots(
     ctx: &mut LowerCtx<'_>,

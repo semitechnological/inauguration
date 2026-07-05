@@ -58,10 +58,6 @@ pub fn parse_rust_artifact_source_with_dir(
     })
 }
 
-fn lower_file_items(file: &syn::File) -> Result<UnifiedModule, String> {
-    lower_file_items_at(file, &PathBuf::from("."))
-}
-
 fn lower_file_items_at(file: &syn::File, base_dir: &Path) -> Result<UnifiedModule, String> {
     let mut decls = Vec::new();
     let mut external_modules: Vec<(String, PathBuf)> = Vec::new();
@@ -642,14 +638,6 @@ fn map_type(ty: &syn::Type) -> Typ {
     }
 }
 
-fn lower_block(block: &syn::Block) -> Vec<Stmt> {
-    lower_block_inner(block, true)
-}
-
-fn lower_block_no_implicit_return(block: &syn::Block) -> Vec<Stmt> {
-    lower_block_inner(block, false)
-}
-
 fn lower_block_with_types(
     block: &syn::Block,
     local_types: &mut HashMap<String, String>,
@@ -662,10 +650,6 @@ fn lower_block_no_implicit_return_with_types(
     local_types: &mut HashMap<String, String>,
 ) -> Vec<Stmt> {
     lower_block_inner_with_types(block, false, local_types)
-}
-
-fn lower_block_inner(block: &syn::Block, wrap_implicit_return: bool) -> Vec<Stmt> {
-    lower_block_inner_with_types(block, wrap_implicit_return, &mut HashMap::new())
 }
 
 fn lower_block_inner_with_types(
@@ -928,10 +912,6 @@ fn local_decl_type(pat: &syn::Pat) -> Option<Typ> {
         syn::Pat::Reference(r) => local_decl_type(&r.pat),
         _ => None,
     }
-}
-
-fn lower_expr(expr: &syn::Expr) -> Expr {
-    lower_expr_with_types(expr, &mut HashMap::new())
 }
 
 fn lower_expr_with_types(expr: &syn::Expr, local_types: &mut HashMap<String, String>) -> Expr {

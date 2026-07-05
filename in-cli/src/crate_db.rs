@@ -22,7 +22,6 @@ pub struct SymbolLocation {
 /// A parsed module's cached data.
 struct ParsedModule {
     module: UnifiedModule,
-    exports: Vec<String>,
 }
 
 /// Per-crate info.
@@ -184,7 +183,6 @@ impl CrateDb {
                     module_path.to_string(),
                     ParsedModule {
                         module: parsed.clone(),
-                        exports,
                     },
                 );
             }

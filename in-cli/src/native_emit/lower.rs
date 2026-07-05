@@ -50,8 +50,6 @@ pub(crate) use lower_util::{
 pub const TARGET_TRIPLE: &str = "aarch64-apple-darwin";
 
 const ENTRY_STUB_SIZE: u32 = 32; // 16 bytes entry stub + 16 bytes global error flag/value
-const ERROR_FLAG_OFFSET: u32 = 16;
-const ERROR_VALUE_OFFSET: u32 = 24;
 
 /// Build ARM64 assembly source from lowered code bytes.
 /// Each external call site (BL 0 placeholder) is replaced with a proper

@@ -113,6 +113,9 @@ pub struct CompileResult {
 pub struct Compiler {
     config: super::metadata::ComponentSpec,
     pass_manager: PassManager,
+    // Only read from `#[cfg(test)]` assertions (see `compiler_creates_from_spec`); the
+    // non-test lib artifact never reads it, so rustc's per-artifact dead-code pass flags it.
+    #[allow(dead_code)]
     backend: BackendKind,
     timings: CompileTimings,
     last_unified: Option<UnifiedModule>,

@@ -79,14 +79,6 @@ impl CodeEmitter {
 
 // ── REX prefix helpers ──────────────────────────────────────────
 
-fn rex_b(rm: u8) -> u8 {
-    0x41 | (if rm >= 8 { 1 } else { 0 })
-}
-
-fn rex_w() -> u8 {
-    0x48
-}
-
 fn rex_wb(rm: u8) -> u8 {
     0x48 | (if rm >= 8 { 1 } else { 0 })
 }

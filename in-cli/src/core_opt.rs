@@ -1180,7 +1180,6 @@ struct RelJump {
     offset_byte: usize, // position of the offset bytes (pos+1 for most, pos+2 for 0F 8x)
     offset_value: i32,  // original signed offset
     target: usize,      // absolute target position after instruction
-    is_call: bool,      // true for call (E8)
 }
 
 /// Scan the code buffer and remove redundant `mov r, r` instructions where
@@ -1201,17 +1200,17 @@ pub fn peephole_x86_64(code: &mut Vec<u8>) {
     let mut i = 0;
     while i < code.len() {
         let b = code[i];
-        let (len, is_rel, is_call, offset_idx, offset_size) = match b {
-            0xE8 => (5, true, true, 1, 4),         // call rel32
-            0xE9 => (5, true, false, 1, 4),        // jmp rel32
-            0xEB => (2, true, false, 1, 1),        // jmp rel8
-            0x70..=0x7F => (2, true, false, 1, 1), // jcc rel8
+        let (len, is_rel, offset_idx, offset_size) = match b {
+            0xE8 => (5, true, 1, 4),        // call rel32
+            0xE9 => (5, true, 1, 4),        // jmp rel32
+            0xEB => (2, true, 1, 1),        // jmp rel8
+            0x70..=0x7F => (2, true, 1, 1), // jcc rel8
             0x0F if i + 1 < code.len() && (0x80..=0x8F).contains(&code[i + 1]) => {
-                (6, true, false, 2, 4) // jcc rel32 (0F 8x ...)
+                (6, true, 2, 4) // jcc rel32 (0F 8x ...)
             }
             _ => {
                 let insn_len = x86_64_insn_length(code, i);
-                (insn_len, false, false, 0, 0)
+                (insn_len, false, 0, 0)
             }
         };
         if is_rel {
@@ -1233,7 +1232,6 @@ pub fn peephole_x86_64(code: &mut Vec<u8>) {
                 offset_byte: i + offset_idx,
                 offset_value,
                 target,
-                is_call,
             });
         }
         i += len;

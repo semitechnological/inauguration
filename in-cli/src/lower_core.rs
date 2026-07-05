@@ -1274,10 +1274,6 @@ pub fn lower_to_textual_sil(module: &UnifiedModule, _module_id: &str) -> String 
     lower_to_textual_sil_inner(module, false)
 }
 
-pub(crate) fn lower_to_textual_sil_with_main_helper_refs(module: &UnifiedModule) -> String {
-    lower_to_textual_sil_inner(module, true)
-}
-
 fn lower_to_textual_sil_inner(module: &UnifiedModule, synthesize_main_helper_refs: bool) -> String {
     let mut module = module.clone();
     desugar_module(&mut module);
