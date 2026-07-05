@@ -299,8 +299,8 @@ fn desugar_closures_in_expr(expr: &mut Expr, counter: &mut usize, extra_decls: &
             *expr = Expr::StructInit {
                 name: caps_name,
                 fields: captures
-                    .iter()
-                    .map(|c| (c.clone(), Expr::Ident(c.clone())))
+                    .into_iter()
+                    .map(|c| (c.clone(), Expr::Ident(c)))
                     .collect(),
             };
         }
