@@ -1,7 +1,17 @@
 # Polyglot Compiler Matrix Benchmark
 
-Measured against installed native compiler checks and `in compile --target native --entry answer --json` for the same polyglot sample files. The native mode column distinguishes object compilation, bytecode compilation, typechecking, and syntax-only checks; ratios are only directly comparable within the same mode. Missing native compilers are skipped; native compiler failures fail the script, while `in` failures are reported in the row.
-Wall times: median over `3` timed runs; min-max across those runs shown in parentheses.
+Side-by-side **native toolchain** vs **`in compile --target native`** on the same polyglot sample files.
+
+## How to read the comparison
+
+| Column | Meaning |
+| --- | --- |
+| **Native median** | Wall time for the installed compiler check (`clang`, `rustc`, `go`, …) |
+| **in median** | Wall time for `in compile --target native --entry answer` on that sample |
+| **in/native** | Ratio **&lt; 1** → inauguration faster for that row; **&gt; 1** → native faster |
+| **Native mode** | object / bytecode / typecheck / syntax — compare only within the same mode |
+
+Wall times: median over `3` timed runs (min–max in parentheses). Missing native compilers are skipped; native failures fail the script; `in` failures stay in the table with status.
 
 ## Benchmark Environment
 

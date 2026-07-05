@@ -1061,9 +1061,7 @@ pub fn typecheck_resolved(
 }
 
 pub fn uses_family_typecheck(parser_id: ParserId) -> bool {
-    if let Some(row) =
-        crate::language_support::language_support_for_parser(parser_id.as_str())
-    {
+    if let Some(row) = crate::language_support::language_support_for_parser(parser_id.as_str()) {
         return row.can_typecheck();
     }
     false

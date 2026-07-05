@@ -407,7 +407,10 @@ mod tests {
         };
         let cleaned = remove_debug_insts(&artifact);
         assert_eq!(cleaned.instructions.len(), 1);
-        assert_eq!(cleaned.instructions[0], "%1 = function_ref @a : $@convention(thin)");
+        assert_eq!(
+            cleaned.instructions[0],
+            "%1 = function_ref @a : $@convention(thin)"
+        );
         assert_eq!(cleaned.instruction_callers.len(), 1);
         assert_eq!(cleaned.instruction_callers[0], "main");
     }
@@ -427,7 +430,10 @@ mod tests {
         };
         let cleaned = remove_debug_insts(&artifact);
         assert_eq!(cleaned.instructions.len(), 1);
-        assert_eq!(cleaned.instructions[0], "%1 = function_ref @a : $@convention(thin)");
+        assert_eq!(
+            cleaned.instructions[0],
+            "%1 = function_ref @a : $@convention(thin)"
+        );
         assert_eq!(cleaned.instruction_callers.len(), 1);
         assert_eq!(cleaned.instruction_callers[0], "main");
     }

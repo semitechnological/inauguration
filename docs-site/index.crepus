@@ -47,7 +47,7 @@ div min-h-screen bg-zinc-950 text-zinc-300 p-6 sm:p-12 text-sm leading-relaxed i
 				div flex gap-3
 					a href="./docs/in-language.html" no-underline inline-flex items-center px-4 py-2 bg-zinc-100 text-zinc-950 hover:bg-white text-xs font-semibold rounded transition-all hover:scale-[1.02]
 						"Get Started"
-					a href="./docs/benchmarks-index.html" no-underline inline-flex items-center px-4 py-2 border border-zinc-800 hover:bg-zinc-900 text-zinc-300 hover:text-white text-xs font-semibold rounded transition-colors
+					a href="./docs/benchmarks/README.html" no-underline inline-flex items-center px-4 py-2 border border-zinc-800 hover:bg-zinc-900 text-zinc-300 hover:text-white text-xs font-semibold rounded transition-colors
 						"Benchmarks"
 			
 			div w-full lg:w-[350px] shrink-0 border border-zinc-800 rounded bg-zinc-900 overflow-hidden in-docs-terminal-glow
@@ -173,21 +173,26 @@ div min-h-screen bg-zinc-950 text-zinc-300 p-6 sm:p-12 text-sm leading-relaxed i
 						"languages.md"
 					span desc
 						" — language matrix"
-				a doc-item href="./docs/benchmarks-index.html"
+				a doc-item href="./docs/benchmarks/README.html"
 					span name
-						"benchmarks-index.md"
+						"benchmarks/README.md"
 					span desc
-						" — JIT, polyglot, self-host"
-				a doc-item href="./docs/jit.html"
+						" — overview"
+				a doc-item href="./docs/benchmarks/jit.html"
 					span name
 						"jit.md"
 					span desc
 						" — compile latency"
-				a doc-item href="./docs/polyglot-compilers.html"
+				a doc-item href="./docs/benchmarks/polyglot-compilers.html"
 					span name
 						"polyglot-compilers.md"
 					span desc
 						" — vs native toolchains"
+				a doc-item href="./docs/benchmarks/self-host-vs-native.html"
+					span name
+						"self-host-vs-native.md"
+					span desc
+						" — in vs rustc"
 				a doc-item href="./docs/docs-site.html"
 					span name
 						"docs-site.md"

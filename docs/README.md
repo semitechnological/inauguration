@@ -1,16 +1,20 @@
-# Benchmarks
+# Documentation
 
-| Doc | What it measures |
-|-----|------------------|
-| [jit.md](jit.md) | JIT compile + run latency on macOS ARM64 |
-| [polyglot-compilers.md](polyglot-compilers.md) | `in compile` vs installed native compilers on polyglot samples |
-| [self-host-vs-native.md](self-host-vs-native.md) | `in build` vs **rustc** (time, binary size, startup) on `in-cli` |
+Guides for **inlang** (`.in`), the inauguration compiler, and the docs site.
 
-Regenerate:
+| Guide | Description |
+| --- | --- |
+| [inlang (.in)](in-language.md) | Syntax, packages, capabilities, Core IR surface |
+| [General compiler](general-compiler.md) | CLI driver, pipeline stages, owned compile |
+| [Multi-front Core IR](multi-frontend-ir.md) | `UnifiedModule`, fronts, lowering |
+| [Language fronts](languages.md) | Live matrix; `in languages --json` |
+| [Parser surface](parser-surface.md) | Extension → `ParserId`, maturity levels |
+| [Native backend](native-backend.md) | MIR, JIT, AArch64 / x86_64 emit |
+| [Docs-site](docs-site.md) | `crepus web`, `backend.in`, Cloudflare deploy |
+| [Benchmarks](benchmarks/README.md) | JIT, polyglot `in` vs native toolchains, self-host vs rustc |
 
-```bash
-./scripts/bench-self-host.sh && python3 scripts/render-self-host-bench-md.py
-./scripts/bench_polyglot_compilers.v   # polyglot matrix
-```
+**Published HTML**
 
-Swift-vs-in benchmark removed; use **polyglot-compilers** for cross-language compile-time comparison.
+`crepus web build` runs **`[targets.docs]`**: Markdown here → `docs-site/dist/docs/` (for example `in-language.html`, `benchmarks/jit.html`). Notes under [`internal/`](internal/) are not published.
+
+Live language matrix: **`in languages --json`**.
