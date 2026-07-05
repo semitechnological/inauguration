@@ -154,37 +154,35 @@ fn collect_module_facts(module: &UnifiedModule) -> Result<ModuleFacts<'_>, (Stri
     let mut structs = HashMap::new();
     let mut globals = HashSet::new();
 
-    // Leak owned Typ values so we have 'static references for intrinsics.
-    // (Small fixed set, leaked once per compilation — acceptable for a compiler.)
-    let void_ret: &'static Typ = Box::leak(Box::new(Typ::Void));
-    let int_ret: &'static Typ = Box::leak(Box::new(Typ::Int));
-
-    // Seed builtin intrinsics so calls to them don't fail verification.
-    let string_ret: &'static Typ = Box::leak(Box::new(Typ::String));
+    // Static intrinsics: these variants contain no owned data, so a static item
+    // gives a cheap 'static reference without leaking an allocation.
+    static VOID_RET: Typ = Typ::Void;
+    static INT_RET: Typ = Typ::Int;
+    static STRING_RET: Typ = Typ::String;
     let intrinsics: [(&str, &'static Typ); 23] = [
-        ("outb", void_ret),
-        ("inb", int_ret),
-        ("outl", void_ret),
-        ("inl", int_ret),
-        ("load8", int_ret),
-        ("load16", int_ret),
-        ("load32", int_ret),
-        ("load64", int_ret),
-        ("store8", void_ret),
-        ("store16", void_ret),
-        ("store32", void_ret),
-        ("store64", void_ret),
-        ("hlt", void_ret),
-        ("cli", void_ret),
-        ("sti", void_ret),
-        ("pause", void_ret),
-        ("lidt", void_ret),
-        ("invlpg", void_ret),
-        ("read_cr2", int_ret),
-        ("invoke", int_ret),
-        ("invoke1", int_ret),
-        ("invoke2", int_ret),
-        ("to_string", string_ret),
+        ("outb", &VOID_RET),
+        ("inb", &INT_RET),
+        ("outl", &VOID_RET),
+        ("inl", &INT_RET),
+        ("load8", &INT_RET),
+        ("load16", &INT_RET),
+        ("load32", &INT_RET),
+        ("load64", &INT_RET),
+        ("store8", &VOID_RET),
+        ("store16", &VOID_RET),
+        ("store32", &VOID_RET),
+        ("store64", &VOID_RET),
+        ("hlt", &VOID_RET),
+        ("cli", &VOID_RET),
+        ("sti", &VOID_RET),
+        ("pause", &VOID_RET),
+        ("lidt", &VOID_RET),
+        ("invlpg", &VOID_RET),
+        ("read_cr2", &INT_RET),
+        ("invoke", &INT_RET),
+        ("invoke1", &INT_RET),
+        ("invoke2", &INT_RET),
+        ("to_string", &STRING_RET),
     ];
     for (name, ret) in intrinsics {
         functions.insert(name, FunctionSig { params: &[], ret });
