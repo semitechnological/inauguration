@@ -206,6 +206,13 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
             &mut all_pending_calls,
             is_interrupt,
         )?;
+        eprintln!(
+            "[x86_64_lower] {} offset=0x{:x} end=0x{:x} size={}",
+            name,
+            offset,
+            emitter.len(),
+            emitter.len() - offset
+        );
     }
 
     // Resolve pending calls and function address references
@@ -614,7 +621,7 @@ fn collect_string_literals(module: &UnifiedModule) -> Vec<String> {
 }
 
 fn collect_globals(module: &UnifiedModule) -> HashMap<String, u64> {
-    const GLOBAL_BASE: u64 = 0x6000;
+    const GLOBAL_BASE: u64 = 0x200000;
     let mut globals = HashMap::new();
     let mut addr = GLOBAL_BASE;
     for decl in &module.decls {
@@ -676,7 +683,11 @@ fn lower_function(
         emitter.emit_insns(&x86_64::prologue());
     }
 
-    // Allocate stack frame
+    // Allocate stack frame. Add extra padding for expression temporaries that
+    // the lowering code pushes/pops without declaring them as locals; the
+    // previous frame size only counted declared locals, which led to stack
+    // corruption when complex expressions spilled values past the frame.
+    ctx.frame_size += 512;
     let frame_size = ctx.frame_reserve();
     if frame_size > 0 {
         emitter.emit_insns(&x86_64::sub_rsp_i32(frame_size as i32));
