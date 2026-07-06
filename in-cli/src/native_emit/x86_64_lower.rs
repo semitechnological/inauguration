@@ -406,6 +406,11 @@ fn rename_calls_in_expr(expr: &mut Expr, name_map: &HashMap<String, String>) {
                 rename_calls_in_expr(arg, name_map);
             }
         }
+        Expr::Ident(name) => {
+            if let Some(mapped) = name_map.get(name.as_str()) {
+                *name = mapped.clone();
+            }
+        }
         Expr::Unary { expr: inner, .. } => rename_calls_in_expr(inner, name_map),
         Expr::Binary { lhs, rhs, .. } => {
             rename_calls_in_expr(lhs, name_map);
@@ -430,7 +435,6 @@ fn rename_calls_in_expr(expr: &mut Expr, name_map: &HashMap<String, String>) {
         | Expr::FloatLit(_)
         | Expr::StringLit(_)
         | Expr::BoolLit(_)
-        | Expr::Ident(_)
         | Expr::Closure { .. } => {}
     }
 }
