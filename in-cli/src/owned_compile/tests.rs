@@ -33,6 +33,7 @@ fn default_request(
         linkage: NativeLinkage::Executable,
         target_triple: None,
         jobs: 1,
+        debug: false,
     }
 }
 

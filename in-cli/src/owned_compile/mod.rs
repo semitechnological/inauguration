@@ -49,6 +49,7 @@ pub struct OwnedCompileRequest {
     pub linkage: NativeLinkage,
     pub target_triple: Option<String>,
     pub jobs: usize,
+    pub debug: bool,
 }
 
 #[derive(Debug, Clone, Serialize, serde::Deserialize)]
@@ -93,6 +94,7 @@ pub struct OwnedCompileReport {
 }
 
 pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
+    let _human_debug_guard = crate::in_lang_parse::lexer::HumanInDebugGuard::new(request.debug);
     let started = Instant::now();
     let jobs = jobs_for_request(request);
     let cwd = compile_cache::workspace_cwd_for_path(&request.path);
@@ -211,7 +213,9 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
                 crate::in_lang_parse::inline_const_values(&mut module);
             }
             Err(e) => {
-                eprintln!("[import] warning: {e}");
+                if request.debug {
+                    eprintln!("[import] warning: {e}");
+                }
                 report.reason_code = Some("import-resolution-failed".to_string());
                 report.reason = Some(e.clone());
                 report.error = Some(e);
@@ -340,7 +344,9 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
             let jit_start = Instant::now();
             let jit_outcome = compile_jit(&module, &request.module_id, request);
             let jit_us = jit_start.elapsed().as_micros();
-            eprintln!("[jit] compile took {jit_us} µs");
+            if request.debug {
+                eprintln!("[jit] compile took {jit_us} µs");
+            }
             match jit_outcome {
                 Ok(jit_result) => {
                     report.backend_level = jit_result.backend_level;

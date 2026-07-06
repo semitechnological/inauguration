@@ -26,6 +26,7 @@ pub(crate) fn cmd_compile(
     trampoline: Option<&str>,
     _base: Option<&str>,
     metadata: Option<&str>,
+    debug: bool,
 ) -> Result<()> {
     let source_path = resolve_invocation_path(cwd, path);
     let out_path = resolve_invocation_path(cwd, out);
@@ -78,6 +79,7 @@ pub(crate) fn cmd_compile(
         linkage: compile_linkage_cli_to_owned(linkage),
         target_triple: target_triple.map(str::to_string),
         jobs: jobs.max(1),
+        debug,
     };
     let report = compile_owned(&request);
 
@@ -85,7 +87,7 @@ pub(crate) fn cmd_compile(
         let raw = report_to_json(&report)
             .map_err(|err| InError::Message(format!("owned compile json: {err}")))?;
         println!("{raw}");
-    } else {
+    } else if debug {
         println!("owned: {}", report.owned);
         println!("success: {}", report.success);
         if let Some(code) = &report.reason_code {
@@ -352,11 +354,12 @@ pub(crate) enum JitExecution {
     String(String),
 }
 
-pub(crate) fn compile_and_run_jit_source_path(
+pub(crate) fn compile_and_run_jit_report(
     source_path: &Path,
     module_id: &str,
     parser: ParserCli,
-) -> Result<JitExecution> {
+    debug: bool,
+) -> Result<(inauguration::owned_compile::OwnedCompileReport, JitExecution)> {
     use inauguration::native_emit::NativeLinkage;
     use inauguration::owned_compile::{CompileTarget, OwnedCompileRequest};
     let request = OwnedCompileRequest {
@@ -369,6 +372,7 @@ pub(crate) fn compile_and_run_jit_source_path(
         linkage: NativeLinkage::Executable,
         target_triple: None,
         jobs: 1,
+        debug,
     };
     let report = inauguration::owned_compile::compile_owned(&request);
     if !report.success {
@@ -378,14 +382,30 @@ pub(crate) fn compile_and_run_jit_source_path(
                 .unwrap_or_else(|| "jit eval failed".to_string()),
         ));
     }
-    if let Some(s) = report.eval_result_string {
-        Ok(JitExecution::String(s))
+    let execution = if let Some(s) = report.eval_result_string.clone() {
+        JitExecution::String(s)
     } else {
-        Ok(JitExecution::Int(report.eval_result.unwrap_or(0)))
-    }
+        JitExecution::Int(report.eval_result.unwrap_or(0))
+    };
+    Ok((report, execution))
 }
 
-pub(crate) fn cmd_execute(cwd: &Path, path: &str, module_id: &str, verbose: bool) -> Result<()> {
+pub(crate) fn compile_and_run_jit_source_path(
+    source_path: &Path,
+    module_id: &str,
+    parser: ParserCli,
+    debug: bool,
+) -> Result<JitExecution> {
+    compile_and_run_jit_report(source_path, module_id, parser, debug).map(|(_, exec)| exec)
+}
+
+pub(crate) fn cmd_execute(
+    cwd: &Path,
+    path: &str,
+    module_id: &str,
+    verbose: bool,
+    debug: bool,
+) -> Result<()> {
     let start = Instant::now();
     let source_path = resolve_invocation_path(cwd, path);
 
@@ -406,14 +426,82 @@ pub(crate) fn cmd_execute(cwd: &Path, path: &str, module_id: &str, verbose: bool
         ));
     }
 
-    let result = compile_and_run_jit_source_path(&source_path, module_id, ParserCli::Auto)?;
+    let (report, result) = compile_and_run_jit_report(&source_path, module_id, ParserCli::Auto, debug)?;
 
     if verbose {
         eprintln!("[jit] Execution completed with result: {:?}", result);
     }
 
-    let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
-    println!("[jit] Finished execution in {:.3}ms", elapsed_ms);
+    if debug {
+        let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+        println!("[jit] Finished execution in {:.3}ms", elapsed_ms);
+        print_owned_report(&report);
+    }
 
     Ok(())
+}
+
+fn print_owned_report(report: &inauguration::owned_compile::OwnedCompileReport) {
+    println!("owned: {}", report.owned);
+    println!("success: {}", report.success);
+    if let Some(code) = &report.reason_code {
+        println!("reason_code: {code}");
+    }
+    if let Some(reason) = &report.reason {
+        println!("reason: {reason}");
+    }
+    println!("path: {}", report.path);
+    println!("module_id: {}", report.module_id);
+    if let Some(identity) = &report.module_identity {
+        if let Some(package) = &identity.package {
+            println!("package: {package}");
+        }
+        if let Some(module) = &identity.module {
+            println!("module: {module}");
+        }
+        if identity.effective_module_id != report.module_id {
+            println!("effective_module_id: {}", identity.effective_module_id);
+        }
+    }
+    println!("target: {}", report.target);
+    if let Some(target_triple) = &report.target_triple {
+        println!("target_triple: {target_triple}");
+    }
+    if let Some(entry) = &report.entry {
+        println!("entry: {entry}");
+    }
+    println!("linkage: {}", report.linkage);
+    println!("frontend_level: {}", report.frontend_level);
+    println!("semantic_level: {}", report.semantic_level);
+    println!("backend_level: {}", report.backend_level);
+    println!("runtime_level: {}", report.runtime_level);
+    if !report.external_invocations.is_empty() {
+        println!(
+            "external_invocations: {}",
+            report.external_invocations.join(", ")
+        );
+    }
+    if let Some(path) = &report.artifact_path {
+        println!("artifact_path: {path}");
+    }
+    if let Some(path) = &report.executable_path {
+        println!("executable_path: {path}");
+    }
+    if let Some(path) = &report.abi_path {
+        println!("abi_path: {path}");
+    }
+    println!("parsed_function_count: {}", report.parsed_function_count);
+    println!("typed_function_count: {}", report.typed_function_count);
+    println!("call_edge_count: {}", report.call_edge_count);
+    println!("jobs: {}", report.jobs);
+    println!("timing.total_us={}", report.timing_micros);
+    if let Some(waves) = &report.timing_waves_us {
+        println!("timing.waves_us={waves:?}");
+    }
+    if report.cache_hit {
+        println!("cache_hit: true");
+    }
+    if let Some(hash) = &report.frontend_hash {
+        println!("frontend_hash: {hash}");
+    }
 }

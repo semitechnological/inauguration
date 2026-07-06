@@ -137,6 +137,7 @@ fn handle_eval(code: &str, parser: Option<&str>, _verbose: bool) -> DaemonRespon
         linkage: crate::native_emit::NativeLinkage::Executable,
         target_triple: None,
         jobs: 1,
+        debug: false,
     };
     let report = compile_owned(&request);
     let _ = std::fs::remove_dir_all(&dir);
@@ -183,6 +184,7 @@ fn handle_compile(
         linkage,
         target_triple,
         jobs: jobs.max(1),
+        debug: false,
     };
     let report = compile_owned(&request);
     let timing_us = start.elapsed().as_micros();

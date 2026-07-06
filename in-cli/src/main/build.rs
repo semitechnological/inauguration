@@ -196,6 +196,7 @@ fn run_pipeline_for_path(
             linkage: inauguration::native_emit::NativeLinkage::Executable,
             target_triple: None,
             jobs: 1,
+            debug: false,
         };
         let report = compile_owned(&request);
         let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
@@ -225,6 +226,7 @@ fn run_pipeline_for_path(
             linkage: inauguration::native_emit::NativeLinkage::Executable,
             target_triple: None,
             jobs: 1,
+            debug: false,
         };
         let report = compile_owned(&request);
         let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
@@ -254,6 +256,7 @@ fn run_pipeline_for_path(
         linkage: inauguration::native_emit::NativeLinkage::Executable,
         target_triple: None,
         jobs: 1,
+        debug: false,
     };
     let report = compile_owned(&request);
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;

@@ -1,4 +1,31 @@
 use super::util::*;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static HUMAN_IN_DEBUG: AtomicBool = AtomicBool::new(false);
+
+pub fn set_human_in_debug(debug: bool) {
+    HUMAN_IN_DEBUG.store(debug, Ordering::Relaxed);
+}
+
+pub fn human_in_debug() -> bool {
+    HUMAN_IN_DEBUG.load(Ordering::Relaxed)
+}
+
+pub struct HumanInDebugGuard(bool);
+
+impl HumanInDebugGuard {
+    pub fn new(debug: bool) -> Self {
+        let prev = human_in_debug();
+        set_human_in_debug(debug);
+        Self(prev)
+    }
+}
+
+impl Drop for HumanInDebugGuard {
+    fn drop(&mut self) {
+        set_human_in_debug(self.0);
+    }
+}
 
 pub(crate) fn human_call_stmt(line: &str) -> Option<String> {
     let trimmed = line.trim();
@@ -65,9 +92,11 @@ pub fn normalize_human_in_source(source: &str) -> String {
     let mut out = Vec::new();
     let mut stack: Vec<(&str, usize)> = Vec::new();
 
-    eprintln!("=== NORMALIZE INPUT ({}B) ===", source.len());
-    eprintln!("{source}");
-    eprintln!("=== END INPUT ===");
+    if human_in_debug() {
+        eprintln!("=== NORMALIZE INPUT ({}B) ===", source.len());
+        eprintln!("{source}");
+        eprintln!("=== END INPUT ===");
+    }
 
     for (idx, raw_line) in lines.iter().enumerate() {
         if raw_line.trim().is_empty() {
