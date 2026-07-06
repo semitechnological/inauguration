@@ -680,7 +680,7 @@ fn lower_function(
     // the lowering code pushes/pops without declaring them as locals; the
     // previous frame size only counted declared locals, which led to stack
     // corruption when complex expressions spilled values past the frame.
-    ctx.frame_size += 512;
+    ctx.frame_size += 2048;
     let frame_size = ctx.frame_reserve();
     if frame_size > 0 {
         emitter.emit_insns(&x86_64::sub_rsp_i32(frame_size as i32));
