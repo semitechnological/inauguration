@@ -1900,13 +1900,12 @@ fn lower_builtin_call(
                 if args.len() == 1 {
                     emitter.emit_width(&[0x89, 0xF8, 0xFF, 0xD0], &[0x48, 0x89, 0xF8, 0xFF, 0xD0]); // mov eax/rax, edi/rdi; call eax/rax
                 } else if args.len() >= 2 {
-                    emitter.emit_width(
-                        &[0x89, 0xF8, 0x89, 0xF7, 0xFF, 0xD0],
-                        &[0x48, 0x89, 0xF8, 0x48, 0x89, 0xF7, 0xFF, 0xD0],
-                    ); // mov eax/rax, edi/rdi; mov edi/rdi, esi/rsi; call eax/rax
+                    emitter.emit_width(&[0x89, 0xF8], &[0x48, 0x89, 0xF8]); // mov eax/rax, edi/rdi
+                    emitter.emit_width(&[0x89, 0xF7], &[0x48, 0x89, 0xF7]); // mov edi/rdi, esi/rsi
                     if args.len() >= 3 {
                         emitter.emit_width(&[0x89, 0xD6], &[0x48, 0x89, 0xD6]); // mov esi/rsi, edx/rdx
                     }
+                    emitter.emit_width(&[0xFF, 0xD0], &[0xFF, 0xD0]); // call eax/rax
                 }
             } else {
                 return Err(format!(
