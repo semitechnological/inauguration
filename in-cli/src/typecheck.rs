@@ -1129,7 +1129,7 @@ pub fn normalize_module(parser_id: ParserId, module: &UnifiedModule) -> UnifiedM
         .iter()
         .map(|decl| normalize_decl(parser_id, decl))
         .collect();
-    UnifiedModule::new(decls)
+    UnifiedModule::with_identity(decls, module.identity.clone())
 }
 
 fn normalize_decl(parser_id: ParserId, decl: &Decl) -> Decl {

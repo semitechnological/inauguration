@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "inauguration"
-version = "0.7.6"
+version = "0.7.7"
 edition = "2024"
 license = "MPL-2.0"
 description = "Rust CLI for the inauguration Swift toolchain experiments: embedded hybrid pipeline (AST refresh → frontend → SIL analysis wave), hotreload daemon (Unix sockets), SwiftPM staging under .build/bin and .build/artifacts, plugins, and workspace-only integration commands (in test)."
@@ -36,7 +36,7 @@ sha2 = "0.11"
 syn = { version = "2", features = ["full"] }
 thiserror = "2"
 tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
-tree-sitter = "0.26.8"
+tree-sitter = "0.26.10"
 # Tree-sitter parsers (all included by default for polyglot eval/build)
 tree-sitter-c = "0.24.2"
 tree-sitter-cpp = "0.23.4"
@@ -51,11 +51,11 @@ tree-sitter-zig = "1.1.2"
 tree-sitter-c-sharp = "0.23.5"
 tree-sitter-dart = "0.2.0"
 tree-sitter-elixir = "0.3.5"
-tree-sitter-erlang = "0.16.0"
-tree-sitter-fsharp = "0.3.0"
+tree-sitter-erlang = "0.19.0"
+tree-sitter-fsharp = "0.3.1"
 tree-sitter-groovy = "0.1.2"
 tree-sitter-haskell = "0.23.1"
-tree-sitter-holyc = "0.0.1"
+tree-sitter-holyc = "0.1.1"
 tree-sitter-julia = "0.23.1"
 tree-sitter-kotlin-ng = "1.1.0"
 tree-sitter-lua = "0.5.0"
@@ -66,7 +66,7 @@ tree-sitter-php = "0.24.2"
 tree-sitter-r = "1.2.0"
 tree-sitter-ruby = "0.23.1"
 tree-sitter-scala = "0.26.0"
-tree-sitter-v = "0.0.2"
+tree-sitter-v = "0.0.3"
 [features]
 default = []
 v-native = []  # Build V native runtime (requires `v` compiler on PATH)
@@ -79,7 +79,7 @@ notify = "8"
 [build-dependencies]
 
 [dev-dependencies]
-criterion = "0.5"
+criterion = "0.8"
 
 [[bench]]
 name = "hybrid_sil"
