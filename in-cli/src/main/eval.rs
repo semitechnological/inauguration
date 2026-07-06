@@ -75,7 +75,13 @@ pub(crate) fn cmd_eval_source_or_path(
     cmd_eval_dispatch(invocation_cwd, &code, parser.as_deref(), verbose, debug)
 }
 
-pub(crate) fn cmd_eval(cwd: &Path, code: &str, parser: Option<&str>, verbose: bool, debug: bool) -> Result<()> {
+pub(crate) fn cmd_eval(
+    cwd: &Path,
+    code: &str,
+    parser: Option<&str>,
+    verbose: bool,
+    debug: bool,
+) -> Result<()> {
     if parser.is_none() && has_polyglot_fences(code) {
         return cmd_polyglot_eval(cwd, code, verbose, debug);
     }
@@ -191,7 +197,12 @@ pub(crate) fn cmd_polyglot_eval(cwd: &Path, code: &str, verbose: bool, debug: bo
     Ok(())
 }
 
-pub(crate) fn cmd_auto_polyglot_eval(cwd: &Path, code: &str, verbose: bool, debug: bool) -> Result<()> {
+pub(crate) fn cmd_auto_polyglot_eval(
+    cwd: &Path,
+    code: &str,
+    verbose: bool,
+    debug: bool,
+) -> Result<()> {
     let blocks = split_auto_blocks(code);
     if blocks.len() <= 1 {
         return cmd_eval(cwd, code, None, verbose, debug);

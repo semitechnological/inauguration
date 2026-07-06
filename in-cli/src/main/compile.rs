@@ -359,7 +359,10 @@ pub(crate) fn compile_and_run_jit_report(
     module_id: &str,
     parser: ParserCli,
     debug: bool,
-) -> Result<(inauguration::owned_compile::OwnedCompileReport, JitExecution)> {
+) -> Result<(
+    inauguration::owned_compile::OwnedCompileReport,
+    JitExecution,
+)> {
     use inauguration::native_emit::NativeLinkage;
     use inauguration::owned_compile::{CompileTarget, OwnedCompileRequest};
     let request = OwnedCompileRequest {
@@ -426,7 +429,8 @@ pub(crate) fn cmd_execute(
         ));
     }
 
-    let (report, result) = compile_and_run_jit_report(&source_path, module_id, ParserCli::Auto, debug)?;
+    let (report, result) =
+        compile_and_run_jit_report(&source_path, module_id, ParserCli::Auto, debug)?;
 
     if verbose {
         eprintln!("[jit] Execution completed with result: {:?}", result);

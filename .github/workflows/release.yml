@@ -95,7 +95,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Check if version is already on crates.io
+        id: published
+        working-directory: in-cli
+        run: |
+          VERSION=$(cargo metadata --no-deps --format-version 1 | grep -o '"version":"[^"]*"' | head -1 | cut -d'"' -f4)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if curl -s --fail "https://index.crates.io/in/au/inauguration" | grep -q "\"vers\":\"$VERSION\""; then
+            echo "inauguration $VERSION is already published on crates.io; skipping publish"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "inauguration $VERSION not yet published; will publish"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish inauguration to crates.io (CI only — do not cargo publish locally)
+        if: steps.published.outputs.skip != 'true'
         working-directory: in-cli
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

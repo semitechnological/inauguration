@@ -1,4 +1,5 @@
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
+use std::hint::black_box;
 use inauguration::hybrid_sil::{extract_call_graph, parse_textual_sil, remove_debug_insts};
 
 fn small_subset_sil() -> String {
