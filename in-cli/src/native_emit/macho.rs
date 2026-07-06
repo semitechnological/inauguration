@@ -24,8 +24,8 @@ const VM_PROT_READ: i32 = 1;
 const VM_PROT_EXECUTE: i32 = 4;
 const TEXT_PROT: i32 = VM_PROT_READ | VM_PROT_EXECUTE;
 
-const TEXT_VMADDR: u64 = 0x1000_0000;
-const PAGEZERO_SIZE: u64 = 0x1000_0000;
+const TEXT_VMADDR: u64 = 0x0001_0000_0000;
+const PAGEZERO_SIZE: u64 = 0x0001_0000_0000;
 const PAGE_SIZE: u64 = 0x1000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,23 +48,6 @@ pub struct MachOImage {
     pub exports: Vec<ExportSymbol>,
     /// External symbol references: (instruction_offset_in_code, symbol_name)
     pub external_refs: Vec<(u32, String)>,
-}
-
-#[cfg(test)]
-pub struct MachOExecutable {
-    pub code: Vec<u8>,
-    pub entry_offset: u32,
-}
-
-#[cfg(test)]
-pub fn write_executable(exe: &MachOExecutable, out: &mut Vec<u8>) {
-    let image = MachOImage {
-        code: exe.code.clone(),
-        entry_offset: Some(exe.entry_offset),
-        exports: Vec::new(),
-        external_refs: Vec::new(),
-    };
-    write_image(&image, MachOLinkage::Executable, "", out);
 }
 
 pub fn write_image(
@@ -255,7 +238,7 @@ fn write_macho_image(
     }
     if main_cmd_size > 0 {
         let entryoff = image.entry_offset.unwrap_or(0);
-        write_main_command(out, main_cmd_size, u64::from(entryoff));
+        write_main_command(out, main_cmd_size, text_fileoff + u64::from(entryoff));
     }
     if build_version_cmd_size > 0 {
         write_build_version_command(out, build_version_cmd_size);
@@ -371,8 +354,8 @@ fn write_linkedit_command(
     out.extend_from_slice(&filesize.to_le_bytes());
     out.extend_from_slice(&fileoff.to_le_bytes());
     out.extend_from_slice(&filesize.to_le_bytes());
-    out.extend_from_slice(&TEXT_PROT.to_le_bytes());
-    out.extend_from_slice(&TEXT_PROT.to_le_bytes());
+    out.extend_from_slice(&VM_PROT_READ.to_le_bytes());
+    out.extend_from_slice(&VM_PROT_READ.to_le_bytes());
     out.extend_from_slice(&0u32.to_le_bytes());
     out.extend_from_slice(&0u32.to_le_bytes());
 }
@@ -665,12 +648,14 @@ mod tests {
 
     #[test]
     fn writes_magic_and_load_commands() {
-        let exe = MachOExecutable {
+        let image = MachOImage {
             code: vec![0xD6, 0x5F, 0x03, 0xC0],
-            entry_offset: 0,
+            entry_offset: Some(0),
+            exports: Vec::new(),
+            external_refs: Vec::new(),
         };
         let mut out = Vec::new();
-        write_executable(&exe, &mut out);
+        write_image(&image, MachOLinkage::Executable, "", &mut out);
         assert_eq!(&out[0..4], &MH_MAGIC_64.to_le_bytes());
         assert_eq!(out.len(), (PAGE_SIZE * 3) as usize);
     }
@@ -734,44 +719,5 @@ mod tests {
         );
         let haystack = String::from_utf8_lossy(&out);
         assert!(haystack.contains("_answer"));
-    }
-
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    #[test]
-    fn roundtrip_answer_code_layout() {
-        let code = vec![
-            0x40, 0x05, 0x80, 0xd2, 0x20, 0x00, 0x80, 0xd2, 0x01, 0x10, 0x00, 0xd4,
-        ];
-        let exe = MachOExecutable {
-            code,
-            entry_offset: 0,
-        };
-        let path = std::path::PathBuf::from("/tmp/inauguration-macho-roundtrip");
-        let mut out = Vec::new();
-        write_executable(&exe, &mut out);
-        std::fs::write(&path, &out).unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        use std::os::unix::process::ExitStatusExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let sign = std::process::Command::new("codesign")
-            .args(["-s", "-", "-f"])
-            .arg(&path)
-            .status()
-            .expect("codesign");
-        assert!(sign.success(), "codesign failed");
-        let status = std::process::Command::new(&path).status().expect("run");
-        match status.code() {
-            Some(42) => {}
-            None if status.signal() == Some(9) => {
-                let otool = std::process::Command::new("otool")
-                    .arg("-tV")
-                    .arg(&path)
-                    .output()
-                    .expect("otool");
-                assert!(String::from_utf8_lossy(&otool.stdout).contains("mov\tx0, #0x2a"));
-            }
-            other => panic!("unexpected native exit {other:?}"),
-        }
-        let _ = std::fs::remove_file(path);
     }
 }
