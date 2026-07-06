@@ -99,6 +99,7 @@ pub fn normalize_human_in_source(source: &str) -> String {
     }
 
     for (idx, raw_line) in lines.iter().enumerate() {
+        let raw_line = strip_line_comment_outside_strings(raw_line);
         if raw_line.trim().is_empty() {
             continue;
         }
@@ -271,6 +272,7 @@ pub fn split_top_level_decl_blocks(source: &str) -> Vec<(usize, String)> {
     let mut current: Option<Vec<(usize, String)>> = None;
     let mut out = Vec::new();
     for (line_no, raw_line) in source.lines().enumerate() {
+        let raw_line = strip_line_comment_outside_strings(raw_line);
         let t = raw_line.trim();
         let delta = brace_delta(raw_line);
 

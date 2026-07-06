@@ -206,13 +206,6 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
             &mut all_pending_calls,
             is_interrupt,
         )?;
-        eprintln!(
-            "[x86_64_lower] {} offset=0x{:x} end=0x{:x} size={}",
-            name,
-            offset,
-            emitter.len(),
-            emitter.len() - offset
-        );
     }
 
     // Resolve pending calls and function address references
