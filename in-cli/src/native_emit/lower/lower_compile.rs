@@ -51,7 +51,7 @@ pub fn compile_native_artifact(
     TL_NATIVE_MODE.with(|m| *m.borrow_mut() = true);
     let lowered = lower_module(module, entry, linkage)?;
 
-    if linkage == NativeLinkage::Executable && !lowered.external_refs.is_empty() {
+    if linkage == NativeLinkage::Executable && cfg!(target_os = "macos") {
         eprintln!(
             "[native] as+ld path: {} external refs",
             lowered.external_refs.len()
