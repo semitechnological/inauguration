@@ -3,207 +3,225 @@ google-fonts "Chivo Mono"
 div min-h-screen bg-zinc-950 text-zinc-300 p-6 sm:p-12 text-sm leading-relaxed in-docs-page
 	div max-w-4xl mx-auto flex flex-col gap-10
 		
+		# Header
 		div flex items-center justify-between border-b border-zinc-800 pb-6 crepus-entrance crepus-e1
 			div flex items-center gap-3
-				img src="./static/favicon.svg" alt="" w-8 h-8 rounded bg-zinc-900 border border-zinc-800 p-1 in-docs-logo-pulse
+				img src="./static/favicon.svg" alt="" w-8 h-8 rounded bg-zinc-900 border border-zinc-800 p-1
 				div
 					div text-zinc-100 text-base font-semibold tracking-wider
 						"inauguration"
 					div text-xs text-zinc-500 mt-0.5
-						"Core IR → native JIT · 40 language fronts"
+						"ultrafast hybrid compile · hot reload · JIT"
 			nav flex gap-4 text-xs
 				a href="./docs/in-language.html" no-underline text-zinc-400 hover:text-white transition-colors
 					"Docs"
-				a href="./docs/languages.html" no-underline text-zinc-400 hover:text-white transition-colors
-					"Languages"
-				a href="https://github.com/tschk/inauguration" no-underline text-zinc-400 hover:text-white transition-colors rel="noopener noreferrer" target="_blank"
+				a href="https://github.com/semitechnological/inauguration" no-underline text-zinc-400 hover:text-white transition-colors rel="noopener noreferrer" target="_blank"
 					"GitHub"
 				a href="https://crates.io/crates/inauguration" no-underline text-zinc-400 hover:text-white transition-colors rel="noopener noreferrer" target="_blank"
 					"Crates.io"
 
+		# Hero Section
 		section flex flex-col lg:flex-row gap-8 items-start justify-between py-4 crepus-entrance crepus-e2
 			div flex-1 max-w-2xl
-				p id="in-splash" class="text-blue-400 font-semibold tracking-widest text-xs uppercase mb-2 in-docs-shimmer" aria-live="polite"
+				p text-blue-400 font-semibold tracking-widest text-xs uppercase mb-2
+					"THE STACK: INLANG + CREPUSCULARITY"
 				h1 text-2xl sm:text-3xl font-semibold text-zinc-100 tracking-tight leading-snug mb-4
 					"Ultrafast compiler pipeline for OOP and systems languages"
 				p text-zinc-400 leading-relaxed mb-6
-					"One "
+					"A single unified Core IR → MIR → native JIT emitter. No LLVM, no bytecode VM. Experience sub-millisecond compile loops, live code injection, and seamless GUI integration using the "
 					span text-zinc-200 font-semibold
-						"Core IR"
-					" → "
-					span text-zinc-200 font-semibold
-						"MIR"
-					" → "
-					span text-zinc-200 font-semibold
-						"native JIT"
-					". No LLVM, no bytecode VM. "
-					span text-zinc-200 font-semibold
-						".in"
-					" for orchestration; "
+						"inlang (.in)"
+					" systems language coupled with "
 					span text-zinc-200 font-semibold
 						"crepuscularity"
-					" for this docs UI."
+					" for hardware-accelerated declarative UI everywhere."
 				div flex gap-3
-					a href="./docs/in-language.html" no-underline inline-flex items-center px-4 py-2 bg-zinc-100 text-zinc-950 hover:bg-white text-xs font-semibold rounded transition-all hover:scale-[1.02]
+					a href="./docs/in-language.html" no-underline inline-flex items-center px-4 py-2 bg-zinc-100 text-zinc-950 hover:bg-white text-xs font-semibold rounded transition-colors
 						"Get Started"
-					a href="./docs/benchmarks/README.html" no-underline inline-flex items-center px-4 py-2 border border-zinc-800 hover:bg-zinc-900 text-zinc-300 hover:text-white text-xs font-semibold rounded transition-colors
-						"Benchmarks"
+					a href="https://github.com/semitechnological/inauguration" no-underline inline-flex items-center px-4 py-2 border border-zinc-800 hover:bg-zinc-900 text-zinc-300 hover:text-white text-xs font-semibold rounded transition-colors
+						"View GitHub"
 			
-			div w-full lg:w-[350px] shrink-0 border border-zinc-800 rounded bg-zinc-900 overflow-hidden in-docs-terminal-glow
+			# Terminal preview
+			div w-full lg:w-[350px] shrink-0 border border-zinc-800 rounded bg-zinc-900 overflow-hidden
 				div flex items-center justify-between px-3 py-2 border-b border-zinc-800 bg-zinc-950
 					span text-xs text-zinc-500 font-mono
-						"shell"
+						"inauguration-shell"
 					div flex gap-1
-						span w-2 h-2 rounded-full bg-red-900/80
-						span w-2 h-2 rounded-full bg-amber-900/80
-						span w-2 h-2 rounded-full bg-emerald-900/80
-				pre p-4 m-0 font-mono text-xs leading-relaxed text-zinc-400 overflow-x-auto whitespace-pre
-					"# install\n$ cargo install inauguration\n\n# evaluate / run inline or a file\n$ in eval \"print('hello world')\"\n$ in ./examples/hello.in\n\n# build this repo\n$ in .\n"
+						span w-2 h-2 rounded-full bg-zinc-800
+						span w-2 h-2 rounded-full bg-zinc-800
+						span w-2 h-2 rounded-full bg-zinc-800
+				pre p-4 m-0 font-mono text-xs leading-relaxed text-zinc-400 overflow-x-auto
+					span text-zinc-500
+						"# Run an .in script"
+					br
+					"$ in eval hello.in"
+					br
+					br
+					span text-zinc-500
+						"# Run the test suite"
+					br
+					"$ in test"
+					br
+					br
+					span text-zinc-500
+						"# Update the compiler toolchain"
+					br
+					"$ in self-update"
 
+		# Tech Specs / Core Design Section (Density from crepuscularity docs)
 		section border-t border-zinc-800 pt-8 crepus-entrance crepus-e3
-			div text-zinc-100 font-semibold tracking-wider mb-4
-				"PIPELINE"
-			div grid grid-cols-1 md:grid-cols-3 gap-6
-				div border border-zinc-800 rounded p-4 bg-zinc-900/50 in-docs-card-hover
-					div text-zinc-100 font-semibold text-xs mb-2 uppercase tracking-wide
-						"Multi-front parse"
-					p text-zinc-400 text-xs leading-relaxed m-0
-						"Tree-sitter + dedicated Rust/V/in/icore fronts → UnifiedModule."
-				div border border-zinc-800 rounded p-4 bg-zinc-900/50 in-docs-card-hover
-					div text-zinc-100 font-semibold text-xs mb-2 uppercase tracking-wide
-						"MIR"
-					p text-zinc-400 text-xs leading-relaxed m-0
-						"Deferred offsets, label fixup, then machine buffers."
-				div border border-zinc-800 rounded p-4 bg-zinc-900/50 in-docs-card-hover
-					div text-zinc-100 font-semibold text-xs mb-2 uppercase tracking-wide
-						"JIT / native"
-					p text-zinc-400 text-xs leading-relaxed m-0
-						"AArch64 & x86_64 emit; compiler daemon for warm eval."
-
-		section border-t border-zinc-800 pt-8 crepus-entrance crepus-e4
-			div text-zinc-100 font-semibold tracking-wider mb-4
-				"LANGUAGE FRONTS"
-			p text-zinc-500 text-xs mb-4 m-0
-				"~40 polyglot fronts plus "
-				code text-zinc-400
-					".in"
-				" / "
-				code text-zinc-400
-					".icore"
-				". Eval and project builds can pull "
-				span text-zinc-400
-					"Cargo"
-				", "
-				span text-zinc-400
-					"npm"
-				", and "
-				span text-zinc-400
-					"Go"
-				" module deps from the tree. Run "
-				code text-zinc-400
-					"in languages --json"
-				" for the live matrix."
-			div flex flex-wrap gap-2 text-xs font-mono
-				span lang-chip
-					".in"
-				span lang-chip
-					".icore"
-				span lang-chip
-					"Rust"
-				span lang-chip
-					"Go"
-				span lang-chip
-					"Swift"
-				span lang-chip
-					"C/C++"
-				span lang-chip
-					"Python"
-				span lang-chip
-					"TS/JS"
-				span lang-chip
-					"Java"
-				span lang-chip
-					"Zig"
-				span lang-chip
-					"Ruby"
-				span lang-chip
-					"+28"
-			a href="./docs/languages.html" no-underline text-blue-400 text-xs mt-4 inline-block hover:text-blue-300
-				"Full list →"
-
-		section border-t border-zinc-800 pt-8 crepus-entrance crepus-e5
 			div text-zinc-100 font-semibold tracking-wider mb-6
-				"DOCUMENTATION"
-			div grid grid-cols-1 sm:grid-cols-2 gap-4
-				a doc-item href="./docs/in-language.html"
-					span name
-						"in-language.md"
-					span desc
-						" — inlang syntax & Core IR"
-				a doc-item href="./docs/general-compiler.html"
-					span name
-						"general-compiler.md"
-					span desc
-						" — driver & pipeline"
-				a doc-item href="./docs/multi-frontend-ir.html"
-					span name
-						"multi-frontend-ir.md"
-					span desc
-						" — UnifiedModule"
-				a doc-item href="./docs/native-backend.html"
-					span name
-						"native-backend.md"
-					span desc
-						" — JIT targets"
-				a doc-item href="./docs/parser-surface.html"
-					span name
-						"parser-surface.md"
-					span desc
-						" — ParserId resolution"
-				a doc-item href="./docs/languages.html"
-					span name
-						"languages.md"
-					span desc
-						" — language matrix"
-				a doc-item href="./docs/benchmarks/README.html"
-					span name
-						"benchmarks/README.md"
-					span desc
-						" — overview"
-				a doc-item href="./docs/benchmarks/jit.html"
-					span name
-						"jit.md"
-					span desc
-						" — compile latency"
-				a doc-item href="./docs/benchmarks/polyglot-compilers.html"
-					span name
-						"polyglot-compilers.md"
-					span desc
-						" — vs native toolchains"
-				a doc-item href="./docs/benchmarks/self-host-vs-native.html"
-					span name
-						"self-host-vs-native.md"
-					span desc
-						" — in vs rustc"
-				a doc-item href="./docs/docs-site.html"
-					span name
-						"docs-site.md"
-					span desc
-						" — crepus web + backend.in"
+				"PIPELINE CAPABILITIES"
+			div grid grid-cols-1 md:grid-cols-3 gap-6
+				div border border-zinc-800 rounded p-4 bg-zinc-900/50
+					div text-zinc-100 font-semibold text-xs mb-2 uppercase tracking-wide
+						"1. Multi-Frontend Parser"
+					p text-zinc-400 text-xs leading-relaxed m-0
+						"Uses Tree-sitter polyglot fronts to ingest Swift, C, Rust, Go, Python, Zig, and Java. Lowers source files directly into a unified Core IR AST, mapping structural semantics cleanly."
+				div border border-zinc-800 rounded p-4 bg-zinc-900/50
+					div text-zinc-100 font-semibold text-xs mb-2 uppercase tracking-wide
+						"2. MIR & Offset Assembly"
+					p text-zinc-400 text-xs leading-relaxed m-0
+						"Translates Core IR to MIR (Mid IR). MIR defers relative address offsets, performing label resolution and instruction alignment before assembling to binary buffers."
+				div border border-zinc-800 rounded p-4 bg-zinc-900/50
+					div text-zinc-100 font-semibold text-xs mb-2 uppercase tracking-wide
+						"3. Native JIT Emitters"
+					p text-zinc-400 text-xs leading-relaxed m-0
+						"Direct machine code emission for AArch64 (ARM64) and x86_64. Native page allocation maps binary targets to executable memory, running JIT compiles in microseconds."
 
+		# Docs Directory
+		section border-t border-zinc-800 pt-8 crepus-entrance crepus-e4
+			div text-zinc-100 font-semibold tracking-wider mb-6
+				"DOCUMENTATION DIRECTORY"
+			
+			div grid grid-cols-1 md:grid-cols-2 gap-8
+				
+				# Col 1: Language & Architecture
+				div flex flex-col gap-6
+					div
+						div text-blue-400 font-semibold text-xs uppercase tracking-widest border-b border-zinc-800 pb-2 mb-3
+							"Language & Core IR"
+						div flex flex-col gap-3
+							a doc-item href="./docs/in-language.html"
+								span name
+									"in-language.md"
+								span desc
+									" — learn the brace + line-oriented syntax and type surface of .in"
+							a doc-item href="./docs/multi-frontend-ir.html"
+								span name
+									"multi-frontend-ir.md"
+								span desc
+									" — design of the unified Core IR representation"
+							a doc-item href="./docs/core-ir-extensions.html"
+								span name
+									"core-ir-extensions.md"
+								span desc
+									" — design specs for SIL representation and VM execution"
+							a doc-item href="./docs/parser-surface.html"
+								span name
+									"parser-surface.md"
+								span desc
+									" — extension resolution and shebang registry details"
+
+					div
+						div text-blue-400 font-semibold text-xs uppercase tracking-widest border-b border-zinc-800 pb-2 mb-3
+							"Compiler Implementation"
+						div flex flex-col gap-3
+							a doc-item href="./docs/general-compiler.html"
+								span name
+									"general-compiler.md"
+								span desc
+									" — orchestration stages, compiler entry points, and FFI bindings"
+							a doc-item href="./docs/native-backend.html"
+								span name
+									"native-backend.md"
+								span desc
+									" — binary emission mechanics for AArch64 and x86_64 JIT"
+							a doc-item href="./docs/orchestration-compiler.html"
+								span name
+									"orchestration-compiler.md"
+								span desc
+									" — driver pipeline and multi-front orchestration contract"
+							a doc-item href="./docs/contributing-hybrid-mirror.html"
+								span name
+									"contributing-hybrid-mirror.md"
+								span desc
+									" — workflow to develop in-cli and rust-driver concurrently"
+
+				# Col 2: Benchmarks & Roadmaps
+				div flex flex-col gap-6
+					div
+						div text-blue-400 font-semibold text-xs uppercase tracking-widest border-b border-zinc-800 pb-2 mb-3
+							"Benchmarks & Performance"
+						div flex flex-col gap-3
+							a doc-item href="./docs/jit.html"
+								span name
+									"jit.md"
+								span desc
+									" — latency comparison between interpretive and machine code runtimes"
+							a doc-item href="./docs/swift-vs-in.html"
+								span name
+									"swift-vs-in.md"
+								span desc
+									" — performance benchmarks compiling swift files via .in"
+							a doc-item href="./docs/polyglot-compilers.html"
+								span name
+									"polyglot-compilers.md"
+								span desc
+									" — execution metrics across diverse tree-sitter parser targets"
+							a doc-item href="./docs/self-host-vs-native.html"
+								span name
+									"self-host-vs-native.md"
+								span desc
+									" — comparisons of compiled artifacts and compiler self-hosting"
+
+					div
+						div text-blue-400 font-semibold text-xs uppercase tracking-widest border-b border-zinc-800 pb-2 mb-3
+							"Roadmaps & Planning"
+						div flex flex-col gap-3
+							a doc-item href="./docs/roadmap-execution-plan.html"
+								span name
+									"roadmap-execution-plan.md"
+								span desc
+									" — development phases, targets, and language specifications"
+							a doc-item href="./docs/universal-compiler-roadmap.html"
+								span name
+									"universal-compiler-roadmap.md"
+								span desc
+									" — plan for multi-frontend and cross-architecture expansion"
+							a doc-item href="./docs/interop-roadmap.html"
+								span name
+									"interop-roadmap.md"
+								span desc
+									" — roadmap for direct C/Rust FFI and interoperability mechanics"
+							a doc-item href="./docs/local-mvp-runbook.html"
+								span name
+									"local-mvp-runbook.md"
+								span desc
+									" — developer testing protocols and verification checklist"
+							a doc-item href="./docs/conformance-matrix.html"
+								span name
+									"conformance-matrix.md"
+								span desc
+									" — validation test suite and feature conformance mapping"
+							a doc-item href="./docs/future-work-roadmap.html"
+								span name
+									"future-work-roadmap.md"
+								span desc
+									" — future type assertions and native bridge improvements"
+
+		# Footer
 		footer border-t border-zinc-800 pt-8 pb-12 flex flex-col sm:flex-row justify-between items-center gap-4 text-xs text-zinc-500 crepus-entrance crepus-e6
 			div flex items-center gap-2
 				img src="./static/favicon.svg" alt="" w-6 h-6 rounded opacity-50 bg-zinc-900 border border-zinc-800 p-1
 				span
-					"built with crepuscularity + inauguration"
+					"inauguration docs-site · built with crepuscularity"
 			div flex gap-4
-				a href="https://github.com/tschk/inauguration" no-underline text-zinc-500 hover:text-zinc-300 transition-colors rel="noopener noreferrer" target="_blank"
+				a href="https://github.com/semitechnological/inauguration" no-underline text-zinc-500 hover:text-zinc-300 transition-colors rel="noopener noreferrer" target="_blank"
 					"GitHub"
 				a href="https://crates.io/crates/inauguration" no-underline text-zinc-500 hover:text-zinc-300 transition-colors rel="noopener noreferrer" target="_blank"
 					"Crates.io"
 
-.doc-item no-underline transition-all duration-200 ease-in-out block group text-zinc-400 hover:text-zinc-200 hover:translate-x-0.5
+.doc-item no-underline transition-all duration-200 ease-in-out block group text-zinc-400 hover:text-zinc-200
 .name text-zinc-100 group-hover:text-blue-400 transition-colors duration-200 font-semibold font-mono
 .desc text-zinc-500 group-hover:text-zinc-400 transition-colors duration-200
-
-.lang-chip inline-flex px-2.5 py-1 rounded border border-zinc-800 bg-zinc-900/80 text-zinc-400 in-docs-chip-float

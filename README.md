@@ -21,6 +21,9 @@ it in a JIT. It targets its own backends for AArch64 and x86_64.
   the Rust source (1965 functions) via the owned Core IR path. A full native
   self-build is still blocked by stdlib surface coverage; see the language support
   table below.
+- **Script runner**: `in eval <file>` is the fastest way to run an `.in`, `.rs`,
+  `.zig`, `.go`, `.v`, or `.poly` script through the JIT. `in execute` and
+  `in build` are available for explicit compile/artifact paths.
 - **Bytecode VM**: retired. `in eval`, `in execute`, and `in build` use the
   JIT-only path.
 

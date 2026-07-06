@@ -295,6 +295,8 @@ enum Commands {
         base: Option<String>,
         #[arg(long)]
         metadata: Option<String>,
+        #[arg(long, default_value_t = false, help = "Show detailed stage report")]
+        debug: bool,
     },
     #[command(about = "Compile and execute a source file via JIT")]
     Execute {
@@ -304,6 +306,8 @@ enum Commands {
         module_id: String,
         #[arg(long, default_value_t = false)]
         verbose: bool,
+        #[arg(long, default_value_t = false, help = "Show detailed stage report")]
+        debug: bool,
     },
     #[command(about = "Report owned backend status and compile-path facts")]
     Backend {
@@ -349,6 +353,8 @@ enum Commands {
         parser: Option<String>,
         #[arg(long, default_value_t = false, help = "Show detailed output")]
         verbose: bool,
+        #[arg(long, default_value_t = false, help = "Show detailed stage report")]
+        debug: bool,
     },
     Doctor,
     #[command(about = "Summarize hotreload metrics")]
@@ -570,6 +576,7 @@ fn run() -> Result<()> {
             trampoline,
             base,
             metadata,
+            debug,
         } => cmd_compile(
             &invocation_cwd,
             &path,
@@ -586,12 +593,14 @@ fn run() -> Result<()> {
             trampoline.as_deref(),
             base.as_deref(),
             metadata.as_deref(),
+            debug,
         ),
         Commands::Execute {
             path,
             module_id,
             verbose,
-        } => crate::compile::cmd_execute(&invocation_cwd, &path, &module_id, verbose),
+            debug,
+        } => crate::compile::cmd_execute(&invocation_cwd, &path, &module_id, verbose, debug),
         Commands::Backend {
             path,
             module_id,
@@ -627,7 +636,8 @@ fn run() -> Result<()> {
             source,
             parser,
             verbose,
-        } => cmd_eval_source_or_path(&invocation_cwd, source, parser, verbose),
+            debug,
+        } => cmd_eval_source_or_path(&invocation_cwd, source, parser, verbose, debug),
         Commands::Doctor => cmd_doctor(),
         Commands::Bench { metrics } => {
             cmd_bench(&workspace_root(invocation_cwd.clone())?, &metrics)

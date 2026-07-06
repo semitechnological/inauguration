@@ -454,10 +454,12 @@ fn parse_execute_subcommand() {
             path,
             module_id,
             verbose,
+            debug,
         } => {
             assert_eq!(path, "apps/in-sample/hello.in");
             assert_eq!(module_id, "Hello");
             assert!(verbose);
+            assert!(!debug);
         }
         _ => panic!("expected execute command"),
     }

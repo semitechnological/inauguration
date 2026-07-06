@@ -48,11 +48,15 @@ impl ModuleResolver {
         depth: usize,
     ) {
         if depth >= MAX_DEPTH {
-            eprintln!("[import] warning: max depth ({MAX_DEPTH}) reached for `{name}`");
+            if crate::in_lang_parse::lexer::human_in_debug() {
+                eprintln!("[import] warning: max depth ({MAX_DEPTH}) reached for `{name}`");
+            }
             return;
         }
         let Some(path) = self.find_module(name) else {
-            eprintln!("[import] warning: module not found: `{name}`");
+            if crate::in_lang_parse::lexer::human_in_debug() {
+                eprintln!("[import] warning: module not found: `{name}`");
+            }
             return;
         };
         let key = path.canonicalize().unwrap_or_else(|_| path.clone());
@@ -62,7 +66,9 @@ impl ModuleResolver {
         let imported = match in_lang_parse::parse_in_library_file(&path) {
             Ok(m) => m,
             Err(e) => {
-                eprintln!("[import] warning: `{name}` ({}): {e}", path.display());
+                if crate::in_lang_parse::lexer::human_in_debug() {
+                    eprintln!("[import] warning: `{name}` ({}): {e}", path.display());
+                }
                 return;
             }
         };
@@ -70,20 +76,24 @@ impl ModuleResolver {
         let nested_source = match std::fs::read_to_string(&path) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!(
-                    "[import] warning: cannot read `{name}` ({}): {e}",
-                    path.display()
-                );
+                if crate::in_lang_parse::lexer::human_in_debug() {
+                    eprintln!(
+                        "[import] warning: cannot read `{name}` ({}): {e}",
+                        path.display()
+                    );
+                }
                 return;
             }
         };
         let nested_surface = match in_lang_parse::parse_in_surface_info(&nested_source) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!(
-                    "[import] warning: surface info for `{name}` ({}): {e}",
-                    path.display()
-                );
+                if crate::in_lang_parse::lexer::human_in_debug() {
+                    eprintln!(
+                        "[import] warning: surface info for `{name}` ({}): {e}",
+                        path.display()
+                    );
+                }
                 return;
             }
         };

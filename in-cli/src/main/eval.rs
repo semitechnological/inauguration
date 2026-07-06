@@ -1,6 +1,6 @@
-use crate::compile::{JitExecution, cmd_compile, cmd_execute, compile_and_run_jit_source_path};
+use crate::compile::{JitExecution, cmd_execute, compile_and_run_jit_source_path};
 use crate::util::{extract_cargo_bin_path, resolve_invocation_path};
-use crate::{CompileTargetCli, InError, NativeLinkageCli, Result};
+use crate::{InError, Result};
 use inauguration::parser_registry::{self, ParserCli};
 use std::path::Path;
 use std::process;
@@ -10,14 +10,15 @@ pub(crate) fn cmd_eval_dispatch(
     code: &str,
     parser: Option<&str>,
     verbose: bool,
+    debug: bool,
 ) -> Result<()> {
     if parser.is_none() && !has_polyglot_fences(code) {
         let blocks = split_auto_blocks(code);
         if blocks.len() > 1 {
-            return cmd_auto_polyglot_eval(cwd, code, verbose);
+            return cmd_auto_polyglot_eval(cwd, code, verbose, debug);
         }
     }
-    cmd_eval(cwd, code, parser, verbose)
+    cmd_eval(cwd, code, parser, verbose, debug)
 }
 
 pub(crate) fn cmd_eval_source_or_path(
@@ -25,6 +26,7 @@ pub(crate) fn cmd_eval_source_or_path(
     source: Option<String>,
     parser: Option<String>,
     verbose: bool,
+    debug: bool,
 ) -> Result<()> {
     let code = match source {
         Some(ref s) => {
@@ -40,26 +42,8 @@ pub(crate) fn cmd_eval_source_or_path(
                         .unwrap_or_default()
                         .to_string_lossy()
                         .to_string();
-                    let out = std::env::temp_dir().join(format!("in-cargo-{}.bin", module_id));
                     let bin_str = bin_path.to_string_lossy().to_string();
-                    cmd_compile(
-                        invocation_cwd,
-                        &bin_str,
-                        CompileTargetCli::Jit,
-                        &out.to_string_lossy(),
-                        &module_id,
-                        parser_registry::ParserCli::Auto,
-                        None,
-                        None,
-                        NativeLinkageCli::Executable,
-                        1,
-                        false,
-                        None,
-                        None,
-                        None,
-                        None,
-                    )?;
-                    return cmd_execute(invocation_cwd, &bin_str, &module_id, verbose);
+                    return cmd_execute(invocation_cwd, &bin_str, &module_id, verbose, debug);
                 }
             }
             if resolved.exists() {
@@ -71,33 +55,12 @@ pub(crate) fn cmd_eval_source_or_path(
                     || ext == "v"
                     || ext == "swift"
                 {
-                    let out = std::env::temp_dir().join(format!(
-                        "in-eval-{}.bin",
-                        resolved.file_stem().unwrap_or_default().to_string_lossy()
-                    ));
                     let module_id = resolved
                         .file_stem()
                         .unwrap_or_default()
                         .to_string_lossy()
                         .to_string();
-                    cmd_compile(
-                        invocation_cwd,
-                        s,
-                        CompileTargetCli::Jit,
-                        &out.to_string_lossy(),
-                        &module_id,
-                        parser_registry::ParserCli::Auto,
-                        None,
-                        None,
-                        NativeLinkageCli::Executable,
-                        1,
-                        false,
-                        None,
-                        None,
-                        None,
-                        None,
-                    )?;
-                    return cmd_execute(invocation_cwd, s, &module_id, verbose);
+                    return cmd_execute(invocation_cwd, s, &module_id, verbose, debug);
                 }
                 std::fs::read_to_string(&resolved)
                     .map_err(|e| InError::Message(format!("read {}: {e}", resolved.display())))?
@@ -109,19 +72,19 @@ pub(crate) fn cmd_eval_source_or_path(
             return Err(InError::Message("eval requires code or file path".into()));
         }
     };
-    cmd_eval_dispatch(invocation_cwd, &code, parser.as_deref(), verbose)
+    cmd_eval_dispatch(invocation_cwd, &code, parser.as_deref(), verbose, debug)
 }
 
-pub(crate) fn cmd_eval(cwd: &Path, code: &str, parser: Option<&str>, verbose: bool) -> Result<()> {
+pub(crate) fn cmd_eval(cwd: &Path, code: &str, parser: Option<&str>, verbose: bool, debug: bool) -> Result<()> {
     if parser.is_none() && has_polyglot_fences(code) {
-        return cmd_polyglot_eval(cwd, code, verbose);
+        return cmd_polyglot_eval(cwd, code, verbose, debug);
     }
 
     let parser_id = parse_eval_parser(parser, code)?;
 
     #[cfg(unix)]
     if inauguration::daemon_client::daemon_is_running() {
-        return cmd_eval_daemon(parser_id, code, parser, verbose);
+        return cmd_eval_daemon(parser_id, code, parser, verbose, debug);
     }
 
     let dir = std::env::temp_dir().join(format!(
@@ -148,7 +111,7 @@ pub(crate) fn cmd_eval(cwd: &Path, code: &str, parser: Option<&str>, verbose: bo
     for plan in eval_plans(parser_id, code) {
         std::fs::write(&path, &plan.wrapped)
             .map_err(|e| InError::Message(format!("write eval temp: {e}")))?;
-        match compile_and_run_jit_source_path(&source_path, &module_id, ParserCli::Auto) {
+        match compile_and_run_jit_source_path(&source_path, &module_id, ParserCli::Auto, debug) {
             Ok(run) => {
                 print_result = plan.print_result;
                 execution = Some(run);
@@ -183,6 +146,7 @@ fn cmd_eval_daemon(
     code: &str,
     parser: Option<&str>,
     verbose: bool,
+    _debug: bool,
 ) -> Result<()> {
     let mut last_err = None;
     for plan in eval_plans(parser_id, code) {
@@ -208,10 +172,10 @@ fn cmd_eval_daemon(
     ))
 }
 
-pub(crate) fn cmd_polyglot_eval(cwd: &Path, code: &str, verbose: bool) -> Result<()> {
+pub(crate) fn cmd_polyglot_eval(cwd: &Path, code: &str, verbose: bool, debug: bool) -> Result<()> {
     let blocks = split_polyglot_blocks(code);
     if blocks.is_empty() {
-        return cmd_eval(cwd, code, None, verbose);
+        return cmd_eval(cwd, code, None, verbose, debug);
     }
     for (lang, block) in &blocks {
         let trimmed = block.trim();
@@ -219,7 +183,7 @@ pub(crate) fn cmd_polyglot_eval(cwd: &Path, code: &str, verbose: bool) -> Result
             continue;
         }
         eprint!("[{}] ", lang);
-        match cmd_eval(cwd, trimmed, Some(lang), verbose) {
+        match cmd_eval(cwd, trimmed, Some(lang), verbose, debug) {
             Ok(()) => {}
             Err(e) => eprintln!("failed: {e}"),
         }
@@ -227,10 +191,10 @@ pub(crate) fn cmd_polyglot_eval(cwd: &Path, code: &str, verbose: bool) -> Result
     Ok(())
 }
 
-pub(crate) fn cmd_auto_polyglot_eval(cwd: &Path, code: &str, verbose: bool) -> Result<()> {
+pub(crate) fn cmd_auto_polyglot_eval(cwd: &Path, code: &str, verbose: bool, debug: bool) -> Result<()> {
     let blocks = split_auto_blocks(code);
     if blocks.len() <= 1 {
-        return cmd_eval(cwd, code, None, verbose);
+        return cmd_eval(cwd, code, None, verbose, debug);
     }
     for block in &blocks {
         let trimmed = block.trim();
@@ -248,7 +212,7 @@ pub(crate) fn cmd_auto_polyglot_eval(cwd: &Path, code: &str, verbose: bool) -> R
             _ => "in",
         };
         eprint!("[{}] ", lang);
-        match cmd_eval(cwd, trimmed, Some(lang), verbose) {
+        match cmd_eval(cwd, trimmed, Some(lang), verbose, debug) {
             Ok(()) => {}
             Err(e) => eprintln!("failed: {e}"),
         }

@@ -276,6 +276,7 @@ fn eval_entry_via_jit(module: &UnifiedModule, entry: &str) -> Result<i64, String
         linkage: NativeLinkage::Executable,
         target_triple: None,
         jobs: 1,
+        debug: false,
     };
     let result = compile_jit(module, "App", &request)?;
     result
