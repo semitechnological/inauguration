@@ -107,6 +107,11 @@ div min-h-screen bg-zinc-950 text-zinc-300 p-6 sm:p-12 text-sm leading-relaxed i
 									"in-language.md"
 								span desc
 									" — learn the brace + line-oriented syntax and type surface of .in"
+							a doc-item href="./docs/languages.html"
+								span name
+									"languages.md"
+								span desc
+									" — authoritative matrix of supported language fronts and capabilities"
 							a doc-item href="./docs/multi-frontend-ir.html"
 								span name
 									"multi-frontend-ir.md"
