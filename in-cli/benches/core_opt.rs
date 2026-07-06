@@ -1,7 +1,7 @@
 use criterion::{Criterion, criterion_group, criterion_main};
-use std::hint::black_box;
 use inauguration::core_ir::*;
 use inauguration::core_opt::optimize;
+use std::hint::black_box;
 
 fn generate_test_decls() -> Vec<Decl> {
     let mut decls = Vec::new();
