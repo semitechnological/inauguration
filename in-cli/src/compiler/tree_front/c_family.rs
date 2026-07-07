@@ -434,34 +434,6 @@ fn c_args(src: &[u8], args: Node<'_>) -> Option<Vec<Expr>> {
     Some(out)
 }
 
-#[allow(dead_code)]
-fn c_trivial_return_body(
-    src: &[u8],
-    body: Node<'_>,
-    params: &[(String, Typ)],
-) -> Option<Vec<Stmt>> {
-    if body.kind() != "compound_statement" {
-        return None;
-    }
-    let mut w = body.walk();
-    let items: Vec<Node<'_>> = body.named_children(&mut w).collect();
-    if items.is_empty() {
-        return Some(vec![]);
-    }
-    if items.len() != 1 {
-        return None;
-    }
-    let inner = c_peel_statement_shell(items[0])?;
-    if inner.kind() != "return_statement" {
-        return None;
-    }
-    let ret_expr = match c_try_return_expr(src, inner, params) {
-        Ok(v) => v,
-        Err(()) => return None,
-    };
-    Some(vec![Stmt::Return(ret_expr)])
-}
-
 fn c_peel_statement_shell<'a>(n: Node<'a>) -> Option<Node<'a>> {
     match n.kind() {
         "statement" => {
@@ -475,68 +447,6 @@ fn c_peel_statement_shell<'a>(n: Node<'a>) -> Option<Node<'a>> {
         }
         _ => Some(n),
     }
-}
-
-/// `Ok(Some(expr))` = `return <expr>;`, `Ok(None)` = `return;`, `Err` = non-trivial return.
-#[allow(dead_code)]
-fn c_try_return_expr(
-    src: &[u8],
-    ret: Node<'_>,
-    params: &[(String, Typ)],
-) -> Result<Option<Expr>, ()> {
-    if named_descendant(ret, "binary_expression").is_some()
-        || named_descendant(ret, "call_expression").is_some()
-    {
-        return Err(());
-    }
-    let mut w = ret.walk();
-    for ch in ret.named_children(&mut w) {
-        match ch.kind() {
-            "number_literal" => {
-                let t = node_txt(src, ch).trim();
-                let v = parse_c_integer_literal(t).ok_or(())?;
-                return Ok(Some(Expr::IntLit(v)));
-            }
-            "identifier" => {
-                let name = node_txt(src, ch).trim().to_string();
-                if params.iter().any(|(p, _)| p == &name) {
-                    return Ok(Some(Expr::Ident(name)));
-                }
-                return Err(());
-            }
-            "expression" | "comma_expression" => {
-                if let Some(num) = named_descendant(ch, "number_literal") {
-                    let t = node_txt(src, num).trim();
-                    let v = parse_c_integer_literal(t).ok_or(())?;
-                    return Ok(Some(Expr::IntLit(v)));
-                }
-                if let Some(e) = c_try_param_ident_expr(src, ch, params) {
-                    return Ok(Some(e));
-                }
-                return Err(());
-            }
-            _ => {}
-        }
-    }
-    Ok(None)
-}
-
-/// `return x` / `return (x)` where the value is a lone parameter name (no calls, subscripts, or
-/// binary operators in the return expression).
-#[allow(dead_code)]
-fn c_try_param_ident_expr(src: &[u8], expr: Node<'_>, params: &[(String, Typ)]) -> Option<Expr> {
-    if named_descendant(expr, "binary_expression").is_some()
-        || named_descendant(expr, "call_expression").is_some()
-        || named_descendant(expr, "subscript_expression").is_some()
-    {
-        return None;
-    }
-    let id = named_descendant(expr, "identifier")?;
-    let name = node_txt(src, id).trim().to_string();
-    if params.iter().any(|(p, _)| p == &name) {
-        return Some(Expr::Ident(name));
-    }
-    None
 }
 
 fn parse_c_integer_literal(t: &str) -> Option<i64> {
