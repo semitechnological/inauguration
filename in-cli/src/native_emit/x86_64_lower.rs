@@ -1923,6 +1923,64 @@ fn lower_builtin_call(
     }
 }
 
+fn emit_stack_cleanup(emitter: &mut CodeEmitter, args_len: usize) {
+    if args_len > 6 {
+        let stack_bytes = (args_len - 6) * if x86_64::is_32bit() { 4 } else { 8 };
+        emitter.emit_width(&[0x81, 0xC4], &[0x48, 0x81, 0xC4]); // add esp/rsp, imm32
+        emitter.emit_bytes(&(stack_bytes as u32).to_le_bytes());
+    }
+}
+
+fn emit_external_call_fallback(emitter: &mut CodeEmitter, target_name: &str, target_reg: u8) {
+    if target_name.ends_with("process :: exit")
+        || target_name == "exit"
+        || target_name.ends_with("process :: abort")
+    {
+        emitter.emit_width(
+            &[0xB8, 0x3C, 0x00, 0x00, 0x00],
+            &[0x48, 0xC7, 0xC0, 0x3C, 0x00, 0x00, 0x00],
+        ); // mov eax/rax, 60
+        emitter.emit_bytes(&[0x0F, 0x05]); // syscall
+    }
+    emitter.emit_insns(&x86_64::load_i64(target_reg, 0));
+}
+
+fn lower_call_args(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    args: &[Expr],
+    target_name: &str,
+    pending_calls: &mut Vec<PendingCall>,
+) -> Result<(), String> {
+    let arg_regs = [RDI, RSI, RDX, RCX, 8, 9];
+    if args.len() > 16 {
+        return Err(format!(
+            "x86_64-lower: too many arguments in call to `{target_name}` in `{}`",
+            ctx.fn_name
+        ));
+    }
+    if args.len() > 6 {
+        for arg in args[6..].iter().rev() {
+            lower_expr_into(emitter, ctx, arg, RAX, pending_calls)?;
+            emitter.emit_insns(&x86_64::push_r(RAX));
+        }
+    }
+    for (i, arg) in args[..6.min(args.len())].iter().enumerate() {
+        if i > 0 {
+            for j in 0..i {
+                emitter.emit_insns(&x86_64::push_r(arg_regs[j]));
+            }
+        }
+        lower_expr_into(emitter, ctx, arg, arg_regs[i], pending_calls)?;
+        if i > 0 {
+            for j in (0..i).rev() {
+                emitter.emit_insns(&x86_64::pop_r(arg_regs[j]));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn lower_call_expr(
     emitter: &mut CodeEmitter,
     ctx: &mut LowerCtx<'_>,
@@ -1952,50 +2010,11 @@ fn lower_call_expr(
         return Ok(());
     }
 
-    let arg_regs = [RDI, RSI, RDX, RCX, 8, 9];
-    if args.len() > 16 {
-        return Err(format!(
-            "x86_64-lower: too many arguments in call to `{target_name}` in `{}`",
-            ctx.fn_name
-        ));
-    }
-    if args.len() > 6 {
-        for arg in args[6..].iter().rev() {
-            lower_expr_into(emitter, ctx, arg, RAX, pending_calls)?;
-            emitter.emit_insns(&x86_64::push_r(RAX));
-        }
-    }
-    for (i, arg) in args[..6.min(args.len())].iter().enumerate() {
-        if i > 0 {
-            for j in 0..i {
-                emitter.emit_insns(&x86_64::push_r(arg_regs[j]));
-            }
-        }
-        lower_expr_into(emitter, ctx, arg, arg_regs[i], pending_calls)?;
-        if i > 0 {
-            for j in (0..i).rev() {
-                emitter.emit_insns(&x86_64::pop_r(arg_regs[j]));
-            }
-        }
-    }
+    lower_call_args(emitter, ctx, args, &target_name, pending_calls)?;
 
     if !ctx.functions.contains_key(&target_name) {
-        if args.len() > 6 {
-            let stack_bytes = (args.len() - 6) * if x86_64::is_32bit() { 4 } else { 8 };
-            emitter.emit_width(&[0x81, 0xC4], &[0x48, 0x81, 0xC4]); // add esp/rsp, imm32
-            emitter.emit_bytes(&(stack_bytes as u32).to_le_bytes());
-        }
-        if target_name.ends_with("process :: exit")
-            || target_name == "exit"
-            || target_name.ends_with("process :: abort")
-        {
-            emitter.emit_width(
-                &[0xB8, 0x3C, 0x00, 0x00, 0x00],
-                &[0x48, 0xC7, 0xC0, 0x3C, 0x00, 0x00, 0x00],
-            ); // mov eax/rax, 60
-            emitter.emit_bytes(&[0x0F, 0x05]); // syscall
-        }
-        emitter.emit_insns(&x86_64::load_i64(target_reg, 0));
+        emit_stack_cleanup(emitter, args.len());
+        emit_external_call_fallback(emitter, &target_name, target_reg);
         return Ok(());
     }
 
@@ -2006,11 +2025,7 @@ fn lower_call_expr(
         target: target_name,
     });
 
-    if args.len() > 6 {
-        let stack_bytes = (args.len() - 6) * if x86_64::is_32bit() { 4 } else { 8 };
-        emitter.emit_width(&[0x81, 0xC4], &[0x48, 0x81, 0xC4]); // add esp/rsp, imm32
-        emitter.emit_bytes(&(stack_bytes as u32).to_le_bytes());
-    }
+    emit_stack_cleanup(emitter, args.len());
 
     if target_reg != RAX {
         emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
