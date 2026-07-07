@@ -1984,6 +1984,53 @@ dependencies:
     }
 
     #[test]
+    fn test_diagnostics_for_missing_dependencies_format_error() {
+        let imports = vec![
+            PackageSemanticImport {
+                import: "foo.bar".to_string(),
+                dependency: None,
+                status: "resolved".to_string(),
+                reason: "core".to_string(),
+            },
+            PackageSemanticImport {
+                import: "some.missing.dep".to_string(),
+                dependency: None,
+                status: "unresolved".to_string(),
+                reason: "dependency-not-declared".to_string(),
+            },
+            PackageSemanticImport {
+                import: "another.missing".to_string(),
+                dependency: None,
+                status: "error".to_string(),
+                reason: "parse-failed".to_string(),
+            },
+        ];
+
+        let diagnostics = diagnostics_for_semantic_imports(&imports);
+        assert_eq!(diagnostics.len(), 2);
+
+        let diag1 = &diagnostics[0];
+        assert_eq!(diag1.code, "INPKG001");
+        assert_eq!(diag1.severity, "warning");
+        assert_eq!(diag1.import, "some.missing.dep");
+        assert_eq!(diag1.reason, "dependency-not-declared");
+        assert_eq!(
+            diag1.message,
+            "semantic import `some.missing.dep` is not declared in the nearest inauguration.package"
+        );
+
+        let diag2 = &diagnostics[1];
+        assert_eq!(diag2.code, "INPKG001");
+        assert_eq!(diag2.severity, "warning");
+        assert_eq!(diag2.import, "another.missing");
+        assert_eq!(diag2.reason, "parse-failed");
+        assert_eq!(
+            diag2.message,
+            "semantic import `another.missing` is not declared in the nearest inauguration.package"
+        );
+    }
+
+    #[test]
     fn test_diagnostics_for_semantic_imports_formatting() {
         let imports = vec![
             PackageSemanticImport {
