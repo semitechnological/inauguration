@@ -68,7 +68,7 @@ pub struct InstallOptions {
 }
 
 pub fn default_packages_root(package_root: &Path) -> PathBuf {
-    package_root.join("target/in/packages")
+    package_root.join(".in-packages")
 }
 
 pub fn add_packages(
@@ -906,13 +906,31 @@ mod tests {
         let empty_path = Path::new("");
         assert_eq!(
             default_packages_root(empty_path),
-            PathBuf::from("target/in/packages")
+            PathBuf::from(".in-packages")
         );
 
         let absolute_path = Path::new("/my/project");
         assert_eq!(
             default_packages_root(absolute_path),
-            PathBuf::from("/my/project/target/in/packages")
+            PathBuf::from("/my/project/.in-packages")
+        );
+
+        let dot_path = Path::new(".");
+        assert_eq!(
+            default_packages_root(dot_path),
+            PathBuf::from("./.in-packages")
+        );
+
+        let dotdot_path = Path::new("..");
+        assert_eq!(
+            default_packages_root(dotdot_path),
+            PathBuf::from("../.in-packages")
+        );
+
+        let nested_path = Path::new("some/nested/dir");
+        assert_eq!(
+            default_packages_root(nested_path),
+            PathBuf::from("some/nested/dir/.in-packages")
         );
     }
 
