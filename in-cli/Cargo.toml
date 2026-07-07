@@ -97,3 +97,7 @@ harness = false
 [[bench]]
 name = "lower_core_closures"
 harness = false
+
+[[bench]]
+name = "lower_core"
+harness = false
