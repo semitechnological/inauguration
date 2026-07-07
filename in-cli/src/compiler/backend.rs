@@ -308,4 +308,22 @@ mod tests {
             _ => panic!("Expected UnsupportedTarget error, got {:?}", result),
         }
     }
+
+    #[test]
+    fn selects_elf_for_arm32_linux() {
+        let kind = select_backend(&spec("armv7-unknown-linux-gnueabihf", Executable)).unwrap();
+        assert_eq!(kind, BackendKind::Arm32Elf);
+    }
+
+    #[test]
+    fn selects_coff_for_aarch64_windows() {
+        let kind = select_backend(&spec("aarch64-pc-windows-msvc", Executable)).unwrap();
+        assert_eq!(kind, BackendKind::AArch64Coff);
+    }
+
+    #[test]
+    fn selects_raw_binary_for_unknown_target() {
+        let kind = select_backend(&spec("fake-unsupported-triple", Executable)).unwrap();
+        assert_eq!(kind, BackendKind::RawBinary);
+    }
 }
