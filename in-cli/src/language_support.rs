@@ -554,5 +554,8 @@ mod tests {
 
         let fake_support = language_support_for_parser("fake");
         assert!(fake_support.is_none());
+
+        assert!(language_support_for_parser("").is_none());
+        assert!(language_support_for_parser("Rust").is_none());
     }
 }

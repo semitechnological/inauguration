@@ -687,6 +687,11 @@ mod tests {
     }
 
     #[test]
+    fn parse_package_lock_empty_string() {
+        let result = parse_package_lock("");
+        assert!(result.is_err());
+    }
+    #[test]
     fn reports_error_for_empty_lock_file() {
         let result = parse_text("");
         assert_eq!(result, Err("missing required field `lock-version`".into()));
