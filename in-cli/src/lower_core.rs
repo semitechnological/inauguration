@@ -156,7 +156,7 @@ fn collect_free_vars(body: &[Stmt], params: &[(String, Typ)]) -> Vec<String> {
     let mut reads = HashSet::new();
     collect_body_reads(body, &mut reads);
 
-    let mut declared = HashSet::new();
+    let mut declared: HashSet<&str> = HashSet::new();
     collect_declared_vars_in_body(body, &mut declared);
 
     let mut param_refs = HashSet::with_capacity(params.len());
@@ -175,7 +175,7 @@ fn collect_free_vars(body: &[Stmt], params: &[(String, Typ)]) -> Vec<String> {
     captures
 }
 
-fn rewrite_captures_in_body(body: &mut [Stmt], captures: &HashSet<String>) {
+fn rewrite_captures_in_body(body: &mut [Stmt], captures: &HashSet<&str>) {
     for stmt in body {
         match stmt {
             Stmt::Let(_, _, e)
@@ -230,9 +230,9 @@ fn rewrite_captures_in_body(body: &mut [Stmt], captures: &HashSet<String>) {
     }
 }
 
-fn rewrite_captures_in_expr(expr: &mut Expr, captures: &HashSet<String>) {
+fn rewrite_captures_in_expr(expr: &mut Expr, captures: &HashSet<&str>) {
     match expr {
-        Expr::Ident(name) if captures.contains(name) => {
+        Expr::Ident(name) if captures.contains(name.as_str()) => {
             *expr = Expr::Field {
                 base: Box::new(Expr::Ident("self".into())),
                 name: std::mem::take(name),
@@ -284,7 +284,7 @@ fn desugar_closures_in_expr(expr: &mut Expr, counter: &mut usize, extra_decls: &
             let caps_name = format!("{fn_name}_captures");
             let closure_params = params.clone();
             let captures = collect_free_vars(body, &closure_params);
-            let captures_set: HashSet<String> = captures.iter().cloned().collect();
+            let captures_set: HashSet<&str> = captures.iter().map(|s| s.as_str()).collect();
             rewrite_captures_in_body(body, &captures_set);
             let caps_fields: Vec<(String, Typ)> = captures
                 .iter()
@@ -310,7 +310,7 @@ fn desugar_closures_in_expr(expr: &mut Expr, counter: &mut usize, extra_decls: &
                 name: caps_name,
                 fields: captures
                     .into_iter()
-                    .map(|c| (c.clone(), Expr::Ident(c)))
+                    .map(|c| { let id = c.clone(); (c, Expr::Ident(id)) })
                     .collect(),
             };
         }

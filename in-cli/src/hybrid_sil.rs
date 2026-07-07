@@ -464,6 +464,43 @@ mod tests {
     }
 
     #[test]
+    fn remove_debug_insts_mismatched_instruction_callers_removes_debug() {
+        let artifact = SilArtifact {
+            function_id: "fallback_func".into(),
+            cfg_blocks: vec![],
+            instructions: vec![
+                "debug_value %0".into(),
+                "%1 = function_ref @a : $@convention(thin)".into(),
+                "debug_value %2".into(),
+            ],
+            instruction_callers: vec!["some_caller".into()],
+            functions: vec![],
+        };
+        let cleaned = remove_debug_insts(&artifact);
+        assert_eq!(cleaned.instructions.len(), 1);
+        assert_eq!(
+            cleaned.instructions[0],
+            "%1 = function_ref @a : $@convention(thin)"
+        );
+        assert_eq!(cleaned.instruction_callers.len(), 1);
+        assert_eq!(cleaned.instruction_callers[0], "fallback_func");
+    }
+
+    #[test]
+    fn remove_debug_insts_with_only_debug_values_returns_empty() {
+        let artifact = SilArtifact {
+            function_id: "main".into(),
+            cfg_blocks: vec![],
+            instructions: vec!["debug_value %0".into(), "debug_value %1".into()],
+            instruction_callers: vec!["main".into(), "main".into()],
+            functions: vec![],
+        };
+        let cleaned = remove_debug_insts(&artifact);
+        assert!(cleaned.instructions.is_empty());
+        assert!(cleaned.instruction_callers.is_empty());
+    }
+
+    #[test]
     fn remove_debug_insts_keeps_function_records_aligned() {
         let artifact = parse_textual_sil(concat!(
             "sil @helper\nentry:\n",

@@ -79,6 +79,18 @@ pub struct PackageTargetSelection {
     pub unknown: Vec<String>,
 }
 
+impl PackageTargetSelection {
+    pub fn target_enabled(&self, target: &str) -> bool {
+        if self.disabled.iter().any(|d| d == target) {
+            return false;
+        }
+        if self.enabled.is_empty() {
+            return true;
+        }
+        self.enabled.iter().any(|e| e == target)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CapabilityPolicyValidation {
     pub valid: bool,
@@ -1356,6 +1368,45 @@ mod tests {
     }
 
     #[test]
+    fn test_package_target_selection_target_enabled() {
+        // Target is present in `disabled` (returns `false`)
+        let selection1 = PackageTargetSelection {
+            requested: vec![],
+            enabled: vec!["macos".to_string()],
+            disabled: vec!["linux".to_string()],
+            unknown: vec![],
+        };
+        assert_eq!(selection1.target_enabled("linux"), false);
+
+        // Target is not in `disabled` and `enabled` is empty (returns `true`)
+        let selection2 = PackageTargetSelection {
+            requested: vec![],
+            enabled: vec![],
+            disabled: vec!["windows".to_string()],
+            unknown: vec![],
+        };
+        assert_eq!(selection2.target_enabled("linux"), true);
+
+        // Target is not in `disabled`, `enabled` is non-empty, and target is in `enabled` (returns `true`)
+        let selection3 = PackageTargetSelection {
+            requested: vec![],
+            enabled: vec!["linux".to_string(), "macos".to_string()],
+            disabled: vec!["windows".to_string()],
+            unknown: vec![],
+        };
+        assert_eq!(selection3.target_enabled("linux"), true);
+
+        // Target is not in `disabled`, `enabled` is non-empty, and target is not in `enabled` (returns `false`)
+        let selection4 = PackageTargetSelection {
+            requested: vec![],
+            enabled: vec!["macos".to_string()],
+            disabled: vec!["windows".to_string()],
+            unknown: vec![],
+        };
+        assert_eq!(selection4.target_enabled("linux"), false);
+    }
+
+    #[test]
     fn parses_package_manifest_source_directly() {
         let manifest = parse_package_manifest_source(
             r#"name: direct_test
@@ -1981,6 +2032,53 @@ dependencies:
         assert_eq!(diagnostics[0].code, "INPKG001");
         assert_eq!(diagnostics[0].severity, "warning");
         assert_eq!(diagnostics[0].import, "cache.redis");
+    }
+
+    #[test]
+    fn test_diagnostics_for_missing_dependencies_format_error() {
+        let imports = vec![
+            PackageSemanticImport {
+                import: "foo.bar".to_string(),
+                dependency: None,
+                status: "resolved".to_string(),
+                reason: "core".to_string(),
+            },
+            PackageSemanticImport {
+                import: "some.missing.dep".to_string(),
+                dependency: None,
+                status: "unresolved".to_string(),
+                reason: "dependency-not-declared".to_string(),
+            },
+            PackageSemanticImport {
+                import: "another.missing".to_string(),
+                dependency: None,
+                status: "error".to_string(),
+                reason: "parse-failed".to_string(),
+            },
+        ];
+
+        let diagnostics = diagnostics_for_semantic_imports(&imports);
+        assert_eq!(diagnostics.len(), 2);
+
+        let diag1 = &diagnostics[0];
+        assert_eq!(diag1.code, "INPKG001");
+        assert_eq!(diag1.severity, "warning");
+        assert_eq!(diag1.import, "some.missing.dep");
+        assert_eq!(diag1.reason, "dependency-not-declared");
+        assert_eq!(
+            diag1.message,
+            "semantic import `some.missing.dep` is not declared in the nearest inauguration.package"
+        );
+
+        let diag2 = &diagnostics[1];
+        assert_eq!(diag2.code, "INPKG001");
+        assert_eq!(diag2.severity, "warning");
+        assert_eq!(diag2.import, "another.missing");
+        assert_eq!(diag2.reason, "parse-failed");
+        assert_eq!(
+            diag2.message,
+            "semantic import `another.missing` is not declared in the nearest inauguration.package"
+        );
     }
 
     #[test]

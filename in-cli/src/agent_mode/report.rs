@@ -118,6 +118,46 @@ fn fix_plan_from_report(report: AgentReport) -> AgentFixPlan {
     }
 }
 
+
+struct SurfaceFacts {
+    effects: Vec<String>,
+    capabilities: Vec<String>,
+    orchestration: OrchestrationFacts,
+    package_symbol_index: Vec<crate::package_manifest::PackageSymbolIndexEntry>,
+    package_diagnostics: Vec<crate::package_manifest::PackageDiagnostic>,
+}
+
+struct CoreIrFacts {
+    lower_micros: u64,
+    graph_micros: u64,
+    textual_sil_bytes: usize,
+    textual_sil_lines: usize,
+    core_ir_summary: Option<crate::agent_mode::summary::CoreIrSummary>,
+    graph_facts: Option<GraphFacts>,
+}
+
+
+fn extract_core_ir_facts(module: &UnifiedModule, module_id: &str) -> CoreIrFacts {
+    let summary = summarize_core_ir(module);
+    let lower_start = Instant::now();
+    let textual_sil = lower_textual_sil(module, module_id);
+    let lower_micros = micros(lower_start);
+    let textual_sil_bytes = textual_sil.len();
+    let textual_sil_lines = textual_sil.lines().count();
+    let graph_start = Instant::now();
+    let graph_facts = Some(graph_facts_from_sil(&textual_sil));
+    let graph_micros = micros(graph_start);
+
+    CoreIrFacts {
+        lower_micros,
+        graph_micros,
+        textual_sil_bytes,
+        textual_sil_lines,
+        core_ir_summary: Some(summary),
+        graph_facts,
+    }
+}
+
 fn build_report(path: &Path, config: &AgentModeConfig) -> Result<AgentReport, AgentModeError> {
     let total_start = Instant::now();
     let source = fs::read_to_string(path)?;
@@ -132,51 +172,46 @@ fn build_report(path: &Path, config: &AgentModeConfig) -> Result<AgentReport, Ag
     let parse_start = Instant::now();
     let parsed = parser_registry::parse_with_resolved(resolved, path);
     let parse_micros = micros(parse_start);
-    let mut lower_micros = 0;
-    let mut graph_micros = 0;
-    let mut textual_sil_bytes = 0;
-    let mut textual_sil_lines = 0;
+
     let mut core_decl_count = 0;
-    let mut core_ir_summary = None;
-    let mut graph_facts = None;
-    let mut orchestration = OrchestrationFacts::default();
-    let mut effects = Vec::new();
-    let mut capabilities = Vec::new();
-    let mut package_symbol_index = Vec::new();
-    let mut package_diagnostics = Vec::new();
+
+    let mut core_ir_facts = CoreIrFacts {
+        lower_micros: 0,
+        graph_micros: 0,
+        textual_sil_bytes: 0,
+        textual_sil_lines: 0,
+        core_ir_summary: None,
+        graph_facts: None,
+    };
+
+    let mut surface_facts = SurfaceFacts {
+        effects: Vec::new(),
+        capabilities: Vec::new(),
+        orchestration: OrchestrationFacts::default(),
+        package_symbol_index: Vec::new(),
+        package_diagnostics: Vec::new(),
+    };
+
     match parsed {
         Ok(Some(module)) => {
             core_decl_count = module.decls.len();
-            language_level =
-                language_level_for_module(language_level, parser_id.as_deref(), &source);
+            language_level = language_level_for_module(language_level, parser_id.as_deref(), &source);
+
             if parser_id.as_deref() == Some("in")
                 && let Ok(surface) = crate::in_lang_parse::parse_in_surface_info(&source)
             {
-                enrich_report_from_surface_info(
+                surface_facts = extract_surface_facts(
                     surface,
                     path,
                     &source,
                     parser_id.as_deref(),
                     &module,
                     &mut diagnostics,
-                    &mut effects,
-                    &mut capabilities,
-                    &mut orchestration,
-                    &mut package_symbol_index,
-                    &mut package_diagnostics,
                 );
             }
-            let summary = summarize_core_ir(&module);
+
             diagnostics.extend(core_diagnostics(&module, parser_id.as_deref(), &source));
-            let lower_start = Instant::now();
-            let textual_sil = lower_textual_sil(&module, &config.module_id);
-            lower_micros = micros(lower_start);
-            textual_sil_bytes = textual_sil.len();
-            textual_sil_lines = textual_sil.lines().count();
-            let graph_start = Instant::now();
-            graph_facts = Some(graph_facts_from_sil(&textual_sil));
-            graph_micros = micros(graph_start);
-            core_ir_summary = Some(summary);
+            core_ir_facts = extract_core_ir_facts(&module, &config.module_id);
         }
         Ok(None) => {
             diagnostics.push(diagnostic(
@@ -203,51 +238,53 @@ fn build_report(path: &Path, config: &AgentModeConfig) -> Result<AgentReport, Ag
             ));
         }
     }
+
     repair_plans.extend(
         diagnostics
             .iter()
             .filter_map(|d| repair_plan_for(d, &source)),
     );
+
     Ok(AgentReport {
         schema_version: 1,
         diagnostics,
         parser_decision,
         language_level,
-        core_ir_summary,
-        graph_facts,
-        orchestration,
-        effects,
-        capabilities,
-        package_symbol_index,
-        package_diagnostics,
+        core_ir_summary: core_ir_facts.core_ir_summary,
+        graph_facts: core_ir_facts.graph_facts,
+        orchestration: surface_facts.orchestration,
+        effects: surface_facts.effects,
+        capabilities: surface_facts.capabilities,
+        package_symbol_index: surface_facts.package_symbol_index,
+        package_diagnostics: surface_facts.package_diagnostics,
         size_timing: SizeTiming {
             source_bytes,
             source_lines,
             core_decl_count,
-            textual_sil_bytes,
-            textual_sil_lines,
+            textual_sil_bytes: core_ir_facts.textual_sil_bytes,
+            textual_sil_lines: core_ir_facts.textual_sil_lines,
             parse_micros,
-            lower_micros,
-            graph_micros,
+            lower_micros: core_ir_facts.lower_micros,
+            graph_micros: core_ir_facts.graph_micros,
             total_micros: micros(total_start),
         },
         repair_plans,
     })
 }
 
-fn enrich_report_from_surface_info(
+fn extract_surface_facts(
     surface: InSurfaceInfo,
     path: &Path,
     source: &str,
     parser_id: Option<&str>,
     module: &UnifiedModule,
     diagnostics: &mut Vec<AgentDiagnostic>,
-    effects: &mut Vec<String>,
-    capabilities: &mut Vec<String>,
-    orchestration: &mut OrchestrationFacts,
-    package_symbol_index: &mut Vec<crate::package_manifest::PackageSymbolIndexEntry>,
-    package_diagnostics: &mut Vec<crate::package_manifest::PackageDiagnostic>,
-) {
+) -> SurfaceFacts {
+    let mut effects = Vec::new();
+    let mut capabilities = Vec::new();
+
+    let mut package_symbol_index;
+
     let declared_capabilities = surface.capabilities.clone();
     let mut extern_bindings = surface.externs.clone();
     for import in &surface.imports {
@@ -304,7 +341,7 @@ fn enrich_report_from_surface_info(
         &surface.semantic_bindings,
         &semantic_imports,
     );
-    *package_symbol_index = if let Ok((root, manifest)) =
+    package_symbol_index = if let Ok((root, manifest)) =
         crate::package_manifest::load_package_manifest_from_source(path)
     {
         let lock = crate::package_lock::discover_package_lock(&root.root).and_then(|lock_root| {
@@ -322,8 +359,7 @@ fn enrich_report_from_surface_info(
     package_symbol_index.extend(crate::package_manifest::symbol_index_for_semantic_bindings(
         &semantic_bindings,
     ));
-    *package_diagnostics =
-        crate::package_manifest::diagnostics_for_semantic_imports(&semantic_imports);
+    let package_diagnostics = crate::package_manifest::diagnostics_for_semantic_imports(&semantic_imports);
     for diagnostic_fact in package_diagnostics.iter() {
         diagnostics.push(diagnostic(
             &diagnostic_fact.code,
@@ -338,7 +374,7 @@ fn enrich_report_from_surface_info(
     }
     diagnostics.extend(dependency_symbol_call_diagnostics(
         module,
-        package_symbol_index,
+        &package_symbol_index,
         &semantic_bindings
             .iter()
             .filter(|binding| binding.status == "resolved")
@@ -397,7 +433,15 @@ fn enrich_report_from_surface_info(
         ));
     }
     capabilities.extend(surface.capabilities);
-    *orchestration = orchestration_facts_from_surface(surface.orchestration);
+    let orchestration = orchestration_facts_from_surface(surface.orchestration);
+
+    SurfaceFacts {
+        effects,
+        capabilities,
+        orchestration,
+        package_symbol_index,
+        package_diagnostics,
+    }
 }
 
 fn io_error_report(path: &Path, config: &AgentModeConfig, err: AgentModeError) -> AgentReport {
