@@ -94,21 +94,13 @@ impl<'a> LowerCtx<'a> {
             ret_typ: Typ::Int,
         };
         // Allocate stack slots for parameters
-        // On x86_64 (System V), first 6 integer args go in RDI, RSI, RDX, RCX, R8, R9
-        let param_regs = [RDI, RSI, RDX, RCX, 8, 9]; // 8=R8, 9=R9
-        for (i, (name, _typ)) in params.iter().enumerate() {
-            if i < 6 {
-                let _reg = param_regs[i];
-                let offset = ctx.alloc_slot();
-                ctx.locals.insert(name.clone(), StackSlot::Scalar(offset));
-                // Store param from register into stack slot
-                // (register saved during function entry, actual store emitted by lower)
-            } else {
-                // Stack params: at [rbp + 16 + (i-6)*8]
-                let stack_offset = 16 + ((i - 6) * 8);
-                ctx.locals
-                    .insert(name.clone(), StackSlot::Scalar(stack_offset as u32));
-            }
+        // On x86_64 (System V), first 6 integer args go in RDI, RSI, RDX, RCX, R8, R9.
+        // All parameters get a local stack slot so the body can reload them the same
+        // way. Register params are stored to their slots in the prologue; stack params
+        // are loaded from the caller's argument area and stored to their slots there.
+        for (_i, (name, _typ)) in params.iter().enumerate() {
+            let offset = ctx.alloc_slot();
+            ctx.locals.insert(name.clone(), StackSlot::Scalar(offset));
         }
         ctx
     }
@@ -692,14 +684,15 @@ fn lower_function(
     // Instead skip save AND zero-fill; params survive in registers.
     let param_regs = [RDI, RSI, RDX, RCX, 8, 9];
     let stosq_clobbers = [true, false, false, true, false, false];
+    let n_stack_params = func.params.len().saturating_sub(6) as i32;
     if !is_interrupt {
         // Save clobbered params before zero-fill destroys them
         for (i, (name, _)) in func.params.iter().enumerate() {
             if i < 6 && ctx.locals.contains_key(name) && stosq_clobbers[i] {
                 let temp_disp = if x86_64::is_32bit() {
-                    8 + i as i32 * 4
+                    8 + i as i32 * 4 + n_stack_params * 4
                 } else {
-                    16 + i as i32 * 8
+                    16 + i as i32 * 8 + n_stack_params * 8
                 };
                 emitter.emit_insns(&x86_64::mov_m_r(RBP, temp_disp, param_regs[i]));
             }
@@ -730,14 +723,24 @@ fn lower_function(
                 if let Some(StackSlot::Scalar(offset)) = ctx.locals.get(name) {
                     if stosq_clobbers[i] {
                         let temp_disp = if x86_64::is_32bit() {
-                            8 + i as i32 * 4
+                            8 + i as i32 * 4 + n_stack_params * 4
                         } else {
-                            16 + i as i32 * 8
+                            16 + i as i32 * 8 + n_stack_params * 8
                         };
                         emitter.emit_insns(&x86_64::mov_r_m(param_regs[i], RBP, temp_disp));
                     }
                     emitter.emit_insns(&x86_64::str64(param_regs[i], *offset as u16));
                 }
+            } else if let Some(StackSlot::Scalar(offset)) = ctx.locals.get(name) {
+                // Stack params: load from caller's argument area and store to the
+                // local slot so the body can reload via ldr64.
+                let stack_offset = if x86_64::is_32bit() {
+                    12 + ((i - 6) * 4) as i32
+                } else {
+                    16 + ((i - 6) * 8) as i32
+                };
+                emitter.emit_insns(&x86_64::mov_r_m(RAX, RBP, stack_offset));
+                emitter.emit_insns(&x86_64::str64(RAX, *offset as u16));
             }
         }
     } else {
@@ -2464,6 +2467,102 @@ fn main() -> void {}
         }
         assert!(found_backward_jmp, "no backward jump found");
         assert!(found_exit_jmp, "no exit conditional jump found");
+    }
+
+    #[test]
+    fn lower_while_loop_with_flag() {
+        // Reproducer from the Space NVMe driver: a loop using a `done` flag that is
+        // updated in the body must re-evaluate the condition each iteration.
+        let src = r#"
+fn count() -> Int {
+  let done = 0
+  let to = 0
+  while done == 0 {
+    to = to + 1
+    if to >= 5 {
+      done = 1
+    }
+  }
+  return to
+}
+
+fn main() -> void {}
+"#;
+        let module = crate::in_lang_parse::parse_in_source(src).expect("parse");
+        let result = lower_module(&module, "count").expect("lower");
+        let code = &result.code;
+
+        // The backward jump must target the condition, not skip it. The condition
+        // includes a comparison (cmp r/m, imm) and a conditional exit (0F 84).
+        let mut found_backward_jmp = false;
+        let mut found_exit_jmp = false;
+        for i in 0..code.len() {
+            if i + 1 < code.len() && code[i] == 0xEB {
+                let off = code[i + 1] as i8;
+                let target = (i as i32 + 2 + off as i32) as usize;
+                if target < i {
+                    found_backward_jmp = true;
+                }
+            }
+            if i + 4 < code.len() && code[i] == 0xE9 {
+                let off = i32::from_le_bytes(code[i + 1..i + 5].try_into().unwrap());
+                let target = (i as i32 + 5 + off) as usize;
+                if target < i {
+                    found_backward_jmp = true;
+                }
+            }
+            if i + 5 < code.len() && code[i] == 0x0F && code[i + 1] == 0x84 {
+                found_exit_jmp = true;
+            }
+        }
+        assert!(found_backward_jmp, "no backward jump found");
+        assert!(found_exit_jmp, "no exit conditional jump found");
+    }
+
+    #[test]
+    fn lower_seventh_argument_is_loaded_from_stack() {
+        // Reproducer from the Space NVMe driver: a 7-argument function must load
+        // the 7th argument from the caller's stack-argument area.
+        let src = r#"
+fn seven(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int) -> Int {
+  return g
+}
+
+fn main() -> void {}
+"#;
+        let module = crate::in_lang_parse::parse_in_source(src).expect("parse");
+        let result = lower_module(&module, "seven").expect("lower");
+        let code = &result.code;
+
+        // The prologue must load the 7th argument from [rbp + 16] and store it to
+        // g's local slot. mov rax, [rbp+16] is 48 8B 45 10; mov [rbp-56], rax is
+        // 48 89 45 C8.  It must also save the rep-stosq-clobbered register params
+        // above the stack-arg area so they don't overwrite argument 7: mov [rbp+24], rdi
+        // is 48 89 7D 18 and mov [rbp+48], rcx is 48 89 4D 30.
+        let load_stack_arg = [0x48u8, 0x8B, 0x45, 0x10];
+        let store_to_slot = [0x48u8, 0x89, 0x45, 0xC8];
+        let save_rdi_above_stack_arg = [0x48u8, 0x89, 0x7D, 0x18];
+        let save_rcx_above_stack_arg = [0x48u8, 0x89, 0x4D, 0x30];
+        assert!(
+            code.windows(load_stack_arg.len())
+                .any(|w| w == load_stack_arg),
+            "missing prologue load of stack argument: expected `mov rax, [rbp+16]`"
+        );
+        assert!(
+            code.windows(store_to_slot.len())
+                .any(|w| w == store_to_slot),
+            "missing prologue store to g slot: expected `mov [rbp-56], rax`"
+        );
+        assert!(
+            code.windows(save_rdi_above_stack_arg.len())
+                .any(|w| w == save_rdi_above_stack_arg),
+            "missing clobbered RDI save above stack arg: expected `mov [rbp+24], rdi`"
+        );
+        assert!(
+            code.windows(save_rcx_above_stack_arg.len())
+                .any(|w| w == save_rcx_above_stack_arg),
+            "missing clobbered RCX save above stack arg: expected `mov [rbp+48], rcx`"
+        );
     }
 
     #[test]
