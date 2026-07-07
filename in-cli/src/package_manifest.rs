@@ -79,6 +79,18 @@ pub struct PackageTargetSelection {
     pub unknown: Vec<String>,
 }
 
+impl PackageTargetSelection {
+    pub fn target_enabled(&self, target: &str) -> bool {
+        if self.disabled.iter().any(|d| d == target) {
+            return false;
+        }
+        if self.enabled.is_empty() {
+            return true;
+        }
+        self.enabled.iter().any(|e| e == target)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CapabilityPolicyValidation {
     pub valid: bool,
@@ -1353,6 +1365,45 @@ mod tests {
         let manifest_path = temp.path.join("inauguration.package");
         fs::write(&manifest_path, source).expect("write manifest");
         load_package_manifest(&manifest_path)
+    }
+
+    #[test]
+    fn test_package_target_selection_target_enabled() {
+        // Target is present in `disabled` (returns `false`)
+        let selection1 = PackageTargetSelection {
+            requested: vec![],
+            enabled: vec!["macos".to_string()],
+            disabled: vec!["linux".to_string()],
+            unknown: vec![],
+        };
+        assert_eq!(selection1.target_enabled("linux"), false);
+
+        // Target is not in `disabled` and `enabled` is empty (returns `true`)
+        let selection2 = PackageTargetSelection {
+            requested: vec![],
+            enabled: vec![],
+            disabled: vec!["windows".to_string()],
+            unknown: vec![],
+        };
+        assert_eq!(selection2.target_enabled("linux"), true);
+
+        // Target is not in `disabled`, `enabled` is non-empty, and target is in `enabled` (returns `true`)
+        let selection3 = PackageTargetSelection {
+            requested: vec![],
+            enabled: vec!["linux".to_string(), "macos".to_string()],
+            disabled: vec!["windows".to_string()],
+            unknown: vec![],
+        };
+        assert_eq!(selection3.target_enabled("linux"), true);
+
+        // Target is not in `disabled`, `enabled` is non-empty, and target is not in `enabled` (returns `false`)
+        let selection4 = PackageTargetSelection {
+            requested: vec![],
+            enabled: vec!["macos".to_string()],
+            disabled: vec!["windows".to_string()],
+            unknown: vec![],
+        };
+        assert_eq!(selection4.target_enabled("linux"), false);
     }
 
     #[test]
