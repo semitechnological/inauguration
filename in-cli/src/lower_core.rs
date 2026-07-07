@@ -310,7 +310,10 @@ fn desugar_closures_in_expr(expr: &mut Expr, counter: &mut usize, extra_decls: &
                 name: caps_name,
                 fields: captures
                     .into_iter()
-                    .map(|c| { let id = c.clone(); (c, Expr::Ident(id)) })
+                    .map(|c| {
+                        let id = c.clone();
+                        (c, Expr::Ident(id))
+                    })
                     .collect(),
             };
         }

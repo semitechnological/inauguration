@@ -1,7 +1,7 @@
 use criterion::{Criterion, criterion_group, criterion_main};
-use std::hint::black_box;
 use inauguration::core_ir::*;
 use inauguration::lower_core::lower_to_textual_sil;
+use std::hint::black_box;
 
 fn generate_module_with_closures() -> UnifiedModule {
     let mut stmts = Vec::new();
@@ -20,7 +20,7 @@ fn generate_module_with_closures() -> UnifiedModule {
         let cap_expr = Expr::Binary {
             op: "+".to_string(),
             lhs: Box::new(Expr::Ident(format!("var_{}", i))),
-            rhs: Box::new(Expr::Ident(format!("var_{}", i+1))),
+            rhs: Box::new(Expr::Ident(format!("var_{}", i + 1))),
         };
         closure_body.push(Stmt::Return(Some(cap_expr)));
 
@@ -31,11 +31,7 @@ fn generate_module_with_closures() -> UnifiedModule {
             captures: vec![],
         };
 
-        stmts.push(Stmt::Let(
-            format!("closure_{}", i),
-            None,
-            closure,
-        ));
+        stmts.push(Stmt::Let(format!("closure_{}", i), None, closure));
     }
 
     let func = Decl::Function {
