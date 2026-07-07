@@ -2016,6 +2016,37 @@ dependencies:
     }
 
     #[test]
+    fn test_diagnostics_for_semantic_imports_missing_dependencies_format() {
+        let imports = vec![
+            PackageSemanticImport {
+                import: "some.missing.dependency".to_string(),
+                dependency: None,
+                status: "unresolved".to_string(),
+                reason: "package-manifest-missing".to_string(),
+            },
+            PackageSemanticImport {
+                import: "another.missing.dependency".to_string(),
+                dependency: None,
+                status: "error".to_string(),
+                reason: "dependency-not-found".to_string(),
+            },
+        ];
+
+        let diagnostics = diagnostics_for_semantic_imports(&imports);
+
+        assert_eq!(diagnostics.len(), 2);
+
+        assert_eq!(
+            diagnostics[0].message,
+            "semantic import `some.missing.dependency` is not declared in the nearest inauguration.package"
+        );
+        assert_eq!(
+            diagnostics[1].message,
+            "semantic import `another.missing.dependency` is not declared in the nearest inauguration.package"
+        );
+    }
+
+    #[test]
     fn compile_context_at_root_returns_none_if_no_manifest() {
         let temp = TempDirGuard::new();
         assert!(compile_context_at_root(&temp.path).is_none());
