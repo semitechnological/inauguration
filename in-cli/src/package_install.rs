@@ -68,7 +68,7 @@ pub struct InstallOptions {
 }
 
 pub fn default_packages_root(package_root: &Path) -> PathBuf {
-    package_root.join("target/in/packages")
+    package_root.join(".in-packages")
 }
 
 pub fn add_packages(
@@ -906,13 +906,13 @@ mod tests {
         let empty_path = Path::new("");
         assert_eq!(
             default_packages_root(empty_path),
-            PathBuf::from("target/in/packages")
+            PathBuf::from(".in-packages")
         );
 
         let absolute_path = Path::new("/my/project");
         assert_eq!(
             default_packages_root(absolute_path),
-            PathBuf::from("/my/project/target/in/packages")
+            PathBuf::from("/my/project/.in-packages")
         );
     }
 
@@ -979,6 +979,13 @@ mod tests {
             name: "github.com/foo/bar".to_string(),
         };
         assert_eq!(export_symbol_for(&package_ref), "go_github_com_foo_bar");
+    }
+
+    #[test]
+    fn default_packages_root_resolves_correctly() {
+        let root = Path::new("/my/project");
+        let packages_root = default_packages_root(root);
+        assert_eq!(packages_root, Path::new("/my/project/.in-packages"));
     }
 
     #[test]
