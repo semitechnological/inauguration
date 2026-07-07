@@ -326,7 +326,9 @@ mod tests {
         assert!(IrType::U16.is_integer());
         assert!(IrType::U32.is_integer());
         assert!(IrType::U64.is_integer());
-        assert!(!IrType::F32.is_float() || !IrType::F32.is_integer());
+        assert!(!IrType::F32.is_integer());
+        assert!(!IrType::F64.is_integer());
+        assert!(!IrType::Float(32).is_integer());
         assert!(!IrType::Bool.is_integer());
         assert!(!IrType::Void.is_integer());
     }
@@ -338,7 +340,10 @@ mod tests {
         assert!(IrType::F32.is_float());
         assert!(IrType::F64.is_float());
         assert!(!IrType::I32.is_float());
+        assert!(!IrType::I64.is_float());
+        assert!(!IrType::Int(32).is_float());
         assert!(!IrType::Bool.is_float());
+        assert!(!IrType::Void.is_float());
     }
 
     // ─── IrValue ───────────────────────────────────────────────────────
