@@ -1,7 +1,7 @@
-use criterion::{criterion_group, criterion_main, Criterion};
-use std::hint::black_box;
-use inauguration::core_ir::{Expr, Stmt, Typ, UnifiedModule, Decl, CoreModuleIdentity};
+use criterion::{Criterion, criterion_group, criterion_main};
+use inauguration::core_ir::{CoreModuleIdentity, Decl, Expr, Stmt, Typ, UnifiedModule};
 use inauguration::lower_core::desugar_module;
+use std::hint::black_box;
 
 fn bench_desugar_module(c: &mut Criterion) {
     let mut stmts = Vec::new();
@@ -9,14 +9,12 @@ fn bench_desugar_module(c: &mut Criterion) {
         stmts.push(Stmt::Let(
             format!("var_{}", i),
             None,
-            Expr::StringLit("abc".to_string())
+            Expr::StringLit("abc".to_string()),
         ));
         stmts.push(Stmt::Expr(Expr::Closure {
             params: vec![],
             ret: Typ::Void,
-            body: vec![
-                Stmt::Expr(Expr::Ident(format!("var_{}", i)))
-            ],
+            body: vec![Stmt::Expr(Expr::Ident(format!("var_{}", i)))],
             captures: vec![],
         }));
     }

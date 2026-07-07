@@ -429,7 +429,6 @@ mod tests {
         assert!(spec2.is_freestanding());
     }
 
-
     #[test]
     fn component_spec_json_generation() {
         let mut spec = ComponentSpec::host_executable("json-test", Some("main"));

@@ -118,7 +118,6 @@ fn fix_plan_from_report(report: AgentReport) -> AgentFixPlan {
     }
 }
 
-
 struct SurfaceFacts {
     effects: Vec<String>,
     capabilities: Vec<String>,
@@ -135,7 +134,6 @@ struct CoreIrFacts {
     core_ir_summary: Option<crate::agent_mode::summary::CoreIrSummary>,
     graph_facts: Option<GraphFacts>,
 }
-
 
 fn extract_core_ir_facts(module: &UnifiedModule, module_id: &str) -> CoreIrFacts {
     let summary = summarize_core_ir(module);
@@ -195,7 +193,8 @@ fn build_report(path: &Path, config: &AgentModeConfig) -> Result<AgentReport, Ag
     match parsed {
         Ok(Some(module)) => {
             core_decl_count = module.decls.len();
-            language_level = language_level_for_module(language_level, parser_id.as_deref(), &source);
+            language_level =
+                language_level_for_module(language_level, parser_id.as_deref(), &source);
 
             if parser_id.as_deref() == Some("in")
                 && let Ok(surface) = crate::in_lang_parse::parse_in_surface_info(&source)
@@ -359,7 +358,8 @@ fn extract_surface_facts(
     package_symbol_index.extend(crate::package_manifest::symbol_index_for_semantic_bindings(
         &semantic_bindings,
     ));
-    let package_diagnostics = crate::package_manifest::diagnostics_for_semantic_imports(&semantic_imports);
+    let package_diagnostics =
+        crate::package_manifest::diagnostics_for_semantic_imports(&semantic_imports);
     for diagnostic_fact in package_diagnostics.iter() {
         diagnostics.push(diagnostic(
             &diagnostic_fact.code,

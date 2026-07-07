@@ -434,7 +434,6 @@ fn c_args(src: &[u8], args: Node<'_>) -> Option<Vec<Expr>> {
     Some(out)
 }
 
-
 fn c_peel_statement_shell<'a>(n: Node<'a>) -> Option<Node<'a>> {
     match n.kind() {
         "statement" => {
@@ -449,7 +448,6 @@ fn c_peel_statement_shell<'a>(n: Node<'a>) -> Option<Node<'a>> {
         _ => Some(n),
     }
 }
-
 
 fn parse_c_integer_literal(t: &str) -> Option<i64> {
     let t = t.trim();
