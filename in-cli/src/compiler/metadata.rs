@@ -129,6 +129,19 @@ impl ComponentSpec {
     pub fn is_freestanding(&self) -> bool {
         self.target.ends_with("-none") || self.target.ends_with("-none-elf")
     }
+
+    pub fn to_json_pretty(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string_pretty(self)
+    }
+
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
+    }
+
+    pub fn with_host_target(mut self) -> Self {
+        self.target = Self::host_triple();
+        self
+    }
 }
 
 // ─── Component Metadata ─────────────────────────────────────────────────
@@ -414,6 +427,33 @@ mod tests {
         };
         assert_eq!(spec2.object_format(), "elf");
         assert!(spec2.is_freestanding());
+    }
+
+
+    #[test]
+    fn component_spec_json_generation() {
+        let mut spec = ComponentSpec::host_executable("json-test", Some("main"));
+        spec.capabilities = vec![ComponentCapability {
+            name: "fs".into(),
+            capability_type: "FileSystem".into(),
+            args: vec!["read".into()],
+        }];
+
+        let json = spec.to_json().unwrap();
+        assert!(json.contains("\"name\":\"json-test\""));
+        assert!(json.contains("\"artifact_kind\":\"Executable\""));
+
+        let pretty_json = spec.to_json_pretty().unwrap();
+        assert!(pretty_json.contains("\"name\": \"json-test\""));
+        assert!(pretty_json.contains("\"artifact_kind\": \"Executable\""));
+    }
+
+    #[test]
+    fn component_spec_with_host_target() {
+        let mut spec = ComponentSpec::host_executable("test", None);
+        spec.target = "wasm32-unknown-unknown".into();
+        let host_spec = spec.with_host_target();
+        assert_eq!(host_spec.target, ComponentSpec::host_triple());
     }
 
     #[test]
