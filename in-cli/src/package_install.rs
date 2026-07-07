@@ -68,7 +68,7 @@ pub struct InstallOptions {
 }
 
 pub fn default_packages_root(package_root: &Path) -> PathBuf {
-    package_root.join("target/in/packages")
+    package_root.join(".in-packages")
 }
 
 pub fn add_packages(
@@ -906,13 +906,28 @@ mod tests {
         let empty_path = Path::new("");
         assert_eq!(
             default_packages_root(empty_path),
-            PathBuf::from("target/in/packages")
+            PathBuf::from(".in-packages")
         );
 
         let absolute_path = Path::new("/my/project");
         assert_eq!(
             default_packages_root(absolute_path),
-            PathBuf::from("/my/project/target/in/packages")
+            PathBuf::from("/my/project/.in-packages")
+        );
+    }
+
+    #[test]
+    fn default_packages_root_edge_cases() {
+        let root_path = Path::new("/");
+        assert_eq!(
+            default_packages_root(root_path),
+            PathBuf::from("/.in-packages")
+        );
+
+        let trailing_slash_path = Path::new("/usr/local/");
+        assert_eq!(
+            default_packages_root(trailing_slash_path),
+            PathBuf::from("/usr/local/.in-packages")
         );
     }
 
