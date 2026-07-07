@@ -317,6 +317,7 @@ mod tests {
 
     #[test]
     fn ir_type_is_integer() {
+        // True cases
         assert!(IrType::Int(32).is_integer());
         assert!(IrType::I8.is_integer());
         assert!(IrType::I16.is_integer());
@@ -326,19 +327,37 @@ mod tests {
         assert!(IrType::U16.is_integer());
         assert!(IrType::U32.is_integer());
         assert!(IrType::U64.is_integer());
-        assert!(!IrType::F32.is_float() || !IrType::F32.is_integer());
+
+        // False cases
+        assert!(!IrType::Float(32).is_integer());
+        assert!(!IrType::F32.is_integer());
+        assert!(!IrType::F64.is_integer());
         assert!(!IrType::Bool.is_integer());
         assert!(!IrType::Void.is_integer());
+        assert!(!IrType::Ptr(Box::new(IrType::I32)).is_integer());
+        assert!(!IrType::Array(Box::new(IrType::I32), 10).is_integer());
+        assert!(!IrType::Slice(Box::new(IrType::I32)).is_integer());
+        assert!(!IrType::Named("Foo".to_string()).is_integer());
+        assert!(!IrType::Never.is_integer());
     }
 
     #[test]
     fn ir_type_is_float() {
+        // True cases
         assert!(IrType::Float(32).is_float());
         assert!(IrType::Float(64).is_float());
         assert!(IrType::F32.is_float());
         assert!(IrType::F64.is_float());
+
+        // False cases
         assert!(!IrType::I32.is_float());
         assert!(!IrType::Bool.is_float());
+        assert!(!IrType::Void.is_float());
+        assert!(!IrType::Ptr(Box::new(IrType::I32)).is_float());
+        assert!(!IrType::Array(Box::new(IrType::I32), 10).is_float());
+        assert!(!IrType::Slice(Box::new(IrType::I32)).is_float());
+        assert!(!IrType::Named("Foo".to_string()).is_float());
+        assert!(!IrType::Never.is_float());
     }
 
     // ─── IrValue ───────────────────────────────────────────────────────
