@@ -1407,6 +1407,60 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_package_manifest_source_comprehensive() {
+        let manifest = parse_package_manifest_source(
+            r#"name: comprehensive_test
+version: 1.0.0
+entry: src/main.in
+targets:
+  macos: true
+  linux: false
+dependencies:
+  dep1:
+    version: ^1.2.3
+    targets:
+      - macos
+  dep2:
+    version: latest
+capabilities:
+  - network
+  - filesystem.read
+extensions:
+  - distributed-workers
+  - preview-host
+"#,
+        )
+        .expect("parse manifest source comprehensively");
+
+        assert_eq!(manifest.name, "comprehensive_test");
+        assert_eq!(manifest.version, "1.0.0");
+        assert_eq!(manifest.entry, Some("src/main.in".to_string()));
+
+        assert_eq!(manifest.targets.get("macos").copied(), Some(true));
+        assert_eq!(manifest.targets.get("linux").copied(), Some(false));
+
+        let dep1 = manifest.dependencies.get("dep1").expect("should have dep1");
+        assert_eq!(dep1.version, "^1.2.3");
+        assert_eq!(dep1.targets, vec!["macos".to_string()]);
+
+        let dep2 = manifest.dependencies.get("dep2").expect("should have dep2");
+        assert_eq!(dep2.version, "latest");
+
+        assert_eq!(manifest.capabilities, vec!["network".to_string(), "filesystem.read".to_string()]);
+        assert_eq!(manifest.extensions, vec!["distributed-workers".to_string(), "preview-host".to_string()]);
+    }
+
+    #[test]
+    fn test_parse_package_manifest_source_error() {
+        let result = parse_package_manifest_source(
+            "name: error_test\n\tversion: 1.0.0", // Contains a tab character
+        );
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err();
+        assert!(err_msg.contains("tabs are not valid indentation"), "Unexpected error: {}", err_msg);
+    }
+
+    #[test]
     fn parses_package_manifest_source_directly() {
         let manifest = parse_package_manifest_source(
             r#"name: direct_test
