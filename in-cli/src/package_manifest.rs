@@ -1376,7 +1376,7 @@ mod tests {
             disabled: vec!["linux".to_string()],
             unknown: vec![],
         };
-        assert_eq!(selection1.target_enabled("linux"), false);
+        assert!(!selection1.target_enabled("linux"));
 
         // Target is not in `disabled` and `enabled` is empty (returns `true`)
         let selection2 = PackageTargetSelection {
@@ -1385,7 +1385,7 @@ mod tests {
             disabled: vec!["windows".to_string()],
             unknown: vec![],
         };
-        assert_eq!(selection2.target_enabled("linux"), true);
+        assert!(selection2.target_enabled("linux"));
 
         // Target is not in `disabled`, `enabled` is non-empty, and target is in `enabled` (returns `true`)
         let selection3 = PackageTargetSelection {
@@ -1394,7 +1394,7 @@ mod tests {
             disabled: vec!["windows".to_string()],
             unknown: vec![],
         };
-        assert_eq!(selection3.target_enabled("linux"), true);
+        assert!(selection3.target_enabled("linux"));
 
         // Target is not in `disabled`, `enabled` is non-empty, and target is not in `enabled` (returns `false`)
         let selection4 = PackageTargetSelection {
@@ -1403,7 +1403,69 @@ mod tests {
             disabled: vec!["windows".to_string()],
             unknown: vec![],
         };
-        assert_eq!(selection4.target_enabled("linux"), false);
+        assert!(!selection4.target_enabled("linux"));
+    }
+
+    #[test]
+    fn test_parse_package_manifest_source_comprehensive() {
+        let manifest = parse_package_manifest_source(
+            r#"name: comprehensive_test
+version: 1.0.0
+entry: src/main.in
+targets:
+  macos: true
+  linux: false
+dependencies:
+  dep1:
+    version: ^1.2.3
+    targets:
+      - macos
+  dep2:
+    version: latest
+capabilities:
+  - network
+  - filesystem.read
+extensions:
+  - distributed-workers
+  - preview-host
+"#,
+        )
+        .expect("parse manifest source comprehensively");
+
+        assert_eq!(manifest.name, "comprehensive_test");
+        assert_eq!(manifest.version, "1.0.0");
+        assert_eq!(manifest.entry, Some("src/main.in".to_string()));
+        assert_eq!(manifest.targets.get("macos").copied(), Some(true));
+        assert_eq!(manifest.targets.get("linux").copied(), Some(false));
+        let dep1 = manifest.dependencies.get("dep1").expect("should have dep1");
+        assert_eq!(dep1.version, "^1.2.3");
+        assert_eq!(dep1.targets, vec!["macos".to_string()]);
+        let dep2 = manifest.dependencies.get("dep2").expect("should have dep2");
+        assert_eq!(dep2.version, "latest");
+        assert_eq!(
+            manifest.capabilities,
+            vec!["network".to_string(), "filesystem.read".to_string()]
+        );
+        assert_eq!(
+            manifest.extensions,
+            vec![
+                "distributed-workers".to_string(),
+                "preview-host".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn test_parse_package_manifest_source_error() {
+        let result = parse_package_manifest_source(
+            "name: error_test\n\tversion: 1.0.0",
+        );
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err();
+        assert!(
+            err_msg.contains("tabs are not valid indentation"),
+            "Unexpected error: {err_msg}"
+        );
     }
 
     #[test]
@@ -2120,6 +2182,20 @@ dependencies:
     }
 
     #[test]
+    fn compile_context_in_dir_returns_none_if_no_manifest() {
+        let temp = TempDirGuard::new();
+        assert!(compile_context_in_dir(&temp.path).is_none());
+    }
+
+    #[test]
+    fn compile_context_for_source_returns_none_if_no_manifest() {
+        let temp = TempDirGuard::new();
+        let source_file = temp.path.join("main.in");
+        fs::write(&source_file, "fn main() -> void {}").expect("write dummy source");
+        assert!(compile_context_for_source(&source_file).is_none());
+    }
+
+    #[test]
     fn compile_context_at_root_returns_context_if_manifest_exists() {
         let temp = TempDirGuard::new();
         fs::write(
@@ -2133,6 +2209,28 @@ version: 0.1.0
         assert_eq!(context.name, "test_pkg");
         assert_eq!(context.entry, None);
         assert_eq!(context.dependency_search_paths.len(), 0);
+    }
+
+    #[test]
+    fn compile_context_honors_legacy_target_in_packages_install_path() {
+        let temp = TempDirGuard::new();
+        let install_rel = "target/in/packages/npm/hono/4.0.0";
+        fs::create_dir_all(temp.path.join(install_rel)).expect("legacy install tree");
+        fs::write(
+            temp.path.join(PACKAGE_MANIFEST_FILE),
+            "name: legacy\nversion: 0.1.0\ndependencies:\n  hono:\n    version: 4.0.0\n",
+        )
+        .expect("write manifest");
+        fs::write(
+            temp.path.join(crate::package_lock::PACKAGE_LOCK_FILE),
+            format!(
+                "lock-version: 1\nname: legacy\nversion: 0.1.0\ndependencies:\n  hono:\n    version: 4.0.0\n    install_path: {install_rel}\n"
+            ),
+        )
+        .expect("write lock");
+        let context = compile_context_at_root(&temp.path).expect("load context");
+        assert_eq!(context.dependency_search_paths.len(), 1);
+        assert!(context.dependency_search_paths[0].ends_with("hono/4.0.0"));
     }
 
     #[test]

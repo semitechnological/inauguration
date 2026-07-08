@@ -67,8 +67,19 @@ pub struct InstallOptions {
     pub offline: bool,
 }
 
+/// Default install root for registry-fetched dependencies (new projects).
+pub const PACKAGES_ROOT_DIR: &str = ".in-packages";
+
+/// Legacy install root; still honored when `install_path` in the lock points here.
+pub const LEGACY_PACKAGES_ROOT_DIR: &str = "target/in/packages";
+
 pub fn default_packages_root(package_root: &Path) -> PathBuf {
-    package_root.join("target/in/packages")
+    package_root.join(PACKAGES_ROOT_DIR)
+}
+
+#[must_use]
+pub fn legacy_packages_root(package_root: &Path) -> PathBuf {
+    package_root.join(LEGACY_PACKAGES_ROOT_DIR)
 }
 
 pub fn add_packages(
@@ -906,13 +917,34 @@ mod tests {
         let empty_path = Path::new("");
         assert_eq!(
             default_packages_root(empty_path),
-            PathBuf::from("target/in/packages")
+            PathBuf::from(PACKAGES_ROOT_DIR)
         );
 
         let absolute_path = Path::new("/my/project");
         assert_eq!(
             default_packages_root(absolute_path),
-            PathBuf::from("/my/project/target/in/packages")
+            PathBuf::from("/my/project/.in-packages")
+        );
+
+        let relative_path = Path::new("some/relative/path");
+        assert_eq!(
+            default_packages_root(relative_path),
+            PathBuf::from("some/relative/path/.in-packages")
+        );
+
+        let trailing_slash_path = Path::new("/path/with/trailing/slash/");
+        assert_eq!(
+            default_packages_root(trailing_slash_path),
+            PathBuf::from("/path/with/trailing/slash/.in-packages")
+        );
+    }
+
+    #[test]
+    fn legacy_packages_root_unchanged() {
+        let root = Path::new("/proj");
+        assert_eq!(
+            legacy_packages_root(root),
+            PathBuf::from("/proj/target/in/packages")
         );
     }
 
