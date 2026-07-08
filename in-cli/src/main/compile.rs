@@ -69,13 +69,12 @@ pub(crate) fn cmd_compile(
             metadata,
         );
     }
+    let parsed_base = base.map(parse_base).transpose()?;
     let owned_emit = match emit {
         Some(EmitKindCli::Sci) => {
-            let base_str = base
+            let base_val = parsed_base
                 .ok_or_else(|| InError::Message("--base is required for --emit sci".to_string()))?;
-            Some(OwnedEmit::Sci {
-                base: parse_base(base_str)?,
-            })
+            Some(OwnedEmit::Sci { base: base_val })
         }
         _ => None,
     };
@@ -91,6 +90,7 @@ pub(crate) fn cmd_compile(
         jobs: jobs.max(1),
         debug,
         emit: owned_emit,
+        base: parsed_base,
     };
     let report = compile_owned(&request);
 
@@ -399,6 +399,7 @@ pub(crate) fn compile_and_run_jit_report(
         jobs: 1,
         debug,
         emit: None,
+        base: None,
     };
     let report = inauguration::owned_compile::compile_owned(&request);
     if !report.success {
