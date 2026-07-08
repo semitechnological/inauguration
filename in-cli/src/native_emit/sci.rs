@@ -23,21 +23,25 @@ pub fn emit_sci_binary(module: &UnifiedModule, entry: &str, base: u64) -> Result
     let data_base = align_up(code_base + code_size as u64, 8);
     // Second pass: patch globals using the real data section base.
     let result = lower_module_with_bases(module, entry, code_base, data_base)?;
-    build_image(&result, base, required_capabilities_mask(module))
+    let pad = (data_base - (code_base + result.code.len() as u64)) as usize;
+    build_image(&result, base, required_capabilities_mask(module), pad)
 }
 
 fn build_image(
     result: &X86_64CompileResult,
     base: u64,
     required_caps: u64,
+    data_pad: usize,
 ) -> Result<Vec<u8>, String> {
-    let image_size = SCI_MANIFEST_SIZE + result.code.len();
+    let image_size = SCI_MANIFEST_SIZE + result.code.len() + data_pad + result.data.len();
     let mut image = Vec::with_capacity(image_size);
     image.extend_from_slice(&SCI_MAGIC.to_le_bytes());
     image.extend_from_slice(&required_caps.to_le_bytes());
     image.extend_from_slice(&base.to_le_bytes());
     image.extend_from_slice(&(image_size as u64).to_le_bytes());
     image.extend_from_slice(&result.code);
+    image.resize(image.len() + data_pad, 0);
+    image.extend_from_slice(&result.data);
     Ok(image)
 }
 
