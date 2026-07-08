@@ -25,9 +25,9 @@ pub(crate) fn cmd_doctor() -> Result<()> {
     }
     println!("{}", doctor_update_mode_text(checkout_root.is_some()));
     println!(
-        "PATH tools (need cargo, bash for in test; curl for in update remote fallback; v for benchmarks):"
+        "PATH tools (need cargo, bash for in test; curl for in update remote fallback):"
     );
-    for tool in ["bash", "curl", "cargo", "rustc", "swift", "v", "rg"] {
+    for tool in ["bash", "curl", "cargo", "rustc", "swift", "rg"] {
         match find_tool_path(tool) {
             Some(path) => println!("  ok: {tool} ({path})"),
             None => println!("  missing: {tool}"),

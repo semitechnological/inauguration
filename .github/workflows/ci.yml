@@ -18,7 +18,7 @@ jobs:
         run: cargo fmt --check
         working-directory: in-cli
       - name: Clippy
-        run: cargo clippy --all-targets --all-features --locked -- -D warnings
+        run: cargo clippy --all-targets --features extended --locked -- -D warnings
         working-directory: in-cli
       - name: Test
         run: cargo test --features extended

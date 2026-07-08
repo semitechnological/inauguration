@@ -7,6 +7,7 @@ use std::thread;
 use std::time::Instant;
 
 pub(crate) struct TestOptions {
+    pub(crate) list: bool,
     pub(crate) self_host: bool,
     pub(crate) toolchain: bool,
     pub(crate) external_parity: bool,
@@ -38,6 +39,12 @@ struct TestGroupResult {
 }
 
 pub(crate) fn cmd_test(root: &Path, options: TestOptions) -> Result<()> {
+    if options.list {
+        for name in all_test_step_names() {
+            println!("{name}");
+        }
+        return Ok(());
+    }
     if !options.paths.is_empty() {
         return run_test_groups(
             vec![TestGroup {
@@ -337,7 +344,6 @@ fn print_test_group_result(result: &TestGroupResult) {
     }
 }
 
-#[cfg(test)]
 pub(crate) fn all_test_step_names() -> Vec<&'static str> {
     let mut names = Vec::new();
     names.extend(owned_native_test_step_names());
