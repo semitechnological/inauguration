@@ -25,6 +25,7 @@ pub struct InSemanticBinding {
 pub struct InExternBinding {
     pub language: String,
     pub name: String,
+    pub params: Vec<(String, Typ)>,
     pub required_capabilities: Vec<String>,
     pub ret: Option<Typ>,
 }
@@ -54,6 +55,7 @@ pub(crate) fn std_binding(name: &str, caps: Vec<String>) -> InExternBinding {
     InExternBinding {
         language: "std".into(),
         name: name.into(),
+        params: vec![],
         required_capabilities: caps,
         ret: None,
     }
@@ -93,15 +95,17 @@ pub fn in_standard_import_bindings(import: &str) -> Vec<InExternBinding> {
 }
 
 pub(crate) fn binding_decl(binding: &InExternBinding) -> Decl {
-    if let Some(ret) = &binding.ret {
+    // General extern with explicit params: use them directly
+    if !binding.params.is_empty() {
         return Decl::Function {
             name: binding.name.clone(),
-            params: Vec::new(),
-            ret: ret.clone(),
+            params: binding.params.clone(),
+            ret: binding.ret.clone().unwrap_or(Typ::Void),
             body: Vec::new(),
             type_params: vec![],
         };
     }
+    // Standard library named bindings (legacy imports like "std.io", "std.fs")
     match binding.name.as_str() {
         "print" => Decl::Function {
             name: binding.name.clone(),
@@ -197,7 +201,7 @@ pub(crate) fn binding_decl(binding: &InExternBinding) -> Decl {
         _ => Decl::Function {
             name: binding.name.clone(),
             params: Vec::new(),
-            ret: Typ::Void,
+            ret: binding.ret.clone().unwrap_or(Typ::Void),
             body: Vec::new(),
             type_params: vec![],
         },

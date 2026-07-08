@@ -1,0 +1,7 @@
+package test_extern
+
+extern c fn strlen(s: Int) -> Int;
+
+fn main() -> Int {
+    return strlen("hello world!")
+}

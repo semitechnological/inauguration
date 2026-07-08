@@ -150,6 +150,7 @@ fn bindings_for_dependency(
                 .into_iter()
                 .map(|name| InExternBinding {
                     language: language.clone(),
+                    params: vec![],
                     name,
                     required_capabilities: vec!["package.invoke".into()],
                     ret: None,
@@ -163,6 +164,7 @@ fn bindings_for_dependency(
         .map(|binding| InExternBinding {
             language: extern_language_for_ecosystem(&metadata.ecosystem).to_string(),
             name: binding.symbol.clone(),
+            params: vec![],
             required_capabilities: vec!["package.invoke".into()],
             ret: crate::package_runtime::binding_return_type(binding),
         })
