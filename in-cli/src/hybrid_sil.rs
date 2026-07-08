@@ -39,7 +39,7 @@ impl SilAnalysisReport {
     }
 }
 
-fn parse_sil_function_header(line: &str) -> Option<String> {
+fn parse_sil_function_header(line: &str) -> Option<&str> {
     if !line.starts_with("sil ") {
         return None;
     }
@@ -50,13 +50,12 @@ fn parse_sil_function_header(line: &str) -> Option<String> {
         .split(|c: char| c.is_whitespace() || c == '(')
         .next()
         .unwrap_or("")
-        .trim_end_matches(':')
-        .to_string();
+        .trim_end_matches(':');
     if name.is_empty() { None } else { Some(name) }
 }
 
 pub fn parse_textual_sil(input: &str) -> SilArtifact {
-    let mut function_id = String::from("unknown");
+    let mut function_id = "unknown";
     let mut cfg_blocks = Vec::new();
     let mut instructions = Vec::new();
     let mut instruction_callers = Vec::new();
@@ -72,7 +71,7 @@ pub fn parse_textual_sil(input: &str) -> SilArtifact {
                 functions.push(record);
             }
             current_function = Some(SilFunctionRecord {
-                function_id: function_id.clone(),
+                function_id: function_id.to_string(),
                 cfg_blocks: Vec::new(),
                 instructions: Vec::new(),
             });
@@ -81,7 +80,7 @@ pub fn parse_textual_sil(input: &str) -> SilArtifact {
             cfg_blocks.push(block.clone());
             current_function
                 .get_or_insert_with(|| SilFunctionRecord {
-                    function_id: function_id.clone(),
+                    function_id: function_id.to_string(),
                     cfg_blocks: Vec::new(),
                     instructions: Vec::new(),
                 })
@@ -90,10 +89,10 @@ pub fn parse_textual_sil(input: &str) -> SilArtifact {
         } else {
             let instruction = line.to_string();
             instructions.push(instruction.clone());
-            instruction_callers.push(function_id.clone());
+            instruction_callers.push(function_id.to_string());
             current_function
                 .get_or_insert_with(|| SilFunctionRecord {
-                    function_id: function_id.clone(),
+                    function_id: function_id.to_string(),
                     cfg_blocks: Vec::new(),
                     instructions: Vec::new(),
                 })
@@ -105,7 +104,7 @@ pub fn parse_textual_sil(input: &str) -> SilArtifact {
         functions.push(record);
     }
     SilArtifact {
-        function_id,
+        function_id: function_id.to_string(),
         cfg_blocks,
         instructions,
         instruction_callers,
