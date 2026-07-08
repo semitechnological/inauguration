@@ -30,6 +30,9 @@ pub struct ElfExecutable {
 pub struct ElfObject {
     pub code: Vec<u8>,
     pub export_name: String,
+    /// Additional exported symbols (name, offset).
+    /// The primary export_name is always included as the first export.
+    pub exports: Vec<(String, u32)>,
 }
 
 pub fn x86_64_return_i32_object_code(value: u8) -> Vec<u8> {
@@ -83,8 +86,25 @@ pub fn write_aarch64_relocatable_object(object: &ElfObject, out: &mut Vec<u8>) {
 
 fn write_elf64_relocatable_object(object: &ElfObject, machine: u16, out: &mut Vec<u8>) {
     let shstrtab = b"\0.text\0.symtab\0.strtab\0.shstrtab\0";
-    let strtab = format!("\0{}\0", object.export_name).into_bytes();
-    let symtab_size = 48u64;
+    // Build combined export list: primary + additional
+    let mut all_exports: Vec<(&str, u64)> = vec![(&object.export_name, 0)];
+    let mut export_offsets: Vec<u64> = vec![0u64];
+    for (name, offset) in &object.exports {
+        all_exports.push((name, *offset as u64));
+        export_offsets.push(*offset as u64);
+    }
+    // Build string table: null + all export names
+    let mut strtab: Vec<u8> = vec![0u8];
+    let mut name_indices: Vec<u32> = vec![0u32];
+    for (name, _) in &all_exports {
+        let idx = strtab.len() as u32;
+        name_indices.push(idx);
+        strtab.extend_from_slice(name.as_bytes());
+        strtab.push(0u8);
+    }
+    let sym_count = all_exports.len() as u64 + 1;
+    let symtab_entry_size = 24u64;
+    let symtab_size = sym_count * symtab_entry_size;
     let text_name = 1u32;
     let symtab_name = 7u32;
     let strtab_name = 15u32;
@@ -120,7 +140,14 @@ fn write_elf64_relocatable_object(object: &ElfObject, machine: u16, out: &mut Ve
 
     out.extend_from_slice(&object.code);
     write_symbol(out, 0, 0, 0, 0, 0, 0);
-    write_symbol(out, 1, 0x12, 0, 1, 0, object.code.len() as u64);
+    for i in 0..all_exports.len() {
+        let (name_idx_val, size) = if i + 1 < all_exports.len() {
+            (name_indices[i + 1], all_exports[i + 1].1 - all_exports[i].1)
+        } else {
+            (name_indices[i + 1], object.code.len() as u64 - all_exports[i].1)
+        };
+        write_symbol(out, name_idx_val, 0x12, 0, 1, all_exports[i].1, size);
+    }
     out.extend_from_slice(&strtab);
     out.extend_from_slice(shstrtab);
 
@@ -577,7 +604,8 @@ mod tests {
         let object = ElfObject {
             code: x86_64_return_i32_object_code(42),
             export_name: "answer".to_string(),
-        };
+        exports: vec![],
+    };
         let mut out = Vec::new();
         write_x86_64_relocatable_object(&object, &mut out);
         assert_eq!(&out[0..4], &ELF_MAGIC);
@@ -595,7 +623,8 @@ mod tests {
         let object = ElfObject {
             code: aarch64_return_i32_object_code(42),
             export_name: "answer".to_string(),
-        };
+        exports: vec![],
+    };
         let mut out = Vec::new();
         write_aarch64_relocatable_object(&object, &mut out);
         assert_eq!(&out[0..4], &ELF_MAGIC);
@@ -618,7 +647,8 @@ mod tests {
         let object = ElfObject {
             code: arm32_return_i32_object_code(42),
             export_name: "answer".to_string(),
-        };
+        exports: vec![],
+    };
         let mut out = Vec::new();
         write_arm32_relocatable_object(&object, &mut out);
         assert_eq!(&out[0..4], &ELF_MAGIC);

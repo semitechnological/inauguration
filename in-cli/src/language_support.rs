@@ -96,21 +96,21 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         language: "C",
         parser_id: Some("c"),
         extensions: &["c", "h"],
-        capabilities: &["parse", "lower", "typecheck"],
+        capabilities: &["parse", "lower", "typecheck", "boundary"],
         front: "compiler::tree_front",
-        runtime_boundary: "Core IR and textual SIL; libc/runtime ABI is not bundled",
+        runtime_boundary: "Core IR, textual SIL, and Boundary IR; libc/runtime ABI is not bundled",
         example: "apps/polyglot-sample/sample.c",
-        next_step: "Add pointer types, declarator metadata, and ABI boundaries",
+        next_step: "Add pointer types, declarator metadata, and full ABI boundary verification",
     },
     LanguageSupport {
         language: "C++",
         parser_id: Some("cpp"),
         extensions: &["cc", "cpp", "cxx", "hpp", "hxx", "hh", "h++", "ipp"],
-        capabilities: &["parse", "lower", "typecheck"],
+        capabilities: &["parse", "lower", "typecheck", "boundary"],
         front: "compiler::tree_front",
-        runtime_boundary: "Core IR and textual SIL; standard library/runtime ABI is not bundled",
+        runtime_boundary: "Core IR, textual SIL, and Boundary IR; standard library/runtime ABI is not bundled",
         example: "apps/polyglot-sample/sample_class.cpp",
-        next_step: "Add class_specifier lowering to Decl::Class, methods, templates-as-metadata, and ABI boundaries",
+        next_step: "Add class_specifier lowering to Decl::Class, methods, templates-as-metadata, and full ABI boundary verification",
     },
     LanguageSupport {
         language: "Objective-C",
@@ -504,7 +504,7 @@ mod tests {
 
     #[test]
     fn dedicated_fronts_have_max_capabilities() {
-        for language in ["in", "icore", "V", "JavaScript", "TypeScript", "Odin"] {
+        for language in ["in", "icore", "C", "C++", "V", "JavaScript", "TypeScript", "Odin"] {
             let entry = LANGUAGE_SUPPORT
                 .iter()
                 .find(|entry| entry.language == language)
