@@ -1,0 +1,25 @@
+{
+  "ecosystem": "cargo",
+  "name": "crepuscularity",
+  "version": "0.4.7",
+  "registry": "crates.io",
+  "install_path": "/Users/undivisible/projects/inauguration/apps/package-ecosystem-sample/.in-packages/cargo/crepuscularity/0.4.7",
+  "exports": [
+    "crepuscularity_greet"
+  ],
+  "bindings": [
+    {
+      "symbol": "crepuscularity_greet",
+      "returns": "string",
+      "invoke": {
+        "program": "cargo",
+        "args": [
+          "run",
+          "--quiet",
+          "--manifest-path",
+          "inauguration-runner/Cargo.toml"
+        ]
+      }
+    }
+  ]
+}

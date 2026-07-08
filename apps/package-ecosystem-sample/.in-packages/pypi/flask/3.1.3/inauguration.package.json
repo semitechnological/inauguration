@@ -1,0 +1,23 @@
+{
+  "ecosystem": "pypi",
+  "name": "flask",
+  "version": "3.1.3",
+  "registry": "pypi.org",
+  "install_path": "/Users/undivisible/projects/inauguration/apps/package-ecosystem-sample/.in-packages/pypi/flask/3.1.3",
+  "exports": [
+    "flask_greet"
+  ],
+  "bindings": [
+    {
+      "symbol": "flask_greet",
+      "returns": "string",
+      "invoke": {
+        "program": "python3",
+        "args": [
+          "-c",
+          "import sys; sys.path.insert(0,'inauguration-site-packages'); import flask; sys.stdout.write('flask')"
+        ]
+      }
+    }
+  ]
+}

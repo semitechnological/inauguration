@@ -1,0 +1,15 @@
+{
+  "exports": [
+    {
+      "symbol": "fiber_greet",
+      "returns": "string",
+      "invoke": {
+        "program": "sh",
+        "args": [
+          "-c",
+          "cd inauguration-invoke && go run ."
+        ]
+      }
+    }
+  ]
+}

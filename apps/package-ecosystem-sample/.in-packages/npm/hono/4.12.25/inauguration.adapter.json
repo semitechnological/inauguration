@@ -1,0 +1,15 @@
+{
+  "exports": [
+    {
+      "symbol": "hono_greet",
+      "returns": "string",
+      "invoke": {
+        "program": "node",
+        "args": [
+          "-e",
+          "const {Hono}=require('hono'); new Hono(); process.stdout.write('hono')"
+        ]
+      }
+    }
+  ]
+}
