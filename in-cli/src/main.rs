@@ -324,6 +324,8 @@ enum Commands {
     },
     #[command(about = "Run self-hosted compiler test suites")]
     Test {
+        #[arg(long, default_value_t = false, help = "Print test group names and exit")]
+        list: bool,
         #[arg(long, default_value_t = false)]
         self_host: bool,
         #[arg(long, default_value_t = false)]
@@ -609,6 +611,7 @@ fn run() -> Result<()> {
             json,
         } => cmd_backend(&invocation_cwd, &path, &module_id, parser, target, json),
         Commands::Test {
+            list,
             self_host,
             toolchain,
             external_parity,
@@ -619,6 +622,7 @@ fn run() -> Result<()> {
         } => cli_test::cmd_test(
             &workspace_root(invocation_cwd.clone())?,
             cli_test::TestOptions {
+                list,
                 self_host,
                 toolchain,
                 external_parity,

@@ -28,17 +28,17 @@ in test
 
 Use an `in` binary built from this repo. From a checkout, run **`in update`** (alias **`in self-update`**) to reinstall via `cargo install --path in-cli --locked` (honours **`IN_INSTALL_DIR`** like `./install.sh`). Outside a checkout, `in update` falls back to remote `install.sh` from `https://raw.githubusercontent.com/${IN_REPO:-tschk/inauguration}/master/install.sh` on Unix hosts. You can still use `./install.sh` or `cargo install --path in-cli --force` manually. A stale globally installed `in` (older than `in-cli` in your tree) can fail mid-suite with `No such file or directory` because `in test` must match the workspace layout.
 
-If touching benchmarks or runtime timing, also run:
+If touching benchmarks or runtime timing, also run `in bench` (reads checked-in metrics NDJSON).
 
-```bash
-./scripts/bench-swift.sh
-in bench
-```
+## Testing tiers
 
-## Rust `protocol-gen` vs V
+- **L0**: `cargo test` in `in-cli`
+- **L1**: `scripts/run-conformance.sh` (skips listed in `conformance/skipped.txt`)
+- **L2**: default `in test` integration scripts; `in test --list` prints groups; `--toolchain` / `--owned-native` / `--all` widen scope
+
+## `protocol-gen`
 
 - **`protocol-gen` (Rust, `in-cli`)**: canonical checked-in codegen for `PatchType` / Swift `GeneratedWirePatchType` from `shared/protocol/events.schema.json`. CI runs **`scripts/check-protocol-models.sh`** (Rust generator + `git diff`).
-- **V**: benchmark driver **`scripts/bench_swift.v`** (via **`scripts/bench-swift.sh`**: `v -gc none run …/bench_swift.v`) plus optional tools such as **`shared/protocol/generate_models.v`**.
 
 ## Code ownership map
 

@@ -6,18 +6,15 @@ cd "$ROOT"
 
 IN_CMD=("${IN_BIN:-in}")
 
-# Pre-existing failures (JIT crashes or runtime features not yet implemented)
-SKIP_FIXTURES=(
-  conformance/runtime/string-ops.in
-  conformance/runtime/array-ops.in
-  conformance/types/string-ops.in
-  conformance/classes/class-basic.java
-  conformance/control-flow/match-string.in
-  conformance/functions/nested-calls.in
-  conformance/types/bool-ops.in
-  conformance/types/float-arithmetic.in
-
-)
+SKIP_FIXTURES=()
+if [[ -f "$ROOT/conformance/skipped.txt" ]]; then
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%%#*}"
+    line="$(echo "$line" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+    [[ -z "$line" ]] && continue
+    SKIP_FIXTURES+=("$line")
+  done < "$ROOT/conformance/skipped.txt"
+fi
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'

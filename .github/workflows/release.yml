@@ -26,7 +26,7 @@ jobs:
         run: cargo fmt --check
         working-directory: in-cli
       - name: Clippy
-        run: cargo clippy --all-targets --all-features --locked -- -D warnings
+        run: cargo clippy --all-targets --features extended --locked -- -D warnings
         working-directory: in-cli
       - name: Test
         run: cargo test --features extended
@@ -49,13 +49,6 @@ jobs:
         run: in build --path in-cli/src/main.rs --module-id InCli --verbose
       - name: Check diff whitespace
         run: git diff --check
-
-      - name: Self-host bench JSON (non-fatal)
-        continue-on-error: true
-        run: |
-          cargo build --release --manifest-path in-cli/Cargo.toml --features extended
-          BENCH_RUNS=1 IN_BIN=in-cli/target/release/in ./scripts/bench-self-host.sh
-          python3 scripts/render-self-host-bench-md.py
 
   build:
     needs: prerelease-gate

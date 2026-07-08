@@ -152,4 +152,4 @@
   - `./scripts/check-native-subset-sample.sh`
   - `./scripts/check-in-lang-sample.sh`
   - `./scripts/check-icore-sample.sh`
-  - `./scripts/bench-swift.sh` and `in bench` when touching benchmarks, hot reload timing, or runtime timing.
+  - `in bench` when touching benchmarks or runtime timing.
