@@ -1192,6 +1192,51 @@ dependencies:
     }
 
     #[test]
+    fn formats_complex_package_lock() {
+        let lock = PackageLock {
+            lock_version: "1".into(),
+            name: "my-app".into(),
+            version: "1.0.0".into(),
+            dependencies: BTreeMap::from([
+                ("dep1".into(), crate::package_manifest::PackageDependency {
+                    version: "1.2.3".into(),
+                    kind: Some("registry".into()),
+                    source: Some("https://registry.com".into()),
+                    rev: Some("abc".into()),
+                    checksum: Some("sha256:123".into()),
+                    targets: vec!["linux".into(), "macos".into()],
+                    capabilities: vec!["fs".into()],
+                    build: BTreeMap::from([("mode".into(), "release".into())]),
+                    install_path: Some("/opt/dep1".into()),
+                })
+            ]),
+        };
+
+        let formatted = format_package_lock(&lock);
+        let expected = "\
+lock-version: 1
+name: my-app
+version: 1.0.0
+dependencies:
+  dep1:
+    version: 1.2.3
+    kind: registry
+    source: https://registry.com
+    rev: abc
+    checksum: sha256:123
+    install_path: /opt/dep1
+    targets:
+      - linux
+      - macos
+    capabilities:
+      - fs
+    build:
+      mode: release
+";
+        assert_eq!(formatted, expected);
+    }
+
+    #[test]
     fn parse_invalid_list_items() {
         let empty_item = "\
 lock-version: 1
