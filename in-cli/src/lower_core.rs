@@ -286,10 +286,14 @@ fn desugar_closures_in_expr(expr: &mut Expr, counter: &mut usize, extra_decls: &
             let captures = collect_free_vars(body, &closure_params);
             let captures_set: HashSet<&str> = captures.iter().map(|s| s.as_str()).collect();
             rewrite_captures_in_body(body, &captures_set);
-            let caps_fields: Vec<(String, Typ)> = captures
-                .iter()
-                .map(|c| (c.clone(), Typ::Named("Any".into())))
-                .collect();
+
+            let mut caps_fields = Vec::with_capacity(captures.len());
+            let mut init_fields = Vec::with_capacity(captures.len());
+            for c in captures.into_iter() {
+                caps_fields.push((c.clone(), Typ::Named("Any".into())));
+                init_fields.push((c.clone(), Expr::Ident(c)));
+            }
+
             let mut fn_params = vec![("self".to_string(), Typ::Named(caps_name.clone()))];
             fn_params.extend(std::mem::take(params));
             let closure_ret = ret.clone();
@@ -308,13 +312,7 @@ fn desugar_closures_in_expr(expr: &mut Expr, counter: &mut usize, extra_decls: &
             });
             *expr = Expr::StructInit {
                 name: caps_name,
-                fields: captures
-                    .into_iter()
-                    .map(|c| {
-                        let id = c.clone();
-                        (c, Expr::Ident(id))
-                    })
-                    .collect(),
+                fields: init_fields,
             };
         }
         Expr::Unary { expr: inner, .. } => desugar_closures_in_expr(inner, counter, extra_decls),
