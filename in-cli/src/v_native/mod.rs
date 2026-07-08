@@ -661,6 +661,33 @@ pub mod bench {
         }
 
         #[test]
+        fn aggregate_zeros() {
+            let stats = aggregate(&[0, 0, 0]);
+            assert_eq!(stats.min, 0);
+            assert_eq!(stats.max, 0);
+            assert_eq!(stats.mean, 0);
+            assert_eq!(stats.stddev, 0);
+        }
+
+        #[test]
+        fn aggregate_large_variance() {
+            let stats = aggregate(&[10, 1000]);
+            assert_eq!(stats.min, 10);
+            assert_eq!(stats.max, 1000);
+            assert_eq!(stats.mean, 505);
+            assert_eq!(stats.stddev, 495);
+        }
+
+        #[test]
+        fn aggregate_extreme_values() {
+            let stats = aggregate(&[1_000_000_000, 2_000_000_000]);
+            assert_eq!(stats.min, 1_000_000_000);
+            assert_eq!(stats.max, 2_000_000_000);
+            assert_eq!(stats.mean, 1_500_000_000);
+            assert_eq!(stats.stddev, 500_000_000);
+        }
+
+        #[test]
         fn regression_no_regression() {
             assert!(!regression(100, 100, 10));
         }
