@@ -5,17 +5,17 @@ dependencies:
   cargo:crepuscularity:
     version: latest
     kind: cargo
-    install_path: target/in/packages/cargo/crepuscularity/0.4.7
+    install_path: .in-packages/cargo/crepuscularity/0.4.7
   go:fiber:
     version: latest
     kind: go
     source: github.com/gofiber/fiber/v2
-    install_path: target/in/packages/go/github.com/gofiber/fiber/v2/v2.45.0
+    install_path: .in-packages/go/github.com/gofiber/fiber/v2/v2.45.0
   npm:hono:
     version: 4.12.25
     kind: npm
-    install_path: target/in/packages/npm/hono/4.12.25
+    install_path: .in-packages/npm/hono/4.12.25
   pypi:flask:
     version: latest
     kind: pypi
-    install_path: target/in/packages/pypi/flask/3.1.3
+    install_path: .in-packages/pypi/flask/3.1.3
