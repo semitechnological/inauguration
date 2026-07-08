@@ -2120,6 +2120,20 @@ dependencies:
     }
 
     #[test]
+    fn compile_context_in_dir_returns_none_if_no_manifest() {
+        let temp = TempDirGuard::new();
+        assert!(compile_context_in_dir(&temp.path).is_none());
+    }
+
+    #[test]
+    fn compile_context_for_source_returns_none_if_no_manifest() {
+        let temp = TempDirGuard::new();
+        let source_file = temp.path.join("main.in");
+        fs::write(&source_file, "fn main() -> void {}").expect("write dummy source");
+        assert!(compile_context_for_source(&source_file).is_none());
+    }
+
+    #[test]
     fn compile_context_at_root_returns_context_if_manifest_exists() {
         let temp = TempDirGuard::new();
         fs::write(
