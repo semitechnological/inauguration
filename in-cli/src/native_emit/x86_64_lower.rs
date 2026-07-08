@@ -25,6 +25,8 @@ pub struct X86_64CompileResult {
     pub relocations: Vec<u32>,
     /// The base address used during codegen (KERNEL_BASE = 0x101100).
     pub codegen_base: u64,
+    /// Initialised data section bytes (global variable initial values).
+    pub data: Vec<u8>,
 }
 
 #[derive(Debug, Clone)]
@@ -312,6 +314,7 @@ pub fn lower_module_with_bases(
         .iter()
         .map(|(name, offset)| (name.clone(), *offset))
         .collect();
+    let data = build_data_section(module, &globals);
 
     Ok(X86_64CompileResult {
         code: emitter.bytes,
@@ -319,6 +322,7 @@ pub fn lower_module_with_bases(
         exports,
         relocations,
         codegen_base: code_base,
+        data,
     })
 }
 
@@ -652,6 +656,29 @@ fn collect_globals(module: &UnifiedModule) -> HashMap<String, u64> {
         }
     }
     globals
+}
+
+fn build_data_section(module: &UnifiedModule, globals: &HashMap<String, u64>) -> Vec<u8> {
+    let mut data = Vec::new();
+    let mut max_offset = 0u64;
+    for decl in &module.decls {
+        if let Decl::Global { name, init, .. } = decl {
+            let offset = *globals.get(name).unwrap_or(&0);
+            let val: i64 = match init.as_deref() {
+                Some(Expr::IntLit(v)) => *v,
+                Some(Expr::BoolLit(b)) => *b as i64,
+                _ => 0,
+            };
+            while data.len() < offset as usize {
+                data.push(0);
+            }
+            data.extend_from_slice(&val.to_le_bytes());
+            if offset >= max_offset {
+                max_offset = offset + 8;
+            }
+        }
+    }
+    data
 }
 
 fn lower_function(
