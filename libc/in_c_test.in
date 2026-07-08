@@ -1,0 +1,97 @@
+package space.kernel.libc
+module space.kernel.libc.in_c_test
+
+// Test: .in calling C libc functions via extern human fn (C ABI boundary)
+// Self-contained test — no kernel dependencies.
+//
+// extern human fn maps .in function declarations to C ABI symbols
+// in the linked ELF object.
+
+extern human fn c_strlen(s: Int) -> Int
+extern human fn c_strcmp(a: Int, b: Int) -> Int
+extern human fn c_memcpy(dst: Int, src: Int, n: Int) -> void
+extern human fn c_memset(dst: Int, c: Int, n: Int) -> void
+extern human fn c_memcmp(a: Int, b: Int, n: Int) -> Int
+extern human fn c_atoi(s: Int) -> Int
+extern human fn c_abs(x: Int) -> Int
+extern human fn c_min(a: Int, b: Int) -> Int
+extern human fn c_max(a: Int, b: Int) -> Int
+extern human fn c_ispow2(x: Int) -> Int
+
+fn in_strlen(s: Int) -> Int {
+  let len = 0
+  while load8(s + len) != 0 {
+    len = len + 1
+  }
+  return len
+}
+
+fn run_tests() -> Int {
+  let failures = 0
+
+  // strlen: .in vs C
+  let test_str: Int = "hello libc boundary"
+  let in_len = in_strlen(test_str)
+  let c_len = c_strlen(test_str)
+  if in_len != c_len {
+    failures = failures + 1
+  }
+
+  // strcmp
+  let s1: Int = "abc"
+  let s2: Int = "abc"
+  let s3: Int = "abd"
+  if c_strcmp(s1, s2) != 0 {
+    failures = failures + 1
+  }
+  if c_strcmp(s1, s3) >= 0 {
+    failures = failures + 1
+  }
+
+  // memcpy + memcmp
+  let src: Int = "ABCDEFGH"
+  let dst = alloc(16)
+  c_memset(dst, 0, 16)
+  c_memcpy(dst, src, 8)
+  if c_memcmp(dst, src, 8) != 0 {
+    failures = failures + 1
+  }
+
+  // memset
+  c_memset(dst, 65, 4)
+  if load8(dst + 0) != 65 || load8(dst + 1) != 65 {
+    failures = failures + 1
+  }
+
+  // atoi
+  if c_atoi("42") != 42 {
+    failures = failures + 1
+  }
+  if c_atoi("-7") != -7 {
+    failures = failures + 1
+  }
+
+  // abs, min, max, ispow2
+  if c_abs(-10) != 10 {
+    failures = failures + 1
+  }
+  if c_min(3, 8) != 3 {
+    failures = failures + 1
+  }
+  if c_max(3, 8) != 8 {
+    failures = failures + 1
+  }
+  if c_ispow2(16) == 0 {
+    failures = failures + 1
+  }
+  if c_ispow2(15) != 0 {
+    failures = failures + 1
+  }
+
+  return failures
+}
+
+fn main() -> Int {
+  let f = run_tests()
+  return f
+}
