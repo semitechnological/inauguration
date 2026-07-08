@@ -76,8 +76,7 @@ pub mod package_runtime;
 pub mod parser_registry;
 pub mod target;
 pub mod typecheck;
-#[cfg(feature = "v-native")]
-pub mod v_native;
+pub mod toolchain_util;
 
 #[cfg(test)]
 mod in_pipeline_tests {
