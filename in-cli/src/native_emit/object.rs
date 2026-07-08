@@ -14,7 +14,7 @@ use crate::native_emit::elf::{
 use crate::native_emit::macho::{ExportSymbol, MachOImage, MachOLinkage, write_image};
 use crate::native_emit::target::AARCH64_NONE_TRIPLE;
 use crate::native_emit::wasm::{WASM32_UNKNOWN_TRIPLE, WasmModule, write_scalar_i32_module};
-use crate::native_emit::x86_64_lower::{X86_64_TRIPLE, lower_module};
+use crate::native_emit::x86_64_lower::{X86_64_TRIPLE, lower_module, lower_module_with_bases};
 
 pub const NATIVE_OBJECT_SUBSET: &str = "native-object-subset";
 
@@ -25,6 +25,7 @@ pub struct NativeObjectRequest<'a> {
     pub exit_code: u8,
     pub module: &'a UnifiedModule,
     pub module_id: &'a str,
+    pub base: Option<u64>,
 }
 
 pub struct NativeObjectArtifact {
@@ -264,8 +265,24 @@ fn emit_x86_64_freestanding_object(request: &NativeObjectRequest<'_>) -> NativeO
     let is_i386 =
         request.target_triple.starts_with("i386-") || request.target_triple.starts_with("i686-");
     crate::native_emit::x86_64::set_32bit(is_i386);
-    // Use real x86_64 lowering for freestanding targets
-    match lower_module(request.module, request.entry) {
+    let align_up = |addr: u64, alignment: u64| -> u64 { (addr + alignment - 1) & !(alignment - 1) };
+    // Use real x86_64 lowering for freestanding targets. If a base address was
+    // supplied, lower the module so globals/strings are emitted at the correct
+    // load address (enabling external ld.lld + linker-script workflows).
+    let lower_result = match request.base {
+        Some(code_base) => {
+            match lower_module_with_bases(request.module, request.entry, code_base, code_base) {
+                Ok(temp) => {
+                    let code_size = temp.code.len();
+                    let data_base = align_up(code_base + code_size as u64, 8);
+                    lower_module_with_bases(request.module, request.entry, code_base, data_base)
+                }
+                Err(e) => Err(e),
+            }
+        }
+        None => lower_module(request.module, request.entry),
+    };
+    match lower_result {
         Ok(result) => {
             let mut bytes = Vec::new();
             let object = ElfObject {
@@ -375,6 +392,7 @@ mod tests {
             exit_code: 42,
             module: &module,
             module_id: "App",
+            base: None,
         };
         let artifact = emit_native_object(&request).expect("object artifact");
         assert_eq!(artifact.artifact_kind, "elf-relocatable-object");
@@ -393,6 +411,7 @@ mod tests {
             exit_code: 42,
             module: &module,
             module_id: "App",
+            base: None,
         };
         let artifact = emit_native_object(&request).expect("wasm artifact");
         assert_eq!(artifact.artifact_kind, "wasm-module");
@@ -411,6 +430,7 @@ mod tests {
             exit_code: 42,
             module: &module,
             module_id: "App",
+            base: None,
         };
         assert!(emit_native_object(&request).is_none());
     }
@@ -425,6 +445,7 @@ mod tests {
             exit_code: 42,
             module: &module,
             module_id: "App",
+            base: None,
         };
         let artifact = emit_native_object(&request).expect("aarch64 object artifact");
         assert_eq!(artifact.artifact_kind, "elf-relocatable-object");
@@ -445,6 +466,7 @@ mod tests {
             exit_code: 42,
             module: &module,
             module_id: "App",
+            base: None,
         };
         let artifact = emit_native_object(&request).expect("macho archive artifact");
         assert_eq!(artifact.artifact_kind, "mach-o-static-archive");
@@ -463,6 +485,7 @@ mod tests {
             exit_code: 42,
             module: &module,
             module_id: "App",
+            base: None,
         };
         let artifact = emit_native_object(&request).expect("arm32 object artifact");
         assert_eq!(artifact.artifact_kind, "elf32-relocatable-object");
@@ -484,6 +507,7 @@ mod tests {
             exit_code: 42,
             module: &module,
             module_id: "App",
+            base: None,
         };
         let artifact = emit_native_object(&request).expect("aarch64 freestanding artifact");
         assert_eq!(artifact.artifact_kind, "elf-relocatable-object");
@@ -505,6 +529,7 @@ mod tests {
             exit_code: 42,
             module: &module,
             module_id: "App",
+            base: None,
         };
         let artifact = emit_native_object(&request).expect("x86 executable artifact");
         assert_eq!(artifact.artifact_kind, "elf-executable");
@@ -525,6 +550,7 @@ mod tests {
             exit_code: 42,
             module: &module,
             module_id: "App",
+            base: None,
         };
         let artifact = emit_native_object(&request).expect("aarch64 executable artifact");
         assert_eq!(artifact.artifact_kind, "elf-executable");
@@ -545,6 +571,7 @@ mod tests {
             exit_code: 42,
             module: &module,
             module_id: "App",
+            base: None,
         };
         let artifact = emit_native_object(&request).expect("arm32 executable artifact");
         assert_eq!(artifact.artifact_kind, "elf32-executable");

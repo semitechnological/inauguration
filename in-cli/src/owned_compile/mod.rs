@@ -58,6 +58,9 @@ pub struct OwnedCompileRequest {
     pub jobs: usize,
     pub debug: bool,
     pub emit: Option<OwnedEmit>,
+    /// Optional load address for static-lib / freestanding objects that need
+    /// position-dependent code/data layouts.
+    pub base: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, serde::Deserialize)]

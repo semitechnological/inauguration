@@ -98,6 +98,7 @@ pub fn compile_native(
             exit_code: exit,
             module,
             module_id,
+            base: request.base,
         };
         if let Some(artifact) = native_emit::emit_native_object(&object_request) {
             fs::write(out_path, artifact.bytes)

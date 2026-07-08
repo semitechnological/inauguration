@@ -139,6 +139,7 @@ fn handle_eval(code: &str, parser: Option<&str>, _verbose: bool) -> DaemonRespon
         jobs: 1,
         debug: false,
         emit: None,
+        base: None,
     };
     let report = compile_owned(&request);
     let _ = std::fs::remove_dir_all(&dir);
@@ -187,6 +188,7 @@ fn handle_compile(
         jobs: jobs.max(1),
         debug: false,
         emit: None,
+        base: None,
     };
     let report = compile_owned(&request);
     let timing_us = start.elapsed().as_micros();

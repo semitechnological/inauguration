@@ -198,6 +198,7 @@ fn run_pipeline_for_path(
             jobs: 1,
             debug: false,
             emit: None,
+            base: None,
         };
         let report = compile_owned(&request);
         let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
@@ -229,6 +230,7 @@ fn run_pipeline_for_path(
             jobs: 1,
             debug: false,
             emit: None,
+            base: None,
         };
         let report = compile_owned(&request);
         let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
@@ -260,6 +262,7 @@ fn run_pipeline_for_path(
         jobs: 1,
         debug: false,
         emit: None,
+        base: None,
     };
     let report = compile_owned(&request);
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;

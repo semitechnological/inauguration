@@ -35,6 +35,7 @@ fn default_request(
         jobs: 1,
         debug: false,
         emit: None,
+        base: None,
     }
 }
 
