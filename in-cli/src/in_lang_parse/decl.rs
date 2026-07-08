@@ -386,14 +386,15 @@ pub(crate) fn parse_extern_fn_block(block: &str) -> Result<InExternBinding, Stri
         } else {
             (header, Vec::new())
         };
-    let (name, _, _) = parse_fn_header(header)?;
+    let (name, params, ret) = parse_fn_header(header)?;
     if name.is_empty() {
         return Err(".in: extern function name missing".into());
     }
     Ok(InExternBinding {
         language: language.to_string(),
         name,
+        params,
         required_capabilities,
-        ret: None,
+        ret: Some(ret),
     })
 }

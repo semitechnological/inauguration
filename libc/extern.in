@@ -1,0 +1,48 @@
+// =============================================================================
+// std.in — libc extern bindings
+//
+// Imports C/C++ libc functions via the extern mechanism.
+// When the cross-language linker resolves them, the actual implementations
+// come from compiled C/C++ libc objects (libc_full.c, libcxx, etc.).
+//
+// Import:  import "libc/extern.in"
+// Provides: all POSIX libc functions as extern references
+// =============================================================================
+package std.extern
+
+// string.h
+extern c fn strlen(s: Int) -> Int;
+extern c fn strcmp(s1: Int, s2: Int) -> Int;
+extern c fn strncmp(s1: Int, s2: Int, n: Int) -> Int;
+extern c fn strcpy(dst: Int, src: Int) -> Int;
+extern c fn strncpy(dst: Int, src: Int, n: Int) -> Int;
+extern c fn strcat(dst: Int, src: Int) -> Int;
+extern c fn strchr(s: Int, c: Int) -> Int;
+extern c fn strstr(haystack: Int, needle: Int) -> Int;
+extern c fn strspn(s: Int, accept: Int) -> Int;
+extern c fn strcspn(s: Int, reject: Int) -> Int;
+
+// memory.h
+extern c fn memset(dst: Int, c: Int, n: Int) -> Int;
+extern c fn memcpy(dst: Int, src: Int, n: Int) -> Int;
+extern c fn memmove(dst: Int, src: Int, n: Int) -> Int;
+extern c fn memcmp(s1: Int, s2: Int, n: Int) -> Int;
+
+// ctype.h
+extern c fn isdigit(c: Int) -> Int;
+extern c fn isalpha(c: Int) -> Int;
+extern c fn isspace(c: Int) -> Int;
+extern c fn isupper(c: Int) -> Int;
+extern c fn islower(c: Int) -> Int;
+extern c fn toupper(c: Int) -> Int;
+extern c fn tolower(c: Int) -> Int;
+
+// stdlib.h
+extern c fn atoi(s: Int) -> Int;
+extern c fn abs(x: Int) -> Int;
+
+// stdio.h
+extern c fn sprintf(buf: Int, fmt: Int, a: Int, b: Int, c: Int, d: Int) -> Int;
+
+// math.h
+extern c fn pow_int(base: Int, exp: Int) -> Int;
