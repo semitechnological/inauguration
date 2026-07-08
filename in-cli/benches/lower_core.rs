@@ -19,7 +19,7 @@ fn bench_desugar_module(c: &mut Criterion) {
         }));
     }
 
-    let mut module = UnifiedModule {
+    let module = UnifiedModule {
         identity: CoreModuleIdentity::default(),
         decls: vec![Decl::Function {
             name: "main".to_string(),

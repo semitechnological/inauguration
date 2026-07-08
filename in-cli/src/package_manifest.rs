@@ -1376,7 +1376,7 @@ mod tests {
             disabled: vec!["linux".to_string()],
             unknown: vec![],
         };
-        assert_eq!(selection1.target_enabled("linux"), false);
+        assert!(!selection1.target_enabled("linux"));
 
         // Target is not in `disabled` and `enabled` is empty (returns `true`)
         let selection2 = PackageTargetSelection {
@@ -1385,7 +1385,7 @@ mod tests {
             disabled: vec!["windows".to_string()],
             unknown: vec![],
         };
-        assert_eq!(selection2.target_enabled("linux"), true);
+        assert!(selection2.target_enabled("linux"));
 
         // Target is not in `disabled`, `enabled` is non-empty, and target is in `enabled` (returns `true`)
         let selection3 = PackageTargetSelection {
@@ -1394,7 +1394,7 @@ mod tests {
             disabled: vec!["windows".to_string()],
             unknown: vec![],
         };
-        assert_eq!(selection3.target_enabled("linux"), true);
+        assert!(selection3.target_enabled("linux"));
 
         // Target is not in `disabled`, `enabled` is non-empty, and target is not in `enabled` (returns `false`)
         let selection4 = PackageTargetSelection {
@@ -1403,7 +1403,7 @@ mod tests {
             disabled: vec!["windows".to_string()],
             unknown: vec![],
         };
-        assert_eq!(selection4.target_enabled("linux"), false);
+        assert!(!selection4.target_enabled("linux"));
     }
 
     #[test]
