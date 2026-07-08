@@ -98,7 +98,7 @@ impl<'a> LowerCtx<'a> {
         // All parameters get a local stack slot so the body can reload them the same
         // way. Register params are stored to their slots in the prologue; stack params
         // are loaded from the caller's argument area and stored to their slots there.
-        for (_i, (name, _typ)) in params.iter().enumerate() {
+        for (name, _typ) in params.iter() {
             let offset = ctx.alloc_slot();
             ctx.locals.insert(name.clone(), StackSlot::Scalar(offset));
         }

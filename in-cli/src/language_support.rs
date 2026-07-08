@@ -431,9 +431,9 @@ pub fn all_language_support() -> &'static [LanguageSupport] {
 
 #[must_use]
 pub fn language_support_for_parser(parser_id: &str) -> Option<&'static LanguageSupport> {
-    LANGUAGE_SUPPORT
+    all_language_support()
         .iter()
-        .find(|entry| entry.parser_id == Some(parser_id))
+        .find(|lang| lang.parser_id == Some(parser_id))
 }
 
 #[cfg(test)]

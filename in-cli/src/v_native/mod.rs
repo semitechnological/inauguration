@@ -392,6 +392,25 @@ pub mod parallel {
         }
 
         #[test]
+        fn wave_plan_zero_jobs() {
+            assert_eq!(wave_plan(0, 4, 4), vec![0]);
+        }
+
+        #[test]
+        fn wave_plan_one_max_wave() {
+            assert_eq!(wave_plan(10, 4, 1), vec![10]);
+        }
+
+        #[test]
+        fn wave_plan_large_jobs() {
+            let plan = wave_plan(1000, 10, 10);
+            assert_eq!(
+                plan,
+                vec![100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]
+            );
+        }
+
+        #[test]
         fn merge_timings_basic() {
             let stats = merge_timings(&[10, 20, 30]);
             assert_eq!(stats.min, 10);
@@ -658,6 +677,33 @@ pub mod bench {
             assert_eq!(stats.max, 50);
             assert_eq!(stats.mean, 50);
             assert_eq!(stats.stddev, 0);
+        }
+
+        #[test]
+        fn aggregate_zeros() {
+            let stats = aggregate(&[0, 0, 0]);
+            assert_eq!(stats.min, 0);
+            assert_eq!(stats.max, 0);
+            assert_eq!(stats.mean, 0);
+            assert_eq!(stats.stddev, 0);
+        }
+
+        #[test]
+        fn aggregate_unordered() {
+            let stats = aggregate(&[100, 10, 50, 20]);
+            assert_eq!(stats.min, 10);
+            assert_eq!(stats.max, 100);
+            assert_eq!(stats.mean, 45);
+            assert_eq!(stats.stddev, 35);
+        }
+
+        #[test]
+        fn aggregate_large_variance() {
+            let stats = aggregate(&[10, 1000]);
+            assert_eq!(stats.min, 10);
+            assert_eq!(stats.max, 1000);
+            assert_eq!(stats.mean, 505);
+            assert_eq!(stats.stddev, 495);
         }
 
         #[test]

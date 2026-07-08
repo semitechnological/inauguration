@@ -39,7 +39,7 @@ impl SilAnalysisReport {
     }
 }
 
-fn parse_sil_function_header(line: &str) -> Option<String> {
+fn parse_sil_function_header(line: &str) -> Option<&str> {
     if !line.starts_with("sil ") {
         return None;
     }
@@ -50,13 +50,12 @@ fn parse_sil_function_header(line: &str) -> Option<String> {
         .split(|c: char| c.is_whitespace() || c == '(')
         .next()
         .unwrap_or("")
-        .trim_end_matches(':')
-        .to_string();
+        .trim_end_matches(':');
     if name.is_empty() { None } else { Some(name) }
 }
 
 pub fn parse_textual_sil(input: &str) -> SilArtifact {
-    let mut function_id = String::from("unknown");
+    let mut function_id = "unknown";
     let mut cfg_blocks = Vec::new();
     let mut instructions = Vec::new();
     let mut instruction_callers = Vec::new();
@@ -72,7 +71,7 @@ pub fn parse_textual_sil(input: &str) -> SilArtifact {
                 functions.push(record);
             }
             current_function = Some(SilFunctionRecord {
-                function_id: function_id.clone(),
+                function_id: function_id.to_string(),
                 cfg_blocks: Vec::new(),
                 instructions: Vec::new(),
             });
@@ -81,7 +80,7 @@ pub fn parse_textual_sil(input: &str) -> SilArtifact {
             cfg_blocks.push(block.clone());
             current_function
                 .get_or_insert_with(|| SilFunctionRecord {
-                    function_id: function_id.clone(),
+                    function_id: function_id.to_string(),
                     cfg_blocks: Vec::new(),
                     instructions: Vec::new(),
                 })
@@ -90,10 +89,10 @@ pub fn parse_textual_sil(input: &str) -> SilArtifact {
         } else {
             let instruction = line.to_string();
             instructions.push(instruction.clone());
-            instruction_callers.push(function_id.clone());
+            instruction_callers.push(function_id.to_string());
             current_function
                 .get_or_insert_with(|| SilFunctionRecord {
-                    function_id: function_id.clone(),
+                    function_id: function_id.to_string(),
                     cfg_blocks: Vec::new(),
                     instructions: Vec::new(),
                 })
@@ -105,7 +104,7 @@ pub fn parse_textual_sil(input: &str) -> SilArtifact {
         functions.push(record);
     }
     SilArtifact {
-        function_id,
+        function_id: function_id.to_string(),
         cfg_blocks,
         instructions,
         instruction_callers,
@@ -498,6 +497,79 @@ mod tests {
         let cleaned = remove_debug_insts(&artifact);
         assert!(cleaned.instructions.is_empty());
         assert!(cleaned.instruction_callers.is_empty());
+    }
+
+    #[test]
+    fn parse_textual_sil_instructions_before_header() {
+        let input = "bb_unknown:\n\
+                     %0 = integer_literal $Builtin.Int64, 1\n\
+                     sil @real_func\n\
+                     bb0:\n\
+                     %1 = integer_literal $Builtin.Int64, 2";
+        let artifact = parse_textual_sil(input);
+        assert_eq!(
+            artifact,
+            SilArtifact {
+                function_id: "real_func".to_string(),
+                cfg_blocks: vec!["bb_unknown".to_string(), "bb0".to_string()],
+                instructions: vec![
+                    "%0 = integer_literal $Builtin.Int64, 1".to_string(),
+                    "%1 = integer_literal $Builtin.Int64, 2".to_string(),
+                ],
+                instruction_callers: vec!["unknown".to_string(), "real_func".to_string()],
+                functions: vec![
+                    SilFunctionRecord {
+                        function_id: "unknown".to_string(),
+                        cfg_blocks: vec!["bb_unknown".to_string()],
+                        instructions: vec!["%0 = integer_literal $Builtin.Int64, 1".to_string()],
+                    },
+                    SilFunctionRecord {
+                        function_id: "real_func".to_string(),
+                        cfg_blocks: vec!["bb0".to_string()],
+                        instructions: vec!["%1 = integer_literal $Builtin.Int64, 2".to_string()],
+                    },
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn parse_textual_sil_full_structure() {
+        let input = "// comment\n\
+                     sil @first_func\n\
+                     bb0:\n\
+                       %0 = integer_literal $Builtin.Int64, 1\n\
+                     \n\
+                     sil @second_func\n\
+                     entry:\n\
+                       %1 = function_ref @helper : $@convention(thin)\n";
+        let artifact = parse_textual_sil(input);
+        assert_eq!(
+            artifact,
+            SilArtifact {
+                function_id: "second_func".to_string(),
+                cfg_blocks: vec!["bb0".to_string(), "entry".to_string()],
+                instructions: vec![
+                    "%0 = integer_literal $Builtin.Int64, 1".to_string(),
+                    "%1 = function_ref @helper : $@convention(thin)".to_string(),
+                ],
+                instruction_callers: vec!["first_func".to_string(), "second_func".to_string()],
+                functions: vec![
+                    SilFunctionRecord {
+                        function_id: "first_func".to_string(),
+                        cfg_blocks: vec!["bb0".to_string()],
+                        instructions: vec!["%0 = integer_literal $Builtin.Int64, 1".to_string()],
+                    },
+                    SilFunctionRecord {
+                        function_id: "second_func".to_string(),
+                        cfg_blocks: vec!["entry".to_string()],
+                        instructions: vec![
+                            "%1 = function_ref @helper : $@convention(thin)".to_string()
+                        ],
+                    },
+                ],
+            }
+        );
     }
 
     #[test]
