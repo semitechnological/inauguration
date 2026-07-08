@@ -501,6 +501,79 @@ mod tests {
     }
 
     #[test]
+    fn parse_textual_sil_instructions_before_header() {
+        let input = "bb_unknown:\n\
+                     %0 = integer_literal $Builtin.Int64, 1\n\
+                     sil @real_func\n\
+                     bb0:\n\
+                     %1 = integer_literal $Builtin.Int64, 2";
+        let artifact = parse_textual_sil(input);
+        assert_eq!(
+            artifact,
+            SilArtifact {
+                function_id: "real_func".to_string(),
+                cfg_blocks: vec!["bb_unknown".to_string(), "bb0".to_string()],
+                instructions: vec![
+                    "%0 = integer_literal $Builtin.Int64, 1".to_string(),
+                    "%1 = integer_literal $Builtin.Int64, 2".to_string(),
+                ],
+                instruction_callers: vec!["unknown".to_string(), "real_func".to_string()],
+                functions: vec![
+                    SilFunctionRecord {
+                        function_id: "unknown".to_string(),
+                        cfg_blocks: vec!["bb_unknown".to_string()],
+                        instructions: vec!["%0 = integer_literal $Builtin.Int64, 1".to_string()],
+                    },
+                    SilFunctionRecord {
+                        function_id: "real_func".to_string(),
+                        cfg_blocks: vec!["bb0".to_string()],
+                        instructions: vec!["%1 = integer_literal $Builtin.Int64, 2".to_string()],
+                    },
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn parse_textual_sil_full_structure() {
+        let input = "// comment\n\
+                     sil @first_func\n\
+                     bb0:\n\
+                       %0 = integer_literal $Builtin.Int64, 1\n\
+                     \n\
+                     sil @second_func\n\
+                     entry:\n\
+                       %1 = function_ref @helper : $@convention(thin)\n";
+        let artifact = parse_textual_sil(input);
+        assert_eq!(
+            artifact,
+            SilArtifact {
+                function_id: "second_func".to_string(),
+                cfg_blocks: vec!["bb0".to_string(), "entry".to_string()],
+                instructions: vec![
+                    "%0 = integer_literal $Builtin.Int64, 1".to_string(),
+                    "%1 = function_ref @helper : $@convention(thin)".to_string(),
+                ],
+                instruction_callers: vec!["first_func".to_string(), "second_func".to_string()],
+                functions: vec![
+                    SilFunctionRecord {
+                        function_id: "first_func".to_string(),
+                        cfg_blocks: vec!["bb0".to_string()],
+                        instructions: vec!["%0 = integer_literal $Builtin.Int64, 1".to_string()],
+                    },
+                    SilFunctionRecord {
+                        function_id: "second_func".to_string(),
+                        cfg_blocks: vec!["entry".to_string()],
+                        instructions: vec![
+                            "%1 = function_ref @helper : $@convention(thin)".to_string()
+                        ],
+                    },
+                ],
+            }
+        );
+    }
+
+    #[test]
     fn remove_debug_insts_keeps_function_records_aligned() {
         let artifact = parse_textual_sil(concat!(
             "sil @helper\nentry:\n",
