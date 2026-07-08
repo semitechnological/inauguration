@@ -431,9 +431,9 @@ pub fn all_language_support() -> &'static [LanguageSupport] {
 
 #[must_use]
 pub fn language_support_for_parser(parser_id: &str) -> Option<&'static LanguageSupport> {
-    LANGUAGE_SUPPORT
+    all_language_support()
         .iter()
-        .find(|entry| entry.parser_id == Some(parser_id))
+        .find(|lang| lang.parser_id == Some(parser_id))
 }
 
 #[cfg(test)]
@@ -549,12 +549,15 @@ mod tests {
 
     #[test]
     fn test_language_support_for_parser() {
+        // Test with a known parser ID
         let rust_support = language_support_for_parser("rust").expect("should find rust");
         assert_eq!(rust_support.language, "Rust");
 
+        // Test with an unknown parser ID
         let fake_support = language_support_for_parser("fake");
         assert!(fake_support.is_none());
 
+        // Test with edge case parser IDs
         assert!(language_support_for_parser("").is_none());
         assert!(language_support_for_parser("Rust").is_none());
     }
