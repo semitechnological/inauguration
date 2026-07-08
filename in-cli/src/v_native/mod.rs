@@ -661,6 +661,24 @@ pub mod bench {
         }
 
         #[test]
+        fn aggregate_zeros() {
+            let stats = aggregate(&[0, 0, 0]);
+            assert_eq!(stats.min, 0);
+            assert_eq!(stats.max, 0);
+            assert_eq!(stats.mean, 0);
+            assert_eq!(stats.stddev, 0);
+        }
+
+        #[test]
+        fn aggregate_unordered() {
+            let stats = aggregate(&[100, 10, 50, 20]);
+            assert_eq!(stats.min, 10);
+            assert_eq!(stats.max, 100);
+            assert_eq!(stats.mean, 45); // (100 + 10 + 50 + 20) / 4 = 45
+            assert_eq!(stats.stddev, 35); // sq_sum = 55^2 + (-35)^2 + 5^2 + (-25)^2 = 3025 + 1225 + 25 + 625 = 4900, 4900/4 = 1225, sqrt(1225) = 35
+        }
+
+        #[test]
         fn regression_no_regression() {
             assert!(!regression(100, 100, 10));
         }
