@@ -1,0 +1,5 @@
+🧪 [testing improvement description] No changes needed
+
+🎯 **What:** The requested test `test_language_support_for_parser` testing known ('rust') and unknown ('fake') languages already exists in `in-cli/src/language_support.rs`. No changes were needed to fill the testing gap.
+📊 **Coverage:** The function `language_support_for_parser` is already adequately covered with unit tests checking the happy path and negative path.
+✨ **Result:** Test coverage and code reliability are confirmed without modifications.
