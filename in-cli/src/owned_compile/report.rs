@@ -34,24 +34,15 @@ pub fn timing_waves_for_jobs(jobs: usize, total_micros: u128) -> Vec<u128> {
     if jobs <= 1 {
         return vec![total_micros];
     }
-    #[cfg(feature = "v-native")]
-    if crate::v_native::v_native_available() {
-        let boundaries = crate::v_native::parallel::wave_plan(jobs, jobs, jobs);
-        let mut waves = Vec::with_capacity(boundaries.len());
-        for &boundary in &boundaries {
-            let share = (total_micros * boundary as u128) / jobs as u128;
-            waves.push(share);
-        }
-        if let Some((last, rest)) = waves.split_last_mut() {
-            let sum: u128 = rest.iter().sum();
-            *last = total_micros.saturating_sub(sum);
-        }
-        return waves;
+    let boundaries = crate::toolchain_util::wave_plan(jobs, jobs, jobs);
+    let mut waves = Vec::with_capacity(boundaries.len());
+    for &boundary in &boundaries {
+        let share = (total_micros * boundary as u128) / jobs as u128;
+        waves.push(share);
     }
-    let per = total_micros / jobs as u128;
-    let mut waves = vec![per; jobs];
-    if let Some(last) = waves.last_mut() {
-        *last = total_micros.saturating_sub(per.saturating_mul((jobs - 1) as u128));
+    if let Some((last, rest)) = waves.split_last_mut() {
+        let sum: u128 = rest.iter().sum();
+        *last = total_micros.saturating_sub(sum);
     }
     waves
 }

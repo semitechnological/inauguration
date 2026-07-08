@@ -231,9 +231,6 @@ fn try_const_answer_entry(module: &UnifiedModule, entry: &str) -> Option<u8> {
                 return None;
             }
             if let Stmt::Return(Some(Expr::IntLit(val))) = &body[0] {
-                #[cfg(feature = "v-native")]
-                let code = crate::v_native::inrt::eval_answer(*val);
-                #[cfg(not(feature = "v-native"))]
                 let code = (*val & 0xff) as u8;
                 return Some(code);
             }
