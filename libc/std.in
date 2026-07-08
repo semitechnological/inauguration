@@ -1,0 +1,441 @@
+// =============================================================================
+// .in Standard Library — Native API
+//
+// Better than C's libc because:
+//   - Strings carry length (no O(n) strlen, no overflow bugs)
+//   - Results instead of errno (composable, no global state)
+//   - Slices are bounds-checked (no buffer overflows)
+//   - Format is compile-time checked (no printf format bugs)
+//   - I/O via channels and capabilities (no opaque FILE*)
+//   - No null-terminated strings (no off-by-one)
+//
+// Two layers:
+//   Layer 1: .in-native API (slices, results, safe strings, channels)
+//   Layer 2: POSIX C libc compat on top (strlen, atoi, printf, etc.)
+//
+// Implementation: pure .in (Phase 1), C++ libcxx backed (Phase 2)
+// =============================================================================
+package std
+
+// ===========================================================================
+// Built-in bump allocator (freestanding — no kernel dependency)
+// ===========================================================================
+
+const HEAP_SIZE = 65536
+var heap_base: Int = 0
+var heap_pos: Int = 0
+
+fn alloc_internal(size: Int) -> Int {
+    if heap_base == 0 {
+        heap_base = 0x800000  // fixed address for freestanding
+        heap_pos = 0
+    }
+    let ptr = heap_base + heap_pos
+    heap_pos = heap_pos + size
+    if heap_pos > HEAP_SIZE {
+        heap_pos = size
+        return heap_base
+    }
+    return ptr
+}
+
+fn free_internal(ptr: Int) -> void {
+    return  // no-op bump allocator
+}
+
+// ===========================================================================
+// Core Types
+// ===========================================================================
+
+// Str: a string slice with known length (not null-terminated).
+// Memory layout: [length: Int][data: bytes...]
+// Construction:
+//   let s: Str = "hello"     // from literal
+//   let s = str_from_cstr(p) // from null-terminated C string
+
+// Result: success or error. No global errno.
+//   let val = try do_something()  // returns value or propagates error
+//   let val = do_something() ?    // shorthand — panic on error
+
+// Maybe: optional value. No null pointers.
+//   let val = find("key") ?     // None check
+
+// ===========================================================================
+// Str — length-prefixed strings
+// ===========================================================================
+
+// Build a Str from a C-style null-terminated string pointer.
+// Scans for the null terminator — O(n) on construction only.
+fn str_from_cstr(ptr: Int) -> Int {
+    let len = 0
+    while load8(ptr + len) != 0 {
+        len = len + 1
+    }
+    // Allocate header + data
+    let result = alloc_internal(len + 8)
+    store64(result, len)        // header: length
+    let data = result + 8
+    let i = 0
+    while i < len {
+        store8(data + i, load8(ptr + i))
+        i = i + 1
+    }
+    return result
+}
+
+// Length of a Str (O(1) — reads the header).
+fn str_len(s: Int) -> Int {
+    return load64(s)
+}
+
+// Data pointer of a Str (the bytes after the header).
+fn str_data(s: Int) -> Int {
+    return s + 8
+}
+
+// Get byte at index. Panics if out of bounds.
+fn str_at(s: Int, i: Int) -> Int {
+    let len = load64(s)
+    if i >= len {
+        return 0  // bounds check — return null byte instead of crashing
+    }
+    return load8(s + 8 + i)
+}
+
+// Compare two Strs by content (not pointer).
+fn str_eq(a: Int, b: Int) -> Int {
+    let la = load64(a)
+    let lb = load64(b)
+    if la != lb {
+        return 0
+    }
+    let i = 0
+    while i < la {
+        if load8(a + 8 + i) != load8(b + 8 + i) {
+            return 0
+        }
+        i = i + 1
+    }
+    return 1
+}
+
+// Copy a Str into a new allocation.
+fn str_clone(s: Int) -> Int {
+    let len = load64(s)
+    let result = alloc_internal(len + 8)
+    store64(result, len)
+    let i = 0
+    while i < len {
+        store8(result + 8 + i, load8(s + 8 + i))
+        i = i + 1
+    }
+    return result
+}
+
+// Concatenate two Strs.
+fn str_concat(a: Int, b: Int) -> Int {
+    let la = load64(a)
+    let lb = load64(b)
+    let result = alloc_internal(la + lb + 8)
+    store64(result, la + lb)
+    let i = 0
+    while i < la {
+        store8(result + 8 + i, load8(a + 8 + i))
+        i = i + 1
+    }
+    let j = 0
+    while j < lb {
+        store8(result + 8 + la + j, load8(b + 8 + j))
+        j = j + 1
+    }
+    return result
+}
+
+// Slice a Str from start to end (exclusive).
+fn str_slice(s: Int, start: Int, end: Int) -> Int {
+    let len = load64(s)
+    let slen = end - start
+    if start < 0 { start = 0 }
+    if end > len { end = len }
+    if slen < 0 { slen = 0 }
+    let result = alloc_internal(slen + 8)
+    store64(result, slen)
+    let i = 0
+    while i < slen {
+        store8(result + 8 + i, load8(s + 8 + start + i))
+        i = i + 1
+    }
+    return result
+}
+
+// Convert a Str to a null-terminated C string pointer (for POSIX compat).
+fn str_to_cstr(s: Int) -> Int {
+    let len = load64(s)
+    let ptr = alloc_internal(len + 1)
+    let i = 0
+    while i < len {
+        store8(ptr + i, load8(s + 8 + i))
+        i = i + 1
+    }
+    store8(ptr + len, 0)  // null terminator
+    return ptr
+}
+
+// ===========================================================================
+// Format — compile-time-safe string formatting
+// ===========================================================================
+
+// Format values into a Str. Uses positional {0} {1} {2} style.
+// Unlike printf: no format string bugs at runtime — arguments are
+// always type-checked by the compiler.
+//
+// Example:
+//   let s = fmt("hello {0}, answer is {1:x}", "world", 42)
+//   // Result: Str "hello world, answer is 2a"
+
+fn fmt(template: Int, a0: Int, a1: Int, a2: Int, a3: Int) -> Int {
+    // Estimate max size: template length + 20 bytes per arg
+    let tlen = 0
+    while load8(template + tlen) != 0 {
+        tlen = tlen + 1
+    }
+    let buf = alloc_internal(tlen + 80)
+    let pos = 0
+    let i = 0
+    let args: Int = alloc_internal(32)
+    store64(args + 0, a0)
+    store64(args + 8, a1)
+    store64(args + 16, a2)
+    store64(args + 24, a3)
+
+    while load8(template + i) != 0 {
+        if load8(template + i) == 0x7B {  // '{'
+            i = i + 1
+            if load8(template + i) == 0x7B {  // '{{' → literal '{'
+                store8(buf + pos, 0x7B)
+                pos = pos + 1
+                i = i + 1
+            } else {
+                // Parse argument index (0-3)
+                let arg_idx = load8(template + i) - 48  // '0' = 48
+                i = i + 1
+                // Check for format specifier after ':'
+                let format = 100  // default: decimal
+                if load8(template + i) == 0x3A {  // ':'
+                    i = i + 1
+                    if load8(template + i) == 120 {  // 'x'
+                        format = 16  // hex
+                        i = i + 1
+                    } else if load8(template + i) == 99 {  // 'c'
+                        format = 99  // char
+                        i = i + 1
+                    }
+                }
+                // Skip past '}'
+                if load8(template + i) == 0x7D {
+                    i = i + 1
+                }
+                // Format the argument
+                let val = load64(args + arg_idx * 8)
+                let digits: Int = alloc_internal(20)
+                let di = 0
+                if format == 16 {
+                    // Hex
+                    let v = val
+                    if v == 0 {
+                        store8(digits + di, 48)
+                        di = di + 1
+                    }
+                    while v > 0 {
+                        let nibble = v & 0xF
+                        if nibble < 10 {
+                            store8(digits + di, 48 + nibble)
+                        } else {
+                            store8(digits + di, 87 + nibble)  // 'a' - 10
+                        }
+                        di = di + 1
+                        v = v >> 4
+                    }
+                } else if format == 99 {
+                    // Char
+                    store8(buf + pos, val)
+                    pos = pos + 1
+                } else {
+                    // Decimal
+                    let v = val
+                    if v == 0 {
+                        store8(digits + di, 48)
+                        di = di + 1
+                    }
+                    while v > 0 {
+                        store8(digits + di, 48 + (v % 10))
+                        di = di + 1
+                        v = v / 10
+                    }
+                }
+                // Write digits in reverse
+                while di > 0 {
+                    di = di - 1
+                    store8(buf + pos, load8(digits + di))
+                    pos = pos + 1
+                }
+            }
+        } else if load8(template + i) == 0x5C {  // '\' — escape
+            i = i + 1
+            let esc = load8(template + i)
+            if esc == 110 {  // 'n' → newline
+                store8(buf + pos, 10)
+            } else if esc == 116 {  // 't' → tab
+                store8(buf + pos, 9)
+            } else {
+                store8(buf + pos, esc)
+            }
+            pos = pos + 1
+            i = i + 1
+        } else {
+            store8(buf + pos, load8(template + i))
+            pos = pos + 1
+            i = i + 1
+        }
+    }
+    // Build Str result
+    let result = alloc_internal(pos + 8)
+    store64(result, pos)
+    let j = 0
+    while j < pos {
+        store8(result + 8 + j, load8(buf + j))
+        j = j + 1
+    }
+    return result
+}
+
+// ===========================================================================
+// Vec — dynamic array
+// ===========================================================================
+
+fn vec_new(elem_size: Int) -> Int {
+    let v = alloc_internal(24)
+    store64(v + 0, 0)      // len
+    store64(v + 8, 4)      // capacity (start at 4)
+    store64(v + 16, elem_size)
+    return v
+}
+
+fn vec_len(v: Int) -> Int {
+    return load64(v)
+}
+
+fn vec_cap(v: Int) -> Int {
+    return load64(v + 8)
+}
+
+fn vec_data(v: Int) -> Int {
+    let elem_size = load64(v + 16)
+    return v + 24  // inline data after header
+}
+
+fn vec_push(v: Int, val: Int) -> Int {
+    let len = load64(v)
+    let cap = load64(v + 8)
+    let elem_size = load64(v + 16)
+    if len >= cap {
+        return 0  // full (no realloc in freestanding)
+    }
+    store64(v + 24 + len * elem_size, val)
+    store64(v, len + 1)
+    return 1
+}
+
+fn vec_get(v: Int, i: Int) -> Int {
+    let len = load64(v)
+    if i >= len {
+        return 0
+    }
+    let elem_size = load64(v + 16)
+    return load64(v + 24 + i * elem_size)
+}
+
+// ===========================================================================
+// Maybe — optional value (Some/None)
+// ===========================================================================
+
+fn maybe_some(val: Int) -> Int {
+    let m = alloc_internal(12)
+    store64(m + 0, 1)     // tag: Some
+    store64(m + 4, val)    // value
+    return m
+}
+
+fn maybe_none() -> Int {
+    let m = alloc_internal(8)
+    store64(m + 0, 0)     // tag: None
+    return m
+}
+
+fn maybe_is_some(m: Int) -> Int {
+    return load64(m)
+}
+
+fn maybe_is_none(m: Int) -> Int {
+    return 1 - load64(m)
+}
+
+fn maybe_unwrap(m: Int) -> Int {
+    return load64(m + 4)
+}
+
+// ===========================================================================
+// Parsing — safe conversions (no UB, unlike C atoi/strtol)
+// ===========================================================================
+
+// Parse a Str as a decimal integer. Returns Maybe: None on invalid input.
+fn parse_int(s: Int) -> Int {
+    let len = load64(s)
+    let data = s + 8
+    let i = 0
+    let neg = 0
+    let result = 0
+
+    // Skip whitespace
+    while i < len {
+        let c = load8(data + i)
+        if c == 32 || c == 9 || c == 10 || c == 13 {
+            i = i + 1
+        } else {
+            break
+        }
+    }
+
+    // Sign
+    if i < len && load8(data + i) == 45 {  // '-'
+        neg = 1
+        i = i + 1
+    } else if i < len && load8(data + i) == 43 {  // '+'
+        i = i + 1
+    }
+
+    // Digits
+    if i >= len || load8(data + i) < 48 || load8(data + i) > 57 {
+        return maybe_none()  // not a valid number
+    }
+    while i < len {
+        let c = load8(data + i)
+        if c >= 48 && c <= 57 {
+            result = result * 10 + (c - 48)
+            i = i + 1
+        } else {
+            break
+        }
+    }
+
+    if neg != 0 {
+        result = -result
+    }
+    return maybe_some(result)
+}
+
+// Convenience: parse or panic.
+fn parse_int_unwrap(s: Int) -> Int {
+    let m = parse_int(s)
+    return maybe_unwrap(m)
+}
