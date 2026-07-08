@@ -371,6 +371,14 @@ pub mod parallel {
         }
 
         #[test]
+        fn wave_plan_math_fallback_chunking() {
+            // job_count < max_waves
+            assert_eq!(wave_plan(3, 2, 5), vec![1, 2, 3]);
+            // job_count > max_waves
+            assert_eq!(wave_plan(11, 4, 4), vec![3, 6, 9, 11]);
+        }
+
+        #[test]
         fn wave_plan_zero_waves_or_workers() {
             assert_eq!(wave_plan(10, 0, 5), vec![10]);
             assert_eq!(wave_plan(10, 5, 0), vec![10]);
