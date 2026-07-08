@@ -89,7 +89,8 @@ fn emit_x86_64_elf_object(request: &NativeObjectRequest<'_>) -> NativeObjectArti
     let object = ElfObject {
         code: x86_64_return_i32_object_code(request.exit_code),
         export_name: request.entry.to_string(),
-    };
+                exports: vec![],
+            };
     let mut bytes = Vec::new();
     write_x86_64_relocatable_object(&object, &mut bytes);
     NativeObjectArtifact {
@@ -107,7 +108,8 @@ fn emit_aarch64_elf_object(request: &NativeObjectRequest<'_>) -> NativeObjectArt
     let object = ElfObject {
         code: aarch64_return_i32_object_code(request.exit_code),
         export_name: request.entry.to_string(),
-    };
+                exports: vec![],
+            };
     let mut bytes = Vec::new();
     write_aarch64_relocatable_object(&object, &mut bytes);
     NativeObjectArtifact {
@@ -143,7 +145,8 @@ fn emit_arm32_elf_object(request: &NativeObjectRequest<'_>) -> NativeObjectArtif
     let object = ElfObject {
         code: arm32_return_i32_object_code(request.exit_code),
         export_name: request.entry.to_string(),
-    };
+                exports: vec![],
+            };
     let mut bytes = Vec::new();
     write_arm32_relocatable_object(&object, &mut bytes);
     NativeObjectArtifact {
@@ -228,6 +231,7 @@ fn emit_aarch64_freestanding_object(request: &NativeObjectRequest<'_>) -> Native
             let object = ElfObject {
                 code: result.code,
                 export_name: request.entry.to_string(),
+                exports: vec![],
             };
             write_aarch64_relocatable_object(&object, &mut bytes);
             NativeObjectArtifact {
@@ -245,6 +249,7 @@ fn emit_aarch64_freestanding_object(request: &NativeObjectRequest<'_>) -> Native
             let object = ElfObject {
                 code: aarch64_return_i32_object_code(request.exit_code),
                 export_name: request.entry.to_string(),
+                exports: vec![],
             };
             let mut bytes = Vec::new();
             write_aarch64_relocatable_object(&object, &mut bytes);
@@ -286,8 +291,9 @@ fn emit_x86_64_freestanding_object(request: &NativeObjectRequest<'_>) -> NativeO
         Ok(result) => {
             let mut bytes = Vec::new();
             let object = ElfObject {
-                code: result.code,
+                code: result.code.clone(),
                 export_name: request.entry.to_string(),
+                exports: result.exports.clone(),
             };
             if is_i386 {
                 write_i386_relocatable_object(&object, &mut bytes);
@@ -317,6 +323,7 @@ fn emit_x86_64_freestanding_object(request: &NativeObjectRequest<'_>) -> NativeO
             let object = ElfObject {
                 code: x86_64_return_i32_object_code(request.exit_code),
                 export_name: request.entry.to_string(),
+                exports: vec![],
             };
             let mut bytes = Vec::new();
             if is_i386 {
