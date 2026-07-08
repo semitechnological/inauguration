@@ -34,6 +34,7 @@ fn default_request(
         target_triple: None,
         jobs: 1,
         debug: false,
+        emit: None,
     }
 }
 

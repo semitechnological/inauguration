@@ -66,6 +66,8 @@ enum EmitKindCli {
     Boot,
     /// Emit C source (Vlang-style C backend for optimization via zig cc).
     C,
+    /// Emit a raw SCI component binary for a freestanding x86_64 target.
+    Sci,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -324,7 +326,11 @@ enum Commands {
     },
     #[command(about = "Run self-hosted compiler test suites")]
     Test {
-        #[arg(long, default_value_t = false, help = "Print test group names and exit")]
+        #[arg(
+            long,
+            default_value_t = false,
+            help = "Print test group names and exit"
+        )]
         list: bool,
         #[arg(long, default_value_t = false)]
         self_host: bool,
