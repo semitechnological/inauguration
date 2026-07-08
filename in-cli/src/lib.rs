@@ -75,8 +75,8 @@ pub mod package_ref;
 pub mod package_runtime;
 pub mod parser_registry;
 pub mod target;
-pub mod typecheck;
 pub mod toolchain_util;
+pub mod typecheck;
 
 #[cfg(test)]
 mod in_pipeline_tests {

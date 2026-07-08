@@ -50,8 +50,11 @@ struct LowerCtx<'a> {
     functions: &'a HashMap<String, FunctionInfo>,
     /// Current function name (for error messages)
     fn_name: String,
-    /// Global variable addresses: name → absolute physical address
+    /// Global variable offsets: name → offset within the data section.
+    /// Absolute addresses are patched after code and data layout are known.
     globals: HashMap<String, u64>,
+    /// Sites in the emitted code that reference a global variable.
+    pending_globals: Vec<PendingGlobal>,
     /// Error handling: offset for error flag byte (Throw/Try)
     error_flag_offset: u32,
     /// Error handling: offset for error value (Throw/Try)
@@ -72,6 +75,13 @@ struct PendingCall {
     target: String,
 }
 
+#[derive(Debug, Clone)]
+struct PendingGlobal {
+    site: u32,
+    width: u8,
+    offset: u64,
+}
+
 impl<'a> LowerCtx<'a> {
     fn new(
         fn_name: &str,
@@ -89,6 +99,7 @@ impl<'a> LowerCtx<'a> {
             functions,
             fn_name: fn_name.to_string(),
             globals,
+            pending_globals: Vec::new(),
             error_flag_offset: 0,
             error_value_offset: 0,
             ret_typ: Typ::Int,
@@ -159,8 +170,23 @@ impl<'a> LowerCtx<'a> {
     }
 }
 
-/// Lower a Core IR module to x86_64 machine code.
+/// Lower a Core IR module to x86_64 machine code using the historical default
+/// load addresses (code at 0x101100, data at 0x200000).
 pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64CompileResult, String> {
+    lower_module_with_bases(module, entry, 0x101100, 0x200000)
+}
+
+/// Lower a Core IR module to x86_64 machine code for a specific load layout.
+///
+/// `code_base` is the virtual address of the first instruction in `code`.
+/// `data_base` is the virtual address where the global data section starts.
+/// String literals are placed immediately after the code section.
+pub fn lower_module_with_bases(
+    module: &UnifiedModule,
+    entry: &str,
+    code_base: u64,
+    data_base: u64,
+) -> Result<X86_64CompileResult, String> {
     let functions = collect_functions(module)?;
     let structs = collect_structs(module);
     let globals = collect_globals(module);
@@ -170,6 +196,7 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
     let mut emitter = CodeEmitter::new();
     let mut function_offsets: HashMap<String, u32> = HashMap::new();
     let mut all_pending_calls: Vec<PendingCall> = Vec::new();
+    let mut all_pending_globals: Vec<PendingGlobal> = Vec::new();
 
     // Sort functions so the entry function is always first (so the trampoline
     // can jump to a known offset 0 in the compiled code section).
@@ -189,7 +216,7 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
         let offset = emitter.len();
         function_offsets.insert(name.clone(), offset);
         let is_interrupt = crate::core_ir::is_interrupt_fn(&func.name);
-        lower_function(
+        let pending = lower_function(
             &mut emitter,
             func,
             &structs,
@@ -198,11 +225,8 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
             &mut all_pending_calls,
             is_interrupt,
         )?;
+        all_pending_globals.extend(pending);
     }
-
-    // Resolve pending calls and function address references
-    // SCI header occupies 256 bytes at KCODE_BASE (0x101000), code starts at +0x100
-    const KERNEL_BASE: u64 = 0x101100;
 
     // Resolve calls — collect string refs, resolve function addresses and calls
     let mut str_refs: Vec<(u32, String)> = Vec::new();
@@ -212,7 +236,7 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
             // Function address reference: write absolute address at site
             let fn_name = &call.target[6..];
             if let Some(&func_offset) = function_offsets.get(fn_name) {
-                let abs_addr = KERNEL_BASE + func_offset as u64;
+                let abs_addr = code_base + func_offset as u64;
                 let site = call.site as usize;
                 if x86_64::is_32bit() {
                     if site + 4 <= emitter.bytes.len() {
@@ -241,7 +265,7 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
         let code_end = emitter.len();
         let mut str_offset = 0u64;
         for s in &all_strings {
-            let abs_addr = KERNEL_BASE + code_end as u64 + str_offset;
+            let abs_addr = code_base + code_end as u64 + str_offset;
             for &(site, ref content) in &str_refs {
                 if content == s {
                     let site_u = site as usize;
@@ -270,6 +294,19 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
         }
     }
 
+    // Patch global-variable references now that the data section address is known.
+    for pg in &all_pending_globals {
+        let abs_addr = data_base + pg.offset;
+        let site = pg.site as usize;
+        if pg.width == 4 && site + 4 <= emitter.bytes.len() {
+            emitter.bytes[site..site + 4].copy_from_slice(&(abs_addr as u32).to_le_bytes());
+            relocations.push(pg.site);
+        } else if pg.width == 8 && site + 8 <= emitter.bytes.len() {
+            emitter.bytes[site..site + 8].copy_from_slice(&abs_addr.to_le_bytes());
+            relocations.push(pg.site);
+        }
+    }
+
     let entry_offset = function_offsets.get(entry).copied().unwrap_or(0);
     let exports: Vec<(String, u32)> = function_offsets
         .iter()
@@ -281,7 +318,7 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<X86_64Compile
         entry_offset,
         exports,
         relocations,
-        codegen_base: KERNEL_BASE,
+        codegen_base: code_base,
     })
 }
 
@@ -606,13 +643,12 @@ fn collect_string_literals(module: &UnifiedModule) -> Vec<String> {
 }
 
 fn collect_globals(module: &UnifiedModule) -> HashMap<String, u64> {
-    const GLOBAL_BASE: u64 = 0x200000;
     let mut globals = HashMap::new();
-    let mut addr = GLOBAL_BASE;
+    let mut offset = 0u64;
     for decl in &module.decls {
         if let Decl::Global { name, .. } = decl {
-            globals.insert(name.clone(), addr);
-            addr += 8;
+            globals.insert(name.clone(), offset);
+            offset += 8;
         }
     }
     globals
@@ -626,7 +662,7 @@ fn lower_function(
     globals: &HashMap<String, u64>,
     pending_calls: &mut Vec<PendingCall>,
     is_interrupt: bool,
-) -> Result<(), String> {
+) -> Result<Vec<PendingGlobal>, String> {
     // Validate return type and store for use in Return handling
     let _ret_is_struct = matches!(&func.ret, Typ::Named(_) | Typ::Array(_));
     match &func.ret {
@@ -763,6 +799,8 @@ fn lower_function(
         lower_stmt(emitter, &mut ctx, stmt, pending_calls)?;
     }
 
+    let pending_globals = ctx.pending_globals;
+
     // If no explicit return, emit default epilogue
     if !ctx.emitted_return {
         if matches!(&func.ret, Typ::Named(_) | Typ::Array(_)) {
@@ -793,7 +831,7 @@ fn lower_function(
         }
     }
 
-    Ok(())
+    Ok(pending_globals)
 }
 
 fn alloc_declared_locals(ctx: &mut LowerCtx<'_>, body: &[Stmt]) -> Result<(), String> {
@@ -907,9 +945,16 @@ fn lower_stmt(
         }
         Stmt::Assign(name, expr) => {
             // Check if this is a global variable
-            if let Some(&addr) = ctx.globals.get(name) {
+            if let Some(&offset) = ctx.globals.get(name) {
                 lower_expr_into(emitter, ctx, expr, RAX, pending_calls)?;
-                emitter.emit_insns(&x86_64::mov_abs_from_rax(addr));
+                let addr_offset = if x86_64::is_32bit() { 1 } else { 2 };
+                let site = emitter.len() + addr_offset;
+                emitter.emit_insns(&x86_64::mov_abs_from_rax(0));
+                ctx.pending_globals.push(PendingGlobal {
+                    site,
+                    width: if x86_64::is_32bit() { 4 } else { 8 },
+                    offset,
+                });
                 return Ok(());
             }
             // ponytail: bracket name = array index or struct field not lowered by frontend, skip
@@ -1371,12 +1416,25 @@ fn lower_ident_ref(
     pending_calls: &mut Vec<PendingCall>,
 ) -> Result<(), String> {
     // Check if this is a global variable
-    if let Some(&addr) = ctx.globals.get(name) {
-        let addr32 = addr as u32;
+    if let Some(&offset) = ctx.globals.get(name) {
         if target_reg == RAX {
-            emitter.emit_insns(&x86_64::mov_rax_from_abs(addr));
+            let addr_offset = if x86_64::is_32bit() { 1 } else { 2 };
+            let site = emitter.len() + addr_offset;
+            emitter.emit_insns(&x86_64::mov_rax_from_abs(0));
+            ctx.pending_globals.push(PendingGlobal {
+                site,
+                width: if x86_64::is_32bit() { 4 } else { 8 },
+                offset,
+            });
         } else {
-            emitter.emit_insns(&x86_64::mov_r_from_abs32(target_reg, addr32));
+            let addr_offset = if x86_64::is_32bit() { 3 } else { 4 };
+            let site = emitter.len() + addr_offset;
+            emitter.emit_insns(&x86_64::mov_r_from_abs32(target_reg, 0));
+            ctx.pending_globals.push(PendingGlobal {
+                site,
+                width: 4,
+                offset,
+            });
         }
         return Ok(());
     }

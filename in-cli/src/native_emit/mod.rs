@@ -8,6 +8,7 @@ mod macho;
 pub mod native_link;
 pub mod object;
 pub mod raw;
+pub mod sci;
 pub mod target;
 pub mod wasm;
 pub mod x86_64;

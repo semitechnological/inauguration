@@ -1,7 +1,7 @@
 use crate::native_emit::NativeLinkage;
 use std::path::Path;
 
-use super::CompileTarget;
+use super::{CompileTarget, OwnedEmit};
 
 pub fn target_label(target: CompileTarget) -> &'static str {
     match target {
@@ -20,6 +20,13 @@ pub fn linkage_label(linkage: NativeLinkage) -> &'static str {
 
 pub fn default_linkage_label() -> String {
     linkage_label(NativeLinkage::Executable).to_string()
+}
+
+pub fn emit_label(emit: Option<&OwnedEmit>) -> String {
+    match emit {
+        Some(OwnedEmit::Sci { base }) => format!("sci:0x{base:x}"),
+        None => "default".to_string(),
+    }
 }
 
 pub fn path_extension_is(path: &Path, extension: &str) -> bool {

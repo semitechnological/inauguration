@@ -4,7 +4,7 @@ use crate::util::{
     resolve_invocation_path,
 };
 use crate::{EmitKindCli, InError, NativeLinkageCli, Result};
-use inauguration::owned_compile::{OwnedCompileRequest, compile_owned, report_to_json};
+use inauguration::owned_compile::{OwnedCompileRequest, OwnedEmit, compile_owned, report_to_json};
 use inauguration::parser_registry::ParserCli;
 use std::fs;
 use std::path::Path;
@@ -24,7 +24,7 @@ pub(crate) fn cmd_compile(
     json: bool,
     emit: Option<EmitKindCli>,
     trampoline: Option<&str>,
-    _base: Option<&str>,
+    base: Option<&str>,
     metadata: Option<&str>,
     debug: bool,
 ) -> Result<()> {
@@ -69,6 +69,16 @@ pub(crate) fn cmd_compile(
             metadata,
         );
     }
+    let owned_emit = match emit {
+        Some(EmitKindCli::Sci) => {
+            let base_str = base
+                .ok_or_else(|| InError::Message("--base is required for --emit sci".to_string()))?;
+            Some(OwnedEmit::Sci {
+                base: parse_base(base_str)?,
+            })
+        }
+        _ => None,
+    };
     let request = OwnedCompileRequest {
         path: source_path,
         module_id: auto_module_id,
@@ -80,6 +90,7 @@ pub(crate) fn cmd_compile(
         target_triple: target_triple.map(str::to_string),
         jobs: jobs.max(1),
         debug,
+        emit: owned_emit,
     };
     let report = compile_owned(&request);
 
@@ -160,6 +171,17 @@ pub(crate) fn cmd_compile(
         ));
     }
     Ok(())
+}
+
+fn parse_base(value: &str) -> Result<u64> {
+    if let Some(stripped) = value.strip_prefix("0x") {
+        u64::from_str_radix(stripped, 16)
+            .map_err(|_| InError::Message(format!("invalid hex --base: {value}")))
+    } else {
+        value
+            .parse::<u64>()
+            .map_err(|_| InError::Message(format!("invalid --base: {value}")))
+    }
 }
 
 fn cmd_emit_boot(
@@ -376,6 +398,7 @@ pub(crate) fn compile_and_run_jit_report(
         target_triple: None,
         jobs: 1,
         debug,
+        emit: None,
     };
     let report = inauguration::owned_compile::compile_owned(&request);
     if !report.success {

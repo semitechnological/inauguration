@@ -1457,9 +1457,7 @@ extensions:
 
     #[test]
     fn test_parse_package_manifest_source_error() {
-        let result = parse_package_manifest_source(
-            "name: error_test\n\tversion: 1.0.0",
-        );
+        let result = parse_package_manifest_source("name: error_test\n\tversion: 1.0.0");
         assert!(result.is_err());
         let err_msg = result.unwrap_err();
         assert!(

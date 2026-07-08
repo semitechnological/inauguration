@@ -29,13 +29,20 @@ use report::{
 
 use jit::compile_jit;
 use native::compile_native;
-use util::{default_linkage_label, linkage_label, target_label};
+use util::{default_linkage_label, emit_label, linkage_label, target_label};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum CompileTarget {
     Native,
     /// Native lowering + in-memory JIT execution (no object file on disk)
     Jit,
+}
+
+/// Optional emit mode that changes the artifact produced by `compile_owned`.
+#[derive(Debug, Clone)]
+pub enum OwnedEmit {
+    /// Emit a raw SCI component binary loaded at the given virtual base address.
+    Sci { base: u64 },
 }
 
 #[derive(Debug, Clone)]
@@ -50,6 +57,7 @@ pub struct OwnedCompileRequest {
     pub target_triple: Option<String>,
     pub jobs: usize,
     pub debug: bool,
+    pub emit: Option<OwnedEmit>,
 }
 
 #[derive(Debug, Clone, Serialize, serde::Deserialize)]
@@ -121,6 +129,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
             && cached.target_triple == request.target_triple
             && cached.module_id == request.module_id
             && cached.linkage == linkage_label(request.linkage)
+            && emit_label(request.emit.as_ref()) == emit_label(None)
             && requested_out == cached_out
         {
             cached.cache_hit = true;
@@ -291,6 +300,63 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
     report.semantic_level = "typed-subset".to_string();
     report.typed_function_count = report.parsed_function_count;
     report.call_edge_count = count_call_edges(&module, &request.module_id);
+
+    if let Some(OwnedEmit::Sci { base }) = request.emit {
+        let entry_name = effective_entry.as_deref().unwrap_or("main");
+        let triple = request
+            .target_triple
+            .as_deref()
+            .unwrap_or("x86_64-unknown-none");
+        if !triple.contains("x86_64") {
+            let err = format!("SCI emit requires an x86_64 target triple, got `{triple}`");
+            report.reason_code = Some("sci-target-unsupported".to_string());
+            report.reason = Some(err.clone());
+            report.error = Some(err);
+            return finalize_report(report, started, &cwd, &frontend_hash);
+        }
+        let out_path = match request.out.as_ref() {
+            Some(path) => path,
+            None => {
+                let err = "SCI emit requires --out".to_string();
+                report.reason_code = Some("sci-missing-output".to_string());
+                report.reason = Some(err.clone());
+                report.error = Some(err);
+                return finalize_report(report, started, &cwd, &frontend_hash);
+            }
+        };
+        crate::native_emit::x86_64::set_32bit(false);
+        match crate::native_emit::sci::emit_sci_binary(&module, entry_name, base) {
+            Ok(bytes) => {
+                if let Err(err) = std::fs::write(out_path, &bytes) {
+                    let err = format!("write SCI binary `{}`: {err}", out_path.display());
+                    report.reason_code = Some("sci-write-failed".to_string());
+                    report.reason = Some(err.clone());
+                    report.error = Some(err);
+                    return finalize_report(report, started, &cwd, &frontend_hash);
+                }
+                report.success = true;
+                report.backend_level = "owned-native-subset-freestanding".to_string();
+                report.runtime_level = "sci-component".to_string();
+                report.reason_code = Some("native-x86_64-sci-binary".to_string());
+                report.reason = Some(
+                    "inauguration owns SCI component binary emission for freestanding x86_64"
+                        .to_string(),
+                );
+                report.artifact_path = Some(out_path.display().to_string());
+                if cfg!(unix) {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ =
+                        std::fs::set_permissions(out_path, std::fs::Permissions::from_mode(0o755));
+                }
+            }
+            Err(err) => {
+                report.reason_code = Some("sci-lowering-failed".to_string());
+                report.reason = Some(err.clone());
+                report.error = Some(err);
+            }
+        }
+        return finalize_report(report, started, &cwd, &frontend_hash);
+    }
 
     match request.target {
         CompileTarget::Native => match compile_native(&module, &request.module_id, request) {

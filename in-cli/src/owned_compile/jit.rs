@@ -274,6 +274,7 @@ fn eval_entry_via_jit(module: &UnifiedModule, entry: &str) -> Result<i64, String
         target_triple: None,
         jobs: 1,
         debug: false,
+        emit: None,
     };
     let result = compile_jit(module, "App", &request)?;
     result
