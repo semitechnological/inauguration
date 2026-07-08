@@ -2106,12 +2106,31 @@ fn lower_call_expr(
         return Ok(());
     }
 
+    // Save caller-saved regs before call (RAX excluded — gets return value).
+    // Skip target_reg if caller-saved — holds return value after mov_rr.
+    // ponytail: conservative save of all caller-saved regs; liveness would reduce.
+    let saved: [u8; 8] = [RCX, RDX, RSI, RDI, 8, 9, 10, 11];
+    for &reg in &saved {
+        if reg == target_reg {
+            continue;
+        }
+        emitter.emit_insns(&x86_64::push_r(reg));
+    }
+
     let site = emitter.len() as u32;
     emitter.emit_insns(&x86_64::call_rel32(0));
     pending_calls.push(PendingCall {
         site,
         target: target_name,
     });
+
+    // Restore saved regs in reverse (saved regs at lower addresses than stack args)
+    for &reg in saved.iter().rev() {
+        if reg == target_reg {
+            continue;
+        }
+        emitter.emit_insns(&x86_64::pop_r(reg));
+    }
 
     emit_stack_cleanup(emitter, args.len());
 

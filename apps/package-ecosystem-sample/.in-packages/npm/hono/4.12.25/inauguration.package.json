@@ -1,0 +1,23 @@
+{
+  "ecosystem": "npm",
+  "name": "hono",
+  "version": "4.12.25",
+  "registry": "registry.npmjs.org",
+  "install_path": "/Users/undivisible/projects/inauguration/apps/package-ecosystem-sample/.in-packages/npm/hono/4.12.25",
+  "exports": [
+    "hono_greet"
+  ],
+  "bindings": [
+    {
+      "symbol": "hono_greet",
+      "returns": "string",
+      "invoke": {
+        "program": "node",
+        "args": [
+          "-e",
+          "const {Hono}=require('hono'); new Hono(); process.stdout.write('hono')"
+        ]
+      }
+    }
+  ]
+}
