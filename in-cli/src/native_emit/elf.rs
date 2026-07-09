@@ -161,12 +161,15 @@ fn write_elf64_relocatable_object(object: &ElfObject, machine: u16, out: &mut Ve
         let (name_idx_val, size) = if i + 1 < all_exports.len() {
             (name_indices[i + 1], all_exports[i + 1].1 - all_exports[i].1)
         } else {
-            (name_indices[i + 1], object.code.len() as u64 - all_exports[i].1)
+            (
+                name_indices[i + 1],
+                object.code.len() as u64 - all_exports[i].1,
+            )
         };
         write_symbol(out, name_idx_val, 0x12, 0, 1, all_exports[i].1, size);
     }
     // Undefined symbols (shndx=0 = UND)
-    for (i, name) in object.undefs.iter().enumerate() {
+    for (i, _name) in object.undefs.iter().enumerate() {
         if i < undef_indices.len() {
             write_symbol(out, undef_indices[i], 0x12, 0, 0, 0, 0);
         }
@@ -627,9 +630,9 @@ mod tests {
         let object = ElfObject {
             code: x86_64_return_i32_object_code(42),
             export_name: "answer".to_string(),
-        exports: vec![],
-        undefs: vec![],
-    };
+            exports: vec![],
+            undefs: vec![],
+        };
         let mut out = Vec::new();
         write_x86_64_relocatable_object(&object, &mut out);
         assert_eq!(&out[0..4], &ELF_MAGIC);
@@ -647,9 +650,9 @@ mod tests {
         let object = ElfObject {
             code: aarch64_return_i32_object_code(42),
             export_name: "answer".to_string(),
-        exports: vec![],
-        undefs: vec![],
-    };
+            exports: vec![],
+            undefs: vec![],
+        };
         let mut out = Vec::new();
         write_aarch64_relocatable_object(&object, &mut out);
         assert_eq!(&out[0..4], &ELF_MAGIC);
@@ -672,9 +675,9 @@ mod tests {
         let object = ElfObject {
             code: arm32_return_i32_object_code(42),
             export_name: "answer".to_string(),
-        exports: vec![],
-        undefs: vec![],
-    };
+            exports: vec![],
+            undefs: vec![],
+        };
         let mut out = Vec::new();
         write_arm32_relocatable_object(&object, &mut out);
         assert_eq!(&out[0..4], &ELF_MAGIC);
