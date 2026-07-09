@@ -100,7 +100,7 @@ fn write_elf64_relocatable_object(object: &ElfObject, machine: u16, out: &mut Ve
         all_exports.push((name, *offset as u64));
     }
     // Sort by offset (code layout order) so size calculation is correct
-    all_exports.sort_by(|a, b| a.1.cmp(&b.1));
+    all_exports.sort_by_key(|a| a.1);
     // Build string table: null + all export names + all undef names
     let mut strtab: Vec<u8> = vec![0u8];
     let mut name_indices: Vec<u32> = vec![0u32];
