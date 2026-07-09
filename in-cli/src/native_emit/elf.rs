@@ -88,13 +88,19 @@ pub fn write_aarch64_relocatable_object(object: &ElfObject, out: &mut Vec<u8>) {
 
 fn write_elf64_relocatable_object(object: &ElfObject, machine: u16, out: &mut Vec<u8>) {
     let shstrtab = b"\0.text\0.symtab\0.strtab\0.shstrtab\0";
-    // Build combined export list: primary + additional
-    let mut all_exports: Vec<(&str, u64)> = vec![(&object.export_name, 0)];
-    let mut export_offsets: Vec<u64> = vec![0u64];
+    // Build combined export list: primary + additional, sorted by offset
+    let mut all_exports: Vec<(&str, u64)> = Vec::new();
+    // Primary export (entry name at offset 0)
+    all_exports.push((&object.export_name, 0));
     for (name, offset) in &object.exports {
+        // Skip if same name AND offset as primary (redundant)
+        if name == &object.export_name && *offset == 0 {
+            continue;
+        }
         all_exports.push((name, *offset as u64));
-        export_offsets.push(*offset as u64);
     }
+    // Sort by offset (code layout order) so size calculation is correct
+    all_exports.sort_by(|a, b| a.1.cmp(&b.1));
     // Build string table: null + all export names + all undef names
     let mut strtab: Vec<u8> = vec![0u8];
     let mut name_indices: Vec<u32> = vec![0u32];

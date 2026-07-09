@@ -314,14 +314,35 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
                 module.decls.append(&mut extra.decls);
             }
         }
-        // When C/C++ sources are present: remove empty-body .in externs.
-        // C provides the implementation; the extern is just a declaration.
+        // When C/C++ sources are present: strip empty externs and
+        // dedup. Keep only .in's main and C's function bodies.
         if has_c_src {
+            let mut c_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+            for decl in &module.decls {
+                if let Decl::Function { name, body, .. } = decl {
+                    if !body.is_empty() && name != "main" {
+                        c_names.insert(name.clone());
+                    }
+                }
+            }
+            let mut kept_main = false;
             module.decls.retain(|decl| {
-                if let Decl::Function { body, .. } = decl {
-                    !body.is_empty()
-                } else {
-                    true
+                match decl {
+                    Decl::Function { name, body, .. } => {
+                        // Remove empty externs (C provides bodies, tracked by name)
+                        if body.is_empty() && c_names.contains(name) {
+                            return false;
+                        }
+                        // Remove duplicate main and synthetic C entry wrappers
+                        if name == "main" {
+                            if kept_main {
+                                return false;
+                            }
+                            kept_main = true;
+                        }
+                        true
+                    }
+                    _ => true,
                 }
             });
         }
