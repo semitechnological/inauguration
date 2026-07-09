@@ -27,6 +27,9 @@ pub struct X86_64CompileResult {
     pub codegen_base: u64,
     /// Initialised data section bytes (global variable initial values).
     pub data: Vec<u8>,
+    /// Undefined symbols (externs) — names of functions called but not
+    /// defined in this module. Resolved at link time.
+    pub externs: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -215,6 +218,10 @@ pub fn lower_module_with_bases(
 
     for name in &names {
         let func = &functions[name];
+        // Skip extern functions (empty body) — they become undefined syms
+        if func.body.is_empty() {
+            continue;
+        }
         let offset = emitter.len();
         function_offsets.insert(name.clone(), offset);
         let is_interrupt = crate::core_ir::is_interrupt_fn(&func.name);
@@ -253,13 +260,11 @@ pub fn lower_module_with_bases(
             }
         } else if call.target.starts_with("@str_") {
             str_refs.push((call.site, call.target[5..].to_string()));
-        } else {
-            let target_offset = function_offsets
-                .get(&call.target)
-                .ok_or_else(|| format!("x86_64-lower: unresolved call target `{}`", call.target))?;
-            let rel_offset = *target_offset as i32 - call.site as i32 - 5; // call is 5 bytes
+        } else if let Some(&target_offset) = function_offsets.get(&call.target) {
+            let rel_offset = target_offset as i32 - call.site as i32 - 5; // call is 5 bytes
             emitter.patch_u32(call.site + 1, rel_offset as u32);
         }
+        // else: extern call — keep rel32=0, symbol unresolved until linked
     }
 
     // Append string data section and patch string literal references
@@ -316,6 +321,18 @@ pub fn lower_module_with_bases(
         .collect();
     let data = build_data_section(module, &globals);
 
+    // Build externs list: calls to functions not defined in this module
+    let mut externs: Vec<String> = Vec::new();
+    for call in &all_pending_calls {
+        if !call.target.starts_with("@addr_") 
+            && !call.target.starts_with("@str_")
+            && !function_offsets.contains_key(&call.target)
+            && !externs.contains(&call.target)
+        {
+            externs.push(call.target.clone());
+        }
+    }
+
     Ok(X86_64CompileResult {
         code: emitter.bytes,
         entry_offset,
@@ -323,6 +340,7 @@ pub fn lower_module_with_bases(
         relocations,
         codegen_base: code_base,
         data,
+        externs,
     })
 }
 
@@ -2101,8 +2119,18 @@ fn lower_call_expr(
     lower_call_args(emitter, ctx, args, &target_name, pending_calls)?;
 
     if !ctx.functions.contains_key(&target_name) {
+        // Extern function: emit CALL instruction with relocation.
+        // The linker resolves the target — until then, displacement=0.
+        let site = emitter.len() as u32;
+        emitter.emit_insns(&x86_64::call_rel32(0));
+        pending_calls.push(PendingCall {
+            site,
+            target: target_name,
+        });
         emit_stack_cleanup(emitter, args.len());
-        emit_external_call_fallback(emitter, &target_name, target_reg);
+        if target_reg != RAX {
+            emitter.emit_insns(&x86_64::xor_rr(target_reg, target_reg));
+        }
         return Ok(());
     }
 

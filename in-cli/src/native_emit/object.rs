@@ -90,6 +90,7 @@ fn emit_x86_64_elf_object(request: &NativeObjectRequest<'_>) -> NativeObjectArti
         code: x86_64_return_i32_object_code(request.exit_code),
         export_name: request.entry.to_string(),
                 exports: vec![],
+                undefs: vec![],
             };
     let mut bytes = Vec::new();
     write_x86_64_relocatable_object(&object, &mut bytes);
@@ -109,6 +110,7 @@ fn emit_aarch64_elf_object(request: &NativeObjectRequest<'_>) -> NativeObjectArt
         code: aarch64_return_i32_object_code(request.exit_code),
         export_name: request.entry.to_string(),
                 exports: vec![],
+                undefs: vec![],
             };
     let mut bytes = Vec::new();
     write_aarch64_relocatable_object(&object, &mut bytes);
@@ -146,6 +148,7 @@ fn emit_arm32_elf_object(request: &NativeObjectRequest<'_>) -> NativeObjectArtif
         code: arm32_return_i32_object_code(request.exit_code),
         export_name: request.entry.to_string(),
                 exports: vec![],
+                undefs: vec![],
             };
     let mut bytes = Vec::new();
     write_arm32_relocatable_object(&object, &mut bytes);
@@ -232,6 +235,7 @@ fn emit_aarch64_freestanding_object(request: &NativeObjectRequest<'_>) -> Native
                 code: result.code,
                 export_name: request.entry.to_string(),
                 exports: vec![],
+                undefs: vec![],
             };
             write_aarch64_relocatable_object(&object, &mut bytes);
             NativeObjectArtifact {
@@ -250,6 +254,7 @@ fn emit_aarch64_freestanding_object(request: &NativeObjectRequest<'_>) -> Native
                 code: aarch64_return_i32_object_code(request.exit_code),
                 export_name: request.entry.to_string(),
                 exports: vec![],
+                undefs: vec![],
             };
             let mut bytes = Vec::new();
             write_aarch64_relocatable_object(&object, &mut bytes);
@@ -294,6 +299,7 @@ fn emit_x86_64_freestanding_object(request: &NativeObjectRequest<'_>) -> NativeO
                 code: result.code.clone(),
                 export_name: request.entry.to_string(),
                 exports: result.exports.clone(),
+                undefs: result.externs.clone(),
             };
             if is_i386 {
                 write_i386_relocatable_object(&object, &mut bytes);
@@ -324,6 +330,7 @@ fn emit_x86_64_freestanding_object(request: &NativeObjectRequest<'_>) -> NativeO
                 code: x86_64_return_i32_object_code(request.exit_code),
                 export_name: request.entry.to_string(),
                 exports: vec![],
+                undefs: vec![],
             };
             let mut bytes = Vec::new();
             if is_i386 {

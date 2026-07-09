@@ -33,6 +33,8 @@ pub struct ElfObject {
     /// Additional exported symbols (name, offset).
     /// The primary export_name is always included as the first export.
     pub exports: Vec<(String, u32)>,
+    /// Undefined symbols (externs) — must be resolved at link time.
+    pub undefs: Vec<String>,
 }
 
 pub fn x86_64_return_i32_object_code(value: u8) -> Vec<u8> {
@@ -93,7 +95,7 @@ fn write_elf64_relocatable_object(object: &ElfObject, machine: u16, out: &mut Ve
         all_exports.push((name, *offset as u64));
         export_offsets.push(*offset as u64);
     }
-    // Build string table: null + all export names
+    // Build string table: null + all export names + all undef names
     let mut strtab: Vec<u8> = vec![0u8];
     let mut name_indices: Vec<u32> = vec![0u32];
     for (name, _) in &all_exports {
@@ -102,7 +104,14 @@ fn write_elf64_relocatable_object(object: &ElfObject, machine: u16, out: &mut Ve
         strtab.extend_from_slice(name.as_bytes());
         strtab.push(0u8);
     }
-    let sym_count = all_exports.len() as u64 + 1;
+    let mut undef_indices: Vec<u32> = Vec::new();
+    for name in &object.undefs {
+        let idx = strtab.len() as u32;
+        undef_indices.push(idx);
+        strtab.extend_from_slice(name.as_bytes());
+        strtab.push(0u8);
+    }
+    let sym_count = all_exports.len() as u64 + object.undefs.len() as u64 + 1;
     let symtab_entry_size = 24u64;
     let symtab_size = sym_count * symtab_entry_size;
     let text_name = 1u32;
@@ -139,7 +148,9 @@ fn write_elf64_relocatable_object(object: &ElfObject, machine: u16, out: &mut Ve
     out.extend_from_slice(&shstrndx.to_le_bytes());
 
     out.extend_from_slice(&object.code);
+    // Null symbol
     write_symbol(out, 0, 0, 0, 0, 0, 0);
+    // Defined symbols (shndx=1 = .text)
     for i in 0..all_exports.len() {
         let (name_idx_val, size) = if i + 1 < all_exports.len() {
             (name_indices[i + 1], all_exports[i + 1].1 - all_exports[i].1)
@@ -147,6 +158,12 @@ fn write_elf64_relocatable_object(object: &ElfObject, machine: u16, out: &mut Ve
             (name_indices[i + 1], object.code.len() as u64 - all_exports[i].1)
         };
         write_symbol(out, name_idx_val, 0x12, 0, 1, all_exports[i].1, size);
+    }
+    // Undefined symbols (shndx=0 = UND)
+    for (i, name) in object.undefs.iter().enumerate() {
+        if i < undef_indices.len() {
+            write_symbol(out, undef_indices[i], 0x12, 0, 0, 0, 0);
+        }
     }
     out.extend_from_slice(&strtab);
     out.extend_from_slice(shstrtab);
@@ -605,6 +622,7 @@ mod tests {
             code: x86_64_return_i32_object_code(42),
             export_name: "answer".to_string(),
         exports: vec![],
+        undefs: vec![],
     };
         let mut out = Vec::new();
         write_x86_64_relocatable_object(&object, &mut out);
@@ -624,6 +642,7 @@ mod tests {
             code: aarch64_return_i32_object_code(42),
             export_name: "answer".to_string(),
         exports: vec![],
+        undefs: vec![],
     };
         let mut out = Vec::new();
         write_aarch64_relocatable_object(&object, &mut out);
@@ -648,6 +667,7 @@ mod tests {
             code: arm32_return_i32_object_code(42),
             export_name: "answer".to_string(),
         exports: vec![],
+        undefs: vec![],
     };
         let mut out = Vec::new();
         write_arm32_relocatable_object(&object, &mut out);
