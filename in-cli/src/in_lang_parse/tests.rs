@@ -197,9 +197,9 @@ fn main() -> void { read_file("x"); return; }
         vec![InExternBinding {
             language: "rust".into(),
             name: "read_file".into(),
-            params: vec![],
+            params: vec![("path".into(), Typ::String)],
             required_capabilities: Vec::new(),
-            ret: None,
+            ret: Some(Typ::String),
         }]
     );
 }

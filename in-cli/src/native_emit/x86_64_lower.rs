@@ -2369,7 +2369,7 @@ fn answer() -> Int {
   return 42
 }
 
-fn main() -> void {}
+fn main() -> void { return 0 }
 "#;
         crate::in_lang_parse::parse_in_source(src).expect("parse")
     }
@@ -2380,7 +2380,7 @@ fn add(a: Int, b: Int) -> Int {
   return a + b
 }
 
-fn main() -> void {}
+fn main() -> void { return 0 }
 "#;
         crate::in_lang_parse::parse_in_source(src).expect("parse")
     }
@@ -2395,7 +2395,7 @@ fn entry() -> Int {
   return helper()
 }
 
-fn main() -> void {}
+fn main() -> void { return 0 }
 "#;
         crate::in_lang_parse::parse_in_source(src).expect("parse")
     }
@@ -2410,7 +2410,7 @@ fn max(a: Int, b: Int) -> Int {
   }
 }
 
-fn main() -> void {}
+fn main() -> void { return 0 }
 "#;
         crate::in_lang_parse::parse_in_source(src).expect("parse")
     }
@@ -2499,7 +2499,7 @@ fn answer() -> Int {
   return 0
 }
 
-fn main() -> void {}
+fn main() -> void { return 0 }
 "#;
         let module = crate::in_lang_parse::parse_in_source(src).expect("parse");
         let result = lower_module(&module, "answer").expect("lower");
@@ -2554,7 +2554,7 @@ fn answer() -> Int {
   return 0
 }
 
-fn main() -> void {}
+fn main() -> void { return 0 }
 "#;
         let module = crate::in_lang_parse::parse_in_source(src).expect("parse");
         let result = lower_module(&module, "answer").expect("lower");
@@ -2604,7 +2604,7 @@ fn count() -> Int {
   return to
 }
 
-fn main() -> void {}
+fn main() -> void { return 0 }
 "#;
         let module = crate::in_lang_parse::parse_in_source(src).expect("parse");
         let result = lower_module(&module, "count").expect("lower");
@@ -2646,7 +2646,7 @@ fn seven(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int) -> Int {
   return g
 }
 
-fn main() -> void {}
+fn main() -> void { return 0 }
 "#;
         let module = crate::in_lang_parse::parse_in_source(src).expect("parse");
         let result = lower_module(&module, "seven").expect("lower");
@@ -2695,7 +2695,7 @@ fn classify(x: Int) -> Int {
   return 0
 }
 
-fn main() -> void {}
+fn main() -> void { return 0 }
 "#;
         let module = crate::in_lang_parse::parse_in_source(src).expect("parse");
         let result = lower_module(&module, "classify").expect("lower");
@@ -2714,7 +2714,7 @@ fn default_match(x: Int) -> Int {
   return 0
 }
 
-fn main() -> void {}
+fn main() -> void { return 0 }
 "#;
         let module = crate::in_lang_parse::parse_in_source(src).expect("parse");
         let result = lower_module(&module, "default_match").expect("lower");
@@ -2729,7 +2729,7 @@ fn thrower() -> Int {
   return 0
 }
 
-fn main() -> void {}
+fn main() -> void { return 0 }
 "#;
         let module = crate::in_lang_parse::parse_in_source(src).expect("parse");
         let result = lower_module(&module, "thrower").expect("lower");
@@ -2750,7 +2750,7 @@ fn catcher() -> Int {
   return 0
 }
 
-fn main() -> void {}
+fn main() -> void { return 0 }
 "#;
         let module = crate::in_lang_parse::parse_in_source(src).expect("parse");
         let result = lower_module(&module, "catcher").expect("lower");
