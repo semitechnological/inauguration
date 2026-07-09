@@ -8,7 +8,6 @@ use crate::native_backend;
 use crate::native_emit::NativeLinkage;
 use crate::parser_registry::{self, ParserCli};
 use serde::Serialize;
-use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -118,8 +117,8 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
     let mut multi_sources: Vec<(String, String)> = Vec::new(); // (path, source)
     if is_multi {
         // Scan for .in, .c, .cpp, .rs files in directory
-        for entry in std::fs::read_dir(&request.path).unwrap_or_else(|_| panic!("read dir {}", request.path.display())) {
-            if let Ok(entry) = entry {
+        if let Ok(dir) = std::fs::read_dir(&request.path) {
+            for entry in dir.flatten() {
                 let path = entry.path();
                 if path.is_file() {
                     if let Some(ext) = path.extension() {
@@ -135,7 +134,10 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         if multi_sources.is_empty() {
             return OwnedCompileReport {
                 reason_code: Some("frontend-parse-failed".to_string()),
-                reason: Some(format!("no source files found in {}", request.path.display())),
+                reason: Some(format!(
+                    "no source files found in {}",
+                    request.path.display()
+                )),
                 error: Some("no .in, .c, .cpp, or .rs files found".to_string()),
                 ..base_report(request, jobs, started)
             };
@@ -306,7 +308,9 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
 
     // Multi-file project: parse and merge all additional source files
     if is_multi && multi_sources.len() > 1 {
-        let has_c_src = multi_sources.iter().any(|(p, _)| p.ends_with(".c") || p.ends_with(".cpp"));
+        let has_c_src = multi_sources
+            .iter()
+            .any(|(p, _)| p.ends_with(".c") || p.ends_with(".cpp"));
         for (source_path, _source_content) in &multi_sources[1..] {
             let path = std::path::Path::new(source_path);
             let resolved = parser_registry::resolve_parser_id(path, request.parser);

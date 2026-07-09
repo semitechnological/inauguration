@@ -324,7 +324,7 @@ pub fn lower_module_with_bases(
     // Build externs list: calls to functions not defined in this module
     let mut externs: Vec<String> = Vec::new();
     for call in &all_pending_calls {
-        if !call.target.starts_with("@addr_") 
+        if !call.target.starts_with("@addr_")
             && !call.target.starts_with("@str_")
             && !function_offsets.contains_key(&call.target)
             && !externs.contains(&call.target)
