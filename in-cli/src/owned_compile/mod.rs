@@ -1,5 +1,5 @@
 use crate::compile_cache;
-use crate::core_ir::ModuleIdentityReport;
+use crate::core_ir::{Decl, ModuleIdentityReport};
 use crate::core_ir_verifier;
 use crate::in_lang_parse;
 
@@ -8,6 +8,7 @@ use crate::native_backend;
 use crate::native_emit::NativeLinkage;
 use crate::parser_registry::{self, ParserCli};
 use serde::Serialize;
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -109,15 +110,51 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
     let started = Instant::now();
     let jobs = jobs_for_request(request);
     let cwd = compile_cache::workspace_cwd_for_path(&request.path);
-    let source = match fs::read_to_string(&request.path) {
-        Ok(content) => content,
-        Err(err) => {
+
+    // Multi-file project? Check before trying to read a single source.
+    let has_cargo = request.path.join("Cargo.toml").exists();
+    let is_multi = request.path.is_dir() && !has_cargo;
+
+    let mut multi_sources: Vec<(String, String)> = Vec::new(); // (path, source)
+    if is_multi {
+        // Scan for .in, .c, .cpp, .rs files in directory
+        for entry in std::fs::read_dir(&request.path).unwrap_or_else(|_| panic!("read dir {}", request.path.display())) {
+            if let Ok(entry) = entry {
+                let path = entry.path();
+                if path.is_file() {
+                    if let Some(ext) = path.extension() {
+                        if ext == "in" || ext == "c" || ext == "cpp" || ext == "rs" {
+                            if let Ok(src) = fs::read_to_string(&path) {
+                                multi_sources.push((path.to_string_lossy().to_string(), src));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if multi_sources.is_empty() {
             return OwnedCompileReport {
-                reason_code: Some("frontend-read-failed".to_string()),
-                reason: Some(err.to_string()),
-                error: Some(err.to_string()),
+                reason_code: Some("frontend-parse-failed".to_string()),
+                reason: Some(format!("no source files found in {}", request.path.display())),
+                error: Some("no .in, .c, .cpp, or .rs files found".to_string()),
                 ..base_report(request, jobs, started)
             };
+        }
+    }
+
+    let source = if is_multi {
+        multi_sources[0].1.clone()
+    } else {
+        match fs::read_to_string(&request.path) {
+            Ok(content) => content,
+            Err(err) => {
+                return OwnedCompileReport {
+                    reason_code: Some("frontend-read-failed".to_string()),
+                    reason: Some(err.to_string()),
+                    error: Some(err.to_string()),
+                    ..base_report(request, jobs, started)
+                };
+            }
         }
     };
     let frontend_hash = compile_cache::source_frontend_hash(&request.path, &source);
@@ -150,8 +187,13 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
     report.timing_micros = 0;
     report.frontend_hash = Some(frontend_hash.clone());
 
-    let resolved = parser_registry::resolve_parser_id(&request.path, request.parser);
-    let mut module = match parser_registry::parse_with_resolved(resolved, &request.path) {
+    let primary_path = if is_multi {
+        std::path::Path::new(&multi_sources[0].0)
+    } else {
+        &request.path
+    };
+    let resolved = parser_registry::resolve_parser_id(primary_path, request.parser);
+    let mut module = match parser_registry::parse_with_resolved(resolved, primary_path) {
         Ok(Some(module)) => module,
         Ok(None) => {
             let reason = "owned compile requires a Core IR frontend. All languages now route through Core IR via Tree-sitter.".to_string();
@@ -165,7 +207,7 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
             // Component declarations don't have a `main` entry point.
             let err_str = err.to_string();
             if err_str.contains("missing required `fn main`")
-                && request.path.extension().is_some_and(|e| e == "in")
+                && primary_path.extension().is_some_and(|e| e == "in")
                 && (request.linkage == NativeLinkage::StaticLib
                     || request
                         .target_triple
@@ -194,8 +236,8 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
 
     // Resolve multi-file imports for .in sources
     let mut pkg_entry: Option<String> = None;
-    if request.path.extension().is_some_and(|e| e == "in") {
-        let source_dir = request.path.parent().map(PathBuf::from).unwrap_or_default();
+    if primary_path.extension().is_some_and(|e| e == "in") {
+        let source_dir = primary_path.parent().map(PathBuf::from).unwrap_or_default();
         let mut import_resolver = crate::module_resolver::ModuleResolver::new();
         import_resolver.add_search_path(source_dir.clone());
         import_resolver.add_search_path(PathBuf::from("."));
@@ -236,9 +278,9 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
     }
 
     // ponytail: link cargo dependencies + crate root for Rust sources
-    let is_rust_source = request.path.extension().is_some_and(|e| e == "rs");
+    let is_rust_source = primary_path.extension().is_some_and(|e| e == "rs");
     if is_rust_source {
-        let project_dir = request.path.parent().unwrap_or(Path::new("."));
+        let project_dir = primary_path.parent().unwrap_or(Path::new("."));
         let deps = crate::cargo_linker::compile_cargo_dependencies(project_dir);
         if !deps.is_empty() {
             crate::cargo_linker::merge_dependency_modules(&mut module, deps);
@@ -259,6 +301,29 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
                     );
                 }
             }
+        }
+    }
+
+    // Multi-file project: parse and merge all additional source files
+    if is_multi && multi_sources.len() > 1 {
+        let has_c_src = multi_sources.iter().any(|(p, _)| p.ends_with(".c") || p.ends_with(".cpp"));
+        for (source_path, _source_content) in &multi_sources[1..] {
+            let path = std::path::Path::new(source_path);
+            let resolved = parser_registry::resolve_parser_id(path, request.parser);
+            if let Ok(Some(mut extra)) = parser_registry::parse_with_resolved(resolved, path) {
+                module.decls.append(&mut extra.decls);
+            }
+        }
+        // When C/C++ sources are present: remove empty-body .in externs.
+        // C provides the implementation; the extern is just a declaration.
+        if has_c_src {
+            module.decls.retain(|decl| {
+                if let Decl::Function { body, .. } = decl {
+                    !body.is_empty()
+                } else {
+                    true
+                }
+            });
         }
     }
 

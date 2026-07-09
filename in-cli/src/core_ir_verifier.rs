@@ -586,8 +586,9 @@ fn check_expr(
                         if let Some(arg_typ) = expr_type(arg, facts, env)
                             && param_typ != &arg_typ
                         {
-                            // Allow String→Int coercion for string literals (e.g. serial_write_cstr(port, "hello"))
-                            if !(*param_typ == Typ::Int
+                            // Allow String→Int/pointer coercion for string literals
+                            let param_is_ptr = matches!(param_typ, Typ::Named(n) if n.ends_with("*") || n == "char" || n == "void");
+                            if !((*param_typ == Typ::Int || param_is_ptr)
                                 && arg_typ == Typ::String
                                 && matches!(arg, Expr::StringLit(_)))
                             {
