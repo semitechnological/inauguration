@@ -2037,20 +2037,6 @@ fn emit_stack_cleanup(emitter: &mut CodeEmitter, args_len: usize) {
     }
 }
 
-fn emit_external_call_fallback(emitter: &mut CodeEmitter, target_name: &str, target_reg: u8) {
-    if target_name.ends_with("process :: exit")
-        || target_name == "exit"
-        || target_name.ends_with("process :: abort")
-    {
-        emitter.emit_width(
-            &[0xB8, 0x3C, 0x00, 0x00, 0x00],
-            &[0x48, 0xC7, 0xC0, 0x3C, 0x00, 0x00, 0x00],
-        ); // mov eax/rax, 60
-        emitter.emit_bytes(&[0x0F, 0x05]); // syscall
-    }
-    emitter.emit_insns(&x86_64::load_i64(target_reg, 0));
-}
-
 fn lower_call_args(
     emitter: &mut CodeEmitter,
     ctx: &mut LowerCtx<'_>,

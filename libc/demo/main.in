@@ -1,0 +1,11 @@
+// main.in — uses C functions via extern
+package demo
+
+extern c fn strlen(s: Int) -> Int;
+extern c fn add(a: Int, b: Int) -> Int;
+
+fn main() -> Int {
+    let len = strlen("hello world!")   // calls C strlen via extern
+    let sum = add(len, 1) // calls C add via extern
+    return sum            // should be 13
+}
