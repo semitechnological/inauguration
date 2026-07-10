@@ -435,7 +435,13 @@ impl<'a> LowerCtx<'a> {
         if self.locals.contains_key(name) {
             return Ok(());
         }
-        let resolved = typ.cloned().or_else(|| expr_type(expr));
+        let resolved = typ.cloned().or_else(|| match expr {
+            Expr::Ident(source) => self.locals.get(source).and_then(|slot| match slot {
+                LocalSlot::Struct { typ, .. } => Some(Typ::Named(typ.clone())),
+                _ => None,
+            }),
+            _ => expr_type(expr),
+        });
         if let Some(Typ::Array(elem)) = resolved.as_ref() {
             ensure_native_array_element(elem, fn_name, "local")?;
             let Expr::ArrayLit(items) = expr else {

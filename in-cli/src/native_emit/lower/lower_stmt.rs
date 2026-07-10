@@ -503,15 +503,8 @@ pub(crate) fn lower_struct_expr_into_slots(
                     "native-lower: struct assignment type mismatch: expected `{typ}`, found `{local_typ}` in `{fn_name}`"
                 ));
             }
-            // Use find_field_offset to handle flattened nested struct keys
-            let schema = native_struct_fields(ctx.structs, typ, fn_name)?;
-            for (field, _field_ty) in schema.iter() {
-                let Some(&src) = find_field_offset(&local_fields, field) else {
-                    return Err(format!(
-                        "native-lower: field `{field}` missing on source struct `{local_typ}` in `{fn_name}`"
-                    ));
-                };
-                let Some(&dst) = find_field_offset(fields, field) else {
+            for (field, &src) in &local_fields {
+                let Some(&dst) = fields.get(field) else {
                     return Err(format!(
                         "native-lower: field `{field}` missing on destination struct `{typ}` in `{fn_name}`"
                     ));
