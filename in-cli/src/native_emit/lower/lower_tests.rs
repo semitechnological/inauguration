@@ -1192,6 +1192,32 @@ fn answer_native_artifact_and_const_eval_exit_42() {
     let _ = std::fs::remove_file(path);
 }
 
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+#[test]
+fn rust_struct_local_copy_executable_preserves_nested_fields() {
+    let module = crate::compiler::rust_front::parse_rust_source(
+        r#"
+struct Point { x: i64, y: i64 }
+struct Segment { start: Point, end: Point }
+
+fn main() -> i64 {
+    let first = Point { x: 42, y: 1 };
+    let second = Point { x: 2, y: 3 };
+    let original = Segment { start: first, end: second };
+    let copy = original;
+    return copy.start.x;
+}
+"#,
+    )
+    .expect("parse Rust");
+    let path = temp_executable("rust-struct-local-copy-exe");
+    let _ = std::fs::remove_file(&path);
+    compile_native_executable(&module, "main", &path).expect("compile");
+    let output = run_native_exe(&path);
+    assert_exit_or_disasm(&output, 42, &path, &["ldr\tx0, [sp", "str\tx0, [sp"]);
+    let _ = std::fs::remove_file(path);
+}
+
 #[test]
 fn rejects_array_literal_return_type_mismatch() {
     let module = UnifiedModule {
