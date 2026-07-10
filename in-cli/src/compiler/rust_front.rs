@@ -692,7 +692,17 @@ fn lower_block_inner_with_types(
                         }
                     }
                     let expr = lower_expr_with_types(&init.expr, local_types);
-                    let local_ty = local_decl_type(&local.pat);
+                    let local_ty = local_decl_type(&local.pat).or_else(|| {
+                        matches!(
+                            &expr,
+                            Expr::Call { callee, .. }
+                                if matches!(
+                                    callee.as_ref(),
+                                    Expr::Ident(name) if name == "Vec::new"
+                                )
+                        )
+                        .then(|| Typ::Named("Vec".to_string()))
+                    });
                     out.push(Stmt::Let(name, local_ty, expr));
                 }
             }
@@ -1096,5 +1106,38 @@ fn main() {
             }
         )));
         assert!(body.iter().any(|s| matches!(s, Stmt::Match { .. })));
+    }
+
+    #[test]
+    fn infers_vec_new_and_qualifies_extend() {
+        let src = r#"
+fn produced() -> Vec<i64> { Vec::new() }
+
+fn main() {
+    let mut values = Vec::new();
+    values.extend(produced());
+}
+"#;
+        let module = parse_rust_source(src).expect("parse rust");
+        let body = module
+            .decls
+            .iter()
+            .find_map(|d| match d {
+                Decl::Function { name, body, .. } if name == "main" => Some(body),
+                _ => None,
+            })
+            .expect("main body");
+        assert!(matches!(
+            body.first(),
+            Some(Stmt::Let(name, Some(Typ::Named(typ)), _)) if name == "values" && typ == "Vec"
+        ));
+        assert!(matches!(
+            body.get(1),
+            Some(Stmt::Return(Some(Expr::Call { callee, args })))
+                if matches!(callee.as_ref(), Expr::Ident(name) if name == "Vec::extend")
+                    && matches!(args.as_slice(), [Expr::Ident(receiver), Expr::Call { callee, .. }]
+                        if receiver == "values"
+                            && matches!(callee.as_ref(), Expr::Ident(name) if name == "produced"))
+        ));
     }
 }
