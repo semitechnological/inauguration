@@ -315,44 +315,78 @@ fn fmt(template: Int, a0: Int, a1: Int, a2: Int, a3: Int) -> Int {
 
 fn vec_new(elem_size: Int) -> Int {
     let v = alloc_internal(24)
-    store64(v + 0, 0)      // len
-    store64(v + 8, 4)      // capacity (start at 4)
-    store64(v + 16, elem_size)
+    store64(v + 0, 0)
+    store64(v + 8, 0)
+    store64(v + 16, 0)
     return v
 }
 
 fn vec_len(v: Int) -> Int {
-    return load64(v)
-}
-
-fn vec_cap(v: Int) -> Int {
     return load64(v + 8)
 }
 
+fn vec_cap(v: Int) -> Int {
+    return load64(v + 16)
+}
+
 fn vec_data(v: Int) -> Int {
-    let elem_size = load64(v + 16)
-    return v + 24  // inline data after header
+    return load64(v)
+}
+
+fn vec_grow(v: Int, min_cap: Int) -> void {
+    let cap = load64(v + 16)
+    let new_cap = cap
+    if new_cap == 0 { new_cap = 4 }
+    while new_cap < min_cap {
+        new_cap = new_cap * 2
+    }
+    let data = alloc_internal(new_cap * 8)
+    let old_data = load64(v)
+    let len = load64(v + 8)
+    let i = 0
+    while i < len {
+        store64(data + i * 8, load64(old_data + i * 8))
+        i = i + 1
+    }
+    store64(v + 0, data)
+    store64(v + 16, new_cap)
 }
 
 fn vec_push(v: Int, val: Int) -> Int {
-    let len = load64(v)
-    let cap = load64(v + 8)
-    let elem_size = load64(v + 16)
+    let len = load64(v + 8)
+    let cap = load64(v + 16)
     if len >= cap {
-        return 0  // full (no realloc in freestanding)
+        vec_grow(v, len + 1)
     }
-    store64(v + 24 + len * elem_size, val)
-    store64(v, len + 1)
+    let data = load64(v)
+    store64(data + len * 8, val)
+    store64(v + 8, len + 1)
     return 1
 }
 
 fn vec_get(v: Int, i: Int) -> Int {
-    let len = load64(v)
+    let len = load64(v + 8)
     if i >= len {
         return 0
     }
-    let elem_size = load64(v + 16)
-    return load64(v + 24 + i * elem_size)
+    return load64(load64(v) + i * 8)
+}
+
+fn vec_extend(v: Int, src: Int) -> Int {
+    let len = load64(v + 8)
+    let src_len = load64(src + 8)
+    let src_data = load64(src)
+    if len + src_len > load64(v + 16) {
+        vec_grow(v, len + src_len)
+    }
+    let data = load64(v)
+    let i = 0
+    while i < src_len {
+        store64(data + (len + i) * 8, load64(src_data + i * 8))
+        i = i + 1
+    }
+    store64(v + 8, len + src_len)
+    return src_len
 }
 
 // ===========================================================================
