@@ -6,8 +6,8 @@
 
 use super::lower_expr::lower_expr_into;
 use super::{
-    FunctionInfo, LowerCtx, PendingCall, TL_EXTERNAL_REFS, TL_NATIVE_MODE, lower_comparison_result,
-    pick_scratch,
+    FunctionInfo, LocalSlot, LowerCtx, PendingCall, TL_EXTERNAL_REFS, TL_NATIVE_MODE,
+    find_field_offset, lower_comparison_result, pick_scratch,
 };
 use crate::core_ir::Expr;
 use crate::native_emit::aarch64::{self, CodeEmitter, REG_SP, REG_XZR};
@@ -135,6 +135,98 @@ fn lower_string_push_str(
     let end_offset = emitter.len() as i32 - end_branch as i32;
     emitter.patch_u32(end_branch, aarch64::b(end_offset));
     emitter.emit_insns(&aarch64::load_i64(rd, 0));
+    Ok(())
+}
+
+fn lower_vec_extend(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    args: &[Expr],
+    rd: u8,
+    functions: &std::collections::HashMap<String, FunctionInfo>,
+    pending_calls: &mut Vec<PendingCall>,
+    fn_name: &str,
+) -> Result<(), String> {
+    let Expr::Ident(destination) = &args[0] else {
+        return Err(format!(
+            "native-lower: Vec::extend destination must be a local in `{fn_name}`"
+        ));
+    };
+    let Some(LocalSlot::Struct { typ, fields }) = ctx.locals.get(destination) else {
+        return Err(format!(
+            "native-lower: Vec::extend destination `{destination}` is not a Vec local in `{fn_name}`"
+        ));
+    };
+    if typ != "Vec" {
+        return Err(format!(
+            "native-lower: Vec::extend destination `{destination}` has type `{typ}` in `{fn_name}`"
+        ));
+    }
+    let offset = *find_field_offset(fields, "ptr").ok_or_else(|| {
+        format!("native-lower: Vec local `{destination}` is missing `ptr` in `{fn_name}`")
+    })?;
+    match &args[1] {
+        Expr::Ident(source) => {
+            let Some(LocalSlot::Struct { typ, fields }) = ctx.locals.get(source) else {
+                return Err(format!(
+                    "native-lower: Vec::extend source `{source}` is not a Vec local in `{fn_name}`"
+                ));
+            };
+            if typ != "Vec" {
+                return Err(format!(
+                    "native-lower: Vec::extend source `{source}` has type `{typ}` in `{fn_name}`"
+                ));
+            }
+            for (register, field) in [(1, "ptr"), (2, "len"), (3, "cap")] {
+                let field_offset = find_field_offset(fields, field).ok_or_else(|| {
+                    format!(
+                        "native-lower: Vec local `{source}` is missing `{field}` in `{fn_name}`"
+                    )
+                })?;
+                emitter.emit_u32(aarch64::ldr64(register, aarch64::REG_SP, *field_offset));
+            }
+        }
+        Expr::Call { callee, args } => {
+            super::lower_call::lower_call(
+                emitter,
+                ctx,
+                callee,
+                args,
+                0,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            emitter.emit_u32(aarch64::mov_reg64(3, 2));
+            emitter.emit_u32(aarch64::mov_reg64(2, 1));
+            emitter.emit_u32(aarch64::mov_reg64(1, 0));
+        }
+        _ => {
+            return Err(format!(
+                "native-lower: Vec::extend source must be a Vec local or call in `{fn_name}`"
+            ));
+        }
+    }
+    emitter.emit_u32(aarch64::add_imm64(0, aarch64::REG_SP, offset as u16));
+    let is_native = TL_NATIVE_MODE.with(|m| *m.borrow());
+    if is_native {
+        let call_site = emitter.len() as u32;
+        emitter.emit_u32(aarch64::bl(0));
+        TL_EXTERNAL_REFS.with(|refs| {
+            refs.borrow_mut()
+                .push((call_site, "in_vec_extend".to_string()))
+        });
+    } else if let Some(native_ptr) =
+        crate::native_emit::native_link::resolve_native_fn("in_vec_extend")
+    {
+        emitter.emit_insns(&aarch64::load_i64(15, native_ptr as usize as i64));
+        emitter.emit_u32(0xD63F_01E0u32 | (15 << 5));
+    } else {
+        return Err("native-lower: missing in_vec_extend runtime".to_string());
+    }
+    if rd != 0 {
+        emitter.emit_u32(aarch64::mov_reg64(rd, 0));
+    }
     Ok(())
 }
 
@@ -864,6 +956,12 @@ pub(crate) fn lower_stdlib_call(
         // Vec::new → return pointer to empty vec (0 for ptr, 0 for len, 0 for cap)
         "new" if args.is_empty() && (target.contains("Vec") || target.contains("vec")) => {
             emitter.emit_insns(&aarch64::load_i64(0, 0));
+            emitter.emit_insns(&aarch64::load_i64(1, 0));
+            emitter.emit_insns(&aarch64::load_i64(2, 0));
+            Ok(true)
+        }
+        "extend" if args.len() == 2 && target.contains("Vec") => {
+            lower_vec_extend(emitter, ctx, args, rd, functions, pending_calls, fn_name)?;
             Ok(true)
         }
         // Vec::with_capacity(n) → not yet implemented in native lowering
