@@ -524,6 +524,9 @@ fn lower_function(
     ctx.binop_temp = ctx.alloc_slot();
     ctx.saved_flag_offset = ctx.stack_size + 8;
     ctx.stack_size += 16;
+    ctx.vec_literal_header_offset = ctx.alloc_slot();
+    ctx.alloc_slot();
+    ctx.alloc_slot();
     if ctx.stack_size > 0 {
         emitter.emit_u32(aarch64::sub_imm64(
             aarch64::REG_SP,
