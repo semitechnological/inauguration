@@ -560,6 +560,74 @@ pub unsafe extern "C" fn in_vec_push(dst_header: *mut u64, value: u64) -> i64 {
     unsafe { in_vec_extend(dst_header, (&raw const value) as u64, 1, 1) }
 }
 
+#[allow(clippy::missing_safety_doc)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn in_vec_push_words(
+    dst_header: *mut u64,
+    src_ptr: *const u64,
+    word_count: u64,
+) -> i64 {
+    if dst_header.is_null()
+        || src_ptr.is_null()
+        || word_count == 0
+        || !(dst_header as usize).is_multiple_of(std::mem::align_of::<u64>())
+        || !(src_ptr as usize).is_multiple_of(std::mem::align_of::<u64>())
+        || word_count > usize::MAX as u64
+    {
+        return 0;
+    }
+    unsafe {
+        let dst_ptr = *dst_header;
+        let dst_len = *dst_header.add(1);
+        let dst_cap = *dst_header.add(2);
+        let Some(required) = dst_len.checked_add(1) else {
+            return 0;
+        };
+        if dst_len > dst_cap
+            || dst_cap > usize::MAX as u64
+            || required > usize::MAX as u64
+            || (dst_len != 0 && dst_ptr == 0)
+        {
+            return 0;
+        }
+        if required > dst_cap {
+            let mut new_cap = dst_cap.max(4);
+            while new_cap < required {
+                let Some(next_cap) = new_cap.checked_mul(2) else {
+                    return 0;
+                };
+                new_cap = next_cap;
+            }
+            let Some(size) = (new_cap as usize).checked_mul(word_count as usize) else {
+                return 0;
+            };
+            let Ok(layout) = std::alloc::Layout::array::<u64>(size) else {
+                return 0;
+            };
+            let new_ptr = std::alloc::alloc(layout) as *mut u64;
+            if new_ptr.is_null() {
+                std::alloc::handle_alloc_error(layout);
+            }
+            if dst_len != 0 {
+                std::ptr::copy_nonoverlapping(
+                    dst_ptr as *const u64,
+                    new_ptr,
+                    (dst_len * word_count) as usize,
+                );
+            }
+            *dst_header = new_ptr as u64;
+            *dst_header.add(2) = new_cap;
+        }
+        std::ptr::copy_nonoverlapping(
+            src_ptr,
+            (*dst_header as *mut u64).add((dst_len * word_count) as usize),
+            word_count as usize,
+        );
+        *dst_header.add(1) = required;
+        1
+    }
+}
+
 /// `text.trim()` -> `String`
 ///
 /// # Safety
@@ -958,6 +1026,32 @@ mod tests {
             );
 
             let layout = std::alloc::Layout::array::<u64>(dst_header[2] as usize).unwrap();
+            std::alloc::dealloc(dst_header[0] as *mut u8, layout);
+        }
+    }
+
+    #[test]
+    fn in_vec_push_words_keeps_element_length() {
+        unsafe {
+            let mut dst_header = [0_u64, 0, 0];
+            let first = [1_u64, 2];
+            let second = [3_u64, 4];
+
+            assert_eq!(
+                in_vec_push_words(dst_header.as_mut_ptr(), first.as_ptr(), 2),
+                1
+            );
+            assert_eq!(
+                in_vec_push_words(dst_header.as_mut_ptr(), second.as_ptr(), 2),
+                1
+            );
+            assert_eq!(dst_header[1], 2);
+            assert_eq!(
+                std::slice::from_raw_parts(dst_header[0] as *const u64, 4),
+                &[1, 2, 3, 4]
+            );
+
+            let layout = std::alloc::Layout::array::<u64>((dst_header[2] * 2) as usize).unwrap();
             std::alloc::dealloc(dst_header[0] as *mut u8, layout);
         }
     }
