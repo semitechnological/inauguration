@@ -395,3 +395,36 @@ fn esc(s: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_arg_value() {
+        let args = vec!["--foo".into(), "bar".into()];
+        assert_eq!(arg_value(&args, "--foo"), Some("bar".into()));
+        assert_eq!(arg_value(&args, "--baz"), None);
+    }
+
+    #[test]
+    fn test_doc_href() {
+        assert_eq!(doc_href("index", "about"), "about.html");
+        assert_eq!(doc_href("nested/page", "about"), "../about.html");
+        assert_eq!(doc_href("index", "nested/page"), "nested/page.html");
+        assert_eq!(doc_href("nested/page", "nested/other"), "other.html");
+    }
+
+    #[test]
+    fn test_brand_href() {
+        assert_eq!(brand_href("index"), "../index.html");
+        assert_eq!(brand_href("nested/page"), "../../index.html");
+    }
+
+    #[test]
+    fn test_esc() {
+        assert_eq!(
+            esc("<script>alert(\"x\" & 'y')</script>"),
+            "&lt;script&gt;alert(&quot;x&quot; &amp; 'y')&lt;/script&gt;"
+        );
+    }
+}
