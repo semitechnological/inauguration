@@ -105,7 +105,7 @@ fn desugar_closures_in_body(body: &mut [Stmt], counter: &mut usize, extra_decls:
                 }
             }
             Stmt::Return(None) => {}
-            Stmt::Break => {}
+            Stmt::Break | Stmt::Propagate => {}
             Stmt::Throw(e) => {
                 desugar_closures_in_expr(e, counter, extra_decls);
             }
@@ -216,7 +216,7 @@ fn rewrite_captures_in_body(body: &mut [Stmt], captures: &HashSet<&str>) {
                 }
             }
             Stmt::Return(None) => {}
-            Stmt::Break => {}
+            Stmt::Break | Stmt::Propagate => {}
             Stmt::Throw(e) => {
                 rewrite_captures_in_expr(e, captures);
             }
@@ -337,7 +337,12 @@ fn desugar_closures_in_expr(expr: &mut Expr, counter: &mut usize, extra_decls: &
         }
         Expr::Call { callee, args, .. } => {
             desugar_closures_in_expr(callee, counter, extra_decls);
-            for arg in args {
+            let preserves_map_closure =
+                matches!(callee.as_ref(), Expr::Ident(name) if name == "map") && args.len() == 2;
+            for (index, arg) in args.iter_mut().enumerate() {
+                if preserves_map_closure && index == 1 && matches!(arg, Expr::Closure { .. }) {
+                    continue;
+                }
                 desugar_closures_in_expr(arg, counter, extra_decls);
             }
         }
@@ -399,7 +404,7 @@ fn rewrite_method_calls_in_body(body: &mut [Stmt], method_map: &HashMap<String, 
                     rewrite_method_calls_in_body(&mut catch.body, method_map);
                 }
             }
-            Stmt::Break => {}
+            Stmt::Break | Stmt::Propagate => {}
         }
     }
 }
@@ -791,7 +796,7 @@ fn collect_stmt_reads(st: &Stmt, reads: &mut HashSet<String>) {
                 collect_body_reads(&arm.body, reads);
             }
         }
-        Stmt::Break => {}
+        Stmt::Break | Stmt::Propagate => {}
     }
 }
 
@@ -1250,6 +1255,7 @@ fn lower_stmts_with_env(
                 out.push_str(&format!("label {try_end_label}\n"));
             }
             Stmt::Break => {}
+            Stmt::Propagate => out.push_str("builtin_call \"propagate_error\"\n"),
         }
     }
     if !implicit_default {

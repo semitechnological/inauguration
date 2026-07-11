@@ -1,4 +1,4 @@
-use crate::core_ir::{Decl, Expr, Stmt, UnifiedModule};
+use crate::core_ir::{Decl, Expr, Stmt, Typ, UnifiedModule};
 use crate::native_backend;
 use crate::native_emit::{self, NativeLinkage};
 use std::collections::HashSet;
@@ -34,11 +34,9 @@ pub fn compile_native(
         .unwrap_or("main");
     let native_module = native_entry_module(module, entry);
     let eval_exit = match request.linkage {
-        NativeLinkage::Executable => Some(const_eval_entry_exit_code(
-            &native_module,
-            module_id,
-            entry,
-        )?),
+        NativeLinkage::Executable => {
+            Some(native_entry_exit_code(&native_module, module_id, entry)?)
+        }
         NativeLinkage::Dylib | NativeLinkage::StaticLib => None,
     };
     let out_path = request
@@ -46,10 +44,10 @@ pub fn compile_native(
         .as_ref()
         .ok_or_else(|| "native compile requires --out executable path".to_string())?;
     if let Some(target_triple) = request.target_triple.as_deref() {
-        let exit = match const_eval_entry_exit_code(&native_module, module_id, entry) {
-            Ok(code) => code,
-            Err(_) if request.linkage == NativeLinkage::StaticLib => 0,
-            Err(err) => return Err(err),
+        let exit = if request.linkage == NativeLinkage::StaticLib {
+            0
+        } else {
+            native_entry_exit_code(&native_module, module_id, entry)?
         };
         if request.linkage == NativeLinkage::Executable
             && target_triple == "aarch64-apple-darwin"
@@ -157,6 +155,21 @@ pub fn compile_native(
     })
 }
 
+fn native_entry_exit_code(
+    module: &UnifiedModule,
+    module_id: &str,
+    entry: &str,
+) -> Result<u8, String> {
+    let returns_exit_code = module.decls.iter().any(|decl| {
+        matches!(decl, Decl::Function { name, ret, .. } if name == entry && matches!(ret.canonical(), Typ::Int | Typ::Bool))
+    });
+    if returns_exit_code {
+        const_eval_entry_exit_code(module, module_id, entry)
+    } else {
+        Ok(0)
+    }
+}
+
 pub fn native_entry_module(module: &UnifiedModule, entry: &str) -> UnifiedModule {
     /// Normalize a name by removing spaces around :: separators
     fn normalize_name(name: &str) -> String {
@@ -254,7 +267,7 @@ pub fn native_entry_module(module: &UnifiedModule, entry: &str) -> UnifiedModule
                     }
                 }
                 Stmt::Return(None) => {}
-                Stmt::Break => {}
+                Stmt::Break | Stmt::Propagate => {}
             }
         }
     }
@@ -361,4 +374,25 @@ pub fn set_native_artifact_permissions(
     _linkage: NativeLinkage,
 ) -> Result<(), String> {
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reference_entry_uses_zero_exit_code_without_jit_execution() {
+        let module = UnifiedModule {
+            identity: Default::default(),
+            decls: vec![Decl::Function {
+                name: "main".to_string(),
+                params: vec![],
+                ret: Typ::String,
+                body: vec![Stmt::Return(Some(Expr::StringLit("value".to_string())))],
+                type_params: vec![],
+            }],
+        };
+
+        assert_eq!(native_entry_exit_code(&module, "App", "main"), Ok(0));
+    }
 }

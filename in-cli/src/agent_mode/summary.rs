@@ -109,6 +109,7 @@ fn typ_label(typ: &Typ) -> String {
         Typ::Bool => "Bool".to_string(),
         Typ::Void => "Void".to_string(),
         Typ::Array(item) => format!("[{}]", typ_label(item)),
+        Typ::Vector(item) => format!("Vec<{}>", typ_label(item)),
         Typ::Named(name) => name.clone(),
         Typ::Generic(name) => name.clone(),
     }

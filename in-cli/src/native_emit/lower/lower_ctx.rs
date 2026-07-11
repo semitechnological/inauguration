@@ -1,6 +1,6 @@
 use super::lower_util::{array_item_matches, ensure_native_array_element, expr_type};
 use super::{PendingInrtCall, PendingStaticArray};
-use crate::core_ir::{Expr, Stmt, Typ};
+use crate::core_ir::{Expr, LoopKind, Stmt, Typ};
 use crate::native_emit::aarch64::{self, CodeEmitter};
 use std::collections::HashMap;
 
@@ -71,7 +71,7 @@ pub(crate) fn alloc_declared_locals(
     for stmt in body {
         match stmt {
             Stmt::Let(name, typ, expr) => ctx.alloc_let_local(name, typ.as_ref(), expr, fn_name)?,
-            Stmt::Break => {}
+            Stmt::Break | Stmt::Propagate => {}
             Stmt::If {
                 then_body,
                 else_body,
@@ -79,6 +79,18 @@ pub(crate) fn alloc_declared_locals(
             } => {
                 alloc_declared_locals(ctx, then_body, fn_name)?;
                 alloc_declared_locals(ctx, else_body, fn_name)?;
+            }
+            Stmt::Loop {
+                kind: LoopKind::For { binding },
+                body,
+                ..
+            } => {
+                ctx.alloc_local(binding, Some(&Typ::Int), fn_name)?;
+                let ptr = ctx.alloc_slot();
+                let len = ctx.alloc_slot();
+                let index = ctx.alloc_slot();
+                ctx.vec_for_slots.allocate(VecForSlots { ptr, len, index });
+                alloc_declared_locals(ctx, body, fn_name)?;
             }
             Stmt::Loop { body, .. } => alloc_declared_locals(ctx, body, fn_name)?,
             Stmt::Match { arms, .. } => {
@@ -122,6 +134,55 @@ pub(crate) enum LocalSlot {
     },
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct VecForSlots {
+    pub(crate) ptr: u32,
+    pub(crate) len: u32,
+    pub(crate) index: u32,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct IteratorMapSlots {
+    pub(crate) ptr: u32,
+    pub(crate) len: u32,
+    pub(crate) index: u32,
+    pub(crate) binding: u32,
+}
+
+#[derive(Default)]
+pub(crate) struct VecForPlan {
+    slots: Vec<VecForSlots>,
+    next: usize,
+}
+
+impl VecForPlan {
+    fn allocate(&mut self, slots: VecForSlots) {
+        self.slots.push(slots);
+    }
+
+    fn next(&mut self, fn_name: &str) -> Result<VecForSlots, String> {
+        let Some(slots) = self.slots.get(self.next).copied() else {
+            return Err(format!(
+                "native-lower: missing Vec iterator state in `{fn_name}`"
+            ));
+        };
+        self.next += 1;
+        Ok(slots)
+    }
+
+    fn assert_consumed(&self, fn_name: &str) -> Result<(), String> {
+        if self.next == self.slots.len() {
+            Ok(())
+        } else {
+            Err(format!(
+                "native-lower: Vec iterator plan incomplete in `{fn_name}` ({}/{} loops lowered)",
+                self.next,
+                self.slots.len()
+            ))
+        }
+    }
+}
+
 pub(crate) struct LowerCtx<'a> {
     /// Parameter name → stack offset (params fully spilled, no register residency)
     pub(crate) params: HashMap<String, u32>,
@@ -129,6 +190,7 @@ pub(crate) struct LowerCtx<'a> {
     /// Stack-based params: (incoming_stack_offset, local_stack_offset)
     pub(crate) stack_params: Vec<(u32, u32)>,
     pub(crate) locals: HashMap<String, LocalSlot>,
+    pub(crate) vec_for_slots: VecForPlan,
     pub(crate) structs: &'a HashMap<String, Vec<(String, Typ)>>,
     pub(crate) strings: &'a HashMap<String, i64>,
     pub(crate) pending_static_arrays: &'a mut Vec<PendingStaticArray>,
@@ -141,6 +203,13 @@ pub(crate) struct LowerCtx<'a> {
     pub(crate) prologue_stack_reserve: u32,
     /// Stack offset for saving binary operation lhs (preserved across rhs eval)
     pub(crate) binop_temp: u32,
+    pub(crate) binop_temps: [u32; 64],
+    pub(crate) binop_depth: usize,
+    pub(crate) call_arg_temps: [u32; 8],
+    pub(crate) vec_literal_header_offset: Option<u32>,
+    pub(crate) aggregate_vector_scratch: Option<(u32, usize)>,
+    pub(crate) iterator_chain_header_offset: Option<u32>,
+    pub(crate) iterator_map_slots: Option<IteratorMapSlots>,
 }
 
 #[allow(clippy::only_used_in_recursion)]
@@ -165,7 +234,12 @@ pub(crate) fn alloc_nested_struct_slots(
                 slots.insert(field.clone(), offset);
                 *abi_idx += 1;
             }
-            Typ::Named(inner_name) => {
+            Typ::Named(_) | Typ::Vector(_) => {
+                let inner_name = match field_ty {
+                    Typ::Named(name) => name.as_str(),
+                    Typ::Vector(_) => "Vec",
+                    _ => unreachable!(),
+                };
                 let Some(inner_fields) = structs.get(inner_name) else {
                     return Err(format!(
                         "native-lower: unknown nested struct type `{inner_name}` in struct `{struct_name}` for `{fn_name}`"
@@ -210,7 +284,12 @@ pub(crate) fn alloc_local_struct_fields(
             Typ::Int | Typ::Bool | Typ::String | Typ::Float => {
                 slots.insert(field.clone(), ctx.alloc_slot());
             }
-            Typ::Named(inner_name) => {
+            Typ::Named(_) | Typ::Vector(_) => {
+                let inner_name = match field_ty {
+                    Typ::Named(name) => name.as_str(),
+                    Typ::Vector(_) => "Vec",
+                    _ => unreachable!(),
+                };
                 let Some(inner_fields) = all_structs.get(inner_name) else {
                     return Err(format!(
                         "native-lower: unknown nested struct type `{inner_name}` in struct `{struct_name}` for `{fn_name}`"
@@ -257,6 +336,7 @@ impl<'a> LowerCtx<'a> {
             param_stores: Vec::new(),
             stack_params: Vec::new(),
             locals: HashMap::new(),
+            vec_for_slots: VecForPlan::default(),
             structs,
             strings,
             pending_static_arrays,
@@ -268,6 +348,13 @@ impl<'a> LowerCtx<'a> {
             saved_flag_offset: 0,
             prologue_stack_reserve: 0,
             binop_temp: 0,
+            binop_temps: [0; 64],
+            binop_depth: 0,
+            call_arg_temps: [0; 8],
+            vec_literal_header_offset: None,
+            aggregate_vector_scratch: None,
+            iterator_chain_header_offset: None,
+            iterator_map_slots: None,
         };
         let mut abi_idx = 0usize;
         for (name, typ) in params {
@@ -360,6 +447,26 @@ impl<'a> LowerCtx<'a> {
                     );
                     abi_idx += 2;
                 }
+                Typ::Vector(_) => {
+                    let Some(fields) = structs.get("Vec") else {
+                        return Err(format!("native-lower: missing Vec ABI type in `{fn_name}`"));
+                    };
+                    let slots = alloc_nested_struct_slots(
+                        &mut ctx,
+                        "Vec",
+                        fields,
+                        structs,
+                        &mut abi_idx,
+                        fn_name,
+                    )?;
+                    ctx.locals.insert(
+                        name.clone(),
+                        LocalSlot::Struct {
+                            typ: "Vec".to_string(),
+                            fields: slots,
+                        },
+                    );
+                }
                 _ => {
                     return Err(format!(
                         "native-lower: unsupported parameter type `{typ:?}` for `{name}` in `{fn_name}`"
@@ -414,6 +521,21 @@ impl<'a> LowerCtx<'a> {
                     name.to_string(),
                     LocalSlot::Struct {
                         typ: struct_name.clone(),
+                        fields: slots,
+                    },
+                );
+                Ok(())
+            }
+            Some(Typ::Vector(_)) => {
+                let Some(fields) = self.structs.get("Vec") else {
+                    return Err(format!("native-lower: missing Vec ABI type in `{fn_name}`"));
+                };
+                let mut slots = HashMap::new();
+                alloc_local_struct_fields(&mut slots, "Vec", fields, self.structs, self, fn_name)?;
+                self.locals.insert(
+                    name.to_string(),
+                    LocalSlot::Struct {
+                        typ: "Vec".to_string(),
                         fields: slots,
                     },
                 );
@@ -484,6 +606,28 @@ impl<'a> LowerCtx<'a> {
         let offset = self.stack_size;
         self.stack_size += 8;
         offset
+    }
+
+    pub(crate) fn acquire_binop_temp(&mut self, fn_name: &str) -> Result<u32, String> {
+        let Some(offset) = self.binop_temps.get(self.binop_depth).copied() else {
+            return Err(format!(
+                "native-lower: binary expression nesting is too deep in `{fn_name}`"
+            ));
+        };
+        self.binop_depth += 1;
+        Ok(offset)
+    }
+
+    pub(crate) fn release_binop_temp(&mut self) {
+        self.binop_depth -= 1;
+    }
+
+    pub(crate) fn next_vec_for_slots(&mut self, fn_name: &str) -> Result<VecForSlots, String> {
+        self.vec_for_slots.next(fn_name)
+    }
+
+    pub(crate) fn assert_vec_for_slots_consumed(&self, fn_name: &str) -> Result<(), String> {
+        self.vec_for_slots.assert_consumed(fn_name)
     }
 
     pub(crate) fn stack_reserve(&self) -> u32 {

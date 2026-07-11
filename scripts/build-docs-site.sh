@@ -13,7 +13,7 @@ CREPUS_MIN="0.9.18"
 CREPU_ROOT="${CREPU_ROOT:-$ROOT/../crepuscularity}"
 
 finish() {
-  "$ROOT/scripts/patch-docs-site-instrument-sans.sh" "$OUT"
+  "$ROOT/scripts/normalize-docs-site.sh" "$OUT"
   echo "inauguration.tsc.hk" >"$OUT/CNAME"
 }
 

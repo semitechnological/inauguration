@@ -70,16 +70,8 @@ pub struct InstallOptions {
 /// Default install root for registry-fetched dependencies (new projects).
 pub const PACKAGES_ROOT_DIR: &str = ".in-packages";
 
-/// Legacy install root; still honored when `install_path` in the lock points here.
-pub const LEGACY_PACKAGES_ROOT_DIR: &str = "target/in/packages";
-
 pub fn default_packages_root(package_root: &Path) -> PathBuf {
     package_root.join(PACKAGES_ROOT_DIR)
-}
-
-#[must_use]
-pub fn legacy_packages_root(package_root: &Path) -> PathBuf {
-    package_root.join(LEGACY_PACKAGES_ROOT_DIR)
 }
 
 pub fn add_packages(
@@ -936,15 +928,6 @@ mod tests {
         assert_eq!(
             default_packages_root(trailing_slash_path),
             PathBuf::from("/path/with/trailing/slash/.in-packages")
-        );
-    }
-
-    #[test]
-    fn legacy_packages_root_unchanged() {
-        let root = Path::new("/proj");
-        assert_eq!(
-            legacy_packages_root(root),
-            PathBuf::from("/proj/target/in/packages")
         );
     }
 

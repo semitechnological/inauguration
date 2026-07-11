@@ -74,6 +74,7 @@ pub enum Typ {
     Float,
     Void,
     Array(Box<Typ>),
+    Vector(Box<Typ>),
     Named(String),
     Generic(String),
 }
@@ -93,6 +94,7 @@ impl Typ {
                 _ => self.clone(),
             },
             Typ::Array(item) => Typ::Array(Box::new(item.canonical())),
+            Typ::Vector(item) => Typ::Vector(Box::new(item.canonical())),
             _ => self.clone(),
         }
     }
@@ -185,6 +187,8 @@ pub enum Stmt {
         body: Vec<Stmt>,
         catches: Vec<CatchArm>,
     },
+    /// Return from the current function when the runtime error flag is set.
+    Propagate,
     /// Evaluated for side effects (e.g. `.in` expression statements).
     Expr(Expr),
     /// Break out of the current loop.
@@ -193,7 +197,7 @@ pub enum Stmt {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoopKind {
-    For,
+    For { binding: String },
     While,
     Infinite,
 }

@@ -157,6 +157,7 @@ pub fn schema_field_size(typ: &crate::core_ir::Typ) -> u64 {
         crate::core_ir::Typ::String => 16,
         crate::core_ir::Typ::Void => 0,
         crate::core_ir::Typ::Array(_) => 16,
+        crate::core_ir::Typ::Vector(_) => 24,
         crate::core_ir::Typ::Named(_) => 8,
         crate::core_ir::Typ::Generic(_) => 8,
     }
@@ -173,5 +174,6 @@ pub fn schema_type_name(typ: &crate::core_ir::Typ) -> String {
         crate::core_ir::Typ::Named(name) => name.clone(),
         crate::core_ir::Typ::Generic(name) => name.clone(),
         crate::core_ir::Typ::Array(elem) => format!("[{}]", schema_type_name(elem)),
+        crate::core_ir::Typ::Vector(elem) => format!("Vec<{}>", schema_type_name(elem)),
     }
 }

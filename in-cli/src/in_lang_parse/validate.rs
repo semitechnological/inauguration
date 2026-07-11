@@ -37,6 +37,7 @@ pub(crate) fn type_known(structs: &HashSet<&str>, t: &Typ) -> bool {
     match t {
         Typ::Named(n) => structs.contains(n.as_str()),
         Typ::Array(item) => type_known(structs, item),
+        Typ::Vector(item) => type_known(structs, item),
         Typ::Int | Typ::Float | Typ::String | Typ::Bool | Typ::Void => true,
         Typ::Generic(_) => false,
     }
@@ -208,7 +209,7 @@ pub(crate) fn validate_stmt_types(
             validate_expr_shapes(fn_name, struct_fields, value)?;
         }
         Stmt::Return(None) => {}
-        Stmt::Break => {}
+        Stmt::Break | Stmt::Propagate => {}
         Stmt::If {
             cond,
             then_body,
@@ -345,7 +346,7 @@ pub(crate) fn desugar_method_calls_in_body(
                 }
             }
             Stmt::Return(None) => {}
-            Stmt::Break => {}
+            Stmt::Break | Stmt::Propagate => {}
             Stmt::Throw(expr) => {
                 desugar_method_calls_in_expr(expr, env, structs, fn_rets);
             }
@@ -609,7 +610,7 @@ pub fn inline_const_values(module: &mut UnifiedModule) {
                 }
             }
             Stmt::Return(None) => {}
-            Stmt::Break => {}
+            Stmt::Break | Stmt::Propagate => {}
         }
     }
 

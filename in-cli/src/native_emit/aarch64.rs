@@ -158,6 +158,10 @@ pub fn cbnz_w(rt: u8, offset_bytes: i32) -> u32 {
     0x3500_0000 | (imm19 << 5) | (rt as u32)
 }
 
+pub fn cbz_w(rt: u8, offset_bytes: i32) -> u32 {
+    cbnz_w(rt, offset_bytes) ^ (1 << 24)
+}
+
 pub fn fmov_from_gp(rd_v: u8, rn_x: u8) -> u32 {
     0x1E27_0000 | ((rn_x as u32) << 5) | (rd_v as u32)
 }

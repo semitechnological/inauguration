@@ -409,6 +409,7 @@ fn type_known_with_boundary(
             struct_names.contains(name.as_str()) || boundary_layout_names.contains(name.as_str())
         }
         Typ::Array(item) => type_known_with_boundary(struct_names, boundary_layout_names, item),
+        Typ::Vector(item) => type_known_with_boundary(struct_names, boundary_layout_names, item),
         Typ::Int | Typ::Float | Typ::String | Typ::Bool | Typ::Void => true,
         Typ::Generic(_) => false,
     }
