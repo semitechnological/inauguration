@@ -1,2 +1,3 @@
 *.in linguist-language=Inauguration
 *.sh linguist-vendored
+apps/package-ecosystem-sample/.in-packages/** linguist-vendored
