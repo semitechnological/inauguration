@@ -526,7 +526,10 @@ fn lower_function(
     ctx.stack_size += 16;
     let aggregate_vector_words =
         max_aggregate_vector_literal_words(&func.body, structs, &func.name)?;
-    if has_struct_return_vec_literal(&func.body) || aggregate_vector_words.is_some() {
+    if has_struct_return_vec_literal(&func.body)
+        || aggregate_vector_words.is_some()
+        || has_iter_once(&func.body)
+    {
         ctx.vec_literal_header_offset = Some(ctx.alloc_slot());
         ctx.alloc_slot();
         ctx.alloc_slot();
@@ -609,6 +612,55 @@ fn lower_function(
     }
 
     Ok(())
+}
+
+fn has_iter_once(body: &[Stmt]) -> bool {
+    fn expr_has_once(expr: &Expr) -> bool {
+        match expr {
+            Expr::Call { callee, args, .. } => {
+                matches!(callee.as_ref(), Expr::Ident(name) if name == "std::iter::once")
+                    || expr_has_once(callee)
+                    || args.iter().any(expr_has_once)
+            }
+            Expr::Binary { lhs, rhs, .. } => expr_has_once(lhs) || expr_has_once(rhs),
+            Expr::Unary { expr, .. } | Expr::Field { base: expr, .. } => expr_has_once(expr),
+            Expr::Index { base, index } => expr_has_once(base) || expr_has_once(index),
+            Expr::StructInit { fields, .. } => fields.iter().any(|(_, value)| expr_has_once(value)),
+            Expr::ArrayLit(items) => items.iter().any(expr_has_once),
+            Expr::IntLit(_)
+            | Expr::FloatLit(_)
+            | Expr::StringLit(_)
+            | Expr::BoolLit(_)
+            | Expr::Ident(_)
+            | Expr::Closure { .. } => false,
+        }
+    }
+    body.iter().any(|stmt| match stmt {
+        Stmt::Let(_, _, expr)
+        | Stmt::Assign(_, expr)
+        | Stmt::Expr(expr)
+        | Stmt::Return(Some(expr))
+        | Stmt::Throw(expr) => expr_has_once(expr),
+        Stmt::IndexAssign {
+            base, index, value, ..
+        } => expr_has_once(base) || expr_has_once(index) || expr_has_once(value),
+        Stmt::FieldAssign { base, value, .. } => expr_has_once(base) || expr_has_once(value),
+        Stmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => expr_has_once(cond) || has_iter_once(then_body) || has_iter_once(else_body),
+        Stmt::Loop { cond, body, .. } => {
+            cond.as_ref().is_some_and(expr_has_once) || has_iter_once(body)
+        }
+        Stmt::Match {
+            scrutinee, arms, ..
+        } => expr_has_once(scrutinee) || arms.iter().any(|arm| has_iter_once(&arm.body)),
+        Stmt::Try { body, catches, .. } => {
+            has_iter_once(body) || catches.iter().any(|catch| has_iter_once(&catch.body))
+        }
+        Stmt::Return(None) | Stmt::Break | Stmt::Propagate => false,
+    })
 }
 
 fn has_struct_return_vec_literal(body: &[Stmt]) -> bool {
