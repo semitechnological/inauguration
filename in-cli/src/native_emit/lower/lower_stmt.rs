@@ -43,16 +43,49 @@ pub(crate) fn lower_stmt(
                             fn_name,
                         )?;
                     }
-                    Typ::Vector(_) => {
-                        lower_struct_expr_into_regs(
-                            emitter,
-                            ctx,
-                            expr,
-                            "Vec",
-                            functions,
-                            pending_calls,
-                            fn_name,
-                        )?;
+                    Typ::Vector(elem) => {
+                        if let (Typ::Named(struct_name), Expr::ArrayLit(items)) =
+                            (elem.as_ref(), expr)
+                        {
+                            let Some(header_offset) = ctx.vec_literal_header_offset else {
+                                return Err(format!(
+                                    "native-lower: missing Vec return header in `{fn_name}`"
+                                ));
+                            };
+                            super::lower_call::lower_aggregate_vector_literal_into_slots(
+                                emitter,
+                                ctx,
+                                items,
+                                struct_name,
+                                header_offset,
+                                header_offset + 8,
+                                header_offset + 16,
+                                functions,
+                                pending_calls,
+                                fn_name,
+                            )?;
+                            for (reg, offset) in
+                                [header_offset, header_offset + 8, header_offset + 16]
+                                    .into_iter()
+                                    .enumerate()
+                            {
+                                emitter.emit_u32(aarch64::ldr64(
+                                    reg as u8,
+                                    aarch64::REG_SP,
+                                    offset,
+                                ));
+                            }
+                        } else {
+                            lower_struct_expr_into_regs(
+                                emitter,
+                                ctx,
+                                expr,
+                                "Vec",
+                                functions,
+                                pending_calls,
+                                fn_name,
+                            )?;
+                        }
                     }
                     _ => {
                         lower_expr::lower_expr_into(
