@@ -742,6 +742,51 @@ fn max_aggregate_vector_literal_words(
     structs: &HashMap<String, Vec<(String, Typ)>>,
     fn_name: &str,
 ) -> Result<Option<usize>, String> {
+    fn max_nested_vector_element_words(
+        typ: &Typ,
+        structs: &HashMap<String, Vec<(String, Typ)>>,
+        fn_name: &str,
+        depth: u32,
+    ) -> Result<usize, String> {
+        if depth > 10 {
+            return Err(format!(
+                "native-lower: recursive struct type detected in `{fn_name}`"
+            ));
+        }
+        match typ {
+            Typ::Vector(element) => {
+                let mut max = lower_util::native_param_abi_slots(
+                    &[("value".to_string(), (**element).clone())],
+                    structs,
+                    fn_name,
+                )?;
+                max = max.max(max_nested_vector_element_words(
+                    element,
+                    structs,
+                    fn_name,
+                    depth + 1,
+                )?);
+                Ok(max)
+            }
+            Typ::Named(name) => {
+                let fields = lower_util::native_struct_fields(structs, name, fn_name)?;
+                let mut max = 0;
+                for (_, field_typ) in fields {
+                    max = max.max(max_nested_vector_element_words(
+                        &field_typ,
+                        structs,
+                        fn_name,
+                        depth + 1,
+                    )?);
+                }
+                Ok(max)
+            }
+            Typ::Array(element) => {
+                max_nested_vector_element_words(element, structs, fn_name, depth + 1)
+            }
+            _ => Ok(0),
+        }
+    }
     fn inspect_expr(
         expr: &Expr,
         structs: &HashMap<String, Vec<(String, Typ)>>,
@@ -757,6 +802,12 @@ fn max_aggregate_vector_literal_words(
                         fn_name,
                     )?;
                     *max = (*max).max(words);
+                    *max = (*max).max(max_nested_vector_element_words(
+                        &Typ::Named(name.clone()),
+                        structs,
+                        fn_name,
+                        0,
+                    )?);
                 }
                 for item in items {
                     inspect_expr(item, structs, fn_name, max)?;
@@ -853,15 +904,6 @@ fn max_aggregate_vector_literal_words(
     }
     let mut max = 0;
     inspect_body(body, structs, fn_name, &mut max)?;
-    if max != 0 {
-        for name in structs.keys() {
-            max = max.max(lower_util::native_param_abi_slots(
-                &[("value".to_string(), Typ::Named(name.clone()))],
-                structs,
-                fn_name,
-            )?);
-        }
-    }
     Ok((max != 0).then_some(max))
 }
 

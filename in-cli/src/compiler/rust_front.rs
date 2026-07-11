@@ -7,8 +7,8 @@ use crate::boundary_ir::{
     BoundaryTransfer, CompileArtifact, IN_ABI_VERSION,
 };
 use crate::boundary_verify::boundary_ir_verify;
+use crate::core_ir::{CatchArm, Expr, LoopKind, MatchArm, Stmt, Typ};
 use crate::core_ir::{Decl, UnifiedModule};
-use crate::core_ir::{Expr, LoopKind, MatchArm, Stmt, Typ};
 use quote::ToTokens;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -621,6 +621,16 @@ fn pattern_name(pat: &syn::Pat) -> Option<String> {
     }
 }
 
+fn err_pattern_binding(pat: &syn::Pat) -> Option<String> {
+    let syn::Pat::TupleStruct(tuple) = pat else {
+        return None;
+    };
+    (tuple.path.segments.last()?.ident == "Err")
+        .then(|| tuple.elems.first())
+        .flatten()
+        .and_then(pattern_name)
+}
+
 fn map_type(ty: &syn::Type) -> Typ {
     match ty {
         syn::Type::Path(tp) => {
@@ -659,6 +669,7 @@ fn map_type(ty: &syn::Type) -> Typ {
             }
         }
         syn::Type::Reference(r) => map_type(&r.elem),
+        syn::Type::Array(array) => Typ::Array(Box::new(map_type(&array.elem))),
         syn::Type::Tuple(t) if t.elems.is_empty() => Typ::Void,
         _ => Typ::Named(ty.to_token_stream().to_string()),
     }
@@ -830,6 +841,24 @@ fn lower_expr_stmt(
         syn::Expr::If(eif) => {
             // Handle `if let` (condition is Expr::Let)
             if let syn::Expr::Let(expr_let) = &*eif.cond {
+                if eif.else_branch.is_none()
+                    && let Some(binding) = err_pattern_binding(&expr_let.pat)
+                {
+                    out.push(Stmt::Try {
+                        body: vec![Stmt::Expr(lower_expr_with_types(
+                            &expr_let.expr,
+                            local_types,
+                        ))],
+                        catches: vec![CatchArm {
+                            pattern: binding,
+                            body: lower_block_no_implicit_return_with_types(
+                                &eif.then_branch,
+                                local_types,
+                            ),
+                        }],
+                    });
+                    return;
+                }
                 // `if let Pat = Expr { ... } else { ... }`
                 // Lower to: let _pat = Expr; match _pat { Pat => ..., _ => else }
                 let scrutinee = lower_expr_with_types(&expr_let.expr, local_types);
@@ -1026,6 +1055,13 @@ fn lower_expr_with_types(expr: &syn::Expr, local_types: &mut HashMap<String, Str
         syn::Expr::Reference(r) => lower_expr_with_types(&r.expr, local_types),
         syn::Expr::Paren(p) => lower_expr_with_types(&p.expr, local_types),
         syn::Expr::Tuple(tuple) if tuple.elems.is_empty() => Expr::IntLit(0),
+        syn::Expr::Array(array) => Expr::ArrayLit(
+            array
+                .elems
+                .iter()
+                .map(|item| lower_expr_with_types(item, local_types))
+                .collect(),
+        ),
         syn::Expr::Macro(mac) if mac.mac.path.is_ident("vec") => {
             syn::punctuated::Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated
                 .parse2(mac.mac.tokens.clone())
@@ -1166,6 +1202,25 @@ fn main() -> Result<i64, i64> {
     }
 
     #[test]
+    fn lowers_if_let_err_to_try() {
+        let module = parse_rust_source(
+            "fn run() -> Result<(), i64> { Ok(()) } fn main() { if let Err(err) = run() { report(err); } }",
+        )
+        .expect("parse if let err");
+        let Decl::Function { body, .. } = module
+            .decls
+            .iter()
+            .find(|decl| matches!(decl, Decl::Function { name, .. } if name == "main"))
+            .expect("main function")
+        else {
+            panic!("main must be a function");
+        };
+        assert!(
+            matches!(body.first(), Some(Stmt::Try { catches, .. }) if catches[0].pattern == "err")
+        );
+    }
+
+    #[test]
     fn lowers_vec_macro_literal() {
         let module = parse_rust_source("fn main() { let values: Vec<i64> = vec![1, 2]; }")
             .expect("parse Vec literal");
@@ -1177,6 +1232,19 @@ fn main() -> Result<i64, i64> {
             Some(Stmt::Let(_, Some(Typ::Vector(elem)), Expr::ArrayLit(items)))
                 if **elem == Typ::Int && items.len() == 2
         ));
+    }
+
+    #[test]
+    fn lowers_fixed_string_array_return() {
+        let module = parse_rust_source("fn names() -> [&'static str; 1] { [\"step\"] }")
+            .expect("parse fixed string array");
+        let Decl::Function { ret, body, .. } = &module.decls[0] else {
+            panic!("main must be a function");
+        };
+        assert_eq!(*ret, Typ::Array(Box::new(Typ::String)));
+        assert!(
+            matches!(body.last(), Some(Stmt::Return(Some(Expr::ArrayLit(items)))) if items.len() == 1)
+        );
     }
 
     #[test]
