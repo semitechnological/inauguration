@@ -37,6 +37,7 @@ pub(crate) fn type_known(structs: &HashSet<&str>, t: &Typ) -> bool {
     match t {
         Typ::Named(n) => structs.contains(n.as_str()),
         Typ::Array(item) => type_known(structs, item),
+        Typ::Vector(item) => type_known(structs, item),
         Typ::Int | Typ::Float | Typ::String | Typ::Bool | Typ::Void => true,
         Typ::Generic(_) => false,
     }

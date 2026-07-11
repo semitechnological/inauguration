@@ -220,7 +220,12 @@ pub(crate) fn alloc_nested_struct_slots(
                 slots.insert(field.clone(), offset);
                 *abi_idx += 1;
             }
-            Typ::Named(inner_name) => {
+            Typ::Named(_) | Typ::Vector(_) => {
+                let inner_name = match field_ty {
+                    Typ::Named(name) => name.as_str(),
+                    Typ::Vector(_) => "Vec",
+                    _ => unreachable!(),
+                };
                 let Some(inner_fields) = structs.get(inner_name) else {
                     return Err(format!(
                         "native-lower: unknown nested struct type `{inner_name}` in struct `{struct_name}` for `{fn_name}`"
@@ -265,7 +270,12 @@ pub(crate) fn alloc_local_struct_fields(
             Typ::Int | Typ::Bool | Typ::String | Typ::Float => {
                 slots.insert(field.clone(), ctx.alloc_slot());
             }
-            Typ::Named(inner_name) => {
+            Typ::Named(_) | Typ::Vector(_) => {
+                let inner_name = match field_ty {
+                    Typ::Named(name) => name.as_str(),
+                    Typ::Vector(_) => "Vec",
+                    _ => unreachable!(),
+                };
                 let Some(inner_fields) = all_structs.get(inner_name) else {
                     return Err(format!(
                         "native-lower: unknown nested struct type `{inner_name}` in struct `{struct_name}` for `{fn_name}`"
@@ -417,6 +427,26 @@ impl<'a> LowerCtx<'a> {
                     );
                     abi_idx += 2;
                 }
+                Typ::Vector(_) => {
+                    let Some(fields) = structs.get("Vec") else {
+                        return Err(format!("native-lower: missing Vec ABI type in `{fn_name}`"));
+                    };
+                    let slots = alloc_nested_struct_slots(
+                        &mut ctx,
+                        "Vec",
+                        fields,
+                        structs,
+                        &mut abi_idx,
+                        fn_name,
+                    )?;
+                    ctx.locals.insert(
+                        name.clone(),
+                        LocalSlot::Struct {
+                            typ: "Vec".to_string(),
+                            fields: slots,
+                        },
+                    );
+                }
                 _ => {
                     return Err(format!(
                         "native-lower: unsupported parameter type `{typ:?}` for `{name}` in `{fn_name}`"
@@ -471,6 +501,21 @@ impl<'a> LowerCtx<'a> {
                     name.to_string(),
                     LocalSlot::Struct {
                         typ: struct_name.clone(),
+                        fields: slots,
+                    },
+                );
+                Ok(())
+            }
+            Some(Typ::Vector(_)) => {
+                let Some(fields) = self.structs.get("Vec") else {
+                    return Err(format!("native-lower: missing Vec ABI type in `{fn_name}`"));
+                };
+                let mut slots = HashMap::new();
+                alloc_local_struct_fields(&mut slots, "Vec", fields, self.structs, self, fn_name)?;
+                self.locals.insert(
+                    name.to_string(),
+                    LocalSlot::Struct {
+                        typ: "Vec".to_string(),
                         fields: slots,
                     },
                 );

@@ -74,6 +74,7 @@ pub enum Typ {
     Float,
     Void,
     Array(Box<Typ>),
+    Vector(Box<Typ>),
     Named(String),
     Generic(String),
 }
@@ -93,6 +94,7 @@ impl Typ {
                 _ => self.clone(),
             },
             Typ::Array(item) => Typ::Array(Box::new(item.canonical())),
+            Typ::Vector(item) => Typ::Vector(Box::new(item.canonical())),
             _ => self.clone(),
         }
     }

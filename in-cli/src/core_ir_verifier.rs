@@ -814,6 +814,7 @@ fn type_name(typ: &Typ) -> String {
         Typ::Bool => "Bool".to_string(),
         Typ::Void => "Void".to_string(),
         Typ::Array(item) => format!("[{}]", type_name(item)),
+        Typ::Vector(item) => format!("Vec<{}>", type_name(item)),
         Typ::Named(name) => name.clone(),
         Typ::Generic(name) => name.clone(),
     }

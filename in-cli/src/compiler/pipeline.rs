@@ -388,6 +388,7 @@ fn lower_typ(typ: &crate::core_ir::Typ) -> IrType {
         crate::core_ir::Typ::Float => IrType::F64,
         crate::core_ir::Typ::Void => IrType::Void,
         crate::core_ir::Typ::Array(elem) => IrType::Array(Box::new(lower_typ(elem)), 0),
+        crate::core_ir::Typ::Vector(elem) => IrType::Array(Box::new(lower_typ(elem)), 0),
         crate::core_ir::Typ::Named(name) => IrType::Named(name.clone()),
         crate::core_ir::Typ::Generic(name) => IrType::Named(name.clone()),
     }
