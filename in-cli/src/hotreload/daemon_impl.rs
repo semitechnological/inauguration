@@ -1102,7 +1102,9 @@ mod tests {
         let metrics_path = std::env::temp_dir().join(format!("hotreload-ok-{}.ndjson", now_ms()));
         let path = std::env::temp_dir().join(format!("hotreload-ok-{}.swift", now_ms()));
         // Use valid Swift syntax that Tree-sitter can parse
-        tokio::fs::write(&path, "func main() {}\n").await.expect("write swift");
+        tokio::fs::write(&path, "func main() {}\n")
+            .await
+            .expect("write swift");
         let pool = ClientPool::new();
         let mut cache = CompileCache::new();
         let patch = emit_patch(
