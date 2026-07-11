@@ -631,6 +631,16 @@ fn main() -> Int {
 }
 
 #[test]
+fn lowers_fixed_array_into_iter() {
+    let module = crate::compiler::rust_front::parse_rust_source(
+        "fn values() -> [i64; 2] { [2, 5] } fn main() { values().into_iter(); }",
+    )
+    .expect("parse rust");
+
+    lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
+}
+
+#[test]
 fn lowers_bool_and_string_array_argument_return_paths() {
     let module = crate::in_lang_parse::parse_in_source(
         r#"

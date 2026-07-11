@@ -1075,6 +1075,33 @@ fn lower_expr_with_types(expr: &syn::Expr, local_types: &mut HashMap<String, Str
                 })
                 .unwrap_or_else(|_| Expr::Ident(mac.to_token_stream().to_string()))
         }
+        syn::Expr::Closure(closure) => {
+            let mut closure_types = local_types.clone();
+            let params = closure
+                .inputs
+                .iter()
+                .map(|input| {
+                    let name = pattern_name(input).unwrap_or_else(|| "_".to_string());
+                    let typ =
+                        local_decl_type(input).unwrap_or_else(|| Typ::Generic("_".to_string()));
+                    closure_types.insert(name.clone(), type_to_string(&typ));
+                    (name, typ)
+                })
+                .collect();
+            let body = match closure.body.as_ref() {
+                syn::Expr::Block(block) => lower_block_with_types(&block.block, &mut closure_types),
+                body => vec![Stmt::Return(Some(lower_expr_with_types(
+                    body,
+                    &mut closure_types,
+                )))],
+            };
+            Expr::Closure {
+                params,
+                ret: Typ::Generic("_".to_string()),
+                body,
+                captures: vec![],
+            }
+        }
         syn::Expr::Call(c) => Expr::Call {
             callee: Box::new(lower_expr_with_types(&c.func, local_types)),
             args: c
@@ -1244,6 +1271,18 @@ fn main() -> Result<i64, i64> {
         assert_eq!(*ret, Typ::Array(Box::new(Typ::String)));
         assert!(
             matches!(body.last(), Some(Stmt::Return(Some(Expr::ArrayLit(items)))) if items.len() == 1)
+        );
+    }
+
+    #[test]
+    fn lowers_closure_body() {
+        let module = parse_rust_source("fn main() { let f = |value: i64| value + 1; }")
+            .expect("parse closure");
+        let Decl::Function { body, .. } = &module.decls[0] else {
+            panic!("main must be a function");
+        };
+        assert!(
+            matches!(body.first(), Some(Stmt::Let(_, _, Expr::Closure { params, body, .. })) if params == &vec![("value".to_string(), Typ::Int)] && matches!(body.last(), Some(Stmt::Return(Some(Expr::Binary { .. })))))
         );
     }
 
