@@ -998,10 +998,7 @@ mod tests {
             select_version("latest", Some("2.0.0"), Some(&versions))?,
             "2.0.0"
         );
-        assert_eq!(
-            select_version("^1.0.0", None, Some(&versions))?,
-            "1.1.0"
-        );
+        assert_eq!(select_version("^1.0.0", None, Some(&versions))?, "1.1.0");
         Ok(())
     }
 
