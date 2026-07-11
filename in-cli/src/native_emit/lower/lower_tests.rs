@@ -2044,3 +2044,26 @@ fn main() -> Int {
         .expect("jit load");
     assert_eq!(unsafe { rt.invoke("main", &[]).expect("invoke") }, 1);
 }
+
+#[test]
+#[cfg(target_arch = "aarch64")]
+fn jit_executes_string_concat_with_nested_call() {
+    let module = crate::in_lang_parse::parse_in_source(
+        r#"
+fn main() -> Int {
+  return str_eq("value=" + to_string(7), "value=7");
+}
+"#,
+    )
+    .expect("parse");
+    let lowered = lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
+    let function_offsets = vec![(
+        "main".into(),
+        ENTRY_STUB_SIZE,
+        lowered.code.len() as u32 - ENTRY_STUB_SIZE,
+    )];
+    let mut rt = crate::jit_runtime::JitRuntime::new();
+    rt.load(&lowered.code, &function_offsets, &lowered.relocations)
+        .expect("jit load");
+    assert_eq!(unsafe { rt.invoke("main", &[]).expect("invoke") }, 1);
+}

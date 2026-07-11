@@ -524,6 +524,9 @@ fn lower_function(
     )?;
     alloc_declared_locals(&mut ctx, &func.body, &func.name)?;
     ctx.binop_temp = ctx.alloc_slot();
+    for index in 0..ctx.binop_temps.len() {
+        ctx.binop_temps[index] = ctx.alloc_slot();
+    }
     ctx.saved_flag_offset = ctx.stack_size + 8;
     ctx.stack_size += 16;
     for index in 0..ctx.call_arg_temps.len() {
