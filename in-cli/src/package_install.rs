@@ -949,19 +949,17 @@ mod tests {
     }
 
     #[test]
-    fn installs_path_dependencies_offline() {
-        let temp = tempfile_dir("package-install");
+    fn installs_path_dependencies_offline() -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile_dir("package-install")?;
         let vendor = temp.join("vendor/cargo/demo");
-        fs::create_dir_all(&vendor).expect("vendor dir");
-        fs::write(vendor.join("README"), "demo").expect("vendor readme");
+        fs::create_dir_all(&vendor)?;
+        fs::write(vendor.join("README"), "demo")?;
         fs::write(
             temp.join(PACKAGE_MANIFEST_FILE),
             "name: demo\nversion: 0.1.0\ndependencies:\n  cargo:demo:\n    version: path:vendor/cargo/demo\n    kind: cargo\n",
-        )
-        .expect("manifest");
+        )?;
 
-        let report =
-            install_dependencies(&temp, InstallOptions { offline: false }).expect("install");
+        let report = install_dependencies(&temp, InstallOptions { offline: false })?;
         assert_eq!(report.installed.len(), 1);
         assert_eq!(report.installed[0].status, "installed");
         assert!(report.installed[0].install_path.is_dir());
@@ -972,36 +970,34 @@ mod tests {
                 .is_file()
         );
         assert!(report.lock_path.is_file());
-        let lock = fs::read_to_string(report.lock_path).expect("lock");
+        let lock = fs::read_to_string(report.lock_path)?;
         assert!(lock.contains("cargo:demo"));
         let _ = fs::remove_dir_all(temp);
+        Ok(())
     }
 
-    fn tempfile_dir(prefix: &str) -> PathBuf {
+    fn tempfile_dir(prefix: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
         let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("clock")
+            .duration_since(std::time::UNIX_EPOCH)?
             .as_nanos();
         let path = std::env::temp_dir().join(format!("{prefix}-{unique}"));
-        fs::create_dir_all(&path).expect("temp dir");
-        path
+        fs::create_dir_all(&path)?;
+        Ok(path)
     }
 
     #[test]
-    fn select_version_prefers_latest_and_caret() {
+    fn select_version_prefers_latest_and_caret() -> Result<(), Box<dyn std::error::Error>> {
         let versions = vec![
             "1.0.0".to_string(),
             "1.1.0".to_string(),
             "2.0.0".to_string(),
         ];
         assert_eq!(
-            select_version("latest", Some("2.0.0"), Some(&versions)).expect("latest"),
+            select_version("latest", Some("2.0.0"), Some(&versions))?,
             "2.0.0"
         );
-        assert_eq!(
-            select_version("^1.0.0", None, Some(&versions)).expect("caret"),
-            "1.1.0"
-        );
+        assert_eq!(select_version("^1.0.0", None, Some(&versions))?, "1.1.0");
+        Ok(())
     }
 
     #[test]
@@ -1022,23 +1018,24 @@ mod tests {
     }
 
     #[test]
-    fn add_packages_writes_manifest_entries() {
-        let temp = tempfile_dir("package-add");
-        let (_, added) = add_packages(&temp, &["pip:flask".to_string()], "latest").expect("add");
+    fn add_packages_writes_manifest_entries() -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile_dir("package-add")?;
+        let (_, added) = add_packages(&temp, &["pip:flask".to_string()], "latest")?;
         assert_eq!(added, vec!["pypi:flask"]);
-        let manifest = fs::read_to_string(temp.join(PACKAGE_MANIFEST_FILE)).expect("manifest");
+        let manifest = fs::read_to_string(temp.join(PACKAGE_MANIFEST_FILE))?;
         assert!(manifest.contains("pypi:flask:"));
         assert!(manifest.contains("kind: pypi"));
         let _ = fs::remove_dir_all(temp);
+        Ok(())
     }
 
     #[test]
-    fn manifest_ecosystem_keys_parse() {
+    fn manifest_ecosystem_keys_parse() -> Result<(), Box<dyn std::error::Error>> {
         let manifest = parse_package_manifest_source(
             "name: demo\nversion: 0.1.0\ndependencies:\n  cargo:crepuscularity:\n    version: latest\n  npm:hono:\n    version: latest\n",
-        )
-        .expect("parse");
+        )?;
         assert!(manifest.dependencies.contains_key("cargo:crepuscularity"));
         assert!(manifest.dependencies.contains_key("npm:hono"));
+        Ok(())
     }
 }
