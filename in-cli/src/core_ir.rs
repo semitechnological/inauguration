@@ -193,7 +193,7 @@ pub enum Stmt {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoopKind {
-    For,
+    For { binding: String },
     While,
     Infinite,
 }

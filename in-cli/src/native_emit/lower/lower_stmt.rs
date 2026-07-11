@@ -4,7 +4,7 @@ use super::lower_util::{
     find_field_offset, is_native_scalar_type, native_struct_fields,
 };
 use super::{FunctionInfo, LocalSlot, LowerCtx, PendingCall};
-use crate::core_ir::{Expr, Stmt, Typ};
+use crate::core_ir::{Expr, LoopKind, Stmt, Typ};
 use crate::native_emit::aarch64::{self, CodeEmitter};
 use std::collections::HashMap;
 
@@ -132,6 +132,21 @@ pub(crate) fn lower_stmt(
             lower_expr::lower_expr_into(emitter, ctx, expr, 0, functions, pending_calls, fn_name)?;
             Ok(())
         }
+        Stmt::Loop {
+            kind: LoopKind::For { binding },
+            cond: Some(iterator),
+            body,
+        } => super::lower_vec_for(
+            emitter,
+            ctx,
+            binding,
+            iterator,
+            body,
+            functions,
+            pending_calls,
+            fn_name,
+            ret_typ,
+        ),
         Stmt::Loop { cond, body, .. } => lower_loop(
             emitter,
             ctx,

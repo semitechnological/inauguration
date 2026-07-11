@@ -827,16 +827,11 @@ fn lower_expr_stmt(
             }
         }
         syn::Expr::ForLoop(f) => {
-            let mut body = vec![Stmt::Expr(Expr::Ident(format!(
-                "for_pat:{}",
-                f.pat.to_token_stream()
-            )))];
-            body.extend(lower_block_no_implicit_return_with_types(
-                &f.body,
-                local_types,
-            ));
+            let body = lower_block_no_implicit_return_with_types(&f.body, local_types);
             out.push(Stmt::Loop {
-                kind: LoopKind::For,
+                kind: LoopKind::For {
+                    binding: f.pat.to_token_stream().to_string(),
+                },
                 cond: Some(lower_expr_with_types(&f.expr, local_types)),
                 body,
             });
@@ -942,6 +937,7 @@ fn lower_expr_with_types(expr: &syn::Expr, local_types: &mut HashMap<String, Str
         }
         syn::Expr::Reference(r) => lower_expr_with_types(&r.expr, local_types),
         syn::Expr::Paren(p) => lower_expr_with_types(&p.expr, local_types),
+        syn::Expr::Tuple(tuple) if tuple.elems.is_empty() => Expr::IntLit(0),
         syn::Expr::Call(c) => Expr::Call {
             callee: Box::new(lower_expr_with_types(&c.func, local_types)),
             args: c
@@ -1031,6 +1027,15 @@ fn main() { let v = 7; return; }
     }
 
     #[test]
+    fn lowers_unit_tuple_to_zero() {
+        let expr: syn::Expr = syn::parse_str("()").expect("parse unit tuple");
+        assert_eq!(
+            lower_expr_with_types(&expr, &mut HashMap::new()),
+            Expr::IntLit(0)
+        );
+    }
+
+    #[test]
     fn extracts_repr_c_layout_and_extern_c_symbol() {
         let src = r#"
 #[repr(C)]
@@ -1101,7 +1106,7 @@ fn main() {
         assert!(body.iter().any(|s| matches!(
             s,
             Stmt::Loop {
-                kind: LoopKind::For,
+                kind: LoopKind::For { .. },
                 ..
             }
         )));

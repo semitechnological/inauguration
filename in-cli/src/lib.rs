@@ -75,7 +75,6 @@ pub mod package_ref;
 pub mod package_runtime;
 pub mod parser_registry;
 pub mod target;
-pub mod toolchain_util;
 pub mod typecheck;
 
 #[cfg(test)]

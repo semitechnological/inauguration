@@ -24,6 +24,7 @@ mod lower_collect;
 mod lower_compile;
 mod lower_ctx;
 mod lower_expr;
+mod lower_iterator;
 mod lower_stdlib;
 mod lower_stmt;
 mod lower_util;
@@ -40,6 +41,7 @@ pub(crate) use lower_collect::{
 pub(crate) use lower_ctx::{
     LocalSlot, LowerCtx, alloc_declared_locals, append_static_arrays, append_string_table,
 };
+pub(crate) use lower_iterator::lower_vec_for;
 pub(crate) use lower_stmt::lower_stmt;
 pub(crate) use lower_util::{
     contains_call, emit_epilogue, emit_failure_return, ensure_return_type, expr_type,
@@ -583,6 +585,7 @@ fn lower_function(
             &func.ret,
         )?;
     }
+    ctx.assert_vec_for_slots_consumed(&func.name)?;
 
     if !ctx.emitted_return {
         if func.ret == Typ::Void {

@@ -1,6 +1,6 @@
 use super::lower_util::{array_item_matches, ensure_native_array_element, expr_type};
 use super::{PendingInrtCall, PendingStaticArray};
-use crate::core_ir::{Expr, Stmt, Typ};
+use crate::core_ir::{Expr, LoopKind, Stmt, Typ};
 use crate::native_emit::aarch64::{self, CodeEmitter};
 use std::collections::HashMap;
 
@@ -80,6 +80,18 @@ pub(crate) fn alloc_declared_locals(
                 alloc_declared_locals(ctx, then_body, fn_name)?;
                 alloc_declared_locals(ctx, else_body, fn_name)?;
             }
+            Stmt::Loop {
+                kind: LoopKind::For { binding },
+                body,
+                ..
+            } => {
+                ctx.alloc_local(binding, Some(&Typ::Int), fn_name)?;
+                let ptr = ctx.alloc_slot();
+                let len = ctx.alloc_slot();
+                let index = ctx.alloc_slot();
+                ctx.vec_for_slots.allocate(VecForSlots { ptr, len, index });
+                alloc_declared_locals(ctx, body, fn_name)?;
+            }
             Stmt::Loop { body, .. } => alloc_declared_locals(ctx, body, fn_name)?,
             Stmt::Match { arms, .. } => {
                 for arm in arms {
@@ -122,6 +134,47 @@ pub(crate) enum LocalSlot {
     },
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct VecForSlots {
+    pub(crate) ptr: u32,
+    pub(crate) len: u32,
+    pub(crate) index: u32,
+}
+
+#[derive(Default)]
+pub(crate) struct VecForPlan {
+    slots: Vec<VecForSlots>,
+    next: usize,
+}
+
+impl VecForPlan {
+    fn allocate(&mut self, slots: VecForSlots) {
+        self.slots.push(slots);
+    }
+
+    fn next(&mut self, fn_name: &str) -> Result<VecForSlots, String> {
+        let Some(slots) = self.slots.get(self.next).copied() else {
+            return Err(format!(
+                "native-lower: missing Vec iterator state in `{fn_name}`"
+            ));
+        };
+        self.next += 1;
+        Ok(slots)
+    }
+
+    fn assert_consumed(&self, fn_name: &str) -> Result<(), String> {
+        if self.next == self.slots.len() {
+            Ok(())
+        } else {
+            Err(format!(
+                "native-lower: Vec iterator plan incomplete in `{fn_name}` ({}/{} loops lowered)",
+                self.next,
+                self.slots.len()
+            ))
+        }
+    }
+}
+
 pub(crate) struct LowerCtx<'a> {
     /// Parameter name → stack offset (params fully spilled, no register residency)
     pub(crate) params: HashMap<String, u32>,
@@ -129,6 +182,7 @@ pub(crate) struct LowerCtx<'a> {
     /// Stack-based params: (incoming_stack_offset, local_stack_offset)
     pub(crate) stack_params: Vec<(u32, u32)>,
     pub(crate) locals: HashMap<String, LocalSlot>,
+    pub(crate) vec_for_slots: VecForPlan,
     pub(crate) structs: &'a HashMap<String, Vec<(String, Typ)>>,
     pub(crate) strings: &'a HashMap<String, i64>,
     pub(crate) pending_static_arrays: &'a mut Vec<PendingStaticArray>,
@@ -257,6 +311,7 @@ impl<'a> LowerCtx<'a> {
             param_stores: Vec::new(),
             stack_params: Vec::new(),
             locals: HashMap::new(),
+            vec_for_slots: VecForPlan::default(),
             structs,
             strings,
             pending_static_arrays,
@@ -484,6 +539,14 @@ impl<'a> LowerCtx<'a> {
         let offset = self.stack_size;
         self.stack_size += 8;
         offset
+    }
+
+    pub(crate) fn next_vec_for_slots(&mut self, fn_name: &str) -> Result<VecForSlots, String> {
+        self.vec_for_slots.next(fn_name)
+    }
+
+    pub(crate) fn assert_vec_for_slots_consumed(&self, fn_name: &str) -> Result<(), String> {
+        self.vec_for_slots.assert_consumed(fn_name)
     }
 
     pub(crate) fn stack_reserve(&self) -> u32 {
