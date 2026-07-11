@@ -299,3 +299,73 @@ pub fn run_compiler_daemon(socket_path: &Path) -> std::io::Result<()> {
 pub fn daemon_pid_path(socket_path: &Path) -> PathBuf {
     socket_path.with_extension("pid")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixStream;
+
+    #[test]
+    fn test_parser_from_cli() {
+        assert_eq!(parser_from_cli(Some("auto")), ParserCli::Auto);
+        assert_eq!(parser_from_cli(Some("in")), ParserCli::In);
+        assert_eq!(parser_from_cli(Some("icore")), ParserCli::Icore);
+        assert_eq!(parser_from_cli(Some("unknown")), ParserCli::Auto);
+        assert_eq!(parser_from_cli(None), ParserCli::Auto);
+    }
+
+    #[test]
+    fn test_target_from_cli() {
+        assert_eq!(target_from_cli(Some("native")), CompileTarget::Native);
+        assert_eq!(target_from_cli(Some("jit")), CompileTarget::Jit);
+        assert_eq!(target_from_cli(Some("unknown")), CompileTarget::Jit);
+        assert_eq!(target_from_cli(None), CompileTarget::Jit);
+    }
+
+    #[test]
+    fn test_ping_request() {
+        let req = DaemonRequest::Ping;
+        let res = handle_request(req);
+        assert!(res.success);
+        assert!(res.error.is_none());
+    }
+
+    #[test]
+    fn test_daemon_request_serialization() {
+        let json = r#"{"command":"ping"}"#;
+        let req: DaemonRequest = serde_json::from_str(json).unwrap();
+        assert!(matches!(req, DaemonRequest::Ping));
+
+        let json = r#"{"command":"eval","code":"1 + 1"}"#;
+        let req: DaemonRequest = serde_json::from_str(json).unwrap();
+        if let DaemonRequest::Eval {
+            code,
+            parser,
+            verbose,
+        } = req
+        {
+            assert_eq!(code, "1 + 1");
+            assert_eq!(parser, None);
+            assert_eq!(verbose, false);
+        } else {
+            panic!("Expected Eval");
+        }
+    }
+
+    #[test]
+    fn test_handle_client_invalid_request() {
+        let (mut client, server) = UnixStream::pair().unwrap();
+        client.write_all(b"invalid json\n").unwrap();
+
+        // Handle client on server side
+        let result = handle_client(server);
+        assert!(result.is_ok());
+
+        let mut response = String::new();
+        client.read_to_string(&mut response).unwrap();
+        let resp: DaemonResponse = serde_json::from_str(response.trim()).unwrap();
+        assert_eq!(resp.success, false);
+        assert!(resp.error.unwrap().contains("invalid request"));
+    }
+}
