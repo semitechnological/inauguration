@@ -299,3 +299,144 @@ pub fn run_compiler_daemon(socket_path: &Path) -> std::io::Result<()> {
 pub fn daemon_pid_path(socket_path: &Path) -> PathBuf {
     socket_path.with_extension("pid")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixStream;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::thread;
+    use std::time::Duration;
+
+    struct TempDirGuard {
+        path: PathBuf,
+    }
+
+    impl TempDirGuard {
+        fn new(name: &str) -> Self {
+            static COUNTER: AtomicUsize = AtomicUsize::new(0);
+            let count = COUNTER.fetch_add(1, Ordering::SeqCst);
+            let path = std::env::temp_dir().join(format!(
+                "inaug-daemon-test-{}-{}-{}",
+                std::process::id(),
+                count,
+                name
+            ));
+            let _ = std::fs::remove_dir_all(&path);
+            std::fs::create_dir_all(&path).unwrap();
+            Self { path }
+        }
+    }
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn test_run_compiler_daemon_ping() {
+        let temp = TempDirGuard::new("ping");
+        let socket_path = temp.path.join("daemon.sock");
+
+        // Create a dummy file to test the removal logic
+        std::fs::write(&socket_path, "dummy").unwrap();
+
+        let socket_path_clone = socket_path.clone();
+        thread::spawn(move || {
+            let _ = run_compiler_daemon(&socket_path_clone);
+        });
+
+        let mut connected = false;
+        for _ in 0..50 {
+            if socket_path.exists() {
+                if let Ok(mut stream) = UnixStream::connect(&socket_path) {
+                    let req = DaemonRequest::Ping;
+                    let req_json = serde_json::to_string(&req).unwrap();
+                    stream.write_all(req_json.as_bytes()).unwrap();
+                    stream.write_all(b"\n").unwrap();
+
+                    let mut response = String::new();
+                    let mut reader = BufReader::new(stream);
+                    reader.read_line(&mut response).unwrap();
+
+                    if !response.is_empty() {
+                        let resp: DaemonResponse = serde_json::from_str(&response).unwrap();
+                        assert!(resp.success);
+                        connected = true;
+                        break;
+                    }
+                }
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        assert!(connected, "Failed to connect to daemon and get response");
+    }
+
+    #[test]
+    fn test_run_compiler_daemon_invalid_json() {
+        let temp = TempDirGuard::new("invalid_json");
+        let socket_path = temp.path.join("daemon.sock");
+
+        let socket_path_clone = socket_path.clone();
+        thread::spawn(move || {
+            let _ = run_compiler_daemon(&socket_path_clone);
+        });
+
+        let mut connected = false;
+        for _ in 0..50 {
+            if socket_path.exists() {
+                if let Ok(mut stream) = UnixStream::connect(&socket_path) {
+                    stream.write_all(b"invalid json here\n").unwrap();
+
+                    let mut response = String::new();
+                    let mut reader = BufReader::new(stream);
+                    reader.read_line(&mut response).unwrap();
+
+                    if !response.is_empty() {
+                        let resp: DaemonResponse = serde_json::from_str(&response).unwrap();
+                        assert!(!resp.success);
+                        assert!(resp.error.is_some());
+                        assert!(resp.error.unwrap().contains("invalid request"));
+                        connected = true;
+                        break;
+                    }
+                }
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        assert!(connected, "Failed to connect and get error response");
+    }
+
+    #[test]
+    fn test_run_compiler_daemon_empty_line() {
+        let temp = TempDirGuard::new("empty_line");
+        let socket_path = temp.path.join("daemon.sock");
+
+        let socket_path_clone = socket_path.clone();
+        thread::spawn(move || {
+            let _ = run_compiler_daemon(&socket_path_clone);
+        });
+
+        let mut connected = false;
+        for _ in 0..50 {
+            if socket_path.exists() {
+                if let Ok(mut stream) = UnixStream::connect(&socket_path) {
+                    // Empty line should be ignored and connection closed without a response
+                    stream.write_all(b"\n").unwrap();
+
+                    let mut response = String::new();
+                    let mut reader = BufReader::new(stream);
+                    reader.read_line(&mut response).unwrap();
+
+                    assert!(response.is_empty()); // No response, connection closed
+                    connected = true;
+                    break;
+                }
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        assert!(connected, "Failed to connect and test empty line");
+    }
+}
