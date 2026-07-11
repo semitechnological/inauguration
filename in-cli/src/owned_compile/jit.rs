@@ -174,13 +174,7 @@ pub fn compile_jit(
         let raw = unsafe { rt.invoke(&resolved_entry, &[]).unwrap_or(1) };
         let decode_string = entry_returns_string && raw != 0 && request.out.is_none();
         let string = if decode_string {
-            let ptr = raw as *const u8;
-            unsafe {
-                let len = *(ptr as *const u64) as usize;
-                let data = ptr.add(8);
-                let bytes = std::slice::from_raw_parts(data, len);
-                String::from_utf8_lossy(bytes).to_string()
-            }
+            decode_jit_string(raw).unwrap_or_default()
         } else {
             String::new()
         };
@@ -213,6 +207,21 @@ pub fn compile_jit(
         reason_code: reason_code.to_string(),
         reason: reason.to_string(),
     })
+}
+
+fn decode_jit_string(raw: i64) -> Option<String> {
+    const MAX_BYTES: usize = 64 * 1024 * 1024;
+    let ptr = raw as *const u8;
+    if ptr.is_null() || !(ptr as usize).is_multiple_of(8) {
+        return None;
+    }
+    let len = unsafe { *(ptr as *const u64) as usize };
+    if len > MAX_BYTES {
+        return None;
+    }
+    let data = unsafe { ptr.add(8) };
+    let bytes = unsafe { std::slice::from_raw_parts(data, len) };
+    Some(String::from_utf8_lossy(bytes).to_string())
 }
 
 fn try_const_answer_entry(module: &UnifiedModule, entry: &str) -> Option<u8> {
@@ -281,4 +290,14 @@ fn eval_entry_via_jit(module: &UnifiedModule, entry: &str) -> Result<i64, String
     result
         .eval_result
         .ok_or_else(|| "jit did not produce a result for entry".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn jit_string_decode_rejects_unaligned_reference() {
+        assert_eq!(decode_jit_string(1), None);
+    }
 }
