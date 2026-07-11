@@ -1844,7 +1844,7 @@ class X {
                 assert!(
                     matches!(body[0], Stmt::If { .. }),
                     "expected if, got {:?}",
-                    &body[0]
+                    body[0]
                 );
             }
             _ => panic!("expected function"),
@@ -3691,7 +3691,7 @@ def risky(x):
                 assert!(
                     matches!(&body[0], Stmt::Try { .. }),
                     "expected Stmt::Try, got {:?}",
-                    &body[0]
+                    body[0]
                 );
                 if let Stmt::Try { catches, .. } = &body[0] {
                     assert_eq!(catches.len(), 1);
@@ -3959,7 +3959,7 @@ def main(): Unit = {
             .expect("helper");
         match helper {
             Decl::Function {
-                params, body: _, ..
+                params, ..
             } => {
                 assert_eq!(params, &vec![("value".into(), Typ::Named("Int".into()))]);
                 // body lowering for Scala is WIP; extract function sigs and class shapes first
