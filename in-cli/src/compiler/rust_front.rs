@@ -752,6 +752,12 @@ fn lower_block_inner_with_types(
                         matches!(init.expr.as_ref(), syn::Expr::Macro(m) if m.mac.path.is_ident("vec"))
                             .then(|| Typ::Vector(Box::new(Typ::Generic("_".to_string()))))
                     });
+                    if is_simple
+                        && !local_types.contains_key(&name)
+                        && let Some(typ) = local_ty.as_ref()
+                    {
+                        local_types.insert(name.clone(), type_to_string(typ));
+                    }
                     out.push(Stmt::Let(name, local_ty, expr));
                 }
             }
