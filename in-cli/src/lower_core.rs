@@ -1348,7 +1348,7 @@ mod tests {
     use crate::core_ir::{Expr, Stmt};
 
     #[test]
-    fn lower_orders_helpers_and_main() {
+    fn lower_orders_helpers_and_main() -> Result<(), &'static str> {
         let module = UnifiedModule {
             identity: Default::default(),
             decls: vec![
@@ -1384,11 +1384,12 @@ mod tests {
         assert!(sil.contains("sil @main"));
         assert!(sil.contains("sil @alpha"));
         assert!(sil.contains("sil @zeta"));
-        let pa = sil.find("sil @alpha").expect("alpha");
-        let pz = sil.find("sil @zeta").expect("zeta");
-        let pm = sil.find("sil @main").expect("main");
+        let pa = sil.find("sil @alpha").ok_or("alpha")?;
+        let pz = sil.find("sil @zeta").ok_or("zeta")?;
+        let pm = sil.find("sil @main").ok_or("main")?;
         assert!(pa < pz);
         assert!(pz < pm);
+        Ok(())
     }
 
     #[test]
@@ -1518,14 +1519,14 @@ mod tests {
     }
 
     #[test]
-    fn lower_folds_parsed_modulo_expression() {
-        let module = crate::in_lang_parse::parse_in_source("fn main() -> Int { return 7 % 4; }\n")
-            .expect("parse");
+    fn lower_folds_parsed_modulo_expression() -> Result<(), String> {
+        let module = crate::in_lang_parse::parse_in_source("fn main() -> Int { return 7 % 4; }\n")?;
 
         let sil = lower_to_textual_sil(&module, "App");
 
         assert!(sil.contains("integer_literal $Builtin.Int64, 3"));
         assert!(!sil.contains("builtin_binop"));
+        Ok(())
     }
 
     #[test]
@@ -1735,7 +1736,7 @@ mod tests {
     }
 
     #[test]
-    fn desugar_closure_captures_one_var() {
+    fn desugar_closure_captures_one_var() -> Result<(), &'static str> {
         let module = UnifiedModule {
             identity: Default::default(),
             decls: vec![Decl::Function {
@@ -1770,15 +1771,16 @@ mod tests {
                 }
                 _ => None,
             })
-            .expect("captures struct should exist");
+            .ok_or("captures struct should exist")?;
         assert!(
             cap_struct.contains(&("x".into(), Typ::Named("Any".into()))),
             "captures struct should have x field, got: {cap_struct:?}"
         );
+        Ok(())
     }
 
     #[test]
-    fn desugar_closure_captures_two_vars() {
+    fn desugar_closure_captures_two_vars() -> Result<(), &'static str> {
         let module = UnifiedModule {
             identity: Default::default(),
             decls: vec![Decl::Function {
@@ -1813,7 +1815,7 @@ mod tests {
                 }
                 _ => None,
             })
-            .expect("captures struct should exist");
+            .ok_or("captures struct should exist")?;
         assert!(
             cap_struct.contains(&("x".into(), Typ::Named("Any".into()))),
             "captures struct should have x field"
@@ -1823,10 +1825,11 @@ mod tests {
             "captures struct should have y field"
         );
         assert_eq!(cap_struct.len(), 2);
+        Ok(())
     }
 
     #[test]
-    fn desugar_closure_rewrites_captured_var_to_self_field() {
+    fn desugar_closure_rewrites_captured_var_to_self_field() -> Result<(), &'static str> {
         let module = UnifiedModule {
             identity: Default::default(),
             decls: vec![Decl::Function {
@@ -1861,7 +1864,7 @@ mod tests {
                 }
                 _ => None,
             })
-            .expect("closure function should exist");
+            .ok_or("closure function should exist")?;
         let has_self_field = body.iter().any(|stmt| match stmt {
             Stmt::Return(Some(Expr::Binary { lhs, .. })) => matches!(
                 lhs.as_ref(),
@@ -1870,10 +1873,11 @@ mod tests {
             _ => false,
         });
         assert!(has_self_field, "captured x should be rewritten to self.x");
+        Ok(())
     }
 
     #[test]
-    fn desugar_closure_hidden_fn_has_self_param() {
+    fn desugar_closure_hidden_fn_has_self_param() -> Result<(), &'static str> {
         let module = UnifiedModule {
             identity: Default::default(),
             decls: vec![Decl::Function {
@@ -1908,7 +1912,7 @@ mod tests {
                 }
                 _ => None,
             })
-            .expect("closure function should exist");
+            .ok_or("closure function should exist")?;
         assert_eq!(
             params.first().map(|(n, _)| n.as_str()),
             Some("self"),
@@ -1922,10 +1926,11 @@ mod tests {
             "self param should be the captures struct type"
         );
         assert_eq!(params.len(), 2, "should have self + original param a");
+        Ok(())
     }
 
     #[test]
-    fn desugar_closure_no_captures_empty_struct() {
+    fn desugar_closure_no_captures_empty_struct() -> Result<(), &'static str> {
         let module = UnifiedModule {
             identity: Default::default(),
             decls: vec![Decl::Function {
@@ -1956,8 +1961,9 @@ mod tests {
                 }
                 _ => None,
             })
-            .expect("captures struct should exist even when empty");
+            .ok_or("captures struct should exist even when empty")?;
         assert!(cap_struct.is_empty(), "no captures -> empty struct");
+        Ok(())
     }
 
     #[test]
