@@ -28,13 +28,13 @@ fn emit_stdlib_wrapper_call(
     fn_name: &str,
 ) -> Result<(), String> {
     for (i, arg) in args.iter().enumerate() {
-        if i > 1 {
+        if i >= ctx.call_arg_temps.len() {
             break;
         }
         lower_expr_into(emitter, ctx, arg, 0, functions, pending_calls, fn_name)?;
         emitter.emit_u32(aarch64::str64(0, REG_SP, ctx.call_arg_temps[i]));
     }
-    for i in 0..args.len().min(2) {
+    for i in 0..args.len().min(ctx.call_arg_temps.len()) {
         emitter.emit_u32(aarch64::ldr64(i as u8, REG_SP, ctx.call_arg_temps[i]));
     }
     emit_stdlib_wrapper_register_call(emitter, wrapper, rd)
