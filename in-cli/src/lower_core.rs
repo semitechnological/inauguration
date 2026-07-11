@@ -1873,7 +1873,7 @@ mod tests {
     }
 
     #[test]
-    fn desugar_closure_hidden_fn_has_self_param() {
+    fn desugar_closure_hidden_fn_has_self_param() -> Result<(), String> {
         let module = UnifiedModule {
             identity: Default::default(),
             decls: vec![Decl::Function {
@@ -1908,7 +1908,7 @@ mod tests {
                 }
                 _ => None,
             })
-            .expect("closure function should exist");
+            .ok_or_else(|| "closure function should exist".to_string())?;
         assert_eq!(
             params.first().map(|(n, _)| n.as_str()),
             Some("self"),
@@ -1922,6 +1922,7 @@ mod tests {
             "self param should be the captures struct type"
         );
         assert_eq!(params.len(), 2, "should have self + original param a");
+        Ok(())
     }
 
     #[test]
