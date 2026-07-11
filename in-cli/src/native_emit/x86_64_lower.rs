@@ -441,7 +441,7 @@ fn rename_calls_in_stmt(stmt: &mut Stmt, name_map: &HashMap<String, String>) {
                 rename_calls(&mut catch.body, name_map);
             }
         }
-        Stmt::Break => {}
+        Stmt::Break | Stmt::Propagate => {}
     }
 }
 
@@ -642,7 +642,7 @@ fn collect_string_literals(module: &UnifiedModule) -> Vec<String> {
                 }
             }
             Stmt::Expr(expr) => from_expr(expr, out),
-            Stmt::Break => {}
+            Stmt::Break | Stmt::Propagate => {}
         }
     }
     let mut strings = Vec::new();
@@ -1082,6 +1082,10 @@ fn lower_stmt(
             ..
         } => Err(format!(
             "x86_64-lower: Vec iteration is not implemented in `{}`",
+            ctx.fn_name
+        )),
+        Stmt::Propagate => Err(format!(
+            "x86_64-lower: error propagation is not implemented in `{}`",
             ctx.fn_name
         )),
         Stmt::Loop { cond, body, .. } => lower_loop(emitter, ctx, cond, body, pending_calls),

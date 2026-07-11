@@ -840,6 +840,43 @@ fn jit_executes_vec_for() {
 }
 
 #[test]
+#[cfg(target_arch = "aarch64")]
+fn jit_propagates_rust_result_error() {
+    let success = crate::compiler::rust_front::parse_rust_source(
+        r#"
+fn leaf() -> Result<i64, i64> { return Ok(4); }
+fn main() -> Result<i64, i64> {
+    let value: i64 = leaf()?;
+    return Ok(value + 1);
+}
+"#,
+    )
+    .expect("parse success result");
+    let failure = crate::compiler::rust_front::parse_rust_source(
+        r#"
+fn leaf() -> Result<i64, i64> { return Err(4); }
+fn main() -> Result<i64, i64> {
+    let value: i64 = leaf()?;
+    return Ok(value + 1);
+}
+"#,
+    )
+    .expect("parse failure result");
+    for (module, expected) in [(success, 5), (failure, 0)] {
+        let lowered = lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
+        let function_offsets = lowered
+            .function_offsets
+            .iter()
+            .map(|(name, offset)| (name.clone(), *offset, 0))
+            .collect::<Vec<_>>();
+        let mut rt = crate::jit_runtime::JitRuntime::new();
+        rt.load(&lowered.code, &function_offsets, &lowered.relocations)
+            .expect("jit load");
+        assert_eq!(unsafe { rt.invoke("main", &[]).expect("invoke") }, expected);
+    }
+}
+
+#[test]
 fn lowers_numeric_match_with_default_arm() {
     let module = UnifiedModule {
         identity: Default::default(),

@@ -238,6 +238,15 @@ pub(crate) fn lower_stmt(
 
             Ok(())
         }
+        Stmt::Propagate => {
+            emitter.emit_u32(aarch64::ldrb(0, 27, 0));
+            let continue_branch = emitter.emit_insn(aarch64::cbz_w(0, 0));
+            emitter.emit_insns(&aarch64::load_i64(0, 0));
+            emit_epilogue(emitter, ctx.prologue_stack_reserve);
+            let end_offset = emitter.len() as i32 - continue_branch as i32;
+            emitter.patch_u32(continue_branch, aarch64::cbz_w(0, end_offset));
+            Ok(())
+        }
         Stmt::Break => Ok(()),
     }
 }

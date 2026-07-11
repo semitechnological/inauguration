@@ -202,7 +202,7 @@ fn format_stmt(stmt: &Stmt, depth: usize, out: &mut String) {
             out.push_str(&indent);
             out.push_str("}\n");
         }
-        Stmt::Throw(_) | Stmt::Try { .. } => {}
+        Stmt::Throw(_) | Stmt::Try { .. } | Stmt::Propagate => {}
     }
 }
 

@@ -185,6 +185,8 @@ pub enum Stmt {
         body: Vec<Stmt>,
         catches: Vec<CatchArm>,
     },
+    /// Return from the current function when the runtime error flag is set.
+    Propagate,
     /// Evaluated for side effects (e.g. `.in` expression statements).
     Expr(Expr),
     /// Break out of the current loop.

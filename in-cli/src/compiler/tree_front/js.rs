@@ -256,7 +256,7 @@ fn rewrite_this_receiver_in_stmt(stmt: &mut Stmt) {
             }
         }
         Stmt::Return(None) => {}
-        Stmt::Break => {}
+        Stmt::Break | Stmt::Propagate => {}
     }
 }
 
@@ -386,7 +386,7 @@ fn rewrite_constructor_calls_in_stmt(stmt: &mut Stmt, class_fields: &HashMap<Str
                 rewrite_constructor_calls_in_body(&mut catch.body, class_fields);
             }
         }
-        Stmt::Return(None) => {}
+        Stmt::Return(None) | Stmt::Propagate => {}
     }
 }
 

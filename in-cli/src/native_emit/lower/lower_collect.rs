@@ -259,7 +259,7 @@ fn collect_body_strings(body: &[Stmt], values: &mut Vec<String>) {
                     collect_body_strings(&catch.body, values);
                 }
             }
-            Stmt::Break => {}
+            Stmt::Break | Stmt::Propagate => {}
         }
     }
 }
