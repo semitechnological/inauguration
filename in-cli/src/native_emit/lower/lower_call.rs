@@ -373,7 +373,7 @@ pub(crate) fn lower_aggregate_vector_literal_into_slots(
     Ok(())
 }
 
-fn aggregate_scratch_fields(
+pub(crate) fn aggregate_scratch_fields(
     ctx: &LowerCtx<'_>,
     struct_name: &str,
     base_offset: u32,

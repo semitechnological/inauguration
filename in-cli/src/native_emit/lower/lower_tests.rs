@@ -641,6 +641,17 @@ fn lowers_fixed_array_into_iter() {
 }
 
 #[test]
+fn lowers_fixed_array_map_collect_to_aggregate_vec() {
+    let mut module = crate::compiler::rust_front::parse_rust_source(
+        "struct Item { value: String } fn values() -> [&'static str; 2] { [\"a\", \"b\"] } fn main() -> Vec<Item> { values().into_iter().map(|value| Item { value }).collect() }",
+    )
+    .expect("parse rust");
+    crate::lower_core::desugar_module(&mut module);
+
+    lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
+}
+
+#[test]
 fn lowers_bool_and_string_array_argument_return_paths() {
     let module = crate::in_lang_parse::parse_in_source(
         r#"
