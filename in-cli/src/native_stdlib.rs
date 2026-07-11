@@ -385,6 +385,32 @@ pub unsafe extern "C" fn in_str_concat(a_ptr: *const u8, b_ptr: *const u8) -> *c
     }
 }
 
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn in_vec_join(
+    values_ptr: *const *const u8,
+    values_len: usize,
+    separator_ptr: *const u8,
+) -> *const u8 {
+    unsafe {
+        let separator = instring_from_ptr(separator_ptr).unwrap_or_default();
+        let values = if values_ptr.is_null() {
+            &[][..]
+        } else {
+            std::slice::from_raw_parts(values_ptr, values_len)
+        };
+        let mut joined = Vec::new();
+        for (index, value) in values.iter().enumerate() {
+            if index != 0 {
+                joined.extend_from_slice(separator);
+            }
+            if let Some(value) = instring_from_ptr(*value) {
+                joined.extend_from_slice(value);
+            }
+        }
+        instring_from_bytes(&joined)
+    }
+}
+
 /// `print(text)` -> void
 /// Prints the instring to stdout without a trailing newline.
 ///
@@ -882,6 +908,15 @@ mod tests {
             let b = instring_from_bytes(b" world");
             let c = in_str_concat(a, b);
             assert_eq!(instring_from_ptr(c).unwrap(), b"hello world");
+        }
+    }
+
+    #[test]
+    fn in_vec_join_works() {
+        unsafe {
+            let values = [instring_from_bytes(b"one"), instring_from_bytes(b"two")];
+            let joined = in_vec_join(values.as_ptr(), values.len(), instring_from_bytes(b", "));
+            assert_eq!(instring_from_ptr(joined), Some(&b"one, two"[..]));
         }
     }
 

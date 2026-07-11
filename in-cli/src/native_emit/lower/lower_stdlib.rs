@@ -621,6 +621,82 @@ fn lower_clone(
     lower_expr_into(emitter, ctx, source, rd, functions, pending_calls, fn_name)
 }
 
+fn lower_vec_join(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    source: &Expr,
+    separator: &Expr,
+    rd: u8,
+    functions: &std::collections::HashMap<String, FunctionInfo>,
+    pending_calls: &mut Vec<PendingCall>,
+    fn_name: &str,
+) -> Result<(), String> {
+    match source {
+        Expr::Ident(local) => {
+            let Some(LocalSlot::Struct { typ, fields }) = ctx.locals.get(local) else {
+                return Err(format!(
+                    "native-lower: join source `{local}` is not a Vec in `{fn_name}`"
+                ));
+            };
+            if typ != "Vec" {
+                return Err(format!(
+                    "native-lower: join source `{local}` is not a Vec in `{fn_name}`"
+                ));
+            }
+            for (register, field) in [(0, "ptr"), (1, "len")] {
+                let offset = find_field_offset(fields, field).ok_or_else(|| {
+                    format!("native-lower: join source `{local}` missing `{field}` in `{fn_name}`")
+                })?;
+                emitter.emit_u32(aarch64::ldr64(register, REG_SP, *offset));
+            }
+        }
+        Expr::Field { base, name } => {
+            let Expr::Ident(local) = base.as_ref() else {
+                return Err(format!(
+                    "native-lower: join field source unsupported in `{fn_name}`"
+                ));
+            };
+            let Some(LocalSlot::Struct { fields, .. }) = ctx.locals.get(local) else {
+                return Err(format!(
+                    "native-lower: join source `{local}` is not a struct in `{fn_name}`"
+                ));
+            };
+            for (register, suffix) in [(0, "ptr"), (1, "len")] {
+                let key = format!("{name}.{suffix}");
+                let offset = find_field_offset(fields, &key).ok_or_else(|| {
+                    format!("native-lower: join source `{key}` missing in `{fn_name}`")
+                })?;
+                emitter.emit_u32(aarch64::ldr64(register, REG_SP, *offset));
+            }
+        }
+        Expr::Call { callee, args } => super::lower_call::lower_call(
+            emitter,
+            ctx,
+            callee,
+            args,
+            0,
+            functions,
+            pending_calls,
+            fn_name,
+        )?,
+        _ => {
+            return Err(format!(
+                "native-lower: join source unsupported in `{fn_name}`"
+            ));
+        }
+    }
+    lower_expr_into(
+        emitter,
+        ctx,
+        separator,
+        2,
+        functions,
+        pending_calls,
+        fn_name,
+    )?;
+    emit_stdlib_wrapper_register_call(emitter, "in_vec_join", rd)
+}
+
 pub(crate) fn resolve_function_name(
     name: &str,
     functions: &std::collections::HashMap<String, FunctionInfo>,
@@ -687,6 +763,19 @@ pub(crate) fn lower_stdlib_call(
     // Recognize std::env / std::fs wrappers first, before generic suffix matching.
     let cleaned: String = target.chars().filter(|&c| c != ' ').collect();
     match cleaned.as_str() {
+        "join" | "Vec::join" if args.len() == 2 => {
+            lower_vec_join(
+                emitter,
+                ctx,
+                &args[0],
+                &args[1],
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
         "clone" if args.len() == 1 => {
             lower_clone(
                 emitter,

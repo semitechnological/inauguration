@@ -44,6 +44,7 @@ const DLSYM_ALLOWLIST: &[&str] = &[
     "in_str_starts_with",
     "in_str_ends_with",
     "in_str_concat",
+    "in_vec_join",
     "in_str_trim",
     "in_str_split_lines",
     "in_str_split_spaces",
@@ -242,6 +243,10 @@ pub fn bootstrap_jit_native() {
     c.insert(
         "in_vec_extend".to_string(),
         NativePtr(crate::native_stdlib::in_vec_extend as *const u8),
+    );
+    c.insert(
+        "in_vec_join".to_string(),
+        NativePtr(crate::native_stdlib::in_vec_join as *const u8),
     );
     c.insert(
         "in_vec_push".to_string(),
