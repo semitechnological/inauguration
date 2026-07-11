@@ -63,7 +63,7 @@ pub fn compile_jit(
             for root in &crate_db.search_roots {
                 let std_root = root.join("std");
                 if std_root.join("src").exists() {
-                    crate_db.register_crate("std", std_root);
+                    let _ = crate_db.register_crate("std", std_root);
                     break;
                 }
             }
@@ -73,7 +73,7 @@ pub fn compile_jit(
                 for root in &crate_db.search_roots {
                     let crate_root = root.join(name);
                     if crate_root.join("src").exists() {
-                        crate_db.register_crate(name, crate_root);
+                        let _ = crate_db.register_crate(name, crate_root);
                         break;
                     }
                 }

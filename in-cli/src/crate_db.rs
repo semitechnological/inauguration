@@ -63,8 +63,9 @@ impl CrateDb {
         }
     }
 
-    pub fn register_crate(&self, name: &str, root: PathBuf) {
-        self.crates.write().unwrap().insert(
+    pub fn register_crate(&self, name: &str, root: PathBuf) -> Result<(), String> {
+        let mut crates = self.crates.write().map_err(|_| "Failed to acquire write lock on crates".to_string())?;
+        crates.insert(
             name.to_string(),
             CrateInfo {
                 name: name.to_string(),
@@ -72,6 +73,7 @@ impl CrateDb {
                 modules: RwLock::new(HashMap::new()),
             },
         );
+        Ok(())
     }
 
     /// Resolve a fully-qualified name like "std::fs::read_to_string".
@@ -79,7 +81,7 @@ impl CrateDb {
     pub fn resolve(&self, fq_name: &str) -> Result<(String, String, Arc<UnifiedModule>), String> {
         // Check cache
         {
-            let idx = self.symbol_index.read().unwrap();
+            let idx = self.symbol_index.read().map_err(|_| "symbol index lock poisoned".to_string())?;
             if let Some(loc) = idx.get(fq_name) {
                 return self.get_module(&loc.crate_name, &loc.module_path);
             }
@@ -105,7 +107,7 @@ impl CrateDb {
             .ok_or_else(|| format!("no source for `{fq_name}` (crate={crate_name}, path={rel})"))?;
 
         // Cache the lookup
-        self.symbol_index.write().unwrap().insert(
+        self.symbol_index.write().map_err(|_| "symbol index lock poisoned".to_string())?.insert(
             fq_name.to_string(),
             SymbolLocation {
                 crate_name: crate_name.clone(),
@@ -124,9 +126,9 @@ impl CrateDb {
     ) -> Result<(String, String, Arc<UnifiedModule>), String> {
         // Check already-loaded
         {
-            let crates = self.crates.read().unwrap();
+            let crates = self.crates.read().map_err(|_| "crates lock poisoned".to_string())?;
             if let Some(ci) = crates.get(crate_name) {
-                if let Some(pm) = ci.modules.read().unwrap().get(module_path) {
+                if let Some(pm) = ci.modules.read().map_err(|_| "modules lock poisoned".to_string())?.get(module_path) {
                     return Ok((
                         crate_name.to_string(),
                         module_path.to_string(),
@@ -165,7 +167,7 @@ impl CrateDb {
 
         // Index all exports
         {
-            let mut idx = self.symbol_index.write().unwrap();
+            let mut idx = self.symbol_index.write().map_err(|_| "symbol index lock poisoned".to_string())?;
             for name in &exports {
                 idx.entry(name.clone()).or_insert(SymbolLocation {
                     crate_name: crate_name.to_string(),
@@ -177,9 +179,9 @@ impl CrateDb {
 
         // Cache
         {
-            let crates = self.crates.read().unwrap();
+            let crates = self.crates.read().map_err(|_| "crates lock poisoned".to_string())?;
             if let Some(ci) = crates.get(crate_name) {
-                ci.modules.write().unwrap().insert(
+                ci.modules.write().map_err(|_| "modules lock poisoned".to_string())?.insert(
                     module_path.to_string(),
                     ParsedModule {
                         module: parsed.clone(),
