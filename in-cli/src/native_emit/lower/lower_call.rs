@@ -257,6 +257,16 @@ pub(crate) fn lower_call_arg(
             }
         }
         Typ::Array(elem) => lower_array_call_arg(emitter, ctx, arg, elem, reg, fn_name),
+        Typ::Vector(_) => lower_struct_call_arg(
+            emitter,
+            ctx,
+            arg,
+            "Vec",
+            reg,
+            functions,
+            pending_calls,
+            fn_name,
+        ),
         _ => Err(format!(
             "native-lower: unsupported parameter type `{typ:?}` for argument `{param_name}` in `{fn_name}`"
         )),

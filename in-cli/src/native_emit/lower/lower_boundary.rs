@@ -88,6 +88,7 @@ pub(crate) fn boundary_typ_name(typ: &Typ) -> String {
         Typ::Float => "f64".to_string(),
         Typ::Named(name) => name.clone(),
         Typ::Array(elem) => format!("[{}]", boundary_typ_name(elem)),
+        Typ::Vector(elem) => format!("Vec<{}>", boundary_typ_name(elem)),
         Typ::Generic(name) => name.clone(),
         Typ::Void => "void".to_string(),
     }
@@ -99,6 +100,7 @@ pub(crate) fn boundary_field_size(typ: &Typ) -> u64 {
         Typ::String => 16,
         Typ::Named(_) => 8,
         Typ::Array(_) => 16,
+        Typ::Vector(_) => 24,
         Typ::Generic(_) => 8,
         Typ::Void => 0,
     }
@@ -107,7 +109,7 @@ pub(crate) fn boundary_field_size(typ: &Typ) -> u64 {
 pub(crate) fn boundary_field_align(typ: &Typ) -> u64 {
     match typ {
         Typ::Int | Typ::Bool | Typ::Float | Typ::Named(_) | Typ::Generic(_) => 8,
-        Typ::String | Typ::Array(_) => 8,
+        Typ::String | Typ::Array(_) | Typ::Vector(_) => 8,
         Typ::Void => 1,
     }
 }

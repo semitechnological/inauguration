@@ -565,6 +565,7 @@ fn type_to_string(ty: &Typ) -> String {
         Typ::Void => "()".to_string(),
         Typ::Named(n) => n.clone(),
         Typ::Array(e) => format!("Vec<{}>", type_to_string(e)),
+        Typ::Vector(e) => format!("Vec<{}>", type_to_string(e)),
         Typ::Generic(g) => g.clone(),
     }
 }
@@ -641,6 +642,18 @@ fn map_type(ty: &syn::Type) -> Typ {
                         _ => None,
                     })
                     .unwrap_or_else(|| Typ::Named("Result".to_string())),
+                Some("Vec") => last_segment
+                    .and_then(|segment| match &segment.arguments {
+                        syn::PathArguments::AngleBracketed(arguments) => {
+                            arguments.args.iter().find_map(|arg| match arg {
+                                syn::GenericArgument::Type(ty) => Some(map_type(ty)),
+                                _ => None,
+                            })
+                        }
+                        _ => None,
+                    })
+                    .map(|elem| Typ::Vector(Box::new(elem)))
+                    .unwrap_or_else(|| Typ::Vector(Box::new(Typ::Generic("_".to_string())))),
                 Some(other) => Typ::Named(other.to_string()),
                 None => Typ::Named(tp.path.to_token_stream().to_string()),
             }
@@ -723,10 +736,10 @@ fn lower_block_inner_with_types(
                                     Expr::Ident(name) if name == "Vec::new"
                                 )
                         )
-                        .then(|| Typ::Named("Vec".to_string()))
+                        .then(|| Typ::Vector(Box::new(Typ::Generic("_".to_string()))))
                     }).or_else(|| {
                         matches!(init.expr.as_ref(), syn::Expr::Macro(m) if m.mac.path.is_ident("vec"))
-                            .then(|| Typ::Named("Vec".to_string()))
+                            .then(|| Typ::Vector(Box::new(Typ::Generic("_".to_string()))))
                     });
                     out.push(Stmt::Let(name, local_ty, expr));
                 }
@@ -1157,8 +1170,24 @@ fn main() -> Result<i64, i64> {
         };
         assert!(matches!(
             body.first(),
-            Some(Stmt::Let(_, Some(Typ::Named(typ)), Expr::ArrayLit(items)))
-                if typ == "Vec" && items.len() == 2
+            Some(Stmt::Let(_, Some(Typ::Vector(elem)), Expr::ArrayLit(items)))
+                if **elem == Typ::Int && items.len() == 2
+        ));
+    }
+
+    #[test]
+    fn preserves_vec_struct_element_type() {
+        let module = parse_rust_source(
+            "struct Item { value: i64 } fn main() { let values: Vec<Item> = vec![Item { value: 1 }]; }",
+        )
+        .expect("parse Vec struct literal");
+        let Decl::Function { body, .. } = &module.decls[1] else {
+            panic!("main must be a function");
+        };
+        assert!(matches!(
+            body.first(),
+            Some(Stmt::Let(_, Some(Typ::Vector(elem)), Expr::ArrayLit(items)))
+                if **elem == Typ::Named("Item".into()) && items.len() == 1
         ));
     }
 
@@ -1261,7 +1290,7 @@ fn main() {
             .expect("main body");
         assert!(matches!(
             body.first(),
-            Some(Stmt::Let(name, Some(Typ::Named(typ)), _)) if name == "values" && typ == "Vec"
+            Some(Stmt::Let(name, Some(Typ::Vector(_)), _)) if name == "values"
         ));
         assert!(matches!(
             body.get(1),

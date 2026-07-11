@@ -125,9 +125,12 @@ pub(crate) fn rename_call_expr(expr: &mut Expr, name_map: &HashMap<String, Strin
 pub(crate) fn entry_return_kind(ret: &Typ) -> EntryReturn {
     match canonical_type(ret) {
         Typ::Int | Typ::Float | Typ::Bool => EntryReturn::IntLike,
-        Typ::String | Typ::Void | Typ::Array(_) | Typ::Named(_) | Typ::Generic(_) => {
-            EntryReturn::VoidOrReference
-        }
+        Typ::String
+        | Typ::Void
+        | Typ::Array(_)
+        | Typ::Vector(_)
+        | Typ::Named(_)
+        | Typ::Generic(_) => EntryReturn::VoidOrReference,
     }
 }
 

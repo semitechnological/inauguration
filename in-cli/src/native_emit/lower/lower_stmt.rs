@@ -43,6 +43,17 @@ pub(crate) fn lower_stmt(
                             fn_name,
                         )?;
                     }
+                    Typ::Vector(_) => {
+                        lower_struct_expr_into_regs(
+                            emitter,
+                            ctx,
+                            expr,
+                            "Vec",
+                            functions,
+                            pending_calls,
+                            fn_name,
+                        )?;
+                    }
                     _ => {
                         lower_expr::lower_expr_into(
                             emitter,
@@ -495,9 +506,7 @@ pub(crate) fn lower_struct_expr_into_slots(
                         "native-lower: unknown field `{field}` in struct initializer `{typ}` in `{fn_name}`"
                     ));
                 };
-                if let (Typ::Named(vec_name), Expr::ArrayLit(items)) = (field_typ, value)
-                    && vec_name == "Vec"
-                {
+                if let (Typ::Vector(_), Expr::ArrayLit(items)) = (field_typ, value) {
                     let ptr_key = format!("{field}.ptr");
                     let len_key = format!("{field}.len");
                     let cap_key = format!("{field}.cap");
@@ -604,7 +613,9 @@ pub(crate) fn lower_struct_expr_into_slots(
             if let Some(return_typ) =
                 super::lower_util::call_return_type(callee, functions, fn_name)?
             {
-                if return_typ != &Typ::Named(typ.to_string()) {
+                if return_typ != &Typ::Named(typ.to_string())
+                    && !(typ == "Vec" && matches!(return_typ, Typ::Vector(_)))
+                {
                     return Err(format!(
                         "native-lower: struct assignment return type mismatch: expected `{typ}`, got `{return_typ:?}` in `{fn_name}`"
                     ));
@@ -664,9 +675,7 @@ pub(crate) fn lower_struct_expr_into_regs(
                         "native-lower: struct return initializer `{typ}` missing field `{field}` in `{fn_name}`"
                     ));
                 };
-                if let (Typ::Named(vec_name), Expr::ArrayLit(items)) = (field_typ, value)
-                    && vec_name == "Vec"
-                {
+                if let (Typ::Vector(_), Expr::ArrayLit(items)) = (field_typ, value) {
                     let Some(ptr_offset) = ctx.vec_literal_header_offset else {
                         return Err(format!(
                             "native-lower: missing Vec return scratch space in `{fn_name}`"
@@ -735,7 +744,9 @@ pub(crate) fn lower_struct_expr_into_regs(
             if let Some(return_typ) =
                 super::lower_util::call_return_type(callee, functions, fn_name)?
             {
-                if return_typ != &Typ::Named(typ.to_string()) {
+                if return_typ != &Typ::Named(typ.to_string())
+                    && !(typ == "Vec" && matches!(return_typ, Typ::Vector(_)))
+                {
                     return Err(format!(
                         "native-lower: struct return call type mismatch: expected `{typ}`, got `{return_typ:?}` in `{fn_name}`"
                     ));
