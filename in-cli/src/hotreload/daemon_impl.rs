@@ -649,10 +649,10 @@ async fn start_socket_server(
     pool: ClientPool,
 ) -> Result<tokio::task::JoinHandle<()>, DaemonError> {
     if let Some(parent) = socket_path.parent() {
-        std::fs::create_dir_all(parent)?;
+        tokio::fs::create_dir_all(parent).await?;
     }
-    if socket_path.exists() {
-        std::fs::remove_file(socket_path)?;
+    if tokio::fs::try_exists(socket_path).await.unwrap_or(false) {
+        tokio::fs::remove_file(socket_path).await?;
     }
     let listener = UnixListener::bind(socket_path)?;
     let task = tokio::spawn(async move {
