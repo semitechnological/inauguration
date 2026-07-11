@@ -203,6 +203,8 @@ pub(crate) struct LowerCtx<'a> {
     pub(crate) prologue_stack_reserve: u32,
     /// Stack offset for saving binary operation lhs (preserved across rhs eval)
     pub(crate) binop_temp: u32,
+    pub(crate) binop_temps: [u32; 64],
+    pub(crate) binop_depth: usize,
     pub(crate) call_arg_temps: [u32; 8],
     pub(crate) vec_literal_header_offset: Option<u32>,
     pub(crate) aggregate_vector_scratch: Option<(u32, usize)>,
@@ -346,6 +348,8 @@ impl<'a> LowerCtx<'a> {
             saved_flag_offset: 0,
             prologue_stack_reserve: 0,
             binop_temp: 0,
+            binop_temps: [0; 64],
+            binop_depth: 0,
             call_arg_temps: [0; 8],
             vec_literal_header_offset: None,
             aggregate_vector_scratch: None,
@@ -602,6 +606,20 @@ impl<'a> LowerCtx<'a> {
         let offset = self.stack_size;
         self.stack_size += 8;
         offset
+    }
+
+    pub(crate) fn acquire_binop_temp(&mut self, fn_name: &str) -> Result<u32, String> {
+        let Some(offset) = self.binop_temps.get(self.binop_depth).copied() else {
+            return Err(format!(
+                "native-lower: binary expression nesting is too deep in `{fn_name}`"
+            ));
+        };
+        self.binop_depth += 1;
+        Ok(offset)
+    }
+
+    pub(crate) fn release_binop_temp(&mut self) {
+        self.binop_depth -= 1;
     }
 
     pub(crate) fn next_vec_for_slots(&mut self, fn_name: &str) -> Result<VecForSlots, String> {

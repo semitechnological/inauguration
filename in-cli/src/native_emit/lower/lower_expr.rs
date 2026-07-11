@@ -440,8 +440,17 @@ pub(crate) fn lower_binary(
     // ponytail: if rhs contains a function call, its arg loading overwrites
     // the lhs result. Save lhs to the fixed binop_temp stack slot.
     let rhs_has_call = contains_call(rhs);
+    let temp = if rhs_has_call {
+        Some(ctx.acquire_binop_temp(fn_name)?)
+    } else {
+        None
+    };
     if rhs_has_call {
-        emitter.emit_u32(aarch64::str64(lhs_reg, aarch64::REG_SP, ctx.binop_temp));
+        emitter.emit_u32(aarch64::str64(
+            lhs_reg,
+            aarch64::REG_SP,
+            temp.expect("binary temp"),
+        ));
     }
     lower_expr_into(
         emitter,
@@ -453,7 +462,12 @@ pub(crate) fn lower_binary(
         fn_name,
     )?;
     if rhs_has_call {
-        emitter.emit_u32(aarch64::ldr64(lhs_reg, aarch64::REG_SP, ctx.binop_temp));
+        emitter.emit_u32(aarch64::ldr64(
+            lhs_reg,
+            aarch64::REG_SP,
+            temp.expect("binary temp"),
+        ));
+        ctx.release_binop_temp();
     }
     let insn = match op {
         "+" => aarch64::add_reg64(rd, lhs_reg, rhs_reg),
@@ -510,28 +524,12 @@ fn lower_string_concat(
 ) -> Result<(), String> {
     let wrapper = "in_str_concat";
     let is_native = super::TL_NATIVE_MODE.with(|m| *m.borrow());
-    // Save any caller-saved register that might be in use; use x14 as scratch.
-    let rhs_reg = if rd == 0 { 1 } else { 0 };
+    let temp = ctx.acquire_binop_temp(fn_name)?;
     lower_expr_into(emitter, ctx, lhs, 0, functions, pending_calls, fn_name)?;
-    let lhs_in_x0 = rd == 0;
-    if !lhs_in_x0 {
-        emitter.emit_u32(aarch64::mov_reg64(14, 0));
-    }
-    lower_expr_into(
-        emitter,
-        ctx,
-        rhs,
-        rhs_reg,
-        functions,
-        pending_calls,
-        fn_name,
-    )?;
-    if rhs_reg != 1 {
-        emitter.emit_u32(aarch64::mov_reg64(1, rhs_reg));
-    }
-    if !lhs_in_x0 {
-        emitter.emit_u32(aarch64::mov_reg64(0, 14));
-    }
+    emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, temp));
+    lower_expr_into(emitter, ctx, rhs, 1, functions, pending_calls, fn_name)?;
+    emitter.emit_u32(aarch64::ldr64(0, aarch64::REG_SP, temp));
+    ctx.release_binop_temp();
     if is_native {
         let call_site = emitter.len() as u32;
         emitter.emit_u32(aarch64::bl(0));
