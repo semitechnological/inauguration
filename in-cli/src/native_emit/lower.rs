@@ -526,6 +526,9 @@ fn lower_function(
     ctx.binop_temp = ctx.alloc_slot();
     ctx.saved_flag_offset = ctx.stack_size + 8;
     ctx.stack_size += 16;
+    for index in 0..ctx.call_arg_temps.len() {
+        ctx.call_arg_temps[index] = ctx.alloc_slot();
+    }
     let aggregate_vector_words =
         max_aggregate_vector_literal_words(&func.body, structs, &func.name)?;
     if has_struct_return_vec_literal(&func.body)

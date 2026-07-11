@@ -31,15 +31,11 @@ fn emit_stdlib_wrapper_call(
         if i > 1 {
             break;
         }
-        lower_expr_into(
-            emitter,
-            ctx,
-            arg,
-            i as u8,
-            functions,
-            pending_calls,
-            fn_name,
-        )?;
+        lower_expr_into(emitter, ctx, arg, 0, functions, pending_calls, fn_name)?;
+        emitter.emit_u32(aarch64::str64(0, REG_SP, ctx.call_arg_temps[i]));
+    }
+    for i in 0..args.len().min(2) {
+        emitter.emit_u32(aarch64::ldr64(i as u8, REG_SP, ctx.call_arg_temps[i]));
     }
     emit_stdlib_wrapper_register_call(emitter, wrapper, rd)
 }
@@ -697,6 +693,45 @@ fn lower_vec_join(
     emit_stdlib_wrapper_register_call(emitter, "in_vec_join", rd)
 }
 
+fn lower_array_len(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    source: &Expr,
+    rd: u8,
+    functions: &std::collections::HashMap<String, FunctionInfo>,
+    pending_calls: &mut Vec<PendingCall>,
+    fn_name: &str,
+) -> Result<(), String> {
+    match source {
+        Expr::Ident(local) => match ctx.locals.get(local) {
+            Some(LocalSlot::Array { offsets, .. }) => {
+                emitter.emit_insns(&aarch64::load_i64(rd, offsets.len() as i64));
+                Ok(())
+            }
+            Some(LocalSlot::ArrayParam { len_offset, .. }) => {
+                emitter.emit_u32(aarch64::ldr64(rd, REG_SP, *len_offset));
+                Ok(())
+            }
+            _ => Err(format!(
+                "native-lower: array_len source `{local}` is not an array in `{fn_name}`"
+            )),
+        },
+        Expr::Call { callee, args } => super::lower_call::lower_call(
+            emitter,
+            ctx,
+            callee,
+            args,
+            rd,
+            functions,
+            pending_calls,
+            fn_name,
+        ),
+        _ => Err(format!(
+            "native-lower: array_len source unsupported in `{fn_name}`"
+        )),
+    }
+}
+
 pub(crate) fn resolve_function_name(
     name: &str,
     functions: &std::collections::HashMap<String, FunctionInfo>,
@@ -1135,6 +1170,47 @@ pub(crate) fn lower_stdlib_call(
             )?;
             return Ok(true);
         }
+        "str_eq" if args.len() == 2 => {
+            emit_stdlib_wrapper_call(
+                emitter,
+                ctx,
+                "in_str_eq",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
+        "str_table_has" if args.len() == 2 => {
+            emit_stdlib_wrapper_call(
+                emitter,
+                ctx,
+                "in_str_table_has",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
+        "str_table_get_int" if args.len() == 3 => {
+            for (index, arg) in args.iter().enumerate() {
+                lower_expr_into(emitter, ctx, arg, 0, functions, pending_calls, fn_name)?;
+                emitter.emit_u32(aarch64::str64(0, REG_SP, ctx.call_arg_temps[index]));
+            }
+            for index in 0..args.len() {
+                emitter.emit_u32(aarch64::ldr64(
+                    index as u8,
+                    REG_SP,
+                    ctx.call_arg_temps[index],
+                ));
+            }
+            emit_stdlib_wrapper_register_call(emitter, "in_str_table_get_int", rd)?;
+            return Ok(true);
+        }
         "str_contains" if args.len() == 2 => {
             emit_stdlib_wrapper_call(
                 emitter,
@@ -1292,8 +1368,15 @@ pub(crate) fn lower_stdlib_call(
             return Ok(true);
         }
         "array_len" if args.len() == 1 => {
-            lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?;
-            emitter.emit_u32(aarch64::ldr64(0, 0, 0));
+            lower_array_len(
+                emitter,
+                ctx,
+                &args[0],
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
             return Ok(true);
         }
         "array_push" if args.len() == 2 => {

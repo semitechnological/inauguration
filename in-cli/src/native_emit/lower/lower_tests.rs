@@ -606,6 +606,108 @@ fn main() -> Int {
 }
 
 #[test]
+fn lowers_local_array_len() {
+    let module = crate::in_lang_parse::parse_in_source(
+        r#"
+fn main() -> Int {
+  let values: [Int] = [2, 5, 8];
+  return array_len(values);
+}
+"#,
+    )
+    .expect("parse");
+
+    lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
+}
+
+#[test]
+fn lowers_split_array_assignment() {
+    let module = crate::in_lang_parse::parse_in_source(
+        r#"
+fn main() -> Int {
+  let values: [String] = str_split_lines("one\ntwo");
+  return array_len(values);
+}
+"#,
+    )
+    .expect("parse");
+
+    lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
+}
+
+#[test]
+#[cfg(target_arch = "aarch64")]
+fn jit_executes_split_array_len() {
+    let module = crate::in_lang_parse::parse_in_source(
+        r#"
+fn main() -> Int {
+  let values: [String] = str_split_lines("one\ntwo");
+  return array_len(values);
+}
+"#,
+    )
+    .expect("parse");
+    let lowered = lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
+    let function_offsets = vec![(
+        "main".into(),
+        ENTRY_STUB_SIZE,
+        lowered.code.len() as u32 - ENTRY_STUB_SIZE,
+    )];
+    let mut rt = crate::jit_runtime::JitRuntime::new();
+    rt.load(&lowered.code, &function_offsets, &lowered.relocations)
+        .expect("jit load");
+    assert_eq!(unsafe { rt.invoke("main", &[]).expect("invoke") }, 2);
+}
+
+#[test]
+#[cfg(target_arch = "aarch64")]
+fn jit_executes_split_array_string_index() {
+    let module = crate::in_lang_parse::parse_in_source(
+        r#"
+fn main() -> Int {
+  let values: [String] = str_split_lines("one\ntwo");
+  return str_eq(values[1], "two");
+}
+"#,
+    )
+    .expect("parse");
+    let lowered = lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
+    let function_offsets = vec![(
+        "main".into(),
+        ENTRY_STUB_SIZE,
+        lowered.code.len() as u32 - ENTRY_STUB_SIZE,
+    )];
+    let mut rt = crate::jit_runtime::JitRuntime::new();
+    rt.load(&lowered.code, &function_offsets, &lowered.relocations)
+        .expect("jit load");
+    assert_eq!(unsafe { rt.invoke("main", &[]).expect("invoke") }, 1);
+}
+
+#[test]
+#[cfg(target_arch = "aarch64")]
+fn jit_executes_split_array_string_lookup() {
+    let module = crate::in_lang_parse::parse_in_source(
+        r#"
+fn main() -> Int {
+  let values: [String] = str_split_lines("one\ntwo");
+  return str_table_has("one|two", values[1]);
+}
+"#,
+    )
+    .expect("parse");
+    let lowered = lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
+    let function_offsets = vec![(
+        "main".into(),
+        ENTRY_STUB_SIZE,
+        lowered.code.len() as u32 - ENTRY_STUB_SIZE,
+    )];
+    let mut rt = crate::jit_runtime::JitRuntime::new();
+    rt.load(&lowered.code, &function_offsets, &lowered.relocations)
+        .expect("jit load");
+    assert_eq!(unsafe { rt.invoke("main", &[]).expect("invoke") }, 1);
+}
+
+#[test]
 fn lowers_array_literal_return_as_owned_static_data() {
     let module = crate::in_lang_parse::parse_in_source(
         r#"

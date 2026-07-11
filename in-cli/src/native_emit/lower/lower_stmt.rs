@@ -877,7 +877,16 @@ pub(crate) fn lower_array_expr_into_regs(
                 functions,
                 pending_calls,
                 fn_name,
-            )
+            )?;
+            if matches!(
+                callee.as_ref(),
+                Expr::Ident(name)
+                    if matches!(name.as_str(), "str_split_lines" | "str_split_spaces" | "str_tokenize_expr")
+            ) {
+                emitter.emit_u32(aarch64::ldr64(1, 0, 0));
+                emitter.emit_u32(aarch64::add_imm64(0, 0, 16));
+            }
+            Ok(())
         }
         Expr::ArrayLit(items) => {
             let values = static_array_values(ctx, items, elem, fn_name)?;
