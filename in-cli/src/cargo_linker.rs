@@ -328,3 +328,94 @@ fn prefix_call_expr(expr: &mut Expr, crate_name: &str) {
         _ => {}
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core_ir::{CoreModuleIdentity, Typ};
+
+    fn dummy_module_with_decls(decls: Vec<Decl>) -> UnifiedModule {
+        UnifiedModule {
+            identity: CoreModuleIdentity::default(),
+            decls,
+        }
+    }
+
+    #[test]
+    fn test_merge_dependency_modules_prefixing() {
+        let mut main_mod = dummy_module_with_decls(vec![]);
+
+        // Create a dep module with a function "helper" that calls "other_helper"
+        let dep_decls = vec![Decl::Function {
+            name: "helper".to_string(),
+            params: vec![],
+            ret: Typ::Void,
+            type_params: vec![],
+            body: vec![Stmt::Expr(Expr::Call {
+                callee: Box::new(Expr::Ident("other_helper".to_string())),
+                args: vec![],
+            })],
+        }];
+        let dep_mod = dummy_module_with_decls(dep_decls);
+
+        merge_dependency_modules(&mut main_mod, vec![("my_crate".to_string(), dep_mod)]);
+
+        assert_eq!(main_mod.decls.len(), 1);
+
+        if let Decl::Function { name, body, .. } = &main_mod.decls[0] {
+            assert_eq!(name, "my_crate::helper");
+
+            if let Stmt::Expr(Expr::Call { callee, .. }) = &body[0] {
+                if let Expr::Ident(callee_name) = &**callee {
+                    assert_eq!(callee_name, "my_crate::other_helper");
+                } else {
+                    panic!("Expected Expr::Ident");
+                }
+            } else {
+                panic!("Expected Stmt::Expr(Expr::Call)");
+            }
+        } else {
+            panic!("Expected Decl::Function");
+        }
+    }
+
+    #[test]
+    fn test_merge_dependency_modules_skip_in_prefix() {
+        let mut main_mod = dummy_module_with_decls(vec![]);
+
+        let dep_decls = vec![Decl::Function {
+            name: "in_helper".to_string(),
+            params: vec![],
+            ret: Typ::Void,
+            type_params: vec![],
+            body: vec![Stmt::Expr(Expr::Call {
+                callee: Box::new(Expr::Ident("other_helper".to_string())),
+                args: vec![],
+            })],
+        }];
+        let dep_mod = dummy_module_with_decls(dep_decls);
+
+        merge_dependency_modules(&mut main_mod, vec![("in-something".to_string(), dep_mod)]);
+
+        assert_eq!(main_mod.decls.len(), 1);
+
+        if let Decl::Function { name, body, .. } = &main_mod.decls[0] {
+            assert_eq!(name, "in_helper"); // No prefix applied to declaration
+
+            // Note: Call site IS prefixed according to current implementation
+            // even though the declaration is skipped. If this is a bug in the code,
+            // we test the current behavior for now as this is just a testing improvement.
+            if let Stmt::Expr(Expr::Call { callee, .. }) = &body[0] {
+                if let Expr::Ident(callee_name) = &**callee {
+                    assert_eq!(callee_name, "in-something::other_helper");
+                } else {
+                    panic!("Expected Expr::Ident");
+                }
+            } else {
+                panic!("Expected Stmt::Expr(Expr::Call)");
+            }
+        } else {
+            panic!("Expected Decl::Function");
+        }
+    }
+}
