@@ -828,7 +828,7 @@ fn flatten_single_install_subdir(install_path: &Path) -> Result<(), String> {
     if dirs.len() != 1 {
         return Ok(());
     }
-    let nested = dirs.pop().expect("single dir");
+    let nested = dirs.pop().ok_or_else(|| "expected single dir".to_string())?;
     for entry in fs::read_dir(&nested).map_err(|err| format!("read nested dir: {err}"))? {
         let entry = entry.map_err(|err| format!("read nested entry: {err}"))?;
         let target = install_path.join(entry.file_name());
