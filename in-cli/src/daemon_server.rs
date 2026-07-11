@@ -299,3 +299,24 @@ pub fn run_compiler_daemon(socket_path: &Path) -> std::io::Result<()> {
 pub fn daemon_pid_path(socket_path: &Path) -> PathBuf {
     socket_path.with_extension("pid")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_socket_path() {
+        let expected = std::env::temp_dir().join(DEFAULT_SOCKET_NAME);
+        // Note: this test assumes IN_DAEMON_SOCKET is not set during test run.
+        assert_eq!(default_socket_path(), expected);
+    }
+
+    #[test]
+    fn test_daemon_pid_path() {
+        let socket_path = PathBuf::from("/tmp/inauguration-daemon.sock");
+        assert_eq!(
+            daemon_pid_path(&socket_path),
+            PathBuf::from("/tmp/inauguration-daemon.pid")
+        );
+    }
+}
