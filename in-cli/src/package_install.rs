@@ -988,20 +988,21 @@ mod tests {
     }
 
     #[test]
-    fn select_version_prefers_latest_and_caret() {
+    fn select_version_prefers_latest_and_caret() -> Result<(), String> {
         let versions = vec![
             "1.0.0".to_string(),
             "1.1.0".to_string(),
             "2.0.0".to_string(),
         ];
         assert_eq!(
-            select_version("latest", Some("2.0.0"), Some(&versions)).expect("latest"),
+            select_version("latest", Some("2.0.0"), Some(&versions))?,
             "2.0.0"
         );
         assert_eq!(
-            select_version("^1.0.0", None, Some(&versions)).expect("caret"),
+            select_version("^1.0.0", None, Some(&versions))?,
             "1.1.0"
         );
+        Ok(())
     }
 
     #[test]
