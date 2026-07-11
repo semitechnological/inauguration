@@ -3958,9 +3958,7 @@ def main(): Unit = {
             .find(|d| matches!(d, Decl::Function { name, .. } if name == "helper"))
             .expect("helper");
         match helper {
-            Decl::Function {
-                params, ..
-            } => {
+            Decl::Function { params, .. } => {
                 assert_eq!(params, &vec![("value".into(), Typ::Named("Int".into()))]);
                 // body lowering for Scala is WIP; extract function sigs and class shapes first
                 assert!(
