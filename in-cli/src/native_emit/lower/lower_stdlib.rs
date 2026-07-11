@@ -287,6 +287,35 @@ fn lower_vec_extend(
     Ok(())
 }
 
+fn lower_iter_once(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    args: &[Expr],
+    rd: u8,
+    functions: &std::collections::HashMap<String, FunctionInfo>,
+    pending_calls: &mut Vec<PendingCall>,
+    fn_name: &str,
+) -> Result<(), String> {
+    let Some(header_offset) = ctx.vec_literal_header_offset else {
+        return Err(format!(
+            "native-lower: missing iterator vector header in `{fn_name}`"
+        ));
+    };
+    for offset in [header_offset, header_offset + 8, header_offset + 16] {
+        emitter.emit_u32(aarch64::str64(aarch64::REG_XZR, REG_SP, offset));
+    }
+    lower_expr_into(emitter, ctx, &args[0], 1, functions, pending_calls, fn_name)?;
+    emitter.emit_u32(aarch64::add_imm64(0, REG_SP, header_offset as u16));
+    emit_stdlib_wrapper_register_call(emitter, "in_vec_push", 0)?;
+    for (index, offset) in [header_offset, header_offset + 8, header_offset + 16]
+        .into_iter()
+        .enumerate()
+    {
+        emitter.emit_u32(aarch64::ldr64(rd + index as u8, REG_SP, offset));
+    }
+    Ok(())
+}
+
 pub(crate) fn resolve_function_name(
     name: &str,
     functions: &std::collections::HashMap<String, FunctionInfo>,
@@ -353,6 +382,10 @@ pub(crate) fn lower_stdlib_call(
     // Recognize std::env / std::fs wrappers first, before generic suffix matching.
     let cleaned: String = target.chars().filter(|&c| c != ' ').collect();
     match cleaned.as_str() {
+        "std::iter::once" if args.len() == 1 => {
+            lower_iter_once(emitter, ctx, args, rd, functions, pending_calls, fn_name)?;
+            return Ok(true);
+        }
         "std::env::var" if args.len() == 1 => {
             emit_stdlib_wrapper_call(
                 emitter,
