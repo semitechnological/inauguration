@@ -197,6 +197,7 @@ pub(crate) struct LowerCtx<'a> {
     pub(crate) binop_temp: u32,
     pub(crate) vec_literal_header_offset: Option<u32>,
     pub(crate) aggregate_vector_scratch: Option<(u32, usize)>,
+    pub(crate) iterator_chain_header_offset: Option<u32>,
 }
 
 #[allow(clippy::only_used_in_recursion)]
@@ -337,6 +338,7 @@ impl<'a> LowerCtx<'a> {
             binop_temp: 0,
             vec_literal_header_offset: None,
             aggregate_vector_scratch: None,
+            iterator_chain_header_offset: None,
         };
         let mut abi_idx = 0usize;
         for (name, typ) in params {

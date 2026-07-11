@@ -316,6 +316,118 @@ fn lower_iter_once(
     Ok(())
 }
 
+fn lower_iter_chain(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    args: &[Expr],
+    rd: u8,
+    functions: &std::collections::HashMap<String, FunctionInfo>,
+    pending_calls: &mut Vec<PendingCall>,
+    fn_name: &str,
+) -> Result<(), String> {
+    let Some(header_offset) = ctx.iterator_chain_header_offset else {
+        return Err(format!(
+            "native-lower: missing chain vector header in `{fn_name}"
+        ));
+    };
+    for offset in [header_offset, header_offset + 8, header_offset + 16] {
+        emitter.emit_u32(aarch64::str64(aarch64::REG_XZR, REG_SP, offset));
+    }
+    for source in args {
+        super::lower_call::lower_call(
+            emitter,
+            ctx,
+            &Expr::Ident("collect".to_string()),
+            std::slice::from_ref(source),
+            0,
+            functions,
+            pending_calls,
+            fn_name,
+        )?;
+        emitter.emit_u32(aarch64::mov_reg64(3, 2));
+        emitter.emit_u32(aarch64::mov_reg64(2, 1));
+        emitter.emit_u32(aarch64::mov_reg64(1, 0));
+        emitter.emit_u32(aarch64::add_imm64(0, REG_SP, header_offset as u16));
+        emit_stdlib_wrapper_register_call(emitter, "in_vec_extend", 0)?;
+    }
+    for (index, offset) in [header_offset, header_offset + 8, header_offset + 16]
+        .into_iter()
+        .enumerate()
+    {
+        emitter.emit_u32(aarch64::ldr64(rd + index as u8, REG_SP, offset));
+    }
+    Ok(())
+}
+
+fn lower_iter_collect(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    args: &[Expr],
+    rd: u8,
+    functions: &std::collections::HashMap<String, FunctionInfo>,
+    pending_calls: &mut Vec<PendingCall>,
+    fn_name: &str,
+) -> Result<(), String> {
+    match &args[0] {
+        Expr::Call { callee, args } => super::lower_call::lower_call(
+            emitter,
+            ctx,
+            callee,
+            args,
+            rd,
+            functions,
+            pending_calls,
+            fn_name,
+        ),
+        Expr::Field { base, name } => {
+            let Expr::Ident(local) = base.as_ref() else {
+                return Err(format!(
+                    "native-lower: collect field source unsupported in `{fn_name}`"
+                ));
+            };
+            let Some(LocalSlot::Struct { fields, .. }) = ctx.locals.get(local) else {
+                return Err(format!(
+                    "native-lower: collect source `{local}` is not a struct in `{fn_name}"
+                ));
+            };
+            for (index, suffix) in ["ptr", "len", "cap"].into_iter().enumerate() {
+                let key = format!("{name}.{suffix}");
+                let Some(offset) = find_field_offset(fields, &key) else {
+                    return Err(format!(
+                        "native-lower: collect source `{key}` missing in `{fn_name}"
+                    ));
+                };
+                emitter.emit_u32(aarch64::ldr64(rd + index as u8, REG_SP, *offset));
+            }
+            Ok(())
+        }
+        Expr::Ident(local) => {
+            let Some(LocalSlot::Struct { typ, fields }) = ctx.locals.get(local) else {
+                return Err(format!(
+                    "native-lower: collect source `{local}` is not a Vec in `{fn_name}"
+                ));
+            };
+            if typ != "Vec" {
+                return Err(format!(
+                    "native-lower: collect source `{local}` is not a Vec in `{fn_name}"
+                ));
+            }
+            for (index, name) in ["ptr", "len", "cap"].into_iter().enumerate() {
+                let Some(offset) = find_field_offset(fields, name) else {
+                    return Err(format!(
+                        "native-lower: collect source `{local}` missing `{name}` in `{fn_name}"
+                    ));
+                };
+                emitter.emit_u32(aarch64::ldr64(rd + index as u8, REG_SP, *offset));
+            }
+            Ok(())
+        }
+        _ => Err(format!(
+            "native-lower: collect source unsupported in `{fn_name}"
+        )),
+    }
+}
+
 pub(crate) fn resolve_function_name(
     name: &str,
     functions: &std::collections::HashMap<String, FunctionInfo>,
@@ -382,6 +494,14 @@ pub(crate) fn lower_stdlib_call(
     // Recognize std::env / std::fs wrappers first, before generic suffix matching.
     let cleaned: String = target.chars().filter(|&c| c != ' ').collect();
     match cleaned.as_str() {
+        "collect" if args.len() == 1 => {
+            lower_iter_collect(emitter, ctx, args, rd, functions, pending_calls, fn_name)?;
+            return Ok(true);
+        }
+        "chain" if args.len() == 2 => {
+            lower_iter_chain(emitter, ctx, args, rd, functions, pending_calls, fn_name)?;
+            return Ok(true);
+        }
         "std::iter::once" if args.len() == 1 => {
             lower_iter_once(emitter, ctx, args, rd, functions, pending_calls, fn_name)?;
             return Ok(true);
