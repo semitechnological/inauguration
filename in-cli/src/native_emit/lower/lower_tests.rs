@@ -1,7 +1,7 @@
 use super::*;
 use crate::boundary_emit;
 use crate::core_ir::{
-    CatchArm, CoreModuleIdentity, Decl, Expr, FloatVal, Stmt, Typ, UnifiedModule,
+    CatchArm, CoreModuleIdentity, Decl, Expr, FloatVal, LoopKind, Stmt, Typ, UnifiedModule,
 };
 use crate::inrt;
 use crate::inrt::INRT_BUILTINS;
@@ -735,6 +735,108 @@ fn lowers_runtime_while_loop_conditions() {
     };
 
     lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
+}
+
+#[test]
+fn lowers_vec_iterator_contract() {
+    let module = UnifiedModule {
+        identity: Default::default(),
+        decls: vec![
+            Decl::Function {
+                name: "values".into(),
+                params: vec![],
+                ret: Typ::Named("Vec".into()),
+                body: vec![Stmt::Return(Some(Expr::Call {
+                    callee: Box::new(Expr::Ident("Vec::new".into())),
+                    args: vec![],
+                }))],
+                type_params: vec![],
+            },
+            Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![
+                    Stmt::Let("count".into(), Some(Typ::Int), Expr::IntLit(0)),
+                    Stmt::Loop {
+                        kind: LoopKind::For {
+                            binding: "value".into(),
+                        },
+                        cond: Some(Expr::Call {
+                            callee: Box::new(Expr::Ident("values".into())),
+                            args: vec![],
+                        }),
+                        body: vec![Stmt::Assign(
+                            "count".into(),
+                            Expr::Binary {
+                                op: "+".into(),
+                                lhs: Box::new(Expr::Ident("count".into())),
+                                rhs: Box::new(Expr::IntLit(1)),
+                            },
+                        )],
+                    },
+                    Stmt::Return(Some(Expr::Ident("count".into()))),
+                ],
+                type_params: vec![],
+            },
+        ],
+    };
+
+    lower_module(&module, "main", NativeLinkage::Executable).expect("lower Vec iterator");
+}
+
+#[test]
+#[cfg(target_arch = "aarch64")]
+fn jit_executes_vec_for() {
+    let module = UnifiedModule {
+        identity: Default::default(),
+        decls: vec![Decl::Function {
+            name: "main".into(),
+            params: vec![("values".into(), Typ::Named("Vec".into()))],
+            ret: Typ::Int,
+            body: vec![
+                Stmt::Let("sum".into(), Some(Typ::Int), Expr::IntLit(0)),
+                Stmt::Loop {
+                    kind: LoopKind::For {
+                        binding: "value".into(),
+                    },
+                    cond: Some(Expr::Ident("values".into())),
+                    body: vec![Stmt::Assign(
+                        "sum".into(),
+                        Expr::Binary {
+                            op: "+".into(),
+                            lhs: Box::new(Expr::Ident("sum".into())),
+                            rhs: Box::new(Expr::Ident("value".into())),
+                        },
+                    )],
+                },
+                Stmt::Return(Some(Expr::Ident("sum".into()))),
+            ],
+            type_params: vec![],
+        }],
+    };
+    let lowered = lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
+    let function_offsets = vec![(
+        "main".into(),
+        ENTRY_STUB_SIZE,
+        lowered.code.len() as u32 - ENTRY_STUB_SIZE,
+    )];
+    let values = [3_u64, 5, 7];
+    let mut rt = crate::jit_runtime::JitRuntime::new();
+    rt.load(&lowered.code, &function_offsets, &lowered.relocations)
+        .expect("jit load");
+    let result = unsafe {
+        rt.invoke(
+            "main",
+            &[
+                values.as_ptr() as i64,
+                values.len() as i64,
+                values.len() as i64,
+            ],
+        )
+        .expect("invoke")
+    };
+    assert_eq!(result, 15);
 }
 
 #[test]

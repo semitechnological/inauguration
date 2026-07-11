@@ -46,7 +46,6 @@ fn main() -> io::Result<()> {
     };
 
     generate_docs(Path::new(&docs_src), Path::new(&out_dir), &theme, &site_name)?;
-    patch_chivo_fonts(Path::new(&out_dir))?;
     Ok(())
 }
 
@@ -328,7 +327,7 @@ fn render_shell(
 <title>{ttl} — {site}</title>
 <style>
   *{{box-sizing:border-box}}
-  body{{margin:0;min-height:100vh;background:{s};color:{t};font-family:\"Chivo Mono\",\"JetBrains Mono\",ui-monospace,monospace;-webkit-font-smoothing:antialiased;line-height:1.6}}
+  body{{margin:0;min-height:100vh;background:{s};color:{t};font-family:\"JetBrains Mono\",ui-monospace,monospace;-webkit-font-smoothing:antialiased;line-height:1.6}}
   a{{color:color-mix(in srgb,{t} 88%,transparent);text-decoration:none}}
   a:hover{{color:{t};text-decoration:underline;text-underline-offset:3px}}
   .doc-shell{{display:grid;grid-template-columns:minmax(220px,280px) 1fr;min-height:100vh}}
@@ -367,26 +366,6 @@ fn render_shell(
 </body>
 </html>"
     )
-}
-
-fn patch_chivo_fonts(out_dir: &Path) -> io::Result<()> {
-    if !out_dir.is_dir() {
-        return Ok(());
-    }
-    for entry in std::fs::read_dir(out_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("html") {
-            continue;
-        }
-        let mut text = std::fs::read_to_string(&path)?;
-        text = text.replace(
-            "font-family:Inter,system-ui,sans-serif",
-            "font-family:\"Chivo Mono\",\"JetBrains Mono\",ui-monospace,monospace",
-        );
-        std::fs::write(path, text)?;
-    }
-    Ok(())
 }
 
 fn esc(s: &str) -> String {

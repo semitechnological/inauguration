@@ -10,7 +10,7 @@
 //!   - direct function calls
 //!   - struct init/field access (scalar fields only)
 
-use crate::core_ir::{Decl, Expr, MatchArm, Stmt, Typ, UnifiedModule};
+use crate::core_ir::{Decl, Expr, LoopKind, MatchArm, Stmt, Typ, UnifiedModule};
 use crate::native_emit::x86_64::{self, CodeEmitter, RAX, RBP, RBX, RCX, RDI, RDX, REG_SP, RSI};
 use std::collections::HashMap;
 
@@ -1077,6 +1077,13 @@ fn lower_stmt(
             then_body,
             else_body,
         } => lower_if(emitter, ctx, cond, then_body, else_body, pending_calls),
+        Stmt::Loop {
+            kind: LoopKind::For { .. },
+            ..
+        } => Err(format!(
+            "x86_64-lower: Vec iteration is not implemented in `{}`",
+            ctx.fn_name
+        )),
         Stmt::Loop { cond, body, .. } => lower_loop(emitter, ctx, cond, body, pending_calls),
         Stmt::Match {
             scrutinee, arms, ..
@@ -2441,6 +2448,31 @@ fn main() -> void { return 0 }
         // Should contain a call instruction
         assert!(result.code.contains(&0xE8)); // call rel32
         assert!(result.code.contains(&0xC3)); // ret
+    }
+
+    #[test]
+    fn rejects_vec_for_loop() {
+        let module = UnifiedModule {
+            identity: Default::default(),
+            decls: vec![Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![Stmt::Loop {
+                    kind: LoopKind::For {
+                        binding: "value".into(),
+                    },
+                    cond: Some(Expr::Ident("values".into())),
+                    body: vec![],
+                }],
+                type_params: vec![],
+            }],
+        };
+        let error = match lower_module(&module, "main") {
+            Ok(_) => panic!("Vec iteration must reject"),
+            Err(error) => error,
+        };
+        assert!(error.contains("Vec iteration is not implemented"));
     }
 
     #[test]

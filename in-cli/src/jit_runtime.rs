@@ -366,6 +366,26 @@ impl JitRuntime {
                     }
                     r
                 }
+                3 => {
+                    let a0 = _args[0];
+                    let a1 = _args[1];
+                    let a2 = _args[2];
+                    let r: i64;
+                    unsafe {
+                        std::arch::asm!(
+                            "mov x27, {e}",
+                            "blr {f}",
+                            e = in(reg) ep,
+                            f = in(reg) entry,
+                            in("x0") a0,
+                            in("x1") a1,
+                            in("x2") a2,
+                            lateout("x0") r,
+                            clobber_abi("C"),
+                        );
+                    }
+                    r
+                }
                 _ => 0,
             };
             Some(result)
@@ -381,6 +401,7 @@ impl JitRuntime {
                 0 => unsafe { f(0, 0, 0, 0, 0, 0) },
                 1 => unsafe { f(_args[0], 0, 0, 0, 0, 0) },
                 2 => unsafe { f(_args[0], _args[1], 0, 0, 0, 0) },
+                3 => unsafe { f(_args[0], _args[1], _args[2], 0, 0, 0) },
                 _ => 0,
             };
             Some(result)
