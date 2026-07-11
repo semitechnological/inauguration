@@ -2067,3 +2067,30 @@ fn main() -> Int {
         .expect("jit load");
     assert_eq!(unsafe { rt.invoke("main", &[]).expect("invoke") }, 1);
 }
+
+#[test]
+#[cfg(target_arch = "aarch64")]
+fn jit_executes_internal_string_return_in_concat() {
+    let module = crate::in_lang_parse::parse_in_source(
+        r#"
+import std.json;
+fn quote(text: String) -> String {
+  return json_stringify(text);
+}
+fn main() -> Int {
+  return str_eq("prefix" + quote("kind"), "prefix\"kind\"");
+}
+"#,
+    )
+    .expect("parse");
+    let lowered = lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
+    let function_offsets = lowered
+        .function_offsets
+        .iter()
+        .map(|(name, offset)| (name.clone(), *offset, 0))
+        .collect::<Vec<_>>();
+    let mut rt = crate::jit_runtime::JitRuntime::new();
+    rt.load(&lowered.code, &function_offsets, &lowered.relocations)
+        .expect("jit load");
+    assert_eq!(unsafe { rt.invoke("main", &[]).expect("invoke") }, 1);
+}
