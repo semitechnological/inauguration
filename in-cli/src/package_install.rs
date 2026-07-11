@@ -949,19 +949,18 @@ mod tests {
     }
 
     #[test]
-    fn installs_path_dependencies_offline() {
+    fn installs_path_dependencies_offline() -> Result<(), Box<dyn std::error::Error>> {
         let temp = tempfile_dir("package-install");
         let vendor = temp.join("vendor/cargo/demo");
-        fs::create_dir_all(&vendor).expect("vendor dir");
-        fs::write(vendor.join("README"), "demo").expect("vendor readme");
+        fs::create_dir_all(&vendor)?;
+        fs::write(vendor.join("README"), "demo")?;
         fs::write(
             temp.join(PACKAGE_MANIFEST_FILE),
             "name: demo\nversion: 0.1.0\ndependencies:\n  cargo:demo:\n    version: path:vendor/cargo/demo\n    kind: cargo\n",
-        )
-        .expect("manifest");
+        )?;
 
         let report =
-            install_dependencies(&temp, InstallOptions { offline: false }).expect("install");
+            install_dependencies(&temp, InstallOptions { offline: false })?;
         assert_eq!(report.installed.len(), 1);
         assert_eq!(report.installed[0].status, "installed");
         assert!(report.installed[0].install_path.is_dir());
@@ -972,9 +971,10 @@ mod tests {
                 .is_file()
         );
         assert!(report.lock_path.is_file());
-        let lock = fs::read_to_string(report.lock_path).expect("lock");
+        let lock = fs::read_to_string(report.lock_path)?;
         assert!(lock.contains("cargo:demo"));
         let _ = fs::remove_dir_all(temp);
+        Ok(())
     }
 
     fn tempfile_dir(prefix: &str) -> PathBuf {
