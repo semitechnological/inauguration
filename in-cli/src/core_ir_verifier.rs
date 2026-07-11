@@ -145,6 +145,23 @@ pub fn is_intrinsic(name: &str) -> bool {
             | "invoke1"
             | "invoke2"
             | "to_string"
+            | "read_file"
+            | "write_file"
+            | "path_join"
+            | "str_eq"
+            | "str_contains"
+            | "str_starts_with"
+            | "str_trim"
+            | "str_split_lines"
+            | "str_tokenize_expr"
+            | "str_to_int"
+            | "str_index_of"
+            | "str_slice"
+            | "str_table_has"
+            | "str_table_get_int"
+            | "array_len"
+            | "str_is_int"
+            | "json_stringify"
     )
 }
 
@@ -159,7 +176,9 @@ fn collect_module_facts(module: &UnifiedModule) -> Result<ModuleFacts<'_>, (Stri
     static VOID_RET: Typ = Typ::Void;
     static INT_RET: Typ = Typ::Int;
     static STRING_RET: Typ = Typ::String;
-    let intrinsics: [(&str, &'static Typ); 23] = [
+    static BOOL_RET: Typ = Typ::Bool;
+    let string_array_ret = Box::leak(Box::new(Typ::Array(Box::new(Typ::String))));
+    let intrinsics: [(&str, &'static Typ); 40] = [
         ("outb", &VOID_RET),
         ("inb", &INT_RET),
         ("outl", &VOID_RET),
@@ -183,6 +202,23 @@ fn collect_module_facts(module: &UnifiedModule) -> Result<ModuleFacts<'_>, (Stri
         ("invoke1", &INT_RET),
         ("invoke2", &INT_RET),
         ("to_string", &STRING_RET),
+        ("read_file", &STRING_RET),
+        ("write_file", &BOOL_RET),
+        ("path_join", &STRING_RET),
+        ("str_eq", &BOOL_RET),
+        ("str_contains", &BOOL_RET),
+        ("str_starts_with", &BOOL_RET),
+        ("str_trim", &STRING_RET),
+        ("str_split_lines", string_array_ret),
+        ("str_tokenize_expr", string_array_ret),
+        ("str_to_int", &INT_RET),
+        ("str_index_of", &INT_RET),
+        ("str_slice", &STRING_RET),
+        ("str_table_has", &BOOL_RET),
+        ("str_table_get_int", &INT_RET),
+        ("array_len", &INT_RET),
+        ("str_is_int", &BOOL_RET),
+        ("json_stringify", &STRING_RET),
     ];
     for (name, ret) in intrinsics {
         functions.insert(name, FunctionSig { params: &[], ret });
@@ -431,7 +467,7 @@ fn check_stmt(
             }
             Ok(())
         }
-        Stmt::Throw(_) | Stmt::Try { .. } => Ok(()),
+        Stmt::Throw(_) | Stmt::Try { .. } | Stmt::Propagate => Ok(()),
     }
 }
 
@@ -814,6 +850,7 @@ fn type_name(typ: &Typ) -> String {
         Typ::Bool => "Bool".to_string(),
         Typ::Void => "Void".to_string(),
         Typ::Array(item) => format!("[{}]", type_name(item)),
+        Typ::Vector(item) => format!("Vec<{}>", type_name(item)),
         Typ::Named(name) => name.clone(),
         Typ::Generic(name) => name.clone(),
     }

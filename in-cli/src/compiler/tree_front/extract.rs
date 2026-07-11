@@ -103,7 +103,7 @@ pub fn parse_polyglot_file(id: ParserId, path: &Path) -> Result<UnifiedModule, S
             parse_lang(
                 try_lang_for(ParserId::V).ok_or_else(|| {
                     format!(
-                        "Parser `{}` not included. Rebuild with --features extended",
+                        "Parser `{}` unavailable in this build",
                         ParserId::V.as_str()
                     )
                 })?,
@@ -142,7 +142,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
         ParserId::C => parse_lang(
             try_lang_for(ParserId::C).ok_or_else(|| {
                 format!(
-                    "Parser `{}` not included. Rebuild with --features extended",
+                    "Parser `{}` unavailable in this build",
                     ParserId::C.as_str()
                 )
             })?,
@@ -152,7 +152,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
         ParserId::Cpp | ParserId::ObjCpp => parse_lang(
             try_lang_for(ParserId::Cpp).ok_or_else(|| {
                 format!(
-                    "Parser `{}` not included. Rebuild with --features extended",
+                    "Parser `{}` unavailable in this build",
                     ParserId::Cpp.as_str()
                 )
             })?,
@@ -162,7 +162,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
         ParserId::ObjC => parse_lang(
             try_lang_for(ParserId::ObjC).ok_or_else(|| {
                 format!(
-                    "Parser `{}` not included. Rebuild with --features extended",
+                    "Parser `{}` unavailable in this build",
                     ParserId::ObjC.as_str()
                 )
             })?,
@@ -179,7 +179,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
         ParserId::Java => parse_lang(
             try_lang_for(ParserId::Java).ok_or_else(|| {
                 format!(
-                    "Parser `{}` not included. Rebuild with --features extended",
+                    "Parser `{}` unavailable in this build",
                     ParserId::Java.as_str()
                 )
             })?,
@@ -189,7 +189,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
         ParserId::Kotlin => parse_lang(
             try_lang_for(ParserId::Kotlin).ok_or_else(|| {
                 format!(
-                    "Parser `{}` not included. Rebuild with --features extended",
+                    "Parser `{}` unavailable in this build",
                     ParserId::Kotlin.as_str()
                 )
             })?,
@@ -199,7 +199,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
         ParserId::Scala => parse_lang(
             try_lang_for(ParserId::Scala).ok_or_else(|| {
                 format!(
-                    "Parser `{}` not included. Rebuild with --features extended",
+                    "Parser `{}` unavailable in this build",
                     ParserId::Scala.as_str()
                 )
             })?,
@@ -209,7 +209,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
         ParserId::Groovy => parse_lang(
             try_lang_for(ParserId::Groovy).ok_or_else(|| {
                 format!(
-                    "Parser `{}` not included. Rebuild with --features extended",
+                    "Parser `{}` unavailable in this build",
                     ParserId::Groovy.as_str()
                 )
             })?,
@@ -219,7 +219,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
         ParserId::CSharp => parse_lang(
             try_lang_for(ParserId::CSharp).ok_or_else(|| {
                 format!(
-                    "Parser `{}` not included. Rebuild with --features extended",
+                    "Parser `{}` unavailable in this build",
                     ParserId::CSharp.as_str()
                 )
             })?,
@@ -229,7 +229,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
         ParserId::FSharp => parse_lang(
             try_lang_for(ParserId::FSharp).ok_or_else(|| {
                 format!(
-                    "Parser `{}` not included. Rebuild with --features extended",
+                    "Parser `{}` unavailable in this build",
                     ParserId::FSharp.as_str()
                 )
             })?,
@@ -239,7 +239,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
         ParserId::Python => parse_lang(
             try_lang_for(ParserId::Python).ok_or_else(|| {
                 format!(
-                    "Parser `{}` not included. Rebuild with --features extended",
+                    "Parser `{}` unavailable in this build",
                     ParserId::Python.as_str()
                 )
             })?,
@@ -249,7 +249,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
         ParserId::Ruby => parse_lang(
             try_lang_for(ParserId::Ruby).ok_or_else(|| {
                 format!(
-                    "Parser `{}` not included. Rebuild with --features extended",
+                    "Parser `{}` unavailable in this build",
                     ParserId::Ruby.as_str()
                 )
             })?,
@@ -259,7 +259,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
         ParserId::Php => parse_lang(
             try_lang_for(ParserId::Php).ok_or_else(|| {
                 format!(
-                    "Parser `{}` not included. Rebuild with --features extended",
+                    "Parser `{}` unavailable in this build",
                     ParserId::Php.as_str()
                 )
             })?,
@@ -269,7 +269,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
         ParserId::Perl => parse_lang(
             try_lang_for(ParserId::Perl).ok_or_else(|| {
                 format!(
-                    "Parser `{}` not included. Rebuild with --features extended",
+                    "Parser `{}` unavailable in this build",
                     ParserId::Perl.as_str()
                 )
             })?,
@@ -279,7 +279,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
         ParserId::JavaScript => parse_lang(
             try_lang_for(ParserId::JavaScript).ok_or_else(|| {
                 format!(
-                    "Parser `{}` not included. Rebuild with --features extended",
+                    "Parser `{}` unavailable in this build",
                     ParserId::JavaScript.as_str()
                 )
             })?,
@@ -289,7 +289,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
         ParserId::TypeScript => {
             let ts_lang = try_lang_for(ParserId::TypeScript).ok_or_else(|| {
                 format!(
-                    "Parser `{}` not included. Rebuild with --features extended",
+                    "Parser `{}` unavailable in this build",
                     ParserId::TypeScript.as_str()
                 )
             })?;
@@ -298,7 +298,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
         ParserId::Go => parse_lang(
             try_lang_for(ParserId::Go).ok_or_else(|| {
                 format!(
-                    "Parser `{}` not included. Rebuild with --features extended",
+                    "Parser `{}` unavailable in this build",
                     ParserId::Go.as_str()
                 )
             })?,
@@ -331,7 +331,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
         ParserId::Rust => parse_lang(
             try_lang_for(ParserId::Rust).ok_or_else(|| {
                 format!(
-                    "Parser `{}` not included. Rebuild with --features extended",
+                    "Parser `{}` unavailable in this build",
                     ParserId::Rust.as_str()
                 )
             })?,
@@ -341,7 +341,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
         ParserId::Zig => parse_lang(
             try_lang_for(ParserId::Zig).ok_or_else(|| {
                 format!(
-                    "Parser `{}` not included. Rebuild with --features extended",
+                    "Parser `{}` unavailable in this build",
                     ParserId::Zig.as_str()
                 )
             })?,
@@ -351,7 +351,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
         ParserId::Dart => parse_lang(
             try_lang_for(ParserId::Dart).ok_or_else(|| {
                 format!(
-                    "Parser `{}` not included. Rebuild with --features extended",
+                    "Parser `{}` unavailable in this build",
                     ParserId::Dart.as_str()
                 )
             })?,
@@ -361,7 +361,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
         ParserId::Lua => parse_lang(
             try_lang_for(ParserId::Lua).ok_or_else(|| {
                 format!(
-                    "Parser `{}` not included. Rebuild with --features extended",
+                    "Parser `{}` unavailable in this build",
                     ParserId::Lua.as_str()
                 )
             })?,
@@ -371,7 +371,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
         ParserId::Elixir => parse_lang(
             try_lang_for(ParserId::Elixir).ok_or_else(|| {
                 format!(
-                    "Parser `{}` not included. Rebuild with --features extended",
+                    "Parser `{}` unavailable in this build",
                     ParserId::Elixir.as_str()
                 )
             })?,
@@ -381,7 +381,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
         ParserId::Erlang => parse_lang(
             try_lang_for(ParserId::Erlang).ok_or_else(|| {
                 format!(
-                    "Parser `{}` not included. Rebuild with --features extended",
+                    "Parser `{}` unavailable in this build",
                     ParserId::Erlang.as_str()
                 )
             })?,
@@ -391,7 +391,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
         ParserId::Haskell => parse_lang(
             try_lang_for(ParserId::Haskell).ok_or_else(|| {
                 format!(
-                    "Parser `{}` not included. Rebuild with --features extended",
+                    "Parser `{}` unavailable in this build",
                     ParserId::Haskell.as_str()
                 )
             })?,
@@ -401,7 +401,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
         ParserId::Julia => parse_lang(
             try_lang_for(ParserId::Julia).ok_or_else(|| {
                 format!(
-                    "Parser `{}` not included. Rebuild with --features extended",
+                    "Parser `{}` unavailable in this build",
                     ParserId::Julia.as_str()
                 )
             })?,
@@ -411,7 +411,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
         ParserId::Swift => parse_lang(
             try_lang_for(ParserId::Swift).ok_or_else(|| {
                 format!(
-                    "Parser `{}` not included. Rebuild with --features extended",
+                    "Parser `{}` unavailable in this build",
                     ParserId::Swift.as_str()
                 )
             })?,
@@ -421,7 +421,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
         ParserId::OCaml => parse_lang(
             try_lang_for(ParserId::OCaml).ok_or_else(|| {
                 format!(
-                    "Parser `{}` not included. Rebuild with --features extended",
+                    "Parser `{}` unavailable in this build",
                     ParserId::OCaml.as_str()
                 )
             })?,
@@ -431,7 +431,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
         ParserId::R => parse_lang(
             try_lang_for(ParserId::R).ok_or_else(|| {
                 format!(
-                    "Parser `{}` not included. Rebuild with --features extended",
+                    "Parser `{}` unavailable in this build",
                     ParserId::R.as_str()
                 )
             })?,
@@ -441,7 +441,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
         ParserId::HolyC => parse_lang(
             try_lang_for(ParserId::HolyC).ok_or_else(|| {
                 format!(
-                    "Parser `{}` not included. Rebuild with --features extended",
+                    "Parser `{}` unavailable in this build",
                     ParserId::HolyC.as_str()
                 )
             })?,
@@ -502,7 +502,7 @@ pub fn parse_zig_artifact_source(src: &str, module_id: &str) -> Result<CompileAr
     parser
         .set_language(&try_lang_for(ParserId::Zig).ok_or_else(|| {
             format!(
-                "Parser `{}` not included. Rebuild with --features extended",
+                "Parser `{}` unavailable in this build",
                 ParserId::Zig.as_str()
             )
         })?)

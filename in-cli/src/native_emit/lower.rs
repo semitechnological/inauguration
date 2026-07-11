@@ -1,6 +1,6 @@
 //! Core IR → AArch64 lowering for the owned native subset.
 
-use crate::core_ir::{Stmt, Typ, UnifiedModule};
+use crate::core_ir::{Expr, Stmt, Typ, UnifiedModule};
 use crate::inrt;
 use crate::native_emit::aarch64::{self, CodeEmitter, REG_FP};
 use crate::native_emit::macho::{ExportSymbol, MachOLinkage};
@@ -24,6 +24,7 @@ mod lower_collect;
 mod lower_compile;
 mod lower_ctx;
 mod lower_expr;
+mod lower_iterator;
 mod lower_stdlib;
 mod lower_stmt;
 mod lower_util;
@@ -38,8 +39,10 @@ pub(crate) use lower_collect::{
     collect_functions, collect_strings, collect_structs, entry_return_kind,
 };
 pub(crate) use lower_ctx::{
-    LocalSlot, LowerCtx, alloc_declared_locals, append_static_arrays, append_string_table,
+    IteratorMapSlots, LocalSlot, LowerCtx, alloc_declared_locals, append_static_arrays,
+    append_string_table,
 };
+pub(crate) use lower_iterator::lower_vec_for;
 pub(crate) use lower_stmt::lower_stmt;
 pub(crate) use lower_util::{
     contains_call, emit_epilogue, emit_failure_return, ensure_return_type, expr_type,
@@ -342,6 +345,7 @@ pub fn lower_module_with_jobs(
     let mut pending_static_arrays = Vec::new();
     let mut pending_strings = Vec::new();
     let mut names: Vec<String> = functions.keys().cloned().collect();
+    names.retain(|name| !name.starts_with("__closure_"));
     names.sort();
 
     // Lower each function in parallel. Each function gets its own code buffer,
@@ -520,8 +524,45 @@ fn lower_function(
     )?;
     alloc_declared_locals(&mut ctx, &func.body, &func.name)?;
     ctx.binop_temp = ctx.alloc_slot();
+    for index in 0..ctx.binop_temps.len() {
+        ctx.binop_temps[index] = ctx.alloc_slot();
+    }
     ctx.saved_flag_offset = ctx.stack_size + 8;
     ctx.stack_size += 16;
+    for index in 0..ctx.call_arg_temps.len() {
+        ctx.call_arg_temps[index] = ctx.alloc_slot();
+    }
+    let aggregate_vector_words =
+        max_aggregate_vector_literal_words(&func.body, structs, &func.name)?;
+    if has_struct_return_vec_literal(&func.body)
+        || aggregate_vector_words.is_some()
+        || has_iter_once(&func.body)
+        || has_iter_map(&func.body)
+    {
+        ctx.vec_literal_header_offset = Some(ctx.alloc_slot());
+        ctx.alloc_slot();
+        ctx.alloc_slot();
+    }
+    if has_iter_chain(&func.body) {
+        ctx.iterator_chain_header_offset = Some(ctx.alloc_slot());
+        ctx.alloc_slot();
+        ctx.alloc_slot();
+    }
+    if has_iter_map(&func.body) {
+        ctx.iterator_map_slots = Some(IteratorMapSlots {
+            ptr: ctx.alloc_slot(),
+            len: ctx.alloc_slot(),
+            index: ctx.alloc_slot(),
+            binding: ctx.alloc_slot(),
+        });
+    }
+    if let Some(words) = aggregate_vector_words {
+        let offset = ctx.alloc_slot();
+        for _ in 1..words {
+            ctx.alloc_slot();
+        }
+        ctx.aggregate_vector_scratch = Some((offset, words));
+    }
     if ctx.stack_size > 0 {
         emitter.emit_u32(aarch64::sub_imm64(
             aarch64::REG_SP,
@@ -583,6 +624,7 @@ fn lower_function(
             &func.ret,
         )?;
     }
+    ctx.assert_vec_for_slots_consumed(&func.name)?;
 
     if !ctx.emitted_return {
         if func.ret == Typ::Void {
@@ -592,6 +634,361 @@ fn lower_function(
     }
 
     Ok(())
+}
+
+fn has_iter_once(body: &[Stmt]) -> bool {
+    fn expr_has_once(expr: &Expr) -> bool {
+        match expr {
+            Expr::Call { callee, args, .. } => {
+                matches!(callee.as_ref(), Expr::Ident(name) if name == "std::iter::once")
+                    || expr_has_once(callee)
+                    || args.iter().any(expr_has_once)
+            }
+            Expr::Binary { lhs, rhs, .. } => expr_has_once(lhs) || expr_has_once(rhs),
+            Expr::Unary { expr, .. } | Expr::Field { base: expr, .. } => expr_has_once(expr),
+            Expr::Index { base, index } => expr_has_once(base) || expr_has_once(index),
+            Expr::StructInit { fields, .. } => fields.iter().any(|(_, value)| expr_has_once(value)),
+            Expr::ArrayLit(items) => items.iter().any(expr_has_once),
+            Expr::IntLit(_)
+            | Expr::FloatLit(_)
+            | Expr::StringLit(_)
+            | Expr::BoolLit(_)
+            | Expr::Ident(_)
+            | Expr::Closure { .. } => false,
+        }
+    }
+    body.iter().any(|stmt| match stmt {
+        Stmt::Let(_, _, expr)
+        | Stmt::Assign(_, expr)
+        | Stmt::Expr(expr)
+        | Stmt::Return(Some(expr))
+        | Stmt::Throw(expr) => expr_has_once(expr),
+        Stmt::IndexAssign {
+            base, index, value, ..
+        } => expr_has_once(base) || expr_has_once(index) || expr_has_once(value),
+        Stmt::FieldAssign { base, value, .. } => expr_has_once(base) || expr_has_once(value),
+        Stmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => expr_has_once(cond) || has_iter_once(then_body) || has_iter_once(else_body),
+        Stmt::Loop { cond, body, .. } => {
+            cond.as_ref().is_some_and(expr_has_once) || has_iter_once(body)
+        }
+        Stmt::Match {
+            scrutinee, arms, ..
+        } => expr_has_once(scrutinee) || arms.iter().any(|arm| has_iter_once(&arm.body)),
+        Stmt::Try { body, catches, .. } => {
+            has_iter_once(body) || catches.iter().any(|catch| has_iter_once(&catch.body))
+        }
+        Stmt::Return(None) | Stmt::Break | Stmt::Propagate => false,
+    })
+}
+
+fn has_iter_map(body: &[Stmt]) -> bool {
+    fn expr_has_map(expr: &Expr) -> bool {
+        match expr {
+            Expr::Call { callee, args, .. } => {
+                matches!(callee.as_ref(), Expr::Ident(name) if name == "map")
+                    || expr_has_map(callee)
+                    || args.iter().any(expr_has_map)
+            }
+            Expr::Binary { lhs, rhs, .. } => expr_has_map(lhs) || expr_has_map(rhs),
+            Expr::Unary { expr, .. } | Expr::Field { base: expr, .. } => expr_has_map(expr),
+            Expr::Index { base, index } => expr_has_map(base) || expr_has_map(index),
+            Expr::StructInit { fields, .. } => fields.iter().any(|(_, value)| expr_has_map(value)),
+            Expr::ArrayLit(items) => items.iter().any(expr_has_map),
+            Expr::Closure { body, .. } => has_iter_map(body),
+            Expr::IntLit(_)
+            | Expr::FloatLit(_)
+            | Expr::StringLit(_)
+            | Expr::BoolLit(_)
+            | Expr::Ident(_) => false,
+        }
+    }
+    body.iter().any(|stmt| match stmt {
+        Stmt::Let(_, _, expr)
+        | Stmt::Assign(_, expr)
+        | Stmt::Expr(expr)
+        | Stmt::Return(Some(expr))
+        | Stmt::Throw(expr) => expr_has_map(expr),
+        Stmt::IndexAssign {
+            base, index, value, ..
+        } => expr_has_map(base) || expr_has_map(index) || expr_has_map(value),
+        Stmt::FieldAssign { base, value, .. } => expr_has_map(base) || expr_has_map(value),
+        Stmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => expr_has_map(cond) || has_iter_map(then_body) || has_iter_map(else_body),
+        Stmt::Loop { cond, body, .. } => {
+            cond.as_ref().is_some_and(expr_has_map) || has_iter_map(body)
+        }
+        Stmt::Match {
+            scrutinee, arms, ..
+        } => expr_has_map(scrutinee) || arms.iter().any(|arm| has_iter_map(&arm.body)),
+        Stmt::Try { body, catches, .. } => {
+            has_iter_map(body) || catches.iter().any(|catch| has_iter_map(&catch.body))
+        }
+        Stmt::Return(None) | Stmt::Break | Stmt::Propagate => false,
+    })
+}
+
+fn has_iter_chain(body: &[Stmt]) -> bool {
+    fn expr_has_chain(expr: &Expr) -> bool {
+        match expr {
+            Expr::Call { callee, args, .. } => {
+                matches!(callee.as_ref(), Expr::Ident(name) if name == "chain")
+                    || expr_has_chain(callee)
+                    || args.iter().any(expr_has_chain)
+            }
+            Expr::Binary { lhs, rhs, .. } => expr_has_chain(lhs) || expr_has_chain(rhs),
+            Expr::Unary { expr, .. } | Expr::Field { base: expr, .. } => expr_has_chain(expr),
+            Expr::Index { base, index } => expr_has_chain(base) || expr_has_chain(index),
+            Expr::StructInit { fields, .. } => {
+                fields.iter().any(|(_, value)| expr_has_chain(value))
+            }
+            Expr::ArrayLit(items) => items.iter().any(expr_has_chain),
+            Expr::IntLit(_)
+            | Expr::FloatLit(_)
+            | Expr::StringLit(_)
+            | Expr::BoolLit(_)
+            | Expr::Ident(_)
+            | Expr::Closure { .. } => false,
+        }
+    }
+    body.iter().any(|stmt| match stmt {
+        Stmt::Let(_, _, expr)
+        | Stmt::Assign(_, expr)
+        | Stmt::Expr(expr)
+        | Stmt::Return(Some(expr))
+        | Stmt::Throw(expr) => expr_has_chain(expr),
+        Stmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => expr_has_chain(cond) || has_iter_chain(then_body) || has_iter_chain(else_body),
+        Stmt::Loop { cond, body, .. } => {
+            cond.as_ref().is_some_and(expr_has_chain) || has_iter_chain(body)
+        }
+        Stmt::Match {
+            scrutinee, arms, ..
+        } => expr_has_chain(scrutinee) || arms.iter().any(|arm| has_iter_chain(&arm.body)),
+        Stmt::Try { body, catches, .. } => {
+            has_iter_chain(body) || catches.iter().any(|catch| has_iter_chain(&catch.body))
+        }
+        Stmt::IndexAssign {
+            base, index, value, ..
+        } => expr_has_chain(base) || expr_has_chain(index) || expr_has_chain(value),
+        Stmt::FieldAssign { base, value, .. } => expr_has_chain(base) || expr_has_chain(value),
+        Stmt::Return(None) | Stmt::Break | Stmt::Propagate => false,
+    })
+}
+
+fn has_struct_return_vec_literal(body: &[Stmt]) -> bool {
+    body.iter().any(|stmt| match stmt {
+        Stmt::Return(Some(Expr::StructInit { fields, .. })) => fields
+            .iter()
+            .any(|(_, value)| matches!(value, Expr::ArrayLit(_))),
+        Stmt::If {
+            then_body,
+            else_body,
+            ..
+        } => has_struct_return_vec_literal(then_body) || has_struct_return_vec_literal(else_body),
+        Stmt::Loop { body, .. } | Stmt::Try { body, .. } => has_struct_return_vec_literal(body),
+        Stmt::Match { arms, .. } => arms
+            .iter()
+            .any(|arm| has_struct_return_vec_literal(&arm.body)),
+        _ => false,
+    })
+}
+
+fn max_aggregate_vector_literal_words(
+    body: &[Stmt],
+    structs: &HashMap<String, Vec<(String, Typ)>>,
+    fn_name: &str,
+) -> Result<Option<usize>, String> {
+    fn max_nested_vector_element_words(
+        typ: &Typ,
+        structs: &HashMap<String, Vec<(String, Typ)>>,
+        fn_name: &str,
+        depth: u32,
+    ) -> Result<usize, String> {
+        if depth > 10 {
+            return Err(format!(
+                "native-lower: recursive struct type detected in `{fn_name}`"
+            ));
+        }
+        match typ {
+            Typ::Vector(element) => {
+                let mut max = lower_util::native_param_abi_slots(
+                    &[("value".to_string(), (**element).clone())],
+                    structs,
+                    fn_name,
+                )?;
+                max = max.max(max_nested_vector_element_words(
+                    element,
+                    structs,
+                    fn_name,
+                    depth + 1,
+                )?);
+                Ok(max)
+            }
+            Typ::Named(name) => {
+                let fields = lower_util::native_struct_fields(structs, name, fn_name)?;
+                let mut max = 0;
+                for (_, field_typ) in fields {
+                    max = max.max(max_nested_vector_element_words(
+                        &field_typ,
+                        structs,
+                        fn_name,
+                        depth + 1,
+                    )?);
+                }
+                Ok(max)
+            }
+            Typ::Array(element) => {
+                max_nested_vector_element_words(element, structs, fn_name, depth + 1)
+            }
+            _ => Ok(0),
+        }
+    }
+    fn inspect_expr(
+        expr: &Expr,
+        structs: &HashMap<String, Vec<(String, Typ)>>,
+        fn_name: &str,
+        max: &mut usize,
+    ) -> Result<(), String> {
+        match expr {
+            Expr::ArrayLit(items) => {
+                if let Some(Expr::StructInit { name, .. }) = items.first() {
+                    let words = lower_util::native_param_abi_slots(
+                        &[("value".to_string(), Typ::Named(name.clone()))],
+                        structs,
+                        fn_name,
+                    )?;
+                    *max = (*max).max(words);
+                    *max = (*max).max(max_nested_vector_element_words(
+                        &Typ::Named(name.clone()),
+                        structs,
+                        fn_name,
+                        0,
+                    )?);
+                }
+                for item in items {
+                    inspect_expr(item, structs, fn_name, max)?;
+                }
+            }
+            Expr::Binary { lhs, rhs, .. } => {
+                inspect_expr(lhs, structs, fn_name, max)?;
+                inspect_expr(rhs, structs, fn_name, max)?;
+            }
+            Expr::Unary { expr, .. } | Expr::Field { base: expr, .. } => {
+                inspect_expr(expr, structs, fn_name, max)?;
+            }
+            Expr::Index { base, index } => {
+                inspect_expr(base, structs, fn_name, max)?;
+                inspect_expr(index, structs, fn_name, max)?;
+            }
+            Expr::Call { callee, args, .. } => {
+                inspect_expr(callee, structs, fn_name, max)?;
+                for arg in args {
+                    inspect_expr(arg, structs, fn_name, max)?;
+                }
+            }
+            Expr::StructInit { fields, .. } => {
+                for (_, value) in fields {
+                    inspect_expr(value, structs, fn_name, max)?;
+                }
+            }
+            Expr::Closure { body, .. } => {
+                for stmt in body {
+                    if let Stmt::Return(Some(Expr::StructInit { name, .. })) = stmt {
+                        let words = lower_util::native_param_abi_slots(
+                            &[("value".to_string(), Typ::Named(name.clone()))],
+                            structs,
+                            fn_name,
+                        )?;
+                        *max = (*max).max(words);
+                        *max = (*max).max(max_nested_vector_element_words(
+                            &Typ::Named(name.clone()),
+                            structs,
+                            fn_name,
+                            0,
+                        )?);
+                    }
+                }
+                inspect_body(body, structs, fn_name, max)?;
+            }
+            Expr::IntLit(_)
+            | Expr::FloatLit(_)
+            | Expr::StringLit(_)
+            | Expr::BoolLit(_)
+            | Expr::Ident(_) => {}
+        }
+        Ok(())
+    }
+    fn inspect_body(
+        body: &[Stmt],
+        structs: &HashMap<String, Vec<(String, Typ)>>,
+        fn_name: &str,
+        max: &mut usize,
+    ) -> Result<(), String> {
+        for stmt in body {
+            match stmt {
+                Stmt::Let(_, _, expr)
+                | Stmt::Assign(_, expr)
+                | Stmt::Expr(expr)
+                | Stmt::Return(Some(expr))
+                | Stmt::Throw(expr) => inspect_expr(expr, structs, fn_name, max)?,
+                Stmt::IndexAssign {
+                    base, index, value, ..
+                } => {
+                    inspect_expr(base, structs, fn_name, max)?;
+                    inspect_expr(index, structs, fn_name, max)?;
+                    inspect_expr(value, structs, fn_name, max)?;
+                }
+                Stmt::FieldAssign { base, value, .. } => {
+                    inspect_expr(base, structs, fn_name, max)?;
+                    inspect_expr(value, structs, fn_name, max)?;
+                }
+                Stmt::If {
+                    cond,
+                    then_body,
+                    else_body,
+                } => {
+                    inspect_expr(cond, structs, fn_name, max)?;
+                    inspect_body(then_body, structs, fn_name, max)?;
+                    inspect_body(else_body, structs, fn_name, max)?;
+                }
+                Stmt::Loop { cond, body, .. } => {
+                    if let Some(cond) = cond {
+                        inspect_expr(cond, structs, fn_name, max)?;
+                    }
+                    inspect_body(body, structs, fn_name, max)?;
+                }
+                Stmt::Match {
+                    scrutinee, arms, ..
+                } => {
+                    inspect_expr(scrutinee, structs, fn_name, max)?;
+                    for arm in arms {
+                        inspect_body(&arm.body, structs, fn_name, max)?;
+                    }
+                }
+                Stmt::Try { body, catches, .. } => {
+                    inspect_body(body, structs, fn_name, max)?;
+                    for catch in catches {
+                        inspect_body(&catch.body, structs, fn_name, max)?;
+                    }
+                }
+                Stmt::Return(None) | Stmt::Break | Stmt::Propagate => {}
+            }
+        }
+        Ok(())
+    }
+    let mut max = 0;
+    inspect_body(body, structs, fn_name, &mut max)?;
+    Ok((max != 0).then_some(max))
 }
 
 #[cfg(test)]

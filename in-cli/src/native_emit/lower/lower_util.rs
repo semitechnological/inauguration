@@ -89,6 +89,7 @@ pub(crate) fn ensure_return_type(
             Ok(())
         }
         Typ::Array(elem) => ensure_native_array_element(elem, fn_name, "return"),
+        Typ::Vector(_) => Ok(()),
         Typ::Generic(_) => Ok(()),
     }
 }
@@ -167,6 +168,7 @@ pub(crate) fn native_param_abi_slots(
                 ensure_native_array_element(elem, fn_name, "parameter")?;
                 Ok(2)
             }
+            Typ::Vector(_) => Ok(3),
             _ => Err(format!(
                 "native-lower: unsupported parameter type `{typ:?}` in `{fn_name}`"
             )),
@@ -195,6 +197,7 @@ pub(crate) fn native_struct_fields(
             Typ::Named(inner) if structs.contains_key(inner.as_str()) => {
                 Ok((name.clone(), field_ty.clone()))
             }
+            Typ::Vector(_) => Ok((name.clone(), field_ty.clone())),
             _ => {
                 Err(format!(
                     "native-lower: unsupported field type `{field_ty:?}` for `{name}` in struct `{typ}` in `{fn_name}`"

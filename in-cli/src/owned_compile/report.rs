@@ -34,7 +34,7 @@ pub fn timing_waves_for_jobs(jobs: usize, total_micros: u128) -> Vec<u128> {
     if jobs <= 1 {
         return vec![total_micros];
     }
-    let boundaries = crate::toolchain_util::wave_plan(jobs, jobs, jobs);
+    let boundaries: Vec<usize> = (1..=jobs).collect();
     let mut waves = Vec::with_capacity(boundaries.len());
     for &boundary in &boundaries {
         let share = (total_micros * boundary as u128) / jobs as u128;

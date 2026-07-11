@@ -448,7 +448,7 @@ impl TypeChecker {
                     self.check_stmts(fn_name, fn_ret, &arm.body, facts, &mut env_arm, errors);
                 }
             }
-            Stmt::Throw(_) | Stmt::Try { .. } | Stmt::FieldAssign { .. } => {}
+            Stmt::Throw(_) | Stmt::Try { .. } | Stmt::Propagate | Stmt::FieldAssign { .. } => {}
         }
     }
 
@@ -930,6 +930,7 @@ fn format_typ(typ: &Typ) -> String {
         Typ::Bool => "Bool".to_string(),
         Typ::Void => "Void".to_string(),
         Typ::Array(item) => format!("[{}]", format_typ(item)),
+        Typ::Vector(item) => format!("Vec<{}>", format_typ(item)),
         Typ::Named(name) => name.clone(),
         Typ::Generic(name) => name.clone(),
     }

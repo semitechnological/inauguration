@@ -7,11 +7,12 @@ use crate::boundary_ir::{
     BoundaryTransfer, CompileArtifact, IN_ABI_VERSION,
 };
 use crate::boundary_verify::boundary_ir_verify;
+use crate::core_ir::{CatchArm, Expr, LoopKind, MatchArm, Stmt, Typ};
 use crate::core_ir::{Decl, UnifiedModule};
-use crate::core_ir::{Expr, LoopKind, MatchArm, Stmt, Typ};
 use quote::ToTokens;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use syn::parse::Parser;
 
 type RustLayoutSpecs = HashMap<String, (BoundaryRepr, Vec<(String, syn::Type)>)>;
 
@@ -564,6 +565,7 @@ fn type_to_string(ty: &Typ) -> String {
         Typ::Void => "()".to_string(),
         Typ::Named(n) => n.clone(),
         Typ::Array(e) => format!("Vec<{}>", type_to_string(e)),
+        Typ::Vector(_) => "Vec".to_string(),
         Typ::Generic(g) => g.clone(),
     }
 }
@@ -619,20 +621,55 @@ fn pattern_name(pat: &syn::Pat) -> Option<String> {
     }
 }
 
+fn err_pattern_binding(pat: &syn::Pat) -> Option<String> {
+    let syn::Pat::TupleStruct(tuple) = pat else {
+        return None;
+    };
+    (tuple.path.segments.last()?.ident == "Err")
+        .then(|| tuple.elems.first())
+        .flatten()
+        .and_then(pattern_name)
+}
+
 fn map_type(ty: &syn::Type) -> Typ {
     match ty {
         syn::Type::Path(tp) => {
-            let last = tp.path.segments.last().map(|s| s.ident.to_string());
+            let last_segment = tp.path.segments.last();
+            let last = last_segment.map(|s| s.ident.to_string());
             match last.as_deref() {
                 Some("i8" | "i16" | "i32" | "i64" | "i128" | "isize") => Typ::Int,
                 Some("u8" | "u16" | "u32" | "u64" | "u128" | "usize") => Typ::Int,
                 Some("String" | "str") => Typ::String,
                 Some("bool") => Typ::Bool,
+                Some("Result") => last_segment
+                    .and_then(|segment| match &segment.arguments {
+                        syn::PathArguments::AngleBracketed(arguments) => {
+                            arguments.args.iter().find_map(|arg| match arg {
+                                syn::GenericArgument::Type(ty) => Some(map_type(ty)),
+                                _ => None,
+                            })
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| Typ::Named("Result".to_string())),
+                Some("Vec") => last_segment
+                    .and_then(|segment| match &segment.arguments {
+                        syn::PathArguments::AngleBracketed(arguments) => {
+                            arguments.args.iter().find_map(|arg| match arg {
+                                syn::GenericArgument::Type(ty) => Some(map_type(ty)),
+                                _ => None,
+                            })
+                        }
+                        _ => None,
+                    })
+                    .map(|elem| Typ::Vector(Box::new(elem)))
+                    .unwrap_or_else(|| Typ::Vector(Box::new(Typ::Generic("_".to_string())))),
                 Some(other) => Typ::Named(other.to_string()),
                 None => Typ::Named(tp.path.to_token_stream().to_string()),
             }
         }
         syn::Type::Reference(r) => map_type(&r.elem),
+        syn::Type::Array(array) => Typ::Array(Box::new(map_type(&array.elem))),
         syn::Type::Tuple(t) if t.elems.is_empty() => Typ::Void,
         _ => Typ::Named(ty.to_token_stream().to_string()),
     }
@@ -663,7 +700,7 @@ fn lower_block_inner_with_types(
             syn::Stmt::Local(local) => {
                 if let Some(init) = &local.init {
                     // For destructuring patterns (Err(e), Some(x), etc.), use a temp name
-                    let is_simple = matches!(&local.pat, syn::Pat::Ident(_));
+                    let is_simple = pattern_name(&local.pat).is_some();
                     let name = if is_simple {
                         pattern_name(&local.pat).unwrap_or_else(|| "_pat".to_string())
                     } else {
@@ -691,6 +728,15 @@ fn lower_block_inner_with_types(
                             }
                         }
                     }
+                    if let syn::Expr::Try(try_expr) = init.expr.as_ref() {
+                        out.push(Stmt::Let(
+                            name,
+                            local_decl_type(&local.pat),
+                            lower_expr_with_types(&try_expr.expr, local_types),
+                        ));
+                        out.push(Stmt::Propagate);
+                        continue;
+                    }
                     let expr = lower_expr_with_types(&init.expr, local_types);
                     let local_ty = local_decl_type(&local.pat).or_else(|| {
                         matches!(
@@ -701,8 +747,17 @@ fn lower_block_inner_with_types(
                                     Expr::Ident(name) if name == "Vec::new"
                                 )
                         )
-                        .then(|| Typ::Named("Vec".to_string()))
+                        .then(|| Typ::Vector(Box::new(Typ::Generic("_".to_string()))))
+                    }).or_else(|| {
+                        matches!(init.expr.as_ref(), syn::Expr::Macro(m) if m.mac.path.is_ident("vec"))
+                            .then(|| Typ::Vector(Box::new(Typ::Generic("_".to_string()))))
                     });
+                    if is_simple
+                        && !local_types.contains_key(&name)
+                        && let Some(typ) = local_ty.as_ref()
+                    {
+                        local_types.insert(name.clone(), type_to_string(typ));
+                    }
                     out.push(Stmt::Let(name, local_ty, expr));
                 }
             }
@@ -781,14 +836,35 @@ fn lower_expr_stmt(
     local_types: &mut HashMap<String, String>,
 ) {
     match expr {
-        syn::Expr::Return(ret) => out.push(Stmt::Return(
-            ret.expr
-                .as_ref()
-                .map(|e| lower_expr_with_types(e, local_types)),
-        )),
+        syn::Expr::Return(ret) => lower_return_expr(ret.expr.as_deref(), out, local_types),
+        syn::Expr::Try(try_expr) => {
+            out.push(Stmt::Expr(lower_expr_with_types(
+                &try_expr.expr,
+                local_types,
+            )));
+            out.push(Stmt::Propagate);
+        }
         syn::Expr::If(eif) => {
             // Handle `if let` (condition is Expr::Let)
             if let syn::Expr::Let(expr_let) = &*eif.cond {
+                if eif.else_branch.is_none()
+                    && let Some(binding) = err_pattern_binding(&expr_let.pat)
+                {
+                    out.push(Stmt::Try {
+                        body: vec![Stmt::Expr(lower_expr_with_types(
+                            &expr_let.expr,
+                            local_types,
+                        ))],
+                        catches: vec![CatchArm {
+                            pattern: binding,
+                            body: lower_block_no_implicit_return_with_types(
+                                &eif.then_branch,
+                                local_types,
+                            ),
+                        }],
+                    });
+                    return;
+                }
                 // `if let Pat = Expr { ... } else { ... }`
                 // Lower to: let _pat = Expr; match _pat { Pat => ..., _ => else }
                 let scrutinee = lower_expr_with_types(&expr_let.expr, local_types);
@@ -827,16 +903,11 @@ fn lower_expr_stmt(
             }
         }
         syn::Expr::ForLoop(f) => {
-            let mut body = vec![Stmt::Expr(Expr::Ident(format!(
-                "for_pat:{}",
-                f.pat.to_token_stream()
-            )))];
-            body.extend(lower_block_no_implicit_return_with_types(
-                &f.body,
-                local_types,
-            ));
+            let body = lower_block_no_implicit_return_with_types(&f.body, local_types);
             out.push(Stmt::Loop {
-                kind: LoopKind::For,
+                kind: LoopKind::For {
+                    binding: f.pat.to_token_stream().to_string(),
+                },
                 cond: Some(lower_expr_with_types(&f.expr, local_types)),
                 body,
             });
@@ -891,6 +962,53 @@ fn lower_expr_stmt(
     }
 }
 
+fn lower_return_expr(
+    expr: Option<&syn::Expr>,
+    out: &mut Vec<Stmt>,
+    local_types: &mut HashMap<String, String>,
+) {
+    let Some(expr) = expr else {
+        out.push(Stmt::Return(None));
+        return;
+    };
+    let syn::Expr::Call(call) = expr else {
+        out.push(Stmt::Return(Some(lower_expr_with_types(expr, local_types))));
+        return;
+    };
+    let Some(name) = rust_path_name(&call.func) else {
+        out.push(Stmt::Return(Some(lower_expr_with_types(expr, local_types))));
+        return;
+    };
+    match (name.as_str(), call.args.len()) {
+        ("Ok", 1) => out.push(Stmt::Return(Some(lower_expr_with_types(
+            call.args.first().expect("one Ok argument"),
+            local_types,
+        )))),
+        ("Err", 1) => {
+            out.push(Stmt::Throw(lower_expr_with_types(
+                call.args.first().expect("one Err argument"),
+                local_types,
+            )));
+            out.push(Stmt::Return(None));
+        }
+        _ => out.push(Stmt::Return(Some(lower_expr_with_types(expr, local_types)))),
+    }
+}
+
+fn rust_path_name(expr: &syn::Expr) -> Option<String> {
+    let syn::Expr::Path(path) = expr else {
+        return None;
+    };
+    Some(
+        path.path
+            .to_token_stream()
+            .to_string()
+            .chars()
+            .filter(|ch| *ch != ' ')
+            .collect(),
+    )
+}
+
 fn lower_else_body_with_types(
     else_branch: &syn::Expr,
     local_types: &mut HashMap<String, String>,
@@ -942,6 +1060,89 @@ fn lower_expr_with_types(expr: &syn::Expr, local_types: &mut HashMap<String, Str
         }
         syn::Expr::Reference(r) => lower_expr_with_types(&r.expr, local_types),
         syn::Expr::Paren(p) => lower_expr_with_types(&p.expr, local_types),
+        syn::Expr::Tuple(tuple) if tuple.elems.is_empty() => Expr::IntLit(0),
+        syn::Expr::Array(array) => Expr::ArrayLit(
+            array
+                .elems
+                .iter()
+                .map(|item| lower_expr_with_types(item, local_types))
+                .collect(),
+        ),
+        syn::Expr::Macro(mac) if mac.mac.path.is_ident("vec") => {
+            syn::punctuated::Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated
+                .parse2(mac.mac.tokens.clone())
+                .map(|items| {
+                    Expr::ArrayLit(
+                        items
+                            .iter()
+                            .map(|item| lower_expr_with_types(item, local_types))
+                            .collect(),
+                    )
+                })
+                .unwrap_or_else(|_| Expr::Ident(mac.to_token_stream().to_string()))
+        }
+        syn::Expr::Macro(mac) if mac.mac.path.is_ident("format") => {
+            syn::punctuated::Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated
+                .parse2(mac.mac.tokens.clone())
+                .ok()
+                .and_then(|items| {
+                    let mut items = items.into_iter();
+                    let syn::Expr::Lit(first) = items.next()? else {
+                        return None;
+                    };
+                    let syn::Lit::Str(template) = first.lit else {
+                        return None;
+                    };
+                    let template = template.value();
+                    let segments: Vec<_> = template.split("{}").collect();
+                    let args: Vec<_> = items.collect();
+                    if segments.len() != args.len() + 1 {
+                        return None;
+                    }
+                    let mut result = Expr::StringLit(segments[0].to_string());
+                    for (arg, suffix) in args.into_iter().zip(segments.into_iter().skip(1)) {
+                        result = Expr::Call {
+                            callee: Box::new(Expr::Ident("str_concat".to_string())),
+                            args: vec![result, lower_expr_with_types(&arg, local_types)],
+                        };
+                        if !suffix.is_empty() {
+                            result = Expr::Call {
+                                callee: Box::new(Expr::Ident("str_concat".to_string())),
+                                args: vec![result, Expr::StringLit(suffix.to_string())],
+                            };
+                        }
+                    }
+                    Some(result)
+                })
+                .unwrap_or_else(|| Expr::Ident(mac.to_token_stream().to_string()))
+        }
+        syn::Expr::Closure(closure) => {
+            let mut closure_types = local_types.clone();
+            let params = closure
+                .inputs
+                .iter()
+                .map(|input| {
+                    let name = pattern_name(input).unwrap_or_else(|| "_".to_string());
+                    let typ =
+                        local_decl_type(input).unwrap_or_else(|| Typ::Generic("_".to_string()));
+                    closure_types.insert(name.clone(), type_to_string(&typ));
+                    (name, typ)
+                })
+                .collect();
+            let body = match closure.body.as_ref() {
+                syn::Expr::Block(block) => lower_block_with_types(&block.block, &mut closure_types),
+                body => vec![Stmt::Return(Some(lower_expr_with_types(
+                    body,
+                    &mut closure_types,
+                )))],
+            };
+            Expr::Closure {
+                params,
+                ret: Typ::Generic("_".to_string()),
+                body,
+                captures: vec![],
+            }
+        }
         syn::Expr::Call(c) => Expr::Call {
             callee: Box::new(lower_expr_with_types(&c.func, local_types)),
             args: c
@@ -981,6 +1182,10 @@ fn lower_expr_with_types(expr: &syn::Expr, local_types: &mut HashMap<String, Str
         syn::Expr::Field(ef) => Expr::Field {
             base: Box::new(lower_expr_with_types(&ef.base, local_types)),
             name: ef.member.to_token_stream().to_string(),
+        },
+        syn::Expr::Index(index) => Expr::Index {
+            base: Box::new(lower_expr_with_types(&index.expr, local_types)),
+            index: Box::new(lower_expr_with_types(&index.index, local_types)),
         },
         syn::Expr::Cast(cast) => {
             // ponytail: ignore integer casts, types all match at register width
@@ -1027,6 +1232,126 @@ fn main() { let v = 7; return; }
         );
         assert!(module.decls.iter().any(
             |d| matches!(d, Decl::Function { name, body, .. } if name == "main" && !body.is_empty())
+        ));
+    }
+
+    #[test]
+    fn lowers_unit_tuple_to_zero() {
+        let expr: syn::Expr = syn::parse_str("()").expect("parse unit tuple");
+        assert_eq!(
+            lower_expr_with_types(&expr, &mut HashMap::new()),
+            Expr::IntLit(0)
+        );
+    }
+
+    #[test]
+    fn lowers_result_return_and_propagation() {
+        let module = parse_rust_source(
+            r#"
+fn leaf() -> Result<i64, i64> { return Err(4); }
+fn main() -> Result<i64, i64> {
+    let value: i64 = leaf()?;
+    return Ok(value + 1);
+}
+"#,
+        )
+        .expect("parse result source");
+        let Decl::Function { ret, body, .. } = module
+            .decls
+            .iter()
+            .find(|decl| matches!(decl, Decl::Function { name, .. } if name == "main"))
+            .expect("main function")
+        else {
+            panic!("main must be a function");
+        };
+        assert_eq!(*ret, Typ::Int);
+        assert!(matches!(body.get(1), Some(Stmt::Propagate)));
+        assert!(matches!(body.last(), Some(Stmt::Return(Some(_)))));
+    }
+
+    #[test]
+    fn lowers_if_let_err_to_try() {
+        let module = parse_rust_source(
+            "fn run() -> Result<(), i64> { Ok(()) } fn main() { if let Err(err) = run() { report(err); } }",
+        )
+        .expect("parse if let err");
+        let Decl::Function { body, .. } = module
+            .decls
+            .iter()
+            .find(|decl| matches!(decl, Decl::Function { name, .. } if name == "main"))
+            .expect("main function")
+        else {
+            panic!("main must be a function");
+        };
+        assert!(
+            matches!(body.first(), Some(Stmt::Try { catches, .. }) if catches[0].pattern == "err")
+        );
+    }
+
+    #[test]
+    fn lowers_vec_macro_literal() {
+        let module = parse_rust_source("fn main() { let values: Vec<i64> = vec![1, 2]; }")
+            .expect("parse Vec literal");
+        let Decl::Function { body, .. } = &module.decls[0] else {
+            panic!("main must be a function");
+        };
+        assert!(matches!(
+            body.first(),
+            Some(Stmt::Let(_, Some(Typ::Vector(elem)), Expr::ArrayLit(items)))
+                if **elem == Typ::Int && items.len() == 2
+        ));
+    }
+
+    #[test]
+    fn lowers_fixed_string_array_return() {
+        let module = parse_rust_source("fn names() -> [&'static str; 1] { [\"step\"] }")
+            .expect("parse fixed string array");
+        let Decl::Function { ret, body, .. } = &module.decls[0] else {
+            panic!("main must be a function");
+        };
+        assert_eq!(*ret, Typ::Array(Box::new(Typ::String)));
+        assert!(
+            matches!(body.last(), Some(Stmt::Return(Some(Expr::ArrayLit(items)))) if items.len() == 1)
+        );
+    }
+
+    #[test]
+    fn lowers_closure_body() {
+        let module = parse_rust_source("fn main() { let f = |value: i64| value + 1; }")
+            .expect("parse closure");
+        let Decl::Function { body, .. } = &module.decls[0] else {
+            panic!("main must be a function");
+        };
+        assert!(
+            matches!(body.first(), Some(Stmt::Let(_, _, Expr::Closure { params, body, .. })) if params == &vec![("value".to_string(), Typ::Int)] && matches!(body.last(), Some(Stmt::Return(Some(Expr::Binary { .. })))))
+        );
+    }
+
+    #[test]
+    fn lowers_simple_format_macro() {
+        let module = parse_rust_source("fn main() -> String { format!(\"{}:{}\", \"a\", \"b\") }")
+            .expect("parse format macro");
+        let Decl::Function { body, .. } = &module.decls[0] else {
+            panic!("main must be a function");
+        };
+        assert!(
+            matches!(body.last(), Some(Stmt::Return(Some(Expr::Call { callee, .. }))) if matches!(callee.as_ref(), Expr::Ident(name) if name == "str_concat"))
+        );
+    }
+
+    #[test]
+    fn preserves_vec_struct_element_type() {
+        let module = parse_rust_source(
+            "struct Item { value: i64 } fn main() { let values: Vec<Item> = vec![Item { value: 1 }]; }",
+        )
+        .expect("parse Vec struct literal");
+        let Decl::Function { body, .. } = &module.decls[1] else {
+            panic!("main must be a function");
+        };
+        assert!(matches!(
+            body.first(),
+            Some(Stmt::Let(_, Some(Typ::Vector(elem)), Expr::ArrayLit(items)))
+                if **elem == Typ::Named("Item".into()) && items.len() == 1
         ));
     }
 
@@ -1101,7 +1426,7 @@ fn main() {
         assert!(body.iter().any(|s| matches!(
             s,
             Stmt::Loop {
-                kind: LoopKind::For,
+                kind: LoopKind::For { .. },
                 ..
             }
         )));
@@ -1129,7 +1454,7 @@ fn main() {
             .expect("main body");
         assert!(matches!(
             body.first(),
-            Some(Stmt::Let(name, Some(Typ::Named(typ)), _)) if name == "values" && typ == "Vec"
+            Some(Stmt::Let(name, Some(Typ::Vector(_)), _)) if name == "values"
         ));
         assert!(matches!(
             body.get(1),

@@ -71,6 +71,7 @@ fn format_type(typ: &Typ) -> String {
         Typ::Bool => "Bool".into(),
         Typ::Void => "void".into(),
         Typ::Array(item) => format!("[{}]", format_type(item)),
+        Typ::Vector(item) => format!("Vec<{}>", format_type(item)),
         Typ::Named(name) => name.clone(),
         Typ::Generic(name) => name.clone(),
     }
@@ -202,7 +203,7 @@ fn format_stmt(stmt: &Stmt, depth: usize, out: &mut String) {
             out.push_str(&indent);
             out.push_str("}\n");
         }
-        Stmt::Throw(_) | Stmt::Try { .. } => {}
+        Stmt::Throw(_) | Stmt::Try { .. } | Stmt::Propagate => {}
     }
 }
 

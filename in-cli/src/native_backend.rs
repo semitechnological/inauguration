@@ -1,15 +1,8 @@
 pub use crate::target::{NATIVE_AARCH64_SUBSET, NATIVE_BACKEND_NOT_IMPLEMENTED, TargetSpec};
 
-pub type NativeBackendStatus = TargetSpec;
-
 #[must_use]
 pub fn native_backend_status() -> TargetSpec {
     crate::target::native_target_spec()
-}
-
-#[must_use]
-pub fn backend_statuses() -> Vec<TargetSpec> {
-    crate::target::all_target_specs().to_vec()
 }
 
 #[must_use]
