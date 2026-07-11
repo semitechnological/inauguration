@@ -299,3 +299,49 @@ pub fn run_compiler_daemon(socket_path: &Path) -> std::io::Result<()> {
 pub fn daemon_pid_path(socket_path: &Path) -> PathBuf {
     socket_path.with_extension("pid")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Read;
+    use std::net::Shutdown;
+
+    #[test]
+    fn test_write_response_success() {
+        let (mut s1, mut s2) = UnixStream::pair().unwrap();
+        let response = DaemonResponse {
+            success: true,
+            result: Some(42),
+            report_json: None,
+            output: None,
+            error: None,
+            timing_us: None,
+        };
+
+        write_response(&mut s1, &response).unwrap();
+        drop(s1);
+
+        let mut output = String::new();
+        s2.read_to_string(&mut output).unwrap();
+
+        assert_eq!(output, "{\"success\":true,\"result\":42}\n");
+    }
+
+    #[test]
+    fn test_write_response_error() {
+        let (mut s1, _s2) = UnixStream::pair().unwrap();
+        let response = DaemonResponse {
+            success: false,
+            result: None,
+            report_json: None,
+            output: None,
+            error: Some("test error".to_string()),
+            timing_us: None,
+        };
+
+        s1.shutdown(Shutdown::Write).unwrap();
+        let result = write_response(&mut s1, &response);
+
+        assert!(result.is_err());
+    }
+}
