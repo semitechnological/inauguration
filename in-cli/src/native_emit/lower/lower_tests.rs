@@ -128,6 +128,21 @@ fn lowers_answer_literal_module_to_bytes() {
 }
 
 #[test]
+fn lowers_borrowed_path_parameter() {
+    let module = UnifiedModule {
+        identity: Default::default(),
+        decls: vec![Decl::Function {
+            name: "main".into(),
+            params: vec![("path".into(), Typ::Named("Path".into()))],
+            ret: Typ::Int,
+            body: vec![Stmt::Return(Some(Expr::IntLit(0)))],
+            type_params: vec![],
+        }],
+    };
+    lower_module(&module, "main", NativeLinkage::Executable).expect("lower borrowed Path");
+}
+
+#[test]
 fn compile_native_host_gate() {
     let module = answer_module();
     let path = temp_executable("gate");
