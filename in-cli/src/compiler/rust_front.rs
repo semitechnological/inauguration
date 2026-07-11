@@ -1079,6 +1079,10 @@ fn lower_expr_with_types(expr: &syn::Expr, local_types: &mut HashMap<String, Str
             base: Box::new(lower_expr_with_types(&ef.base, local_types)),
             name: ef.member.to_token_stream().to_string(),
         },
+        syn::Expr::Index(index) => Expr::Index {
+            base: Box::new(lower_expr_with_types(&index.expr, local_types)),
+            index: Box::new(lower_expr_with_types(&index.index, local_types)),
+        },
         syn::Expr::Cast(cast) => {
             // ponytail: ignore integer casts, types all match at register width
             lower_expr_with_types(&cast.expr, local_types)
