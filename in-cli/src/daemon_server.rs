@@ -299,3 +299,24 @@ pub fn run_compiler_daemon(socket_path: &Path) -> std::io::Result<()> {
 pub fn daemon_pid_path(socket_path: &Path) -> PathBuf {
     socket_path.with_extension("pid")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_run_compiler_daemon_error_path() {
+        // Create a temporary file and use it as a directory component to reliably
+        // trigger an error (ENOTDIR) regardless of the user's permissions (e.g., root in CI).
+        let temp_dir = std::env::temp_dir();
+        let temp_file = temp_dir.join(format!("daemon_test_file_{}", std::process::id()));
+        std::fs::write(&temp_file, "dummy").unwrap();
+
+        let invalid_path = temp_file.join("sock.sock");
+        let result = run_compiler_daemon(&invalid_path);
+
+        let _ = std::fs::remove_file(temp_file);
+
+        assert!(result.is_err());
+    }
+}
