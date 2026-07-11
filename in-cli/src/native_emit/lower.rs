@@ -524,10 +524,19 @@ fn lower_function(
     ctx.binop_temp = ctx.alloc_slot();
     ctx.saved_flag_offset = ctx.stack_size + 8;
     ctx.stack_size += 16;
-    if has_struct_return_vec_literal(&func.body) {
+    let aggregate_vector_words =
+        max_aggregate_vector_literal_words(&func.body, structs, &func.name)?;
+    if has_struct_return_vec_literal(&func.body) || aggregate_vector_words.is_some() {
         ctx.vec_literal_header_offset = Some(ctx.alloc_slot());
         ctx.alloc_slot();
         ctx.alloc_slot();
+    }
+    if let Some(words) = aggregate_vector_words {
+        let offset = ctx.alloc_slot();
+        for _ in 1..words {
+            ctx.alloc_slot();
+        }
+        ctx.aggregate_vector_scratch = Some((offset, words));
     }
     if ctx.stack_size > 0 {
         emitter.emit_u32(aarch64::sub_imm64(
@@ -618,6 +627,125 @@ fn has_struct_return_vec_literal(body: &[Stmt]) -> bool {
             .any(|arm| has_struct_return_vec_literal(&arm.body)),
         _ => false,
     })
+}
+
+fn max_aggregate_vector_literal_words(
+    body: &[Stmt],
+    structs: &HashMap<String, Vec<(String, Typ)>>,
+    fn_name: &str,
+) -> Result<Option<usize>, String> {
+    fn inspect_expr(
+        expr: &Expr,
+        structs: &HashMap<String, Vec<(String, Typ)>>,
+        fn_name: &str,
+        max: &mut usize,
+    ) -> Result<(), String> {
+        match expr {
+            Expr::ArrayLit(items) => {
+                if let Some(Expr::StructInit { name, .. }) = items.first() {
+                    let words = lower_util::native_param_abi_slots(
+                        &[("value".to_string(), Typ::Named(name.clone()))],
+                        structs,
+                        fn_name,
+                    )?;
+                    *max = (*max).max(words);
+                }
+                for item in items {
+                    inspect_expr(item, structs, fn_name, max)?;
+                }
+            }
+            Expr::Binary { lhs, rhs, .. } => {
+                inspect_expr(lhs, structs, fn_name, max)?;
+                inspect_expr(rhs, structs, fn_name, max)?;
+            }
+            Expr::Unary { expr, .. } | Expr::Field { base: expr, .. } => {
+                inspect_expr(expr, structs, fn_name, max)?;
+            }
+            Expr::Index { base, index } => {
+                inspect_expr(base, structs, fn_name, max)?;
+                inspect_expr(index, structs, fn_name, max)?;
+            }
+            Expr::Call { callee, args, .. } => {
+                inspect_expr(callee, structs, fn_name, max)?;
+                for arg in args {
+                    inspect_expr(arg, structs, fn_name, max)?;
+                }
+            }
+            Expr::StructInit { fields, .. } => {
+                for (_, value) in fields {
+                    inspect_expr(value, structs, fn_name, max)?;
+                }
+            }
+            Expr::IntLit(_)
+            | Expr::FloatLit(_)
+            | Expr::StringLit(_)
+            | Expr::BoolLit(_)
+            | Expr::Ident(_)
+            | Expr::Closure { .. } => {}
+        }
+        Ok(())
+    }
+    fn inspect_body(
+        body: &[Stmt],
+        structs: &HashMap<String, Vec<(String, Typ)>>,
+        fn_name: &str,
+        max: &mut usize,
+    ) -> Result<(), String> {
+        for stmt in body {
+            match stmt {
+                Stmt::Let(_, _, expr)
+                | Stmt::Assign(_, expr)
+                | Stmt::Expr(expr)
+                | Stmt::Return(Some(expr))
+                | Stmt::Throw(expr) => inspect_expr(expr, structs, fn_name, max)?,
+                Stmt::IndexAssign {
+                    base, index, value, ..
+                } => {
+                    inspect_expr(base, structs, fn_name, max)?;
+                    inspect_expr(index, structs, fn_name, max)?;
+                    inspect_expr(value, structs, fn_name, max)?;
+                }
+                Stmt::FieldAssign { base, value, .. } => {
+                    inspect_expr(base, structs, fn_name, max)?;
+                    inspect_expr(value, structs, fn_name, max)?;
+                }
+                Stmt::If {
+                    cond,
+                    then_body,
+                    else_body,
+                } => {
+                    inspect_expr(cond, structs, fn_name, max)?;
+                    inspect_body(then_body, structs, fn_name, max)?;
+                    inspect_body(else_body, structs, fn_name, max)?;
+                }
+                Stmt::Loop { cond, body, .. } => {
+                    if let Some(cond) = cond {
+                        inspect_expr(cond, structs, fn_name, max)?;
+                    }
+                    inspect_body(body, structs, fn_name, max)?;
+                }
+                Stmt::Match {
+                    scrutinee, arms, ..
+                } => {
+                    inspect_expr(scrutinee, structs, fn_name, max)?;
+                    for arm in arms {
+                        inspect_body(&arm.body, structs, fn_name, max)?;
+                    }
+                }
+                Stmt::Try { body, catches, .. } => {
+                    inspect_body(body, structs, fn_name, max)?;
+                    for catch in catches {
+                        inspect_body(&catch.body, structs, fn_name, max)?;
+                    }
+                }
+                Stmt::Return(None) | Stmt::Break | Stmt::Propagate => {}
+            }
+        }
+        Ok(())
+    }
+    let mut max = 0;
+    inspect_body(body, structs, fn_name, &mut max)?;
+    Ok((max != 0).then_some(max))
 }
 
 #[cfg(test)]
