@@ -21,6 +21,7 @@ use std::os::unix::ffi::OsStrExt;
 /// In-runtime string layout: `len` (u64) followed by the UTF-8 bytes.
 const INSTRING_LEN_SIZE: usize = 8;
 const INSTRING_ALIGN: usize = 8;
+const INSTRING_MAX_BYTES: u64 = 64 * 1024 * 1024;
 
 unsafe fn instring_from_ptr(ptr: *const u8) -> Option<&'static [u8]> {
     if ptr.is_null() || !(ptr as usize).is_multiple_of(INSTRING_ALIGN) {
@@ -28,6 +29,9 @@ unsafe fn instring_from_ptr(ptr: *const u8) -> Option<&'static [u8]> {
     }
     unsafe {
         let len = *(ptr as *const u64);
+        if len > INSTRING_MAX_BYTES {
+            return None;
+        }
         let data = ptr.add(INSTRING_LEN_SIZE);
         Some(std::slice::from_raw_parts(data, len as usize))
     }
@@ -71,9 +75,6 @@ unsafe fn instring_empty() -> *const u8 {
 /// (empty string when the variable is missing, matching a `None` placeholder).
 ///
 /// # Safety
-/// `key_ptr` must be a valid, non-aliased instring pointer (8-byte aligned
-/// header followed by `len` bytes) or null.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn in_env_var(key_ptr: *const u8) -> *const u8 {
     unsafe {
         let Some(key) = instring_from_ptr(key_ptr) else {
@@ -93,8 +94,6 @@ pub unsafe extern "C" fn in_env_var(key_ptr: *const u8) -> *const u8 {
 /// `std::env::temp_dir()` -> `PathBuf`
 ///
 /// # Safety
-/// No raw pointer arguments; safe to call from JIT with the standard C ABI.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn in_env_temp_dir() -> *const u8 {
     unsafe { instring_from_os_str(std::env::temp_dir().as_os_str()) }
 }
@@ -102,8 +101,6 @@ pub unsafe extern "C" fn in_env_temp_dir() -> *const u8 {
 /// `std::env::current_dir()` -> `io::Result<PathBuf>`
 ///
 /// # Safety
-/// No raw pointer arguments; safe to call from JIT with the standard C ABI.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn in_env_current_dir() -> *const u8 {
     unsafe {
         match std::env::current_dir() {
@@ -116,8 +113,6 @@ pub unsafe extern "C" fn in_env_current_dir() -> *const u8 {
 /// `std::fs::read_to_string(path)` -> `io::Result<String>`
 ///
 /// # Safety
-/// `path_ptr` must be a valid, non-aliased instring pointer or null.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn in_fs_read_to_string(path_ptr: *const u8) -> *const u8 {
     unsafe {
         let Some(path_bytes) = instring_from_ptr(path_ptr) else {
@@ -137,8 +132,6 @@ pub unsafe extern "C" fn in_fs_read_to_string(path_ptr: *const u8) -> *const u8 
 /// `std::fs::exists(path)` -> `bool`
 ///
 /// # Safety
-/// `path_ptr` must be a valid, non-aliased instring pointer or null.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn in_fs_exists(path_ptr: *const u8) -> i64 {
     unsafe {
         let Some(path_bytes) = instring_from_ptr(path_ptr) else {
@@ -160,8 +153,6 @@ pub unsafe extern "C" fn in_fs_exists(path_ptr: *const u8) -> i64 {
 /// Returns 1 on success, 0 on error.
 ///
 /// # Safety
-/// Both pointers must be valid, non-aliased instring pointers or null.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn in_fs_write(path_ptr: *const u8, contents_ptr: *const u8) -> i64 {
     unsafe {
         let Some(path_bytes) = instring_from_ptr(path_ptr) else {
@@ -185,8 +176,6 @@ pub unsafe extern "C" fn in_fs_write(path_ptr: *const u8, contents_ptr: *const u
 /// Returns 1 on success, 0 on error.
 ///
 /// # Safety
-/// `path_ptr` must be a valid, non-aliased instring pointer or null.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn in_fs_create_dir(path_ptr: *const u8) -> i64 {
     unsafe {
         let Some(path_bytes) = instring_from_ptr(path_ptr) else {
@@ -207,8 +196,6 @@ pub unsafe extern "C" fn in_fs_create_dir(path_ptr: *const u8) -> i64 {
 /// Returns combined stdout+stderr as an instring; empty when the command fails to start.
 ///
 /// # Safety
-/// `command_ptr` must be a valid, non-aliased instring pointer or null.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn in_process_run(command_ptr: *const u8) -> *const u8 {
     unsafe {
         let Some(cmd_bytes) = instring_from_ptr(command_ptr) else {
@@ -248,8 +235,6 @@ pub unsafe extern "C" fn in_process_run(command_ptr: *const u8) -> *const u8 {
 /// Returns 1 on success, 0 on error.
 ///
 /// # Safety
-/// `path_ptr` must be a valid, non-aliased instring pointer or null.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn in_fs_remove_file(path_ptr: *const u8) -> i64 {
     unsafe {
         let Some(path_bytes) = instring_from_ptr(path_ptr) else {
@@ -269,8 +254,6 @@ pub unsafe extern "C" fn in_fs_remove_file(path_ptr: *const u8) -> i64 {
 /// `std::env::set_var(key, value)`
 ///
 /// # Safety
-/// Both pointers must be valid, non-aliased instring pointers or null.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn in_env_set_var(key_ptr: *const u8, value_ptr: *const u8) {
     unsafe {
         let Some(key) = instring_from_ptr(key_ptr) else {
@@ -294,8 +277,6 @@ pub unsafe extern "C" fn in_env_set_var(key_ptr: *const u8, value_ptr: *const u8
 /// `std::env::remove_var(key)`
 ///
 /// # Safety
-/// `key_ptr` must be a valid, non-aliased instring pointer or null.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn in_env_remove_var(key_ptr: *const u8) {
     unsafe {
         let Some(key) = instring_from_ptr(key_ptr) else {
@@ -313,8 +294,6 @@ pub unsafe extern "C" fn in_env_remove_var(key_ptr: *const u8) {
 /// Returns 1 if `self` contains `pattern`, 0 otherwise.
 ///
 /// # Safety
-/// Both pointers must be valid, non-aliased instring pointers or null.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn in_str_contains(self_ptr: *const u8, pattern_ptr: *const u8) -> i64 {
     unsafe {
         let Some(self_bytes) = instring_from_ptr(self_ptr) else {
@@ -338,8 +317,6 @@ pub unsafe extern "C" fn in_str_contains(self_ptr: *const u8, pattern_ptr: *cons
 /// `String::starts_with(&self, pattern)` -> `bool`
 ///
 /// # Safety
-/// Both pointers must be valid, non-aliased instring pointers or null.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn in_str_starts_with(self_ptr: *const u8, pattern_ptr: *const u8) -> i64 {
     unsafe {
         let Some(self_bytes) = instring_from_ptr(self_ptr) else {
@@ -368,8 +345,6 @@ pub unsafe extern "C" fn in_str_starts_with(self_ptr: *const u8, pattern_ptr: *c
 /// Concatenates two instring values and returns a newly allocated instring.
 ///
 /// # Safety
-/// Both pointers must be valid, non-aliased instring pointers or null.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn in_str_concat(a_ptr: *const u8, b_ptr: *const u8) -> *const u8 {
     unsafe {
         let Some(a) = instring_from_ptr(a_ptr) else {
@@ -385,12 +360,135 @@ pub unsafe extern "C" fn in_str_concat(a_ptr: *const u8, b_ptr: *const u8) -> *c
     }
 }
 
+#[unsafe(no_mangle)]
+/// # Safety
+/// # Safety
+/// Pointer requirements are the same as `in_env_var`.
+pub unsafe extern "C" fn in_json_stringify(text_ptr: *const u8) -> *const u8 {
+    unsafe {
+        let Some(text) = instring_from_ptr(text_ptr) else {
+            return instring_empty();
+        };
+        let mut encoded = Vec::with_capacity(text.len() + 2);
+        encoded.push(b'"');
+        for byte in text {
+            match byte {
+                b'"' => encoded.extend_from_slice(b"\\\""),
+                b'\\' => encoded.extend_from_slice(b"\\\\"),
+                b'\n' => encoded.extend_from_slice(b"\\n"),
+                b'\r' => encoded.extend_from_slice(b"\\r"),
+                b'\t' => encoded.extend_from_slice(b"\\t"),
+                0..=0x1f => {
+                    encoded.extend_from_slice(b"\\u00");
+                    encoded.extend_from_slice(format!("{byte:02x}").as_bytes());
+                }
+                _ => encoded.push(*byte),
+            }
+        }
+        encoded.push(b'"');
+        instring_from_bytes(&encoded)
+    }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// # Safety
+/// Pointer requirements are the same as `in_env_var`.
+pub unsafe extern "C" fn in_str_eq(a_ptr: *const u8, b_ptr: *const u8) -> i64 {
+    unsafe {
+        let Some(a) = instring_from_ptr(a_ptr) else {
+            return 0;
+        };
+        let Some(b) = instring_from_ptr(b_ptr) else {
+            return 0;
+        };
+        i64::from(a == b)
+    }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// # Safety
+/// Pointer requirements are the same as `in_env_var`.
+pub unsafe extern "C" fn in_str_table_has(names_ptr: *const u8, key_ptr: *const u8) -> i64 {
+    unsafe {
+        let Some(names) = instring_from_ptr(names_ptr) else {
+            return 0;
+        };
+        let Some(key) = instring_from_ptr(key_ptr) else {
+            return 0;
+        };
+        i64::from(names.split(|byte| *byte == b'|').any(|name| name == key))
+    }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// # Safety
+/// Pointer requirements are the same as `in_env_var`.
+pub unsafe extern "C" fn in_str_table_get_int(
+    names_ptr: *const u8,
+    values_ptr: *const u8,
+    key_ptr: *const u8,
+) -> i64 {
+    unsafe {
+        let Some(names) = instring_from_ptr(names_ptr) else {
+            return 0;
+        };
+        let Some(values) = instring_from_ptr(values_ptr) else {
+            return 0;
+        };
+        let Some(key) = instring_from_ptr(key_ptr) else {
+            return 0;
+        };
+        let Some(index) = names
+            .split(|byte| *byte == b'|')
+            .position(|name| name == key)
+        else {
+            return 0;
+        };
+        values
+            .split(|byte| *byte == b'|')
+            .nth(index)
+            .and_then(|value| std::str::from_utf8(value).ok())
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0)
+    }
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+/// # Safety
+/// Pointer requirements are the same as `in_env_var`.
+pub unsafe extern "C" fn in_vec_join(
+    values_ptr: *const *const u8,
+    values_len: usize,
+    separator_ptr: *const u8,
+) -> *const u8 {
+    unsafe {
+        let separator = instring_from_ptr(separator_ptr).unwrap_or_default();
+        let values = if values_ptr.is_null() {
+            &[][..]
+        } else {
+            std::slice::from_raw_parts(values_ptr, values_len)
+        };
+        let mut joined = Vec::new();
+        for (index, value) in values.iter().enumerate() {
+            if index != 0 {
+                joined.extend_from_slice(separator);
+            }
+            if let Some(value) = instring_from_ptr(*value) {
+                joined.extend_from_slice(value);
+            }
+        }
+        instring_from_bytes(&joined)
+    }
+}
+
 /// `print(text)` -> void
 /// Prints the instring to stdout without a trailing newline.
 ///
 /// # Safety
-/// `text_ptr` must be a valid, non-aliased instring pointer or null.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn in_print(text_ptr: *const u8) {
     unsafe {
         if let Some(text) = instring_from_ptr(text_ptr) {
@@ -405,8 +503,6 @@ pub unsafe extern "C" fn in_print(text_ptr: *const u8) {
 /// Prints the signed integer to stdout without a trailing newline.
 ///
 /// # Safety
-/// No raw pointer arguments; safe to call from JIT with the standard C ABI.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn in_print_int(n: i64) {
     print!("{}", n);
 }
@@ -414,8 +510,6 @@ pub unsafe extern "C" fn in_print_int(n: i64) {
 /// `String::ends_with(&self, pattern)` -> `bool`
 ///
 /// # Safety
-/// Both pointers must be valid, non-aliased instring pointers or null.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn in_str_ends_with(self_ptr: *const u8, pattern_ptr: *const u8) -> i64 {
     unsafe {
         let Some(self_bytes) = instring_from_ptr(self_ptr) else {
@@ -554,11 +648,83 @@ pub unsafe extern "C" fn in_vec_extend(
     }
 }
 
+#[allow(clippy::missing_safety_doc)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn in_vec_push(dst_header: *mut u64, value: u64) -> i64 {
+    unsafe { in_vec_extend(dst_header, (&raw const value) as u64, 1, 1) }
+}
+
+#[allow(clippy::missing_safety_doc)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn in_vec_push_words(
+    dst_header: *mut u64,
+    src_ptr: *const u64,
+    word_count: u64,
+) -> i64 {
+    if dst_header.is_null()
+        || src_ptr.is_null()
+        || word_count == 0
+        || !(dst_header as usize).is_multiple_of(std::mem::align_of::<u64>())
+        || !(src_ptr as usize).is_multiple_of(std::mem::align_of::<u64>())
+        || word_count > usize::MAX as u64
+    {
+        return 0;
+    }
+    unsafe {
+        let dst_ptr = *dst_header;
+        let dst_len = *dst_header.add(1);
+        let dst_cap = *dst_header.add(2);
+        let Some(required) = dst_len.checked_add(1) else {
+            return 0;
+        };
+        if dst_len > dst_cap
+            || dst_cap > usize::MAX as u64
+            || required > usize::MAX as u64
+            || (dst_len != 0 && dst_ptr == 0)
+        {
+            return 0;
+        }
+        if required > dst_cap {
+            let mut new_cap = dst_cap.max(4);
+            while new_cap < required {
+                let Some(next_cap) = new_cap.checked_mul(2) else {
+                    return 0;
+                };
+                new_cap = next_cap;
+            }
+            let Some(size) = (new_cap as usize).checked_mul(word_count as usize) else {
+                return 0;
+            };
+            let Ok(layout) = std::alloc::Layout::array::<u64>(size) else {
+                return 0;
+            };
+            let new_ptr = std::alloc::alloc(layout) as *mut u64;
+            if new_ptr.is_null() {
+                std::alloc::handle_alloc_error(layout);
+            }
+            if dst_len != 0 {
+                std::ptr::copy_nonoverlapping(
+                    dst_ptr as *const u64,
+                    new_ptr,
+                    (dst_len * word_count) as usize,
+                );
+            }
+            *dst_header = new_ptr as u64;
+            *dst_header.add(2) = new_cap;
+        }
+        std::ptr::copy_nonoverlapping(
+            src_ptr,
+            (*dst_header as *mut u64).add((dst_len * word_count) as usize),
+            word_count as usize,
+        );
+        *dst_header.add(1) = required;
+        1
+    }
+}
+
 /// `text.trim()` -> `String`
 ///
 /// # Safety
-/// `text_ptr` must be a valid, non-aliased instring pointer or null.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn in_str_trim(text_ptr: *const u8) -> *const u8 {
     unsafe {
         let Some(s) = instring_to_str(text_ptr) else {
@@ -571,8 +737,6 @@ pub unsafe extern "C" fn in_str_trim(text_ptr: *const u8) -> *const u8 {
 /// `text.split_whitespace().collect::<Vec<String>>()` -> `[String]`
 ///
 /// # Safety
-/// `text_ptr` must be a valid, non-aliased instring pointer or null.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn in_str_split_spaces(text_ptr: *const u8) -> *const u8 {
     unsafe {
         let Some(s) = instring_to_str(text_ptr) else {
@@ -589,8 +753,6 @@ pub unsafe extern "C" fn in_str_split_spaces(text_ptr: *const u8) -> *const u8 {
 /// `text.lines().collect::<Vec<String>>()` -> `[String]`
 ///
 /// # Safety
-/// `text_ptr` must be a valid, non-aliased instring pointer or null.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn in_str_split_lines(text_ptr: *const u8) -> *const u8 {
     unsafe {
         let Some(s) = instring_to_str(text_ptr) else {
@@ -608,8 +770,6 @@ pub unsafe extern "C" fn in_str_split_lines(text_ptr: *const u8) -> *const u8 {
 /// Same implementation as split_spaces for the JIT runtime.
 ///
 /// # Safety
-/// `text_ptr` must be a valid, non-aliased instring pointer or null.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn in_str_tokenize_expr(text_ptr: *const u8) -> *const u8 {
     unsafe { in_str_split_spaces(text_ptr) }
 }
@@ -617,8 +777,6 @@ pub unsafe extern "C" fn in_str_tokenize_expr(text_ptr: *const u8) -> *const u8 
 /// `text.parse::<i64>()` -> `Int` (0 on failure)
 ///
 /// # Safety
-/// `text_ptr` must be a valid, non-aliased instring pointer or null.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn in_str_to_int(text_ptr: *const u8) -> i64 {
     unsafe {
         let Some(s) = instring_to_str(text_ptr) else {
@@ -631,8 +789,6 @@ pub unsafe extern "C" fn in_str_to_int(text_ptr: *const u8) -> i64 {
 /// `text.parse::<i64>().is_ok()` -> `bool`
 ///
 /// # Safety
-/// `text_ptr` must be a valid, non-aliased instring pointer or null.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn in_str_is_int(text_ptr: *const u8) -> i64 {
     unsafe {
         let Some(s) = instring_to_str(text_ptr) else {
@@ -649,8 +805,6 @@ pub unsafe extern "C" fn in_str_is_int(text_ptr: *const u8) -> i64 {
 /// `text.find(pattern)` -> `Int` (-1 on failure)
 ///
 /// # Safety
-/// Both pointers must be valid, non-aliased instring pointers or null.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn in_str_index_of(text_ptr: *const u8, pattern_ptr: *const u8) -> i64 {
     unsafe {
         let Some(s) = instring_to_str(text_ptr) else {
@@ -666,8 +820,6 @@ pub unsafe extern "C" fn in_str_index_of(text_ptr: *const u8, pattern_ptr: *cons
 /// `text[start..end]` -> `String`
 ///
 /// # Safety
-/// `text_ptr` must be a valid, non-aliased instring pointer or null.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn in_str_slice(text_ptr: *const u8, start: i64, end: i64) -> *const u8 {
     unsafe {
         let Some(s) = instring_to_str(text_ptr) else {
@@ -684,8 +836,6 @@ pub unsafe extern "C" fn in_str_slice(text_ptr: *const u8, start: i64, end: i64)
 /// `n.to_string()` -> `String`
 ///
 /// # Safety
-/// No raw pointer arguments.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn in_int_to_string(n: i64) -> *const u8 {
     unsafe { instring_from_string(n.to_string()) }
 }
@@ -693,8 +843,6 @@ pub unsafe extern "C" fn in_int_to_string(n: i64) -> *const u8 {
 /// `Path::new(a).join(b)` -> `String`
 ///
 /// # Safety
-/// Both pointers must be valid, non-aliased instring pointers or null.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn in_path_join(a_ptr: *const u8, b_ptr: *const u8) -> *const u8 {
     unsafe {
         let Some(a) = instring_to_str(a_ptr) else {
@@ -711,8 +859,6 @@ pub unsafe extern "C" fn in_path_join(a_ptr: *const u8, b_ptr: *const u8) -> *co
 /// `Path::new(p).parent()` -> `String`
 ///
 /// # Safety
-/// `p_ptr` must be a valid, non-aliased instring pointer or null.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn in_path_dirname(p_ptr: *const u8) -> *const u8 {
     unsafe {
         let Some(p) = instring_to_str(p_ptr) else {
@@ -728,8 +874,6 @@ pub unsafe extern "C" fn in_path_dirname(p_ptr: *const u8) -> *const u8 {
 /// `Path::new(p).file_name()` -> `String`
 ///
 /// # Safety
-/// `p_ptr` must be a valid, non-aliased instring pointer or null.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn in_path_basename(p_ptr: *const u8) -> *const u8 {
     unsafe {
         let Some(p) = instring_to_str(p_ptr) else {
@@ -745,8 +889,6 @@ pub unsafe extern "C" fn in_path_basename(p_ptr: *const u8) -> *const u8 {
 /// `Path::new(p).extension()` -> `String`
 ///
 /// # Safety
-/// `p_ptr` must be a valid, non-aliased instring pointer or null.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn in_path_extname(p_ptr: *const u8) -> *const u8 {
     unsafe {
         let Some(p) = instring_to_str(p_ptr) else {
@@ -762,8 +904,6 @@ pub unsafe extern "C" fn in_path_extname(p_ptr: *const u8) -> *const u8 {
 /// `Path::new(p).normalize()` -> `String`
 ///
 /// # Safety
-/// `p_ptr` must be a valid, non-aliased instring pointer or null.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn in_path_normalize(p_ptr: *const u8) -> *const u8 {
     unsafe {
         let Some(p) = instring_to_str(p_ptr) else {
@@ -777,8 +917,6 @@ pub unsafe extern "C" fn in_path_normalize(p_ptr: *const u8) -> *const u8 {
 /// `std::env::var(key).is_ok()` -> `bool`
 ///
 /// # Safety
-/// `key_ptr` must be a valid, non-aliased instring pointer or null.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn in_env_has(key_ptr: *const u8) -> i64 {
     unsafe {
         let Some(key) = instring_to_str(key_ptr) else {
@@ -802,12 +940,58 @@ mod tests {
     }
 
     #[test]
+    fn instring_rejects_unreasonable_length() {
+        let value = u64::MAX;
+        assert!(unsafe { instring_from_ptr((&raw const value).cast()) }.is_none());
+    }
+
+    #[test]
     fn in_str_concat_works() {
         unsafe {
             let a = instring_from_bytes(b"hello");
             let b = instring_from_bytes(b" world");
             let c = in_str_concat(a, b);
             assert_eq!(instring_from_ptr(c).unwrap(), b"hello world");
+        }
+    }
+
+    #[test]
+    fn in_json_stringify_escapes_json_text() {
+        unsafe {
+            let value = in_json_stringify(instring_from_bytes(b"a\"\\\n"));
+            assert_eq!(instring_from_ptr(value), Some(&b"\"a\\\"\\\\\\n\""[..]));
+        }
+    }
+
+    #[test]
+    fn in_str_eq_works() {
+        unsafe {
+            let value = instring_from_bytes(b"same");
+            assert_eq!(in_str_eq(value, instring_from_bytes(b"same")), 1);
+            assert_eq!(in_str_eq(value, instring_from_bytes(b"other")), 0);
+        }
+    }
+
+    #[test]
+    fn in_str_table_lookups_work() {
+        unsafe {
+            let names = instring_from_bytes(b"one|two|");
+            let values = instring_from_bytes(b"7|42|");
+            assert_eq!(in_str_table_has(names, instring_from_bytes(b"two")), 1);
+            assert_eq!(in_str_table_has(names, instring_from_bytes(b"three")), 0);
+            assert_eq!(
+                in_str_table_get_int(names, values, instring_from_bytes(b"two")),
+                42
+            );
+        }
+    }
+
+    #[test]
+    fn in_vec_join_works() {
+        unsafe {
+            let values = [instring_from_bytes(b"one"), instring_from_bytes(b"two")];
+            let joined = in_vec_join(values.as_ptr(), values.len(), instring_from_bytes(b", "));
+            assert_eq!(instring_from_ptr(joined), Some(&b"one, two"[..]));
         }
     }
 
@@ -933,6 +1117,51 @@ mod tests {
             );
 
             let layout = std::alloc::Layout::array::<u64>(dst_header[2] as usize).unwrap();
+            std::alloc::dealloc(dst_header[0] as *mut u8, layout);
+        }
+    }
+
+    #[test]
+    fn in_vec_push_grows_empty_vector() {
+        unsafe {
+            let mut dst_header = [0_u64, 0, 0];
+
+            assert_eq!(in_vec_push(dst_header.as_mut_ptr(), 7), 1);
+            assert_eq!(in_vec_push(dst_header.as_mut_ptr(), 9), 1);
+            assert_eq!(dst_header[1], 2);
+            assert!(dst_header[2] >= 2);
+            assert_eq!(
+                std::slice::from_raw_parts(dst_header[0] as *const u64, 2),
+                &[7, 9]
+            );
+
+            let layout = std::alloc::Layout::array::<u64>(dst_header[2] as usize).unwrap();
+            std::alloc::dealloc(dst_header[0] as *mut u8, layout);
+        }
+    }
+
+    #[test]
+    fn in_vec_push_words_keeps_element_length() {
+        unsafe {
+            let mut dst_header = [0_u64, 0, 0];
+            let first = [1_u64, 2];
+            let second = [3_u64, 4];
+
+            assert_eq!(
+                in_vec_push_words(dst_header.as_mut_ptr(), first.as_ptr(), 2),
+                1
+            );
+            assert_eq!(
+                in_vec_push_words(dst_header.as_mut_ptr(), second.as_ptr(), 2),
+                1
+            );
+            assert_eq!(dst_header[1], 2);
+            assert_eq!(
+                std::slice::from_raw_parts(dst_header[0] as *const u64, 4),
+                &[1, 2, 3, 4]
+            );
+
+            let layout = std::alloc::Layout::array::<u64>((dst_header[2] * 2) as usize).unwrap();
             std::alloc::dealloc(dst_header[0] as *mut u8, layout);
         }
     }
