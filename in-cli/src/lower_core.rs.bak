@@ -1735,7 +1735,7 @@ mod tests {
     }
 
     #[test]
-    fn desugar_closure_captures_one_var() -> Result<(), String> {
+    fn desugar_closure_captures_one_var() {
         let module = UnifiedModule {
             identity: Default::default(),
             decls: vec![Decl::Function {
@@ -1770,16 +1770,15 @@ mod tests {
                 }
                 _ => None,
             })
-            .ok_or_else(|| "captures struct should exist".to_string())?;
+            .unwrap();
         assert!(
             cap_struct.contains(&("x".into(), Typ::Named("Any".into()))),
             "captures struct should have x field, got: {cap_struct:?}"
         );
-        Ok(())
     }
 
     #[test]
-    fn desugar_closure_captures_two_vars() -> Result<(), String> {
+    fn desugar_closure_captures_two_vars() {
         let module = UnifiedModule {
             identity: Default::default(),
             decls: vec![Decl::Function {
@@ -1814,7 +1813,7 @@ mod tests {
                 }
                 _ => None,
             })
-            .ok_or_else(|| "captures struct should exist".to_string())?;
+            .unwrap();
         assert!(
             cap_struct.contains(&("x".into(), Typ::Named("Any".into()))),
             "captures struct should have x field"
@@ -1824,11 +1823,10 @@ mod tests {
             "captures struct should have y field"
         );
         assert_eq!(cap_struct.len(), 2);
-        Ok(())
     }
 
     #[test]
-    fn desugar_closure_rewrites_captured_var_to_self_field() -> Result<(), String> {
+    fn desugar_closure_rewrites_captured_var_to_self_field() {
         let module = UnifiedModule {
             identity: Default::default(),
             decls: vec![Decl::Function {
@@ -1863,7 +1861,7 @@ mod tests {
                 }
                 _ => None,
             })
-            .ok_or_else(|| "closure function should exist".to_string())?;
+            .unwrap();
         let has_self_field = body.iter().any(|stmt| match stmt {
             Stmt::Return(Some(Expr::Binary { lhs, .. })) => matches!(
                 lhs.as_ref(),
@@ -1872,11 +1870,10 @@ mod tests {
             _ => false,
         });
         assert!(has_self_field, "captured x should be rewritten to self.x");
-        Ok(())
     }
 
     #[test]
-    fn desugar_closure_hidden_fn_has_self_param() -> Result<(), String> {
+    fn desugar_closure_hidden_fn_has_self_param() {
         let module = UnifiedModule {
             identity: Default::default(),
             decls: vec![Decl::Function {
@@ -1911,7 +1908,7 @@ mod tests {
                 }
                 _ => None,
             })
-            .ok_or_else(|| "closure function should exist".to_string())?;
+            .unwrap();
         assert_eq!(
             params.first().map(|(n, _)| n.as_str()),
             Some("self"),
@@ -1925,11 +1922,10 @@ mod tests {
             "self param should be the captures struct type"
         );
         assert_eq!(params.len(), 2, "should have self + original param a");
-        Ok(())
     }
 
     #[test]
-    fn desugar_closure_no_captures_empty_struct() -> Result<(), String> {
+    fn desugar_closure_no_captures_empty_struct() {
         let module = UnifiedModule {
             identity: Default::default(),
             decls: vec![Decl::Function {
@@ -1960,9 +1956,8 @@ mod tests {
                 }
                 _ => None,
             })
-            .ok_or_else(|| "captures struct should exist even when empty".to_string())?;
+            .expect("captures struct should exist even when empty");
         assert!(cap_struct.is_empty(), "no captures -> empty struct");
-        Ok(())
     }
 
     #[test]
