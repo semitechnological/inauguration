@@ -763,6 +763,18 @@ pub(crate) fn lower_stdlib_call(
     // Recognize std::env / std::fs wrappers first, before generic suffix matching.
     let cleaned: String = target.chars().filter(|&c| c != ' ').collect();
     match cleaned.as_str() {
+        "display" if args.len() == 1 => {
+            lower_expr_into(
+                emitter,
+                ctx,
+                &args[0],
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
         "join" | "Vec::join" if args.len() == 2 => {
             lower_vec_join(
                 emitter,

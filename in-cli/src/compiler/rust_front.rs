@@ -565,7 +565,7 @@ fn type_to_string(ty: &Typ) -> String {
         Typ::Void => "()".to_string(),
         Typ::Named(n) => n.clone(),
         Typ::Array(e) => format!("Vec<{}>", type_to_string(e)),
-        Typ::Vector(e) => format!("Vec<{}>", type_to_string(e)),
+        Typ::Vector(_) => "Vec".to_string(),
         Typ::Generic(g) => g.clone(),
     }
 }
@@ -1081,6 +1081,41 @@ fn lower_expr_with_types(expr: &syn::Expr, local_types: &mut HashMap<String, Str
                 })
                 .unwrap_or_else(|_| Expr::Ident(mac.to_token_stream().to_string()))
         }
+        syn::Expr::Macro(mac) if mac.mac.path.is_ident("format") => {
+            syn::punctuated::Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated
+                .parse2(mac.mac.tokens.clone())
+                .ok()
+                .and_then(|items| {
+                    let mut items = items.into_iter();
+                    let syn::Expr::Lit(first) = items.next()? else {
+                        return None;
+                    };
+                    let syn::Lit::Str(template) = first.lit else {
+                        return None;
+                    };
+                    let template = template.value();
+                    let segments: Vec<_> = template.split("{}").collect();
+                    let args: Vec<_> = items.collect();
+                    if segments.len() != args.len() + 1 {
+                        return None;
+                    }
+                    let mut result = Expr::StringLit(segments[0].to_string());
+                    for (arg, suffix) in args.into_iter().zip(segments.into_iter().skip(1)) {
+                        result = Expr::Call {
+                            callee: Box::new(Expr::Ident("str_concat".to_string())),
+                            args: vec![result, lower_expr_with_types(&arg, local_types)],
+                        };
+                        if !suffix.is_empty() {
+                            result = Expr::Call {
+                                callee: Box::new(Expr::Ident("str_concat".to_string())),
+                                args: vec![result, Expr::StringLit(suffix.to_string())],
+                            };
+                        }
+                    }
+                    Some(result)
+                })
+                .unwrap_or_else(|| Expr::Ident(mac.to_token_stream().to_string()))
+        }
         syn::Expr::Closure(closure) => {
             let mut closure_types = local_types.clone();
             let params = closure
@@ -1289,6 +1324,18 @@ fn main() -> Result<i64, i64> {
         };
         assert!(
             matches!(body.first(), Some(Stmt::Let(_, _, Expr::Closure { params, body, .. })) if params == &vec![("value".to_string(), Typ::Int)] && matches!(body.last(), Some(Stmt::Return(Some(Expr::Binary { .. })))))
+        );
+    }
+
+    #[test]
+    fn lowers_simple_format_macro() {
+        let module = parse_rust_source("fn main() -> String { format!(\"{}:{}\", \"a\", \"b\") }")
+            .expect("parse format macro");
+        let Decl::Function { body, .. } = &module.decls[0] else {
+            panic!("main must be a function");
+        };
+        assert!(
+            matches!(body.last(), Some(Stmt::Return(Some(Expr::Call { callee, .. }))) if matches!(callee.as_ref(), Expr::Ident(name) if name == "str_concat"))
         );
     }
 
