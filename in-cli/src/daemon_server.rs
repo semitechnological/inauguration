@@ -299,3 +299,55 @@ pub fn run_compiler_daemon(socket_path: &Path) -> std::io::Result<()> {
 pub fn daemon_pid_path(socket_path: &Path) -> PathBuf {
     socket_path.with_extension("pid")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{BufRead, Write};
+
+    #[test]
+    fn test_handle_client_read_error() {
+        let (_s1, s2) = UnixStream::pair().unwrap();
+        s2.set_nonblocking(true).unwrap();
+
+        let result = handle_client(s2);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
+    }
+
+    #[test]
+    fn test_handle_client_write_error() {
+        let (mut s1, s2) = UnixStream::pair().unwrap();
+        s1.write_all(b"invalid json\n").unwrap();
+        s1.shutdown(std::net::Shutdown::Both).unwrap();
+
+        let result = handle_client(s2);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::BrokenPipe);
+    }
+
+    #[test]
+    fn test_handle_client_success_empty() {
+        let (mut s1, s2) = UnixStream::pair().unwrap();
+        s1.write_all(b"\n").unwrap();
+
+        let result = handle_client(s2);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_client_success_invalid_json() {
+        let (mut s1, s2) = UnixStream::pair().unwrap();
+        s1.write_all(b"invalid json\n").unwrap();
+
+        let result = handle_client(s2);
+        assert!(result.is_ok());
+
+        let mut reader = std::io::BufReader::new(s1);
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+
+        assert!(line.contains("\"success\":false"));
+        assert!(line.contains("\"error\":\"invalid request:"));
+    }
+}
