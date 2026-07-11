@@ -203,6 +203,7 @@ pub(crate) struct LowerCtx<'a> {
     pub(crate) prologue_stack_reserve: u32,
     /// Stack offset for saving binary operation lhs (preserved across rhs eval)
     pub(crate) binop_temp: u32,
+    pub(crate) call_arg_temps: [u32; 8],
     pub(crate) vec_literal_header_offset: Option<u32>,
     pub(crate) aggregate_vector_scratch: Option<(u32, usize)>,
     pub(crate) iterator_chain_header_offset: Option<u32>,
@@ -345,6 +346,7 @@ impl<'a> LowerCtx<'a> {
             saved_flag_offset: 0,
             prologue_stack_reserve: 0,
             binop_temp: 0,
+            call_arg_temps: [0; 8],
             vec_literal_header_offset: None,
             aggregate_vector_scratch: None,
             iterator_chain_header_offset: None,

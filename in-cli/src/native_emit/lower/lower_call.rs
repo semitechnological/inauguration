@@ -131,6 +131,7 @@ pub(crate) fn lower_call(
 
     let mut reg = 0u8;
     for (arg, (param_name, typ)) in args.iter().zip(&target_info.params) {
+        let first_reg = reg;
         reg = lower_call_arg(
             emitter,
             ctx,
@@ -142,6 +143,20 @@ pub(crate) fn lower_call(
             fn_name,
             param_name,
         )?;
+        for current in first_reg..reg {
+            emitter.emit_u32(aarch64::str64(
+                current,
+                aarch64::REG_SP,
+                ctx.call_arg_temps[current as usize],
+            ));
+        }
+    }
+    for current in 0..reg {
+        emitter.emit_u32(aarch64::ldr64(
+            current,
+            aarch64::REG_SP,
+            ctx.call_arg_temps[current as usize],
+        ));
     }
 
     let call_site = emitter.len();

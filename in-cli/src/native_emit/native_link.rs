@@ -44,6 +44,9 @@ const DLSYM_ALLOWLIST: &[&str] = &[
     "in_str_starts_with",
     "in_str_ends_with",
     "in_str_concat",
+    "in_str_eq",
+    "in_str_table_has",
+    "in_str_table_get_int",
     "in_vec_join",
     "in_str_trim",
     "in_str_split_lines",
@@ -171,6 +174,18 @@ pub fn bootstrap_jit_native() {
     c.insert(
         "in_str_concat".to_string(),
         NativePtr(crate::native_stdlib::in_str_concat as *const u8),
+    );
+    c.insert(
+        "in_str_eq".to_string(),
+        NativePtr(crate::native_stdlib::in_str_eq as *const u8),
+    );
+    c.insert(
+        "in_str_table_has".to_string(),
+        NativePtr(crate::native_stdlib::in_str_table_has as *const u8),
+    );
+    c.insert(
+        "in_str_table_get_int".to_string(),
+        NativePtr(crate::native_stdlib::in_str_table_get_int as *const u8),
     );
     c.insert(
         "in_print".to_string(),

@@ -21,6 +21,7 @@ use std::os::unix::ffi::OsStrExt;
 /// In-runtime string layout: `len` (u64) followed by the UTF-8 bytes.
 const INSTRING_LEN_SIZE: usize = 8;
 const INSTRING_ALIGN: usize = 8;
+const INSTRING_MAX_BYTES: u64 = 64 * 1024 * 1024;
 
 unsafe fn instring_from_ptr(ptr: *const u8) -> Option<&'static [u8]> {
     if ptr.is_null() || !(ptr as usize).is_multiple_of(INSTRING_ALIGN) {
@@ -28,6 +29,9 @@ unsafe fn instring_from_ptr(ptr: *const u8) -> Option<&'static [u8]> {
     }
     unsafe {
         let len = *(ptr as *const u64);
+        if len > INSTRING_MAX_BYTES {
+            return None;
+        }
         let data = ptr.add(INSTRING_LEN_SIZE);
         Some(std::slice::from_raw_parts(data, len as usize))
     }
@@ -382,6 +386,63 @@ pub unsafe extern "C" fn in_str_concat(a_ptr: *const u8, b_ptr: *const u8) -> *c
         out.extend_from_slice(a);
         out.extend_from_slice(b);
         instring_from_bytes(&out)
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn in_str_eq(a_ptr: *const u8, b_ptr: *const u8) -> i64 {
+    unsafe {
+        let Some(a) = instring_from_ptr(a_ptr) else {
+            return 0;
+        };
+        let Some(b) = instring_from_ptr(b_ptr) else {
+            return 0;
+        };
+        i64::from(a == b)
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn in_str_table_has(names_ptr: *const u8, key_ptr: *const u8) -> i64 {
+    unsafe {
+        let Some(names) = instring_from_ptr(names_ptr) else {
+            return 0;
+        };
+        let Some(key) = instring_from_ptr(key_ptr) else {
+            return 0;
+        };
+        i64::from(names.split(|byte| *byte == b'|').any(|name| name == key))
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn in_str_table_get_int(
+    names_ptr: *const u8,
+    values_ptr: *const u8,
+    key_ptr: *const u8,
+) -> i64 {
+    unsafe {
+        let Some(names) = instring_from_ptr(names_ptr) else {
+            return 0;
+        };
+        let Some(values) = instring_from_ptr(values_ptr) else {
+            return 0;
+        };
+        let Some(key) = instring_from_ptr(key_ptr) else {
+            return 0;
+        };
+        let Some(index) = names
+            .split(|byte| *byte == b'|')
+            .position(|name| name == key)
+        else {
+            return 0;
+        };
+        values
+            .split(|byte| *byte == b'|')
+            .nth(index)
+            .and_then(|value| std::str::from_utf8(value).ok())
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0)
     }
 }
 
@@ -902,12 +963,41 @@ mod tests {
     }
 
     #[test]
+    fn instring_rejects_unreasonable_length() {
+        let value = u64::MAX;
+        assert!(unsafe { instring_from_ptr((&raw const value).cast()) }.is_none());
+    }
+
+    #[test]
     fn in_str_concat_works() {
         unsafe {
             let a = instring_from_bytes(b"hello");
             let b = instring_from_bytes(b" world");
             let c = in_str_concat(a, b);
             assert_eq!(instring_from_ptr(c).unwrap(), b"hello world");
+        }
+    }
+
+    #[test]
+    fn in_str_eq_works() {
+        unsafe {
+            let value = instring_from_bytes(b"same");
+            assert_eq!(in_str_eq(value, instring_from_bytes(b"same")), 1);
+            assert_eq!(in_str_eq(value, instring_from_bytes(b"other")), 0);
+        }
+    }
+
+    #[test]
+    fn in_str_table_lookups_work() {
+        unsafe {
+            let names = instring_from_bytes(b"one|two|");
+            let values = instring_from_bytes(b"7|42|");
+            assert_eq!(in_str_table_has(names, instring_from_bytes(b"two")), 1);
+            assert_eq!(in_str_table_has(names, instring_from_bytes(b"three")), 0);
+            assert_eq!(
+                in_str_table_get_int(names, values, instring_from_bytes(b"two")),
+                42
+            );
         }
     }
 
