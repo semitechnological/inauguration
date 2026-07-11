@@ -316,6 +316,51 @@ fn lower_iter_once(
     Ok(())
 }
 
+fn lower_array_into_iter(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    source: &Expr,
+    rd: u8,
+    functions: &std::collections::HashMap<String, FunctionInfo>,
+    pending_calls: &mut Vec<PendingCall>,
+    fn_name: &str,
+) -> Result<(), String> {
+    match source {
+        Expr::Call { callee, args } => super::lower_call::lower_call(
+            emitter,
+            ctx,
+            callee,
+            args,
+            rd,
+            functions,
+            pending_calls,
+            fn_name,
+        ),
+        Expr::Ident(name) => match ctx.locals.get(name) {
+            Some(LocalSlot::Array { offsets, .. }) if !offsets.is_empty() => {
+                emitter.emit_u32(aarch64::add_imm64(rd, REG_SP, offsets[0] as u16));
+                emitter.emit_insns(&aarch64::load_i64(rd + 1, offsets.len() as i64));
+                Ok(())
+            }
+            Some(LocalSlot::ArrayParam {
+                ptr_offset,
+                len_offset,
+                ..
+            }) => {
+                emitter.emit_u32(aarch64::ldr64(rd, REG_SP, *ptr_offset));
+                emitter.emit_u32(aarch64::ldr64(rd + 1, REG_SP, *len_offset));
+                Ok(())
+            }
+            _ => Err(format!(
+                "native-lower: into_iter source `{name}` is not an array in `{fn_name}`"
+            )),
+        },
+        _ => Err(format!(
+            "native-lower: into_iter source unsupported in `{fn_name}`"
+        )),
+    }
+}
+
 fn lower_iter_chain(
     emitter: &mut CodeEmitter,
     ctx: &mut LowerCtx<'_>,
@@ -494,6 +539,18 @@ pub(crate) fn lower_stdlib_call(
     // Recognize std::env / std::fs wrappers first, before generic suffix matching.
     let cleaned: String = target.chars().filter(|&c| c != ' ').collect();
     match cleaned.as_str() {
+        "into_iter" if args.len() == 1 => {
+            lower_array_into_iter(
+                emitter,
+                ctx,
+                &args[0],
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
         "collect" if args.len() == 1 => {
             lower_iter_collect(emitter, ctx, args, rd, functions, pending_calls, fn_name)?;
             return Ok(true);
