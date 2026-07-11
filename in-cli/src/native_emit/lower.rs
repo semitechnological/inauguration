@@ -853,6 +853,15 @@ fn max_aggregate_vector_literal_words(
     }
     let mut max = 0;
     inspect_body(body, structs, fn_name, &mut max)?;
+    if max != 0 {
+        for name in structs.keys() {
+            max = max.max(lower_util::native_param_abi_slots(
+                &[("value".to_string(), Typ::Named(name.clone()))],
+                structs,
+                fn_name,
+            )?);
+        }
+    }
     Ok((max != 0).then_some(max))
 }
 
