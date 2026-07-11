@@ -301,13 +301,46 @@ fn lower_vector_call_arg(
             "native-lower: missing Vec argument header in `{fn_name}`"
         ));
     };
+    lower_aggregate_vector_literal_into_slots(
+        emitter,
+        ctx,
+        items,
+        struct_name,
+        header_offset,
+        header_offset + 8,
+        header_offset + 16,
+        functions,
+        pending_calls,
+        fn_name,
+    )?;
+    for (index, offset) in [header_offset, header_offset + 8, header_offset + 16]
+        .into_iter()
+        .enumerate()
+    {
+        emitter.emit_u32(aarch64::ldr64(reg + index as u8, aarch64::REG_SP, offset));
+    }
+    Ok(reg + 3)
+}
+
+pub(crate) fn lower_aggregate_vector_literal_into_slots(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    items: &[Expr],
+    struct_name: &str,
+    ptr_offset: u32,
+    len_offset: u32,
+    cap_offset: u32,
+    functions: &HashMap<String, FunctionInfo>,
+    pending_calls: &mut Vec<PendingCall>,
+    fn_name: &str,
+) -> Result<(), String> {
     let Some((scratch_offset, scratch_words)) = ctx.aggregate_vector_scratch else {
         return Err(format!(
             "native-lower: missing aggregate Vec scratch space in `{fn_name}`"
         ));
     };
     let words = native_param_abi_slots(
-        &[("value".to_string(), Typ::Named(struct_name.clone()))],
+        &[("value".to_string(), Typ::Named(struct_name.to_string()))],
         ctx.structs,
         fn_name,
     )?;
@@ -316,21 +349,9 @@ fn lower_vector_call_arg(
             "native-lower: aggregate Vec scratch space is too small in `{fn_name}`"
         ));
     }
-    emitter.emit_u32(aarch64::str64(
-        aarch64::REG_XZR,
-        aarch64::REG_SP,
-        header_offset,
-    ));
-    emitter.emit_u32(aarch64::str64(
-        aarch64::REG_XZR,
-        aarch64::REG_SP,
-        header_offset + 8,
-    ));
-    emitter.emit_u32(aarch64::str64(
-        aarch64::REG_XZR,
-        aarch64::REG_SP,
-        header_offset + 16,
-    ));
+    for offset in [ptr_offset, len_offset, cap_offset] {
+        emitter.emit_u32(aarch64::str64(aarch64::REG_XZR, aarch64::REG_SP, offset));
+    }
     let fields = aggregate_scratch_fields(ctx, struct_name, scratch_offset, fn_name)?;
     for item in items {
         lower_struct_expr_into_slots(
@@ -343,15 +364,9 @@ fn lower_vector_call_arg(
             pending_calls,
             fn_name,
         )?;
-        lower_stdlib::emit_vec_push_words(emitter, header_offset, scratch_offset, words)?;
+        lower_stdlib::emit_vec_push_words(emitter, ptr_offset, scratch_offset, words)?;
     }
-    for (index, offset) in [header_offset, header_offset + 8, header_offset + 16]
-        .into_iter()
-        .enumerate()
-    {
-        emitter.emit_u32(aarch64::ldr64(reg + index as u8, aarch64::REG_SP, offset));
-    }
-    Ok(reg + 3)
+    Ok(())
 }
 
 fn aggregate_scratch_fields(

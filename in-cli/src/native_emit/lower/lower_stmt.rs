@@ -506,7 +506,7 @@ pub(crate) fn lower_struct_expr_into_slots(
                         "native-lower: unknown field `{field}` in struct initializer `{typ}` in `{fn_name}`"
                     ));
                 };
-                if let (Typ::Vector(_), Expr::ArrayLit(items)) = (field_typ, value) {
+                if let (Typ::Vector(elem), Expr::ArrayLit(items)) = (field_typ, value) {
                     let ptr_key = format!("{field}.ptr");
                     let len_key = format!("{field}.len");
                     let cap_key = format!("{field}.cap");
@@ -525,17 +525,32 @@ pub(crate) fn lower_struct_expr_into_slots(
                             "native-lower: Vec field `{field}` missing `cap` in `{typ}` in `{fn_name}`"
                         ));
                     };
-                    super::lower_stdlib::lower_vec_literal_into_slots(
-                        emitter,
-                        ctx,
-                        items,
-                        ptr_offset,
-                        len_offset,
-                        cap_offset,
-                        functions,
-                        pending_calls,
-                        fn_name,
-                    )?;
+                    if let Typ::Named(struct_name) = elem.as_ref() {
+                        super::lower_call::lower_aggregate_vector_literal_into_slots(
+                            emitter,
+                            ctx,
+                            items,
+                            struct_name,
+                            ptr_offset,
+                            len_offset,
+                            cap_offset,
+                            functions,
+                            pending_calls,
+                            fn_name,
+                        )?;
+                    } else {
+                        super::lower_stdlib::lower_vec_literal_into_slots(
+                            emitter,
+                            ctx,
+                            items,
+                            ptr_offset,
+                            len_offset,
+                            cap_offset,
+                            functions,
+                            pending_calls,
+                            fn_name,
+                        )?;
+                    }
                     continue;
                 }
                 // Check if this field references a nested struct variable
