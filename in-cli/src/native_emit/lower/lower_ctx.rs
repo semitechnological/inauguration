@@ -141,6 +141,14 @@ pub(crate) struct VecForSlots {
     pub(crate) index: u32,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct IteratorMapSlots {
+    pub(crate) ptr: u32,
+    pub(crate) len: u32,
+    pub(crate) index: u32,
+    pub(crate) binding: u32,
+}
+
 #[derive(Default)]
 pub(crate) struct VecForPlan {
     slots: Vec<VecForSlots>,
@@ -198,6 +206,7 @@ pub(crate) struct LowerCtx<'a> {
     pub(crate) vec_literal_header_offset: Option<u32>,
     pub(crate) aggregate_vector_scratch: Option<(u32, usize)>,
     pub(crate) iterator_chain_header_offset: Option<u32>,
+    pub(crate) iterator_map_slots: Option<IteratorMapSlots>,
 }
 
 #[allow(clippy::only_used_in_recursion)]
@@ -339,6 +348,7 @@ impl<'a> LowerCtx<'a> {
             vec_literal_header_offset: None,
             aggregate_vector_scratch: None,
             iterator_chain_header_offset: None,
+            iterator_map_slots: None,
         };
         let mut abi_idx = 0usize;
         for (name, typ) in params {

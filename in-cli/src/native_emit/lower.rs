@@ -39,7 +39,8 @@ pub(crate) use lower_collect::{
     collect_functions, collect_strings, collect_structs, entry_return_kind,
 };
 pub(crate) use lower_ctx::{
-    LocalSlot, LowerCtx, alloc_declared_locals, append_static_arrays, append_string_table,
+    IteratorMapSlots, LocalSlot, LowerCtx, alloc_declared_locals, append_static_arrays,
+    append_string_table,
 };
 pub(crate) use lower_iterator::lower_vec_for;
 pub(crate) use lower_stmt::lower_stmt;
@@ -344,6 +345,7 @@ pub fn lower_module_with_jobs(
     let mut pending_static_arrays = Vec::new();
     let mut pending_strings = Vec::new();
     let mut names: Vec<String> = functions.keys().cloned().collect();
+    names.retain(|name| !name.starts_with("__closure_"));
     names.sort();
 
     // Lower each function in parallel. Each function gets its own code buffer,
@@ -529,6 +531,7 @@ fn lower_function(
     if has_struct_return_vec_literal(&func.body)
         || aggregate_vector_words.is_some()
         || has_iter_once(&func.body)
+        || has_iter_map(&func.body)
     {
         ctx.vec_literal_header_offset = Some(ctx.alloc_slot());
         ctx.alloc_slot();
@@ -538,6 +541,14 @@ fn lower_function(
         ctx.iterator_chain_header_offset = Some(ctx.alloc_slot());
         ctx.alloc_slot();
         ctx.alloc_slot();
+    }
+    if has_iter_map(&func.body) {
+        ctx.iterator_map_slots = Some(IteratorMapSlots {
+            ptr: ctx.alloc_slot(),
+            len: ctx.alloc_slot(),
+            index: ctx.alloc_slot(),
+            binding: ctx.alloc_slot(),
+        });
     }
     if let Some(words) = aggregate_vector_words {
         let offset = ctx.alloc_slot();
@@ -663,6 +674,55 @@ fn has_iter_once(body: &[Stmt]) -> bool {
         } => expr_has_once(scrutinee) || arms.iter().any(|arm| has_iter_once(&arm.body)),
         Stmt::Try { body, catches, .. } => {
             has_iter_once(body) || catches.iter().any(|catch| has_iter_once(&catch.body))
+        }
+        Stmt::Return(None) | Stmt::Break | Stmt::Propagate => false,
+    })
+}
+
+fn has_iter_map(body: &[Stmt]) -> bool {
+    fn expr_has_map(expr: &Expr) -> bool {
+        match expr {
+            Expr::Call { callee, args, .. } => {
+                matches!(callee.as_ref(), Expr::Ident(name) if name == "map")
+                    || expr_has_map(callee)
+                    || args.iter().any(expr_has_map)
+            }
+            Expr::Binary { lhs, rhs, .. } => expr_has_map(lhs) || expr_has_map(rhs),
+            Expr::Unary { expr, .. } | Expr::Field { base: expr, .. } => expr_has_map(expr),
+            Expr::Index { base, index } => expr_has_map(base) || expr_has_map(index),
+            Expr::StructInit { fields, .. } => fields.iter().any(|(_, value)| expr_has_map(value)),
+            Expr::ArrayLit(items) => items.iter().any(expr_has_map),
+            Expr::Closure { body, .. } => has_iter_map(body),
+            Expr::IntLit(_)
+            | Expr::FloatLit(_)
+            | Expr::StringLit(_)
+            | Expr::BoolLit(_)
+            | Expr::Ident(_) => false,
+        }
+    }
+    body.iter().any(|stmt| match stmt {
+        Stmt::Let(_, _, expr)
+        | Stmt::Assign(_, expr)
+        | Stmt::Expr(expr)
+        | Stmt::Return(Some(expr))
+        | Stmt::Throw(expr) => expr_has_map(expr),
+        Stmt::IndexAssign {
+            base, index, value, ..
+        } => expr_has_map(base) || expr_has_map(index) || expr_has_map(value),
+        Stmt::FieldAssign { base, value, .. } => expr_has_map(base) || expr_has_map(value),
+        Stmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => expr_has_map(cond) || has_iter_map(then_body) || has_iter_map(else_body),
+        Stmt::Loop { cond, body, .. } => {
+            cond.as_ref().is_some_and(expr_has_map) || has_iter_map(body)
+        }
+        Stmt::Match {
+            scrutinee, arms, ..
+        } => expr_has_map(scrutinee) || arms.iter().any(|arm| has_iter_map(&arm.body)),
+        Stmt::Try { body, catches, .. } => {
+            has_iter_map(body) || catches.iter().any(|catch| has_iter_map(&catch.body))
         }
         Stmt::Return(None) | Stmt::Break | Stmt::Propagate => false,
     })
@@ -835,12 +895,30 @@ fn max_aggregate_vector_literal_words(
                     inspect_expr(value, structs, fn_name, max)?;
                 }
             }
+            Expr::Closure { body, .. } => {
+                for stmt in body {
+                    if let Stmt::Return(Some(Expr::StructInit { name, .. })) = stmt {
+                        let words = lower_util::native_param_abi_slots(
+                            &[("value".to_string(), Typ::Named(name.clone()))],
+                            structs,
+                            fn_name,
+                        )?;
+                        *max = (*max).max(words);
+                        *max = (*max).max(max_nested_vector_element_words(
+                            &Typ::Named(name.clone()),
+                            structs,
+                            fn_name,
+                            0,
+                        )?);
+                    }
+                }
+                inspect_body(body, structs, fn_name, max)?;
+            }
             Expr::IntLit(_)
             | Expr::FloatLit(_)
             | Expr::StringLit(_)
             | Expr::BoolLit(_)
-            | Expr::Ident(_)
-            | Expr::Closure { .. } => {}
+            | Expr::Ident(_) => {}
         }
         Ok(())
     }

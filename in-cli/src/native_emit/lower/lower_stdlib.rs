@@ -5,11 +5,12 @@
 //! in `native_stdlib`.
 
 use super::lower_expr::lower_expr_into;
+use super::lower_stmt::lower_struct_expr_into_slots;
 use super::{
     FunctionInfo, LocalSlot, LowerCtx, PendingCall, TL_EXTERNAL_REFS, TL_NATIVE_MODE,
-    find_field_offset, lower_comparison_result, pick_scratch,
+    find_field_offset, lower_comparison_result, native_param_abi_slots, pick_scratch,
 };
-use crate::core_ir::Expr;
+use crate::core_ir::{Expr, Stmt, Typ};
 use crate::native_emit::aarch64::{self, CodeEmitter, REG_SP, REG_XZR};
 
 /// Emit a call to a C-ABI wrapper exposed by `native_stdlib`.
@@ -404,6 +405,113 @@ fn lower_iter_chain(
     Ok(())
 }
 
+fn lower_array_map(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    source: &Expr,
+    closure: &Expr,
+    rd: u8,
+    functions: &std::collections::HashMap<String, FunctionInfo>,
+    pending_calls: &mut Vec<PendingCall>,
+    fn_name: &str,
+) -> Result<(), String> {
+    let Expr::Closure { params, body, .. } = closure else {
+        return Err(format!(
+            "native-lower: map requires a closure in `{fn_name}`"
+        ));
+    };
+    let [(binding, _)] = params.as_slice() else {
+        return Err(format!(
+            "native-lower: map closure requires one parameter in `{fn_name}`"
+        ));
+    };
+    let Some(Stmt::Return(Some(item @ Expr::StructInit { name, .. }))) = body.last() else {
+        return Err(format!(
+            "native-lower: map closure must return a struct in `{fn_name}`"
+        ));
+    };
+    let Some(header_offset) = ctx.vec_literal_header_offset else {
+        return Err(format!(
+            "native-lower: missing map vector header in `{fn_name}`"
+        ));
+    };
+    let Some(slots) = ctx.iterator_map_slots else {
+        return Err(format!(
+            "native-lower: missing map iterator state in `{fn_name}`"
+        ));
+    };
+    let Some((scratch_offset, scratch_words)) = ctx.aggregate_vector_scratch else {
+        return Err(format!(
+            "native-lower: missing aggregate map scratch space in `{fn_name}`"
+        ));
+    };
+    let words = native_param_abi_slots(
+        &[("value".to_string(), Typ::Named(name.clone()))],
+        ctx.structs,
+        fn_name,
+    )?;
+    if words > scratch_words {
+        return Err(format!(
+            "native-lower: aggregate map scratch space is too small in `{fn_name}`"
+        ));
+    }
+    lower_array_into_iter(emitter, ctx, source, 0, functions, pending_calls, fn_name)?;
+    emitter.emit_u32(aarch64::str64(0, REG_SP, slots.ptr));
+    emitter.emit_u32(aarch64::str64(1, REG_SP, slots.len));
+    emitter.emit_u32(aarch64::str64(aarch64::REG_XZR, REG_SP, slots.index));
+    for offset in [header_offset, header_offset + 8, header_offset + 16] {
+        emitter.emit_u32(aarch64::str64(aarch64::REG_XZR, REG_SP, offset));
+    }
+    let previous = ctx
+        .locals
+        .insert(binding.clone(), LocalSlot::Scalar(slots.binding));
+    let fields = super::lower_call::aggregate_scratch_fields(ctx, name, scratch_offset, fn_name)?;
+    let head = emitter.len();
+    emitter.emit_u32(aarch64::ldr64(0, REG_SP, slots.ptr));
+    emitter.emit_u32(aarch64::ldr64(1, REG_SP, slots.len));
+    emitter.emit_u32(aarch64::ldr64(2, REG_SP, slots.index));
+    emitter.emit_u32(aarch64::cmp_reg64(2, 1));
+    let end_branch = emitter.emit_insn(aarch64::b_cond(10, 0));
+    emitter.emit_u32(aarch64::add_reg64(3, 2, 2));
+    emitter.emit_u32(aarch64::add_reg64(3, 3, 3));
+    emitter.emit_u32(aarch64::add_reg64(3, 3, 3));
+    emitter.emit_u32(aarch64::add_reg64(4, 0, 3));
+    emitter.emit_u32(aarch64::ldr64(5, 4, 0));
+    emitter.emit_u32(aarch64::str64(5, REG_SP, slots.binding));
+    emitter.emit_u32(aarch64::add_imm64(2, 2, 1));
+    emitter.emit_u32(aarch64::str64(2, REG_SP, slots.index));
+    let result = lower_struct_expr_into_slots(
+        emitter,
+        ctx,
+        item,
+        name,
+        &fields,
+        functions,
+        pending_calls,
+        fn_name,
+    )
+    .and_then(|()| {
+        super::lower_stdlib::emit_vec_push_words(emitter, header_offset, scratch_offset, words)
+    });
+    if let Some(previous) = previous {
+        ctx.locals.insert(binding.clone(), previous);
+    } else {
+        ctx.locals.remove(binding);
+    }
+    result?;
+    let back_offset = head as i32 - emitter.len() as i32;
+    emitter.emit_u32(aarch64::b(back_offset));
+    let end_offset = emitter.len() as i32 - end_branch as i32;
+    emitter.patch_u32(end_branch, aarch64::b_cond(10, end_offset));
+    for (index, offset) in [header_offset, header_offset + 8, header_offset + 16]
+        .into_iter()
+        .enumerate()
+    {
+        emitter.emit_u32(aarch64::ldr64(rd + index as u8, REG_SP, offset));
+    }
+    Ok(())
+}
+
 fn lower_iter_collect(
     emitter: &mut CodeEmitter,
     ctx: &mut LowerCtx<'_>,
@@ -414,6 +522,20 @@ fn lower_iter_collect(
     fn_name: &str,
 ) -> Result<(), String> {
     match &args[0] {
+        Expr::Call { callee, args }
+            if matches!(callee.as_ref(), Expr::Ident(name) if name == "map") && args.len() == 2 =>
+        {
+            lower_array_map(
+                emitter,
+                ctx,
+                &args[0],
+                &args[1],
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )
+        }
         Expr::Call { callee, args } => super::lower_call::lower_call(
             emitter,
             ctx,
@@ -471,6 +593,32 @@ fn lower_iter_collect(
             "native-lower: collect source unsupported in `{fn_name}"
         )),
     }
+}
+
+fn lower_clone(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    source: &Expr,
+    rd: u8,
+    functions: &std::collections::HashMap<String, FunctionInfo>,
+    pending_calls: &mut Vec<PendingCall>,
+    fn_name: &str,
+) -> Result<(), String> {
+    if let Expr::Field { base, name } = source
+        && let Expr::Ident(local) = base.as_ref()
+        && let Some(LocalSlot::Struct { fields, .. }) = ctx.locals.get(local)
+        && find_field_offset(fields, &format!("{name}.ptr")).is_some()
+    {
+        for (index, suffix) in ["ptr", "len", "cap"].into_iter().enumerate() {
+            let key = format!("{name}.{suffix}");
+            let offset = find_field_offset(fields, &key).ok_or_else(|| {
+                format!("native-lower: clone source `{key}` missing in `{fn_name}`")
+            })?;
+            emitter.emit_u32(aarch64::ldr64(rd + index as u8, REG_SP, *offset));
+        }
+        return Ok(());
+    }
+    lower_expr_into(emitter, ctx, source, rd, functions, pending_calls, fn_name)
 }
 
 pub(crate) fn resolve_function_name(
@@ -539,6 +687,18 @@ pub(crate) fn lower_stdlib_call(
     // Recognize std::env / std::fs wrappers first, before generic suffix matching.
     let cleaned: String = target.chars().filter(|&c| c != ' ').collect();
     match cleaned.as_str() {
+        "clone" if args.len() == 1 => {
+            lower_clone(
+                emitter,
+                ctx,
+                &args[0],
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
         "into_iter" if args.len() == 1 => {
             lower_array_into_iter(
                 emitter,
@@ -1283,7 +1443,7 @@ pub(crate) fn lower_stdlib_call(
             Ok(true)
         }
         // Option::is_some → cmp tag, #1; cset x0, eq
-        "is_some" if args.len() == 1 && target.contains("Option") => {
+        "is_some" if args.len() == 1 => {
             lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?;
             // Option's tag is at offset 0 (first field)
             emitter.emit_u32(aarch64::ldr64(0, 0, 0));
@@ -1300,7 +1460,7 @@ pub(crate) fn lower_stdlib_call(
             Ok(true)
         }
         // Option::is_none → cmp tag, #0; cset x0, eq
-        "is_none" if args.len() == 1 && target.contains("Option") => {
+        "is_none" if args.len() == 1 => {
             lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?;
             emitter.emit_u32(aarch64::ldr64(0, 0, 0));
             emitter.emit_u32(aarch64::cmp_reg64(0, REG_XZR));
