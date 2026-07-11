@@ -452,7 +452,6 @@ pub(crate) fn lower_struct_expr_into_slots(
 ) -> Result<(), String> {
     match expr {
         Expr::ArrayLit(items) if typ == "Vec" => {
-            let values = static_array_values(ctx, items, &Typ::Int, fn_name)?;
             let Some(&ptr_offset) = find_field_offset(fields, "ptr") else {
                 return Err(format!(
                     "native-lower: Vec local missing `ptr` in `{fn_name}`"
@@ -468,18 +467,17 @@ pub(crate) fn lower_struct_expr_into_slots(
                     "native-lower: Vec local missing `cap` in `{fn_name}`"
                 ));
             };
-            if values.is_empty() {
-                emitter.emit_insns(&aarch64::load_i64(0, 0));
-            } else {
-                let adr_site = emitter.emit_insn(aarch64::adr(0, 0));
-                ctx.pending_static_arrays
-                    .push(super::PendingStaticArray { adr_site, values });
-            }
-            emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, ptr_offset));
-            emitter.emit_insns(&aarch64::load_i64(0, items.len() as i64));
-            emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, len_offset));
-            emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, cap_offset));
-            Ok(())
+            super::lower_stdlib::lower_vec_literal_into_slots(
+                emitter,
+                ctx,
+                items,
+                ptr_offset,
+                len_offset,
+                cap_offset,
+                functions,
+                pending_calls,
+                fn_name,
+            )
         }
         Expr::StructInit {
             name: init,
@@ -492,10 +490,44 @@ pub(crate) fn lower_struct_expr_into_slots(
             }
             let schema = native_struct_fields(ctx.structs, typ, fn_name)?;
             for (field, value) in values {
-                if !schema.iter().any(|(n, _)| n == field) {
+                let Some((_, field_typ)) = schema.iter().find(|(name, _)| name == field) else {
                     return Err(format!(
                         "native-lower: unknown field `{field}` in struct initializer `{typ}` in `{fn_name}`"
                     ));
+                };
+                if let (Typ::Named(vec_name), Expr::ArrayLit(items)) = (field_typ, value)
+                    && vec_name == "Vec"
+                {
+                    let ptr_key = format!("{field}.ptr");
+                    let len_key = format!("{field}.len");
+                    let cap_key = format!("{field}.cap");
+                    let Some(&ptr_offset) = find_field_offset(fields, &ptr_key) else {
+                        return Err(format!(
+                            "native-lower: Vec field `{field}` missing `ptr` in `{typ}` in `{fn_name}`"
+                        ));
+                    };
+                    let Some(&len_offset) = find_field_offset(fields, &len_key) else {
+                        return Err(format!(
+                            "native-lower: Vec field `{field}` missing `len` in `{typ}` in `{fn_name}`"
+                        ));
+                    };
+                    let Some(&cap_offset) = find_field_offset(fields, &cap_key) else {
+                        return Err(format!(
+                            "native-lower: Vec field `{field}` missing `cap` in `{typ}` in `{fn_name}`"
+                        ));
+                    };
+                    super::lower_stdlib::lower_vec_literal_into_slots(
+                        emitter,
+                        ctx,
+                        items,
+                        ptr_offset,
+                        len_offset,
+                        cap_offset,
+                        functions,
+                        pending_calls,
+                        fn_name,
+                    )?;
+                    continue;
                 }
                 // Check if this field references a nested struct variable
                 if let Expr::Ident(local) = value
@@ -625,21 +657,47 @@ pub(crate) fn lower_struct_expr_into_regs(
                 ));
             }
             let schema = native_struct_fields(ctx.structs, typ, fn_name)?;
-            for (reg, (field, _)) in schema.iter().enumerate() {
+            let mut reg = 0u8;
+            for (field, field_typ) in &schema {
                 let Some((_, value)) = values.iter().find(|(name, _)| name == field) else {
                     return Err(format!(
                         "native-lower: struct return initializer `{typ}` missing field `{field}` in `{fn_name}`"
                     ));
                 };
+                if let (Typ::Named(vec_name), Expr::ArrayLit(items)) = (field_typ, value)
+                    && vec_name == "Vec"
+                {
+                    let ptr_offset = ctx.vec_literal_header_offset;
+                    super::lower_stdlib::lower_vec_literal_into_slots(
+                        emitter,
+                        ctx,
+                        items,
+                        ptr_offset,
+                        ptr_offset + 8,
+                        ptr_offset + 16,
+                        functions,
+                        pending_calls,
+                        fn_name,
+                    )?;
+                    for offset in [ptr_offset, ptr_offset + 8, ptr_offset + 16] {
+                        emitter.emit_u32(aarch64::ldr64(reg, aarch64::REG_SP, offset));
+                        reg += 1;
+                    }
+                    continue;
+                }
                 lower_expr::lower_expr_into(
                     emitter,
                     ctx,
                     value,
-                    reg as u8,
+                    reg,
                     functions,
                     pending_calls,
                     fn_name,
                 )?;
+                reg += match field_typ {
+                    Typ::Named(name) if name == "PathBuf" => 3,
+                    _ => 1,
+                };
             }
             Ok(())
         }

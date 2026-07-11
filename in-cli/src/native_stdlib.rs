@@ -554,6 +554,12 @@ pub unsafe extern "C" fn in_vec_extend(
     }
 }
 
+#[allow(clippy::missing_safety_doc)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn in_vec_push(dst_header: *mut u64, value: u64) -> i64 {
+    unsafe { in_vec_extend(dst_header, (&raw const value) as u64, 1, 1) }
+}
+
 /// `text.trim()` -> `String`
 ///
 /// # Safety
@@ -930,6 +936,25 @@ mod tests {
             assert_eq!(
                 std::slice::from_raw_parts(dst_header[0] as *const u64, 3),
                 &[7, 8, 9]
+            );
+
+            let layout = std::alloc::Layout::array::<u64>(dst_header[2] as usize).unwrap();
+            std::alloc::dealloc(dst_header[0] as *mut u8, layout);
+        }
+    }
+
+    #[test]
+    fn in_vec_push_grows_empty_vector() {
+        unsafe {
+            let mut dst_header = [0_u64, 0, 0];
+
+            assert_eq!(in_vec_push(dst_header.as_mut_ptr(), 7), 1);
+            assert_eq!(in_vec_push(dst_header.as_mut_ptr(), 9), 1);
+            assert_eq!(dst_header[1], 2);
+            assert!(dst_header[2] >= 2);
+            assert_eq!(
+                std::slice::from_raw_parts(dst_header[0] as *const u64, 2),
+                &[7, 9]
             );
 
             let layout = std::alloc::Layout::array::<u64>(dst_header[2] as usize).unwrap();

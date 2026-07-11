@@ -40,19 +40,64 @@ fn emit_stdlib_wrapper_call(
             fn_name,
         )?;
     }
+    emit_stdlib_wrapper_register_call(emitter, wrapper, rd)
+}
+
+fn emit_stdlib_wrapper_register_call(
+    emitter: &mut CodeEmitter,
+    wrapper: &str,
+    rd: u8,
+) -> Result<(), String> {
     let is_native = TL_NATIVE_MODE.with(|m| *m.borrow());
     if is_native {
         let call_site = emitter.len() as u32;
         emitter.emit_u32(aarch64::bl(0));
         TL_EXTERNAL_REFS.with(|refs| refs.borrow_mut().push((call_site, wrapper.to_string())));
-    } else if let Some(native_ptr) = crate::native_emit::native_link::resolve_native_fn(wrapper) {
-        emitter.emit_insns(&aarch64::load_i64(15, native_ptr as usize as i64));
-        emitter.emit_u32(0xD63F_01E0u32 | (15 << 5)); // BLR X15
     } else {
-        emitter.emit_insns(&aarch64::load_i64(0, 0));
+        crate::native_emit::native_link::bootstrap_jit_native();
+        if let Some(native_ptr) = crate::native_emit::native_link::resolve_native_fn(wrapper) {
+            emitter.emit_insns(&aarch64::load_i64(15, native_ptr as usize as i64));
+            emitter.emit_u32(0xD63F_01E0u32 | (15 << 5)); // BLR X15
+        } else {
+            return Err(format!("native-lower: missing {wrapper} runtime"));
+        }
     }
     if rd != 0 {
         emitter.emit_u32(aarch64::mov_reg64(rd, 0));
+    }
+    Ok(())
+}
+
+pub(crate) fn lower_vec_literal_into_slots(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    items: &[Expr],
+    ptr_offset: u32,
+    len_offset: u32,
+    cap_offset: u32,
+    functions: &std::collections::HashMap<String, FunctionInfo>,
+    pending_calls: &mut Vec<PendingCall>,
+    fn_name: &str,
+) -> Result<(), String> {
+    emitter.emit_u32(aarch64::str64(
+        aarch64::REG_XZR,
+        aarch64::REG_SP,
+        ptr_offset,
+    ));
+    emitter.emit_u32(aarch64::str64(
+        aarch64::REG_XZR,
+        aarch64::REG_SP,
+        len_offset,
+    ));
+    emitter.emit_u32(aarch64::str64(
+        aarch64::REG_XZR,
+        aarch64::REG_SP,
+        cap_offset,
+    ));
+    for item in items {
+        lower_expr_into(emitter, ctx, item, 1, functions, pending_calls, fn_name)?;
+        emitter.emit_u32(aarch64::add_imm64(0, aarch64::REG_SP, ptr_offset as u16));
+        emit_stdlib_wrapper_register_call(emitter, "in_vec_push", 0)?;
     }
     Ok(())
 }
@@ -843,6 +888,37 @@ pub(crate) fn lower_stdlib_call(
             )?;
             emitter.emit_u32(aarch64::ldr64(rd + 1, rd, 8));
             emitter.emit_u32(aarch64::ldr64(rd, rd, 0));
+            Ok(true)
+        }
+        "to_path_buf" if args.len() == 1 && target.contains("Path") => {
+            let Expr::Ident(name) = &args[0] else {
+                return Err(format!(
+                    "native-lower: Path::to_path_buf receiver must be a local in `{fn_name}`"
+                ));
+            };
+            let Some(LocalSlot::Struct { typ, fields }) = ctx.locals.get(name) else {
+                return Err(format!(
+                    "native-lower: Path::to_path_buf receiver `{name}` is not a Path local in `{fn_name}`"
+                ));
+            };
+            if typ != "Path" {
+                return Err(format!(
+                    "native-lower: Path::to_path_buf receiver `{name}` has type `{typ}` in `{fn_name}`"
+                ));
+            }
+            let Some(&ptr_offset) = find_field_offset(fields, "ptr") else {
+                return Err(format!(
+                    "native-lower: Path local `{name}` is missing `ptr` in `{fn_name}`"
+                ));
+            };
+            let Some(&len_offset) = find_field_offset(fields, "len") else {
+                return Err(format!(
+                    "native-lower: Path local `{name}` is missing `len` in `{fn_name}`"
+                ));
+            };
+            emitter.emit_u32(aarch64::ldr64(rd, REG_SP, ptr_offset));
+            emitter.emit_u32(aarch64::ldr64(rd + 1, REG_SP, len_offset));
+            emitter.emit_u32(aarch64::ldr64(rd + 2, REG_SP, len_offset));
             Ok(true)
         }
         // String/str::as_str → return slice {ptr, len}
