@@ -1,6 +1,6 @@
 //! Core IR → AArch64 lowering for the owned native subset.
 
-use crate::core_ir::{Stmt, Typ, UnifiedModule};
+use crate::core_ir::{Expr, Stmt, Typ, UnifiedModule};
 use crate::inrt;
 use crate::native_emit::aarch64::{self, CodeEmitter, REG_FP};
 use crate::native_emit::macho::{ExportSymbol, MachOLinkage};
@@ -524,9 +524,11 @@ fn lower_function(
     ctx.binop_temp = ctx.alloc_slot();
     ctx.saved_flag_offset = ctx.stack_size + 8;
     ctx.stack_size += 16;
-    ctx.vec_literal_header_offset = ctx.alloc_slot();
-    ctx.alloc_slot();
-    ctx.alloc_slot();
+    if has_struct_return_vec_literal(&func.body) {
+        ctx.vec_literal_header_offset = Some(ctx.alloc_slot());
+        ctx.alloc_slot();
+        ctx.alloc_slot();
+    }
     if ctx.stack_size > 0 {
         emitter.emit_u32(aarch64::sub_imm64(
             aarch64::REG_SP,
@@ -598,6 +600,24 @@ fn lower_function(
     }
 
     Ok(())
+}
+
+fn has_struct_return_vec_literal(body: &[Stmt]) -> bool {
+    body.iter().any(|stmt| match stmt {
+        Stmt::Return(Some(Expr::StructInit { fields, .. })) => fields
+            .iter()
+            .any(|(_, value)| matches!(value, Expr::ArrayLit(_))),
+        Stmt::If {
+            then_body,
+            else_body,
+            ..
+        } => has_struct_return_vec_literal(then_body) || has_struct_return_vec_literal(else_body),
+        Stmt::Loop { body, .. } | Stmt::Try { body, .. } => has_struct_return_vec_literal(body),
+        Stmt::Match { arms, .. } => arms
+            .iter()
+            .any(|arm| has_struct_return_vec_literal(&arm.body)),
+        _ => false,
+    })
 }
 
 #[cfg(test)]

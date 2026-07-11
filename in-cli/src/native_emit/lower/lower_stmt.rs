@@ -667,7 +667,11 @@ pub(crate) fn lower_struct_expr_into_regs(
                 if let (Typ::Named(vec_name), Expr::ArrayLit(items)) = (field_typ, value)
                     && vec_name == "Vec"
                 {
-                    let ptr_offset = ctx.vec_literal_header_offset;
+                    let Some(ptr_offset) = ctx.vec_literal_header_offset else {
+                        return Err(format!(
+                            "native-lower: missing Vec return scratch space in `{fn_name}`"
+                        ));
+                    };
                     super::lower_stdlib::lower_vec_literal_into_slots(
                         emitter,
                         ctx,
