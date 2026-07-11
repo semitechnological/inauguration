@@ -93,7 +93,11 @@ pub(crate) fn lower_call(
             let call_site = emitter.len() as u32;
             emitter.emit_u32(aarch64::bl(0));
             TL_EXTERNAL_REFS.with(|refs| refs.borrow_mut().push((call_site, link_name)));
-        } else if let Some(native_ptr) = crate::native_emit::native_link::resolve_native_fn(target)
+        } else if let Some(native_ptr) =
+            crate::native_emit::native_link::resolve_native_fn(match target.as_str() {
+                "std::process::exit" | "std::process::abort" => "exit",
+                _ => target,
+            })
         {
             // JIT mode: use dlsym'd address
             emitter.emit_insns(&aarch64::load_i64(15, native_ptr as usize as i64));

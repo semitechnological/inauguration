@@ -140,6 +140,47 @@ pub(crate) fn lower_index(
     pending_calls: &mut Vec<PendingCall>,
     fn_name: &str,
 ) -> Result<(), String> {
+    if let Expr::Call { callee, args } = base {
+        lower_call::lower_call(
+            emitter,
+            ctx,
+            callee,
+            args,
+            0,
+            functions,
+            pending_calls,
+            fn_name,
+        )?;
+        let index_reg = if rd == 2 { 3 } else { 2 };
+        lower_expr_into(
+            emitter,
+            ctx,
+            index,
+            index_reg,
+            functions,
+            pending_calls,
+            fn_name,
+        )?;
+        emitter.emit_u32(aarch64::cmp_reg64(index_reg, aarch64::REG_XZR));
+        let negative_branch = emitter.emit_insn(aarch64::b_cond(11, 0));
+        emitter.emit_u32(aarch64::cmp_reg64(index_reg, 1));
+        let oob_branch = emitter.emit_insn(aarch64::b_cond(10, 0));
+        emitter.emit_u32(aarch64::ldr64_reg_offset(rd, 0, index_reg));
+        let end_branch = emitter.emit_insn(aarch64::b(0));
+        let failure_offset = emitter.len() as i32;
+        emitter.patch_u32(
+            negative_branch,
+            aarch64::b_cond(11, failure_offset - negative_branch as i32),
+        );
+        emitter.patch_u32(
+            oob_branch,
+            aarch64::b_cond(10, failure_offset - oob_branch as i32),
+        );
+        emit_failure_return(emitter, ctx.prologue_stack_reserve);
+        let end_offset = emitter.len() as i32 - end_branch as i32;
+        emitter.patch_u32(end_branch, aarch64::b(end_offset));
+        return Ok(());
+    }
     let Expr::Ident(name) = base else {
         return Err(format!(
             "native-lower: unsupported array index base in `{fn_name}`"
