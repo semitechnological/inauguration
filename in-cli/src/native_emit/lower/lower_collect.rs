@@ -185,6 +185,12 @@ pub(crate) fn collect_structs(module: &UnifiedModule) -> HashMap<String, Vec<(St
             vec![("vec".into(), Typ::Named("Vec".into()))],
         );
     }
+    if !structs.contains_key("Path") {
+        structs.insert(
+            "Path".into(),
+            vec![("ptr".into(), Typ::Int), ("len".into(), Typ::Int)],
+        );
+    }
     structs
 }
 
