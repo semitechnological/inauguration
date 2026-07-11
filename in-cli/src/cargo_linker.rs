@@ -118,6 +118,7 @@ pub fn compile_cargo_dependencies(project_dir: &Path) -> Vec<(String, UnifiedMod
 
     // Compile each dependency — skip known-problematic std/platform/proc-macro crates
     let mut already_compiled: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut proc_macro_cache: HashMap<String, bool> = HashMap::new();
     // Only compile specific crates that we KNOW we need and can parse
     // (the exact set of direct dependencies from Cargo.toml)
     let direct_dep_names: std::collections::HashSet<&str> = [
@@ -176,10 +177,19 @@ pub fn compile_cargo_dependencies(project_dir: &Path) -> Vec<(String, UnifiedMod
                 }
                 // Skip proc-macro crates
                 if let Some(manifest_str) = pkg["manifest_path"].as_str() {
-                    if let Ok(content) = std::fs::read_to_string(manifest_str) {
-                        if content.contains("proc-macro") {
-                            continue;
-                        }
+                    let is_proc_macro = if let Some(&cached) = proc_macro_cache.get(manifest_str) {
+                        cached
+                    } else {
+                        let result = if let Ok(content) = std::fs::read_to_string(manifest_str) {
+                            content.contains("proc-macro")
+                        } else {
+                            false
+                        };
+                        proc_macro_cache.insert(manifest_str.to_string(), result);
+                        result
+                    };
+                    if is_proc_macro {
+                        continue;
                     }
                 }
                 if already_compiled.contains(crate_name) {
