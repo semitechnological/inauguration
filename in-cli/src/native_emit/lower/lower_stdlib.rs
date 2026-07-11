@@ -1183,6 +1183,19 @@ pub(crate) fn lower_stdlib_call(
             )?;
             return Ok(true);
         }
+        "json_stringify" if args.len() == 1 => {
+            emit_stdlib_wrapper_call(
+                emitter,
+                ctx,
+                "in_json_stringify",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
         "str_table_has" if args.len() == 2 => {
             emit_stdlib_wrapper_call(
                 emitter,

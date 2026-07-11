@@ -390,6 +390,33 @@ pub unsafe extern "C" fn in_str_concat(a_ptr: *const u8, b_ptr: *const u8) -> *c
 }
 
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn in_json_stringify(text_ptr: *const u8) -> *const u8 {
+    unsafe {
+        let Some(text) = instring_from_ptr(text_ptr) else {
+            return instring_empty();
+        };
+        let mut encoded = Vec::with_capacity(text.len() + 2);
+        encoded.push(b'"');
+        for byte in text {
+            match byte {
+                b'"' => encoded.extend_from_slice(b"\\\""),
+                b'\\' => encoded.extend_from_slice(b"\\\\"),
+                b'\n' => encoded.extend_from_slice(b"\\n"),
+                b'\r' => encoded.extend_from_slice(b"\\r"),
+                b'\t' => encoded.extend_from_slice(b"\\t"),
+                0..=0x1f => {
+                    encoded.extend_from_slice(b"\\u00");
+                    encoded.extend_from_slice(format!("{byte:02x}").as_bytes());
+                }
+                _ => encoded.push(*byte),
+            }
+        }
+        encoded.push(b'"');
+        instring_from_bytes(&encoded)
+    }
+}
+
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn in_str_eq(a_ptr: *const u8, b_ptr: *const u8) -> i64 {
     unsafe {
         let Some(a) = instring_from_ptr(a_ptr) else {
@@ -975,6 +1002,14 @@ mod tests {
             let b = instring_from_bytes(b" world");
             let c = in_str_concat(a, b);
             assert_eq!(instring_from_ptr(c).unwrap(), b"hello world");
+        }
+    }
+
+    #[test]
+    fn in_json_stringify_escapes_json_text() {
+        unsafe {
+            let value = in_json_stringify(instring_from_bytes(b"a\"\\\n"));
+            assert_eq!(instring_from_ptr(value), Some(&b"\"a\\\"\\\\\\n\""[..]));
         }
     }
 
