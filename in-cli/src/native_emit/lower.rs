@@ -534,6 +534,11 @@ fn lower_function(
         ctx.alloc_slot();
         ctx.alloc_slot();
     }
+    if has_iter_chain(&func.body) {
+        ctx.iterator_chain_header_offset = Some(ctx.alloc_slot());
+        ctx.alloc_slot();
+        ctx.alloc_slot();
+    }
     if let Some(words) = aggregate_vector_words {
         let offset = ctx.alloc_slot();
         for _ in 1..words {
@@ -659,6 +664,57 @@ fn has_iter_once(body: &[Stmt]) -> bool {
         Stmt::Try { body, catches, .. } => {
             has_iter_once(body) || catches.iter().any(|catch| has_iter_once(&catch.body))
         }
+        Stmt::Return(None) | Stmt::Break | Stmt::Propagate => false,
+    })
+}
+
+fn has_iter_chain(body: &[Stmt]) -> bool {
+    fn expr_has_chain(expr: &Expr) -> bool {
+        match expr {
+            Expr::Call { callee, args, .. } => {
+                matches!(callee.as_ref(), Expr::Ident(name) if name == "chain")
+                    || expr_has_chain(callee)
+                    || args.iter().any(expr_has_chain)
+            }
+            Expr::Binary { lhs, rhs, .. } => expr_has_chain(lhs) || expr_has_chain(rhs),
+            Expr::Unary { expr, .. } | Expr::Field { base: expr, .. } => expr_has_chain(expr),
+            Expr::Index { base, index } => expr_has_chain(base) || expr_has_chain(index),
+            Expr::StructInit { fields, .. } => {
+                fields.iter().any(|(_, value)| expr_has_chain(value))
+            }
+            Expr::ArrayLit(items) => items.iter().any(expr_has_chain),
+            Expr::IntLit(_)
+            | Expr::FloatLit(_)
+            | Expr::StringLit(_)
+            | Expr::BoolLit(_)
+            | Expr::Ident(_)
+            | Expr::Closure { .. } => false,
+        }
+    }
+    body.iter().any(|stmt| match stmt {
+        Stmt::Let(_, _, expr)
+        | Stmt::Assign(_, expr)
+        | Stmt::Expr(expr)
+        | Stmt::Return(Some(expr))
+        | Stmt::Throw(expr) => expr_has_chain(expr),
+        Stmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => expr_has_chain(cond) || has_iter_chain(then_body) || has_iter_chain(else_body),
+        Stmt::Loop { cond, body, .. } => {
+            cond.as_ref().is_some_and(expr_has_chain) || has_iter_chain(body)
+        }
+        Stmt::Match {
+            scrutinee, arms, ..
+        } => expr_has_chain(scrutinee) || arms.iter().any(|arm| has_iter_chain(&arm.body)),
+        Stmt::Try { body, catches, .. } => {
+            has_iter_chain(body) || catches.iter().any(|catch| has_iter_chain(&catch.body))
+        }
+        Stmt::IndexAssign {
+            base, index, value, ..
+        } => expr_has_chain(base) || expr_has_chain(index) || expr_has_chain(value),
+        Stmt::FieldAssign { base, value, .. } => expr_has_chain(base) || expr_has_chain(value),
         Stmt::Return(None) | Stmt::Break | Stmt::Propagate => false,
     })
 }
