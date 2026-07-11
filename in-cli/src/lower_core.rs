@@ -1348,7 +1348,7 @@ mod tests {
     use crate::core_ir::{Expr, Stmt};
 
     #[test]
-    fn lower_orders_helpers_and_main() {
+    fn lower_orders_helpers_and_main() -> Result<(), &'static str> {
         let module = UnifiedModule {
             identity: Default::default(),
             decls: vec![
@@ -1384,11 +1384,12 @@ mod tests {
         assert!(sil.contains("sil @main"));
         assert!(sil.contains("sil @alpha"));
         assert!(sil.contains("sil @zeta"));
-        let pa = sil.find("sil @alpha").expect("alpha");
-        let pz = sil.find("sil @zeta").expect("zeta");
-        let pm = sil.find("sil @main").expect("main");
+        let pa = sil.find("sil @alpha").ok_or("alpha not found")?;
+        let pz = sil.find("sil @zeta").ok_or("zeta not found")?;
+        let pm = sil.find("sil @main").ok_or("main not found")?;
         assert!(pa < pz);
         assert!(pz < pm);
+        Ok(())
     }
 
     #[test]
