@@ -299,3 +299,21 @@ pub fn run_compiler_daemon(socket_path: &Path) -> std::io::Result<()> {
 pub fn daemon_pid_path(socket_path: &Path) -> PathBuf {
     socket_path.with_extension("pid")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_daemon_pid_path() {
+        assert_eq!(
+            daemon_pid_path(Path::new("/tmp/inauguration-daemon.sock")),
+            PathBuf::from("/tmp/inauguration-daemon.pid")
+        );
+
+        assert_eq!(
+            daemon_pid_path(Path::new("/tmp/inauguration-daemon")),
+            PathBuf::from("/tmp/inauguration-daemon.pid")
+        );
+    }
+}
