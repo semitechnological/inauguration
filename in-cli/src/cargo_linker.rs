@@ -118,6 +118,7 @@ pub fn compile_cargo_dependencies(project_dir: &Path) -> Vec<(String, UnifiedMod
 
     // Compile each dependency — skip known-problematic std/platform/proc-macro crates
     let mut already_compiled: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut proc_macro_cache: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
     // Only compile specific crates that we KNOW we need and can parse
     // (the exact set of direct dependencies from Cargo.toml)
     let direct_dep_names: std::collections::HashSet<&str> = [
@@ -174,16 +175,19 @@ pub fn compile_cargo_dependencies(project_dir: &Path) -> Vec<(String, UnifiedMod
                 if !direct_dep_names.contains(crate_name) {
                     continue;
                 }
-                // Skip proc-macro crates
-                if let Some(manifest_str) = pkg["manifest_path"].as_str() {
-                    if let Ok(content) = std::fs::read_to_string(manifest_str) {
-                        if content.contains("proc-macro") {
-                            continue;
-                        }
-                    }
-                }
                 if already_compiled.contains(crate_name) {
                     continue;
+                }
+                // Skip proc-macro crates
+                if let Some(manifest_str) = pkg["manifest_path"].as_str() {
+                    let is_proc_macro = *proc_macro_cache.entry(manifest_str.to_string()).or_insert_with(|| {
+                        std::fs::read_to_string(manifest_str)
+                            .map(|content| content.contains("proc-macro"))
+                            .unwrap_or(false)
+                    });
+                    if is_proc_macro {
+                        continue;
+                    }
                 }
                 already_compiled.insert(crate_name.to_string());
                 let src_dir = manifest.parent().unwrap_or(Path::new("."));
