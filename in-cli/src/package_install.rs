@@ -949,19 +949,19 @@ mod tests {
     }
 
     #[test]
-    fn installs_path_dependencies_offline() {
-        let temp = tempfile_dir("package-install");
+    fn installs_path_dependencies_offline() -> Result<(), String> {
+        let temp = tempfile_dir("package-install")?;
         let vendor = temp.join("vendor/cargo/demo");
-        fs::create_dir_all(&vendor).expect("vendor dir");
-        fs::write(vendor.join("README"), "demo").expect("vendor readme");
+        fs::create_dir_all(&vendor).map_err(|e| e.to_string())?;
+        fs::write(vendor.join("README"), "demo").map_err(|e| e.to_string())?;
         fs::write(
             temp.join(PACKAGE_MANIFEST_FILE),
             "name: demo\nversion: 0.1.0\ndependencies:\n  cargo:demo:\n    version: path:vendor/cargo/demo\n    kind: cargo\n",
         )
-        .expect("manifest");
+        .map_err(|e| e.to_string())?;
 
-        let report =
-            install_dependencies(&temp, InstallOptions { offline: false }).expect("install");
+        let report = install_dependencies(&temp, InstallOptions { offline: false })
+            .map_err(|e| e.to_string())?;
         assert_eq!(report.installed.len(), 1);
         assert_eq!(report.installed[0].status, "installed");
         assert!(report.installed[0].install_path.is_dir());
@@ -972,19 +972,20 @@ mod tests {
                 .is_file()
         );
         assert!(report.lock_path.is_file());
-        let lock = fs::read_to_string(report.lock_path).expect("lock");
+        let lock = fs::read_to_string(report.lock_path).map_err(|e| e.to_string())?;
         assert!(lock.contains("cargo:demo"));
         let _ = fs::remove_dir_all(temp);
+        Ok(())
     }
 
-    fn tempfile_dir(prefix: &str) -> PathBuf {
+    fn tempfile_dir(prefix: &str) -> Result<PathBuf, String> {
         let unique = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .expect("clock")
+            .map_err(|e| e.to_string())?
             .as_nanos();
         let path = std::env::temp_dir().join(format!("{prefix}-{unique}"));
-        fs::create_dir_all(&path).expect("temp dir");
-        path
+        fs::create_dir_all(&path).map_err(|e| e.to_string())?;
+        Ok(path)
     }
 
     #[test]
@@ -1022,14 +1023,17 @@ mod tests {
     }
 
     #[test]
-    fn add_packages_writes_manifest_entries() {
-        let temp = tempfile_dir("package-add");
-        let (_, added) = add_packages(&temp, &["pip:flask".to_string()], "latest").expect("add");
+    fn add_packages_writes_manifest_entries() -> Result<(), String> {
+        let temp = tempfile_dir("package-add")?;
+        let (_, added) =
+            add_packages(&temp, &["pip:flask".to_string()], "latest").map_err(|e| e.to_string())?;
         assert_eq!(added, vec!["pypi:flask"]);
-        let manifest = fs::read_to_string(temp.join(PACKAGE_MANIFEST_FILE)).expect("manifest");
+        let manifest =
+            fs::read_to_string(temp.join(PACKAGE_MANIFEST_FILE)).map_err(|e| e.to_string())?;
         assert!(manifest.contains("pypi:flask:"));
         assert!(manifest.contains("kind: pypi"));
         let _ = fs::remove_dir_all(temp);
+        Ok(())
     }
 
     #[test]
