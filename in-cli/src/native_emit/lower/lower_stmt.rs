@@ -451,6 +451,36 @@ pub(crate) fn lower_struct_expr_into_slots(
     fn_name: &str,
 ) -> Result<(), String> {
     match expr {
+        Expr::ArrayLit(items) if typ == "Vec" => {
+            let values = static_array_values(ctx, items, &Typ::Int, fn_name)?;
+            let Some(&ptr_offset) = find_field_offset(fields, "ptr") else {
+                return Err(format!(
+                    "native-lower: Vec local missing `ptr` in `{fn_name}`"
+                ));
+            };
+            let Some(&len_offset) = find_field_offset(fields, "len") else {
+                return Err(format!(
+                    "native-lower: Vec local missing `len` in `{fn_name}`"
+                ));
+            };
+            let Some(&cap_offset) = find_field_offset(fields, "cap") else {
+                return Err(format!(
+                    "native-lower: Vec local missing `cap` in `{fn_name}`"
+                ));
+            };
+            if values.is_empty() {
+                emitter.emit_insns(&aarch64::load_i64(0, 0));
+            } else {
+                let adr_site = emitter.emit_insn(aarch64::adr(0, 0));
+                ctx.pending_static_arrays
+                    .push(super::PendingStaticArray { adr_site, values });
+            }
+            emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, ptr_offset));
+            emitter.emit_insns(&aarch64::load_i64(0, items.len() as i64));
+            emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, len_offset));
+            emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, cap_offset));
+            Ok(())
+        }
         Expr::StructInit {
             name: init,
             fields: values,

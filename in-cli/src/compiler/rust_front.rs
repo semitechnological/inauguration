@@ -12,6 +12,7 @@ use crate::core_ir::{Expr, LoopKind, MatchArm, Stmt, Typ};
 use quote::ToTokens;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use syn::parse::Parser;
 
 type RustLayoutSpecs = HashMap<String, (BoundaryRepr, Vec<(String, syn::Type)>)>;
 
@@ -723,6 +724,9 @@ fn lower_block_inner_with_types(
                                 )
                         )
                         .then(|| Typ::Named("Vec".to_string()))
+                    }).or_else(|| {
+                        matches!(init.expr.as_ref(), syn::Expr::Macro(m) if m.mac.path.is_ident("vec"))
+                            .then(|| Typ::Named("Vec".to_string()))
                     });
                     out.push(Stmt::Let(name, local_ty, expr));
                 }
@@ -1009,6 +1013,19 @@ fn lower_expr_with_types(expr: &syn::Expr, local_types: &mut HashMap<String, Str
         syn::Expr::Reference(r) => lower_expr_with_types(&r.expr, local_types),
         syn::Expr::Paren(p) => lower_expr_with_types(&p.expr, local_types),
         syn::Expr::Tuple(tuple) if tuple.elems.is_empty() => Expr::IntLit(0),
+        syn::Expr::Macro(mac) if mac.mac.path.is_ident("vec") => {
+            syn::punctuated::Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated
+                .parse2(mac.mac.tokens.clone())
+                .map(|items| {
+                    Expr::ArrayLit(
+                        items
+                            .iter()
+                            .map(|item| lower_expr_with_types(item, local_types))
+                            .collect(),
+                    )
+                })
+                .unwrap_or_else(|_| Expr::Ident(mac.to_token_stream().to_string()))
+        }
         syn::Expr::Call(c) => Expr::Call {
             callee: Box::new(lower_expr_with_types(&c.func, local_types)),
             args: c
@@ -1129,6 +1146,20 @@ fn main() -> Result<i64, i64> {
         assert_eq!(*ret, Typ::Int);
         assert!(matches!(body.get(1), Some(Stmt::Propagate)));
         assert!(matches!(body.last(), Some(Stmt::Return(Some(_)))));
+    }
+
+    #[test]
+    fn lowers_vec_macro_literal() {
+        let module = parse_rust_source("fn main() { let values: Vec<i64> = vec![1, 2]; }")
+            .expect("parse Vec literal");
+        let Decl::Function { body, .. } = &module.decls[0] else {
+            panic!("main must be a function");
+        };
+        assert!(matches!(
+            body.first(),
+            Some(Stmt::Let(_, Some(Typ::Named(typ)), Expr::ArrayLit(items)))
+                if typ == "Vec" && items.len() == 2
+        ));
     }
 
     #[test]

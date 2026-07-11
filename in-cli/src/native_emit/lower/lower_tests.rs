@@ -841,6 +841,25 @@ fn jit_executes_vec_for() {
 
 #[test]
 #[cfg(target_arch = "aarch64")]
+fn jit_executes_scalar_vec_literal() {
+    let module = crate::compiler::rust_front::parse_rust_source(
+        "fn main() -> i64 { let values: Vec<i64> = vec![2, 3, 5]; let mut sum = 0; for value in values { sum = sum + value; } return sum; }",
+    )
+    .expect("parse Vec literal");
+    let lowered = lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
+    let function_offsets = vec![(
+        "main".into(),
+        ENTRY_STUB_SIZE,
+        lowered.code.len() as u32 - ENTRY_STUB_SIZE,
+    )];
+    let mut rt = crate::jit_runtime::JitRuntime::new();
+    rt.load(&lowered.code, &function_offsets, &lowered.relocations)
+        .expect("jit load");
+    assert_eq!(unsafe { rt.invoke("main", &[]).expect("invoke") }, 10);
+}
+
+#[test]
+#[cfg(target_arch = "aarch64")]
 fn jit_propagates_rust_result_error() {
     let success = crate::compiler::rust_front::parse_rust_source(
         r#"
