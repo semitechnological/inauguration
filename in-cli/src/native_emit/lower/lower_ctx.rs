@@ -195,7 +195,7 @@ pub(crate) struct LowerCtx<'a> {
     pub(crate) prologue_stack_reserve: u32,
     /// Stack offset for saving binary operation lhs (preserved across rhs eval)
     pub(crate) binop_temp: u32,
-    pub(crate) vec_literal_header_offset: u32,
+    pub(crate) vec_literal_header_offset: Option<u32>,
 }
 
 #[allow(clippy::only_used_in_recursion)]
@@ -324,7 +324,7 @@ impl<'a> LowerCtx<'a> {
             saved_flag_offset: 0,
             prologue_stack_reserve: 0,
             binop_temp: 0,
-            vec_literal_header_offset: 0,
+            vec_literal_header_offset: None,
         };
         let mut abi_idx = 0usize;
         for (name, typ) in params {
