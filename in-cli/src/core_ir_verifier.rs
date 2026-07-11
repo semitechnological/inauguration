@@ -431,7 +431,7 @@ fn check_stmt(
             }
             Ok(())
         }
-        Stmt::Throw(_) | Stmt::Try { .. } => Ok(()),
+        Stmt::Throw(_) | Stmt::Try { .. } | Stmt::Propagate => Ok(()),
     }
 }
 

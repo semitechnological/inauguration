@@ -448,7 +448,7 @@ impl TypeChecker {
                     self.check_stmts(fn_name, fn_ret, &arm.body, facts, &mut env_arm, errors);
                 }
             }
-            Stmt::Throw(_) | Stmt::Try { .. } | Stmt::FieldAssign { .. } => {}
+            Stmt::Throw(_) | Stmt::Try { .. } | Stmt::Propagate | Stmt::FieldAssign { .. } => {}
         }
     }
 

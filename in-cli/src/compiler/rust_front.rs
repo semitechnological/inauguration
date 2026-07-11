@@ -622,12 +622,24 @@ fn pattern_name(pat: &syn::Pat) -> Option<String> {
 fn map_type(ty: &syn::Type) -> Typ {
     match ty {
         syn::Type::Path(tp) => {
-            let last = tp.path.segments.last().map(|s| s.ident.to_string());
+            let last_segment = tp.path.segments.last();
+            let last = last_segment.map(|s| s.ident.to_string());
             match last.as_deref() {
                 Some("i8" | "i16" | "i32" | "i64" | "i128" | "isize") => Typ::Int,
                 Some("u8" | "u16" | "u32" | "u64" | "u128" | "usize") => Typ::Int,
                 Some("String" | "str") => Typ::String,
                 Some("bool") => Typ::Bool,
+                Some("Result") => last_segment
+                    .and_then(|segment| match &segment.arguments {
+                        syn::PathArguments::AngleBracketed(arguments) => {
+                            arguments.args.iter().find_map(|arg| match arg {
+                                syn::GenericArgument::Type(ty) => Some(map_type(ty)),
+                                _ => None,
+                            })
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| Typ::Named("Result".to_string())),
                 Some(other) => Typ::Named(other.to_string()),
                 None => Typ::Named(tp.path.to_token_stream().to_string()),
             }
@@ -663,7 +675,7 @@ fn lower_block_inner_with_types(
             syn::Stmt::Local(local) => {
                 if let Some(init) = &local.init {
                     // For destructuring patterns (Err(e), Some(x), etc.), use a temp name
-                    let is_simple = matches!(&local.pat, syn::Pat::Ident(_));
+                    let is_simple = pattern_name(&local.pat).is_some();
                     let name = if is_simple {
                         pattern_name(&local.pat).unwrap_or_else(|| "_pat".to_string())
                     } else {
@@ -690,6 +702,15 @@ fn lower_block_inner_with_types(
                                 }
                             }
                         }
+                    }
+                    if let syn::Expr::Try(try_expr) = init.expr.as_ref() {
+                        out.push(Stmt::Let(
+                            name,
+                            local_decl_type(&local.pat),
+                            lower_expr_with_types(&try_expr.expr, local_types),
+                        ));
+                        out.push(Stmt::Propagate);
+                        continue;
                     }
                     let expr = lower_expr_with_types(&init.expr, local_types);
                     let local_ty = local_decl_type(&local.pat).or_else(|| {
@@ -781,11 +802,14 @@ fn lower_expr_stmt(
     local_types: &mut HashMap<String, String>,
 ) {
     match expr {
-        syn::Expr::Return(ret) => out.push(Stmt::Return(
-            ret.expr
-                .as_ref()
-                .map(|e| lower_expr_with_types(e, local_types)),
-        )),
+        syn::Expr::Return(ret) => lower_return_expr(ret.expr.as_deref(), out, local_types),
+        syn::Expr::Try(try_expr) => {
+            out.push(Stmt::Expr(lower_expr_with_types(
+                &try_expr.expr,
+                local_types,
+            )));
+            out.push(Stmt::Propagate);
+        }
         syn::Expr::If(eif) => {
             // Handle `if let` (condition is Expr::Let)
             if let syn::Expr::Let(expr_let) = &*eif.cond {
@@ -884,6 +908,53 @@ fn lower_expr_stmt(
         }
         _ => out.push(Stmt::Expr(lower_expr_with_types(expr, local_types))),
     }
+}
+
+fn lower_return_expr(
+    expr: Option<&syn::Expr>,
+    out: &mut Vec<Stmt>,
+    local_types: &mut HashMap<String, String>,
+) {
+    let Some(expr) = expr else {
+        out.push(Stmt::Return(None));
+        return;
+    };
+    let syn::Expr::Call(call) = expr else {
+        out.push(Stmt::Return(Some(lower_expr_with_types(expr, local_types))));
+        return;
+    };
+    let Some(name) = rust_path_name(&call.func) else {
+        out.push(Stmt::Return(Some(lower_expr_with_types(expr, local_types))));
+        return;
+    };
+    match (name.as_str(), call.args.len()) {
+        ("Ok", 1) => out.push(Stmt::Return(Some(lower_expr_with_types(
+            call.args.first().expect("one Ok argument"),
+            local_types,
+        )))),
+        ("Err", 1) => {
+            out.push(Stmt::Throw(lower_expr_with_types(
+                call.args.first().expect("one Err argument"),
+                local_types,
+            )));
+            out.push(Stmt::Return(None));
+        }
+        _ => out.push(Stmt::Return(Some(lower_expr_with_types(expr, local_types)))),
+    }
+}
+
+fn rust_path_name(expr: &syn::Expr) -> Option<String> {
+    let syn::Expr::Path(path) = expr else {
+        return None;
+    };
+    Some(
+        path.path
+            .to_token_stream()
+            .to_string()
+            .chars()
+            .filter(|ch| *ch != ' ')
+            .collect(),
+    )
 }
 
 fn lower_else_body_with_types(
@@ -1033,6 +1104,31 @@ fn main() { let v = 7; return; }
             lower_expr_with_types(&expr, &mut HashMap::new()),
             Expr::IntLit(0)
         );
+    }
+
+    #[test]
+    fn lowers_result_return_and_propagation() {
+        let module = parse_rust_source(
+            r#"
+fn leaf() -> Result<i64, i64> { return Err(4); }
+fn main() -> Result<i64, i64> {
+    let value: i64 = leaf()?;
+    return Ok(value + 1);
+}
+"#,
+        )
+        .expect("parse result source");
+        let Decl::Function { ret, body, .. } = module
+            .decls
+            .iter()
+            .find(|decl| matches!(decl, Decl::Function { name, .. } if name == "main"))
+            .expect("main function")
+        else {
+            panic!("main must be a function");
+        };
+        assert_eq!(*ret, Typ::Int);
+        assert!(matches!(body.get(1), Some(Stmt::Propagate)));
+        assert!(matches!(body.last(), Some(Stmt::Return(Some(_)))));
     }
 
     #[test]
