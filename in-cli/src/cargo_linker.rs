@@ -328,3 +328,94 @@ fn prefix_call_expr(expr: &mut Expr, crate_name: &str) {
         _ => {}
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static TEMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+    struct TempDirGuard {
+        path: PathBuf,
+    }
+
+    impl TempDirGuard {
+        fn new() -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "inauguration-cargo-linker-{}-{}-{}",
+                std::process::id(),
+                unique,
+                TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+            ));
+            fs::create_dir_all(&path).expect("create temp dir");
+            Self { path }
+        }
+    }
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn test_compile_cargo_dependencies_empty() {
+        let temp = TempDirGuard::new();
+        // No Cargo.toml, should return empty
+        let deps = compile_cargo_dependencies(&temp.path);
+        assert!(deps.is_empty());
+    }
+
+    #[test]
+    fn test_compile_cargo_dependencies_with_deps() {
+        let temp = TempDirGuard::new();
+        let app_dir = temp.path.join("my-app");
+        let libc_dir = temp.path.join("fake-libc");
+
+        fs::create_dir_all(app_dir.join("src")).unwrap();
+        fs::create_dir_all(libc_dir.join("src")).unwrap();
+
+        fs::write(
+            app_dir.join("Cargo.toml"),
+            r#"
+            [package]
+            name = "my-app"
+            version = "0.1.0"
+            edition = "2021"
+
+            [dependencies]
+            libc = { path = "../fake-libc" }
+            "#,
+        ).unwrap();
+
+        fs::write(
+            app_dir.join("src").join("lib.rs"),
+            "pub fn main() {}\n",
+        ).unwrap();
+
+        fs::write(
+            libc_dir.join("Cargo.toml"),
+            r#"
+            [package]
+            name = "libc"
+            version = "0.1.0"
+            edition = "2021"
+            "#,
+        ).unwrap();
+
+        fs::write(
+            libc_dir.join("src").join("lib.rs"),
+            "pub fn fake_libc_func() {}\n",
+        ).unwrap();
+
+        let deps = compile_cargo_dependencies(&app_dir);
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].0, "libc");
+    }
+}
