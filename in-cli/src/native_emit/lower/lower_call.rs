@@ -2,10 +2,11 @@
 
 use super::lower_expr::lower_expr_into;
 use super::lower_stdlib;
+use super::lower_stmt::lower_struct_expr_into_slots;
 use super::{
     FunctionInfo, LocalSlot, LowerCtx, PendingCall, PendingInrtCall, TL_EXTERNAL_REFS,
     TL_NATIVE_MODE, find_field_offset, is_native_scalar_type, native_link_name,
-    native_param_abi_slots,
+    native_param_abi_slots, native_struct_fields,
 };
 use crate::core_ir::{Expr, Typ};
 use crate::inrt::{inrt_builtin_param_slots, is_inrt_builtin};
@@ -257,11 +258,11 @@ pub(crate) fn lower_call_arg(
             }
         }
         Typ::Array(elem) => lower_array_call_arg(emitter, ctx, arg, elem, reg, fn_name),
-        Typ::Vector(_) => lower_struct_call_arg(
+        Typ::Vector(elem) => lower_vector_call_arg(
             emitter,
             ctx,
             arg,
-            "Vec",
+            elem,
             reg,
             functions,
             pending_calls,
@@ -271,6 +272,148 @@ pub(crate) fn lower_call_arg(
             "native-lower: unsupported parameter type `{typ:?}` for argument `{param_name}` in `{fn_name}`"
         )),
     }
+}
+
+fn lower_vector_call_arg(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    arg: &Expr,
+    elem: &Typ,
+    reg: u8,
+    functions: &HashMap<String, FunctionInfo>,
+    pending_calls: &mut Vec<PendingCall>,
+    fn_name: &str,
+) -> Result<u8, String> {
+    let (Typ::Named(struct_name), Expr::ArrayLit(items)) = (elem, arg) else {
+        return lower_struct_call_arg(
+            emitter,
+            ctx,
+            arg,
+            "Vec",
+            reg,
+            functions,
+            pending_calls,
+            fn_name,
+        );
+    };
+    let Some(header_offset) = ctx.vec_literal_header_offset else {
+        return Err(format!(
+            "native-lower: missing Vec argument header in `{fn_name}`"
+        ));
+    };
+    let Some((scratch_offset, scratch_words)) = ctx.aggregate_vector_scratch else {
+        return Err(format!(
+            "native-lower: missing aggregate Vec scratch space in `{fn_name}`"
+        ));
+    };
+    let words = native_param_abi_slots(
+        &[("value".to_string(), Typ::Named(struct_name.clone()))],
+        ctx.structs,
+        fn_name,
+    )?;
+    if words > scratch_words {
+        return Err(format!(
+            "native-lower: aggregate Vec scratch space is too small in `{fn_name}`"
+        ));
+    }
+    emitter.emit_u32(aarch64::str64(
+        aarch64::REG_XZR,
+        aarch64::REG_SP,
+        header_offset,
+    ));
+    emitter.emit_u32(aarch64::str64(
+        aarch64::REG_XZR,
+        aarch64::REG_SP,
+        header_offset + 8,
+    ));
+    emitter.emit_u32(aarch64::str64(
+        aarch64::REG_XZR,
+        aarch64::REG_SP,
+        header_offset + 16,
+    ));
+    let fields = aggregate_scratch_fields(ctx, struct_name, scratch_offset, fn_name)?;
+    for item in items {
+        lower_struct_expr_into_slots(
+            emitter,
+            ctx,
+            item,
+            struct_name,
+            &fields,
+            functions,
+            pending_calls,
+            fn_name,
+        )?;
+        lower_stdlib::emit_vec_push_words(emitter, header_offset, scratch_offset, words)?;
+    }
+    for (index, offset) in [header_offset, header_offset + 8, header_offset + 16]
+        .into_iter()
+        .enumerate()
+    {
+        emitter.emit_u32(aarch64::ldr64(reg + index as u8, aarch64::REG_SP, offset));
+    }
+    Ok(reg + 3)
+}
+
+fn aggregate_scratch_fields(
+    ctx: &LowerCtx<'_>,
+    struct_name: &str,
+    base_offset: u32,
+    fn_name: &str,
+) -> Result<HashMap<String, u32>, String> {
+    fn append_fields(
+        fields: &mut HashMap<String, u32>,
+        structs: &HashMap<String, Vec<(String, Typ)>>,
+        typ: &Typ,
+        prefix: &str,
+        next_offset: &mut u32,
+        fn_name: &str,
+    ) -> Result<(), String> {
+        match typ {
+            Typ::Int | Typ::Bool | Typ::String | Typ::Float => {
+                fields.insert(prefix.to_string(), *next_offset);
+                *next_offset += 8;
+            }
+            Typ::Vector(_) => {
+                for name in ["ptr", "len", "cap"] {
+                    fields.insert(format!("{prefix}.{name}"), *next_offset);
+                    *next_offset += 8;
+                }
+            }
+            Typ::Named(name) => {
+                let nested = native_struct_fields(structs, name, fn_name)?;
+                for (field, field_typ) in nested {
+                    append_fields(
+                        fields,
+                        structs,
+                        &field_typ,
+                        &format!("{prefix}.{field}"),
+                        next_offset,
+                        fn_name,
+                    )?;
+                }
+            }
+            _ => {
+                return Err(format!(
+                    "native-lower: unsupported aggregate Vec element field in `{fn_name}`"
+                ));
+            }
+        }
+        Ok(())
+    }
+    let schema = native_struct_fields(ctx.structs, struct_name, fn_name)?;
+    let mut fields = HashMap::new();
+    let mut next_offset = base_offset;
+    for (field, typ) in schema {
+        append_fields(
+            &mut fields,
+            ctx.structs,
+            &typ,
+            &field,
+            &mut next_offset,
+            fn_name,
+        )?;
+    }
+    Ok(fields)
 }
 
 pub(crate) fn lower_struct_ptr_arg(

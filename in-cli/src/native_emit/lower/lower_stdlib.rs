@@ -102,6 +102,18 @@ pub(crate) fn lower_vec_literal_into_slots(
     Ok(())
 }
 
+pub(crate) fn emit_vec_push_words(
+    emitter: &mut CodeEmitter,
+    header_offset: u32,
+    source_offset: u32,
+    words: usize,
+) -> Result<(), String> {
+    emitter.emit_u32(aarch64::add_imm64(0, aarch64::REG_SP, header_offset as u16));
+    emitter.emit_u32(aarch64::add_imm64(1, aarch64::REG_SP, source_offset as u16));
+    emitter.emit_insns(&aarch64::load_i64(2, words as i64));
+    emit_stdlib_wrapper_register_call(emitter, "in_vec_push_words", 0)
+}
+
 fn lower_string_push_str(
     emitter: &mut CodeEmitter,
     ctx: &mut LowerCtx<'_>,

@@ -247,6 +247,10 @@ pub fn bootstrap_jit_native() {
         "in_vec_push".to_string(),
         NativePtr(crate::native_stdlib::in_vec_push as *const u8),
     );
+    c.insert(
+        "in_vec_push_words".to_string(),
+        NativePtr(crate::native_stdlib::in_vec_push_words as *const u8),
+    );
 }
 
 fn dlsym_exact(name: &str) -> Option<*const u8> {
