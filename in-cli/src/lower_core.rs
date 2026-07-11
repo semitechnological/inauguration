@@ -1518,14 +1518,15 @@ mod tests {
     }
 
     #[test]
-    fn lower_folds_parsed_modulo_expression() {
-        let module = crate::in_lang_parse::parse_in_source("fn main() -> Int { return 7 % 4; }\n")
-            .expect("parse");
+    fn lower_folds_parsed_modulo_expression() -> Result<(), String> {
+        let module = crate::in_lang_parse::parse_in_source("fn main() -> Int { return 7 % 4; }\n")?;
 
         let sil = lower_to_textual_sil(&module, "App");
 
         assert!(sil.contains("integer_literal $Builtin.Int64, 3"));
         assert!(!sil.contains("builtin_binop"));
+
+        Ok(())
     }
 
     #[test]

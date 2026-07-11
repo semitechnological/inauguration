@@ -25,3 +25,4 @@ docs-site/.crepus-dev/
 .wrangler/
 docs-site/.wrangler/
 .pi-subagents/artifacts/
+apps/package-ecosystem-sample/.in-packages/
