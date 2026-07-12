@@ -390,6 +390,7 @@ pub unsafe extern "C" fn in_str_concat(a_ptr: *const u8, b_ptr: *const u8) -> *c
 }
 
 #[unsafe(no_mangle)]
+#[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn in_json_stringify(text_ptr: *const u8) -> *const u8 {
     unsafe {
         let Some(text) = instring_from_ptr(text_ptr) else {
@@ -417,6 +418,7 @@ pub unsafe extern "C" fn in_json_stringify(text_ptr: *const u8) -> *const u8 {
 }
 
 #[unsafe(no_mangle)]
+#[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn in_str_eq(a_ptr: *const u8, b_ptr: *const u8) -> i64 {
     unsafe {
         let Some(a) = instring_from_ptr(a_ptr) else {
@@ -430,6 +432,7 @@ pub unsafe extern "C" fn in_str_eq(a_ptr: *const u8, b_ptr: *const u8) -> i64 {
 }
 
 #[unsafe(no_mangle)]
+#[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn in_str_table_has(names_ptr: *const u8, key_ptr: *const u8) -> i64 {
     unsafe {
         let Some(names) = instring_from_ptr(names_ptr) else {
@@ -443,6 +446,7 @@ pub unsafe extern "C" fn in_str_table_has(names_ptr: *const u8, key_ptr: *const 
 }
 
 #[unsafe(no_mangle)]
+#[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn in_str_table_get_int(
     names_ptr: *const u8,
     values_ptr: *const u8,
@@ -474,6 +478,7 @@ pub unsafe extern "C" fn in_str_table_get_int(
 }
 
 #[unsafe(no_mangle)]
+#[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn in_vec_join(
     values_ptr: *const *const u8,
     values_len: usize,
