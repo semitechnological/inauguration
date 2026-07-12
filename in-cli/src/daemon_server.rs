@@ -299,3 +299,52 @@ pub fn run_compiler_daemon(socket_path: &Path) -> std::io::Result<()> {
 pub fn daemon_pid_path(socket_path: &Path) -> PathBuf {
     socket_path.with_extension("pid")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+
+    #[test]
+    fn parses_daemon_defaults() {
+        assert_eq!(parser_from_cli(None), ParserCli::Auto);
+        assert_eq!(parser_from_cli(Some("in")), ParserCli::In);
+        assert_eq!(parser_from_cli(Some("icore")), ParserCli::Icore);
+        assert_eq!(target_from_cli(None), CompileTarget::Jit);
+        assert_eq!(target_from_cli(Some("native")), CompileTarget::Native);
+    }
+
+    #[test]
+    fn responds_to_ping() -> std::io::Result<()> {
+        let (mut client, server) = UnixStream::pair()?;
+        client.write_all(b"{\"command\":\"ping\"}\n")?;
+        handle_client(server)?;
+        let mut response = String::new();
+        client.read_to_string(&mut response)?;
+        let response: DaemonResponse = serde_json::from_str(response.trim())?;
+        assert!(response.success);
+        assert!(response.error.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn reports_invalid_requests() -> std::io::Result<()> {
+        let (mut client, server) = UnixStream::pair()?;
+        client.write_all(b"invalid\n")?;
+        handle_client(server)?;
+        let mut response = String::new();
+        client.read_to_string(&mut response)?;
+        let response: DaemonResponse = serde_json::from_str(response.trim())?;
+        assert!(!response.success);
+        assert!(response.error.unwrap().contains("invalid request"));
+        Ok(())
+    }
+
+    #[test]
+    fn derives_pid_path() {
+        assert_eq!(
+            daemon_pid_path(Path::new("/tmp/in.sock")),
+            Path::new("/tmp/in.pid")
+        );
+    }
+}
