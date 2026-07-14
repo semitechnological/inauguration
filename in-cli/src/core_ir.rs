@@ -288,7 +288,7 @@ impl MatchPattern {
             && s.ends_with('}')
         {
             let name = trim_match_pat(&s[..open]);
-            if !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            if !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
                 let inner = &s[open + 1..s.len() - 1];
                 let field_strs = split_match_pat_args(inner);
                 let mut fields = Vec::new();
@@ -317,7 +317,14 @@ impl MatchPattern {
                 });
             }
         }
-        if s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        // Wildcard discard keeps a lone `_`; all other names are kebab-case.
+        if s == "_"
+            || (!s.is_empty()
+                && s.chars().enumerate().all(|(i, c)| match (i, c) {
+                    (0, ch) => ch.is_ascii_alphabetic(),
+                    (_, ch) => ch.is_ascii_alphanumeric() || ch == '-',
+                }))
+        {
             return Ok(MatchPattern::IdentPat(s.to_string()));
         }
         Err(format!(".in: unknown pattern `{s}`"))

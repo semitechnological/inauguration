@@ -82,10 +82,8 @@ pub fn is_valid_semantic_import(name: &str) -> bool {
     !name.is_empty()
         && name.split('.').all(|part| {
             let mut chars = part.chars();
-            chars
-                .next()
-                .is_some_and(|ch| ch == '_' || ch.is_ascii_alphabetic())
-                && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+            chars.next().is_some_and(|ch| ch.is_ascii_alphabetic())
+                && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
         })
 }
 

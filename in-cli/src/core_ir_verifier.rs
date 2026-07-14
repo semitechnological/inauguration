@@ -140,28 +140,28 @@ pub fn is_intrinsic(name: &str) -> bool {
             | "pause"
             | "lidt"
             | "invlpg"
-            | "read_cr2"
+            | "read-cr2"
             | "invoke"
             | "invoke1"
             | "invoke2"
-            | "to_string"
-            | "read_file"
-            | "write_file"
-            | "path_join"
-            | "str_eq"
-            | "str_contains"
-            | "str_starts_with"
-            | "str_trim"
-            | "str_split_lines"
-            | "str_tokenize_expr"
-            | "str_to_int"
-            | "str_index_of"
-            | "str_slice"
-            | "str_table_has"
-            | "str_table_get_int"
-            | "array_len"
-            | "str_is_int"
-            | "json_stringify"
+            | "to-string"
+            | "read-file"
+            | "write-file"
+            | "path-join"
+            | "str-eq"
+            | "str-contains"
+            | "str-starts-with"
+            | "str-trim"
+            | "str-split-lines"
+            | "str-tokenize-expr"
+            | "str-to-int"
+            | "str-index-of"
+            | "str-slice"
+            | "str-table-has"
+            | "str-table-get-int"
+            | "array-len"
+            | "str-is-int"
+            | "json-stringify"
     )
 }
 
@@ -197,28 +197,28 @@ fn collect_module_facts(module: &UnifiedModule) -> Result<ModuleFacts<'_>, (Stri
         ("pause", &VOID_RET),
         ("lidt", &VOID_RET),
         ("invlpg", &VOID_RET),
-        ("read_cr2", &INT_RET),
+        ("read-cr2", &INT_RET),
         ("invoke", &INT_RET),
         ("invoke1", &INT_RET),
         ("invoke2", &INT_RET),
-        ("to_string", &STRING_RET),
-        ("read_file", &STRING_RET),
-        ("write_file", &BOOL_RET),
-        ("path_join", &STRING_RET),
-        ("str_eq", &BOOL_RET),
-        ("str_contains", &BOOL_RET),
-        ("str_starts_with", &BOOL_RET),
-        ("str_trim", &STRING_RET),
-        ("str_split_lines", string_array_ret),
-        ("str_tokenize_expr", string_array_ret),
-        ("str_to_int", &INT_RET),
-        ("str_index_of", &INT_RET),
-        ("str_slice", &STRING_RET),
-        ("str_table_has", &BOOL_RET),
-        ("str_table_get_int", &INT_RET),
-        ("array_len", &INT_RET),
-        ("str_is_int", &BOOL_RET),
-        ("json_stringify", &STRING_RET),
+        ("to-string", &STRING_RET),
+        ("read-file", &STRING_RET),
+        ("write-file", &BOOL_RET),
+        ("path-join", &STRING_RET),
+        ("str-eq", &BOOL_RET),
+        ("str-contains", &BOOL_RET),
+        ("str-starts-with", &BOOL_RET),
+        ("str-trim", &STRING_RET),
+        ("str-split-lines", string_array_ret),
+        ("str-tokenize-expr", string_array_ret),
+        ("str-to-int", &INT_RET),
+        ("str-index-of", &INT_RET),
+        ("str-slice", &STRING_RET),
+        ("str-table-has", &BOOL_RET),
+        ("str-table-get-int", &INT_RET),
+        ("array-len", &INT_RET),
+        ("str-is-int", &BOOL_RET),
+        ("json-stringify", &STRING_RET),
     ];
     for (name, ret) in intrinsics {
         functions.insert(name, FunctionSig { params: &[], ret });

@@ -1964,21 +1964,21 @@ fn lower_builtin_call(
             }
             Ok(true)
         }
-        "read_cr2" => {
+        "read-cr2" => {
             emitter.emit_width(&[0x0F, 0x20, 0xD0], &[0x48, 0x0F, 0x20, 0xD0]); // mov eax/rax, cr2
             if target_reg != RAX {
                 emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
             }
             Ok(true)
         }
-        "read_cr3" => {
+        "read-cr3" => {
             emitter.emit_width(&[0x0F, 0x20, 0xD8], &[0x48, 0x0F, 0x20, 0xD8]); // mov eax/rax, cr3
             if target_reg != RAX {
                 emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
             }
             Ok(true)
         }
-        "write_cr3" => {
+        "write-cr3" => {
             if args.len() >= 1 {
                 lower_expr_into(emitter, ctx, &args[0], RDI, pending_calls)?;
                 emitter.emit_bytes(&[0x0F, 0x22, 0xC7]); // mov cr3, edi/rdi
@@ -2791,7 +2791,7 @@ fn main() -> void { return 0 }
     #[test]
     fn lower_match_default_only() {
         let src = r#"
-fn default_match(x: Int) -> Int {
+fn default-match(x: Int) -> Int {
   match x {
     _ { return 42 }
   }

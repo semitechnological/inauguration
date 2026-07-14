@@ -27,17 +27,24 @@ fn emit_stdlib_wrapper_call(
     pending_calls: &mut Vec<PendingCall>,
     fn_name: &str,
 ) -> Result<(), String> {
+    let temp_base = ctx.acquire_call_arg_temps(fn_name)?;
     for (i, arg) in args.iter().enumerate() {
-        if i >= ctx.call_arg_temps.len() {
+        if i >= 8 {
             break;
         }
         lower_expr_into(emitter, ctx, arg, 0, functions, pending_calls, fn_name)?;
-        emitter.emit_u32(aarch64::str64(0, REG_SP, ctx.call_arg_temps[i]));
+        emitter.emit_u32(aarch64::str64(0, REG_SP, ctx.call_arg_temps[temp_base + i]));
     }
-    for i in 0..args.len().min(ctx.call_arg_temps.len()) {
-        emitter.emit_u32(aarch64::ldr64(i as u8, REG_SP, ctx.call_arg_temps[i]));
+    for i in 0..args.len().min(8) {
+        emitter.emit_u32(aarch64::ldr64(
+            i as u8,
+            REG_SP,
+            ctx.call_arg_temps[temp_base + i],
+        ));
     }
-    emit_stdlib_wrapper_register_call(emitter, wrapper, rd)
+    let result = emit_stdlib_wrapper_register_call(emitter, wrapper, rd);
+    ctx.release_call_arg_temps();
+    result
 }
 
 fn emit_stdlib_wrapper_register_call(
@@ -797,7 +804,14 @@ pub(crate) fn lower_stdlib_call(
 ) -> Result<bool, String> {
     // Recognize std::env / std::fs wrappers first, before generic suffix matching.
     let cleaned: String = target.chars().filter(|&c| c != ' ').collect();
-    match cleaned.as_str() {
+    // Inlang uses kebab-case; Rust/polyglot fronts still emit snake_case method
+    // names. Normalize bare surface names (not `std::…` paths) for matching.
+    let cleaned_kebab = if cleaned.contains("::") {
+        cleaned.clone()
+    } else {
+        cleaned.replace('_', "-")
+    };
+    match cleaned_kebab.as_str() {
         "display" if args.len() == 1 => {
             lower_expr_into(
                 emitter,
@@ -835,7 +849,7 @@ pub(crate) fn lower_stdlib_call(
             )?;
             return Ok(true);
         }
-        "into_iter" if args.len() == 1 => {
+        "into-iter" if args.len() == 1 => {
             lower_array_into_iter(
                 emitter,
                 ctx,
@@ -1013,8 +1027,9 @@ pub(crate) fn lower_stdlib_call(
 
     // Bare function names used by the .in compiler bootstrap and stdlib imports.
     // These are matched before the suffix-based method dispatch below.
-    match cleaned.as_str() {
-        "read_file" if args.len() == 1 => {
+    // `cleaned_kebab` accepts both Inlang kebab-case and Rust snake_case.
+    match cleaned_kebab.as_str() {
+        "read-file" if args.len() == 1 => {
             emit_stdlib_wrapper_call(
                 emitter,
                 ctx,
@@ -1027,7 +1042,7 @@ pub(crate) fn lower_stdlib_call(
             )?;
             return Ok(true);
         }
-        "write_file" if args.len() == 2 => {
+        "write-file" if args.len() == 2 => {
             emit_stdlib_wrapper_call(
                 emitter,
                 ctx,
@@ -1040,7 +1055,7 @@ pub(crate) fn lower_stdlib_call(
             )?;
             return Ok(true);
         }
-        "process_run" if args.len() == 1 => {
+        "process-run" if args.len() == 1 => {
             emit_stdlib_wrapper_call(
                 emitter,
                 ctx,
@@ -1053,7 +1068,7 @@ pub(crate) fn lower_stdlib_call(
             )?;
             return Ok(true);
         }
-        "env_get" if args.len() == 1 => {
+        "env-get" if args.len() == 1 => {
             emit_stdlib_wrapper_call(
                 emitter,
                 ctx,
@@ -1066,7 +1081,7 @@ pub(crate) fn lower_stdlib_call(
             )?;
             return Ok(true);
         }
-        "env_set" if args.len() == 2 => {
+        "env-set" if args.len() == 2 => {
             emit_stdlib_wrapper_call(
                 emitter,
                 ctx,
@@ -1079,7 +1094,7 @@ pub(crate) fn lower_stdlib_call(
             )?;
             return Ok(true);
         }
-        "env_has" if args.len() == 1 => {
+        "env-has" if args.len() == 1 => {
             emit_stdlib_wrapper_call(
                 emitter,
                 ctx,
@@ -1092,7 +1107,7 @@ pub(crate) fn lower_stdlib_call(
             )?;
             return Ok(true);
         }
-        "path_join" if args.len() == 2 => {
+        "path-join" if args.len() == 2 => {
             emit_stdlib_wrapper_call(
                 emitter,
                 ctx,
@@ -1105,7 +1120,7 @@ pub(crate) fn lower_stdlib_call(
             )?;
             return Ok(true);
         }
-        "path_dirname" if args.len() == 1 => {
+        "path-dirname" if args.len() == 1 => {
             emit_stdlib_wrapper_call(
                 emitter,
                 ctx,
@@ -1118,7 +1133,7 @@ pub(crate) fn lower_stdlib_call(
             )?;
             return Ok(true);
         }
-        "path_basename" if args.len() == 1 => {
+        "path-basename" if args.len() == 1 => {
             emit_stdlib_wrapper_call(
                 emitter,
                 ctx,
@@ -1131,7 +1146,7 @@ pub(crate) fn lower_stdlib_call(
             )?;
             return Ok(true);
         }
-        "path_extname" if args.len() == 1 => {
+        "path-extname" if args.len() == 1 => {
             emit_stdlib_wrapper_call(
                 emitter,
                 ctx,
@@ -1144,7 +1159,7 @@ pub(crate) fn lower_stdlib_call(
             )?;
             return Ok(true);
         }
-        "path_normalize" if args.len() == 1 => {
+        "path-normalize" if args.len() == 1 => {
             emit_stdlib_wrapper_call(
                 emitter,
                 ctx,
@@ -1157,7 +1172,7 @@ pub(crate) fn lower_stdlib_call(
             )?;
             return Ok(true);
         }
-        "str_concat" if args.len() == 2 => {
+        "str-concat" if args.len() == 2 => {
             emit_stdlib_wrapper_call(
                 emitter,
                 ctx,
@@ -1170,7 +1185,7 @@ pub(crate) fn lower_stdlib_call(
             )?;
             return Ok(true);
         }
-        "str_eq" if args.len() == 2 => {
+        "str-eq" if args.len() == 2 => {
             emit_stdlib_wrapper_call(
                 emitter,
                 ctx,
@@ -1183,7 +1198,7 @@ pub(crate) fn lower_stdlib_call(
             )?;
             return Ok(true);
         }
-        "json_stringify" if args.len() == 1 => {
+        "json-stringify" if args.len() == 1 => {
             emit_stdlib_wrapper_call(
                 emitter,
                 ctx,
@@ -1196,7 +1211,7 @@ pub(crate) fn lower_stdlib_call(
             )?;
             return Ok(true);
         }
-        "str_table_has" if args.len() == 2 => {
+        "str-table-has" if args.len() == 2 => {
             emit_stdlib_wrapper_call(
                 emitter,
                 ctx,
@@ -1209,22 +1224,20 @@ pub(crate) fn lower_stdlib_call(
             )?;
             return Ok(true);
         }
-        "str_table_get_int" if args.len() == 3 => {
-            for (index, arg) in args.iter().enumerate() {
-                lower_expr_into(emitter, ctx, arg, 0, functions, pending_calls, fn_name)?;
-                emitter.emit_u32(aarch64::str64(0, REG_SP, ctx.call_arg_temps[index]));
-            }
-            for index in 0..args.len() {
-                emitter.emit_u32(aarch64::ldr64(
-                    index as u8,
-                    REG_SP,
-                    ctx.call_arg_temps[index],
-                ));
-            }
-            emit_stdlib_wrapper_register_call(emitter, "in_str_table_get_int", rd)?;
+        "str-table-get-int" if args.len() == 3 => {
+            emit_stdlib_wrapper_call(
+                emitter,
+                ctx,
+                "in_str_table_get_int",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
             return Ok(true);
         }
-        "str_contains" if args.len() == 2 => {
+        "str-contains" if args.len() == 2 => {
             emit_stdlib_wrapper_call(
                 emitter,
                 ctx,
@@ -1237,7 +1250,7 @@ pub(crate) fn lower_stdlib_call(
             )?;
             return Ok(true);
         }
-        "str_starts_with" if args.len() == 2 => {
+        "str-starts-with" if args.len() == 2 => {
             emit_stdlib_wrapper_call(
                 emitter,
                 ctx,
@@ -1250,7 +1263,7 @@ pub(crate) fn lower_stdlib_call(
             )?;
             return Ok(true);
         }
-        "str_ends_with" if args.len() == 2 => {
+        "str-ends-with" if args.len() == 2 => {
             emit_stdlib_wrapper_call(
                 emitter,
                 ctx,
@@ -1263,7 +1276,7 @@ pub(crate) fn lower_stdlib_call(
             )?;
             return Ok(true);
         }
-        "str_trim" if args.len() == 1 => {
+        "str-trim" if args.len() == 1 => {
             emit_stdlib_wrapper_call(
                 emitter,
                 ctx,
@@ -1276,7 +1289,7 @@ pub(crate) fn lower_stdlib_call(
             )?;
             return Ok(true);
         }
-        "str_split_lines" if args.len() == 1 => {
+        "str-split-lines" if args.len() == 1 => {
             emit_stdlib_wrapper_call(
                 emitter,
                 ctx,
@@ -1289,7 +1302,7 @@ pub(crate) fn lower_stdlib_call(
             )?;
             return Ok(true);
         }
-        "str_split_spaces" if args.len() == 1 => {
+        "str-split-spaces" if args.len() == 1 => {
             emit_stdlib_wrapper_call(
                 emitter,
                 ctx,
@@ -1302,7 +1315,7 @@ pub(crate) fn lower_stdlib_call(
             )?;
             return Ok(true);
         }
-        "str_tokenize_expr" if args.len() == 1 => {
+        "str-tokenize-expr" if args.len() == 1 => {
             emit_stdlib_wrapper_call(
                 emitter,
                 ctx,
@@ -1315,7 +1328,7 @@ pub(crate) fn lower_stdlib_call(
             )?;
             return Ok(true);
         }
-        "str_to_int" if args.len() == 1 => {
+        "str-to-int" if args.len() == 1 => {
             emit_stdlib_wrapper_call(
                 emitter,
                 ctx,
@@ -1328,7 +1341,7 @@ pub(crate) fn lower_stdlib_call(
             )?;
             return Ok(true);
         }
-        "str_is_int" if args.len() == 1 => {
+        "str-is-int" if args.len() == 1 => {
             emit_stdlib_wrapper_call(
                 emitter,
                 ctx,
@@ -1341,7 +1354,7 @@ pub(crate) fn lower_stdlib_call(
             )?;
             return Ok(true);
         }
-        "str_index_of" if args.len() == 2 => {
+        "str-index-of" if args.len() == 2 => {
             emit_stdlib_wrapper_call(
                 emitter,
                 ctx,
@@ -1354,7 +1367,7 @@ pub(crate) fn lower_stdlib_call(
             )?;
             return Ok(true);
         }
-        "str_slice" if args.len() == 3 => {
+        "str-slice" if args.len() == 3 => {
             emit_stdlib_wrapper_call(
                 emitter,
                 ctx,
@@ -1367,7 +1380,7 @@ pub(crate) fn lower_stdlib_call(
             )?;
             return Ok(true);
         }
-        "to_string" if args.len() == 1 => {
+        "to-string" if args.len() == 1 => {
             emit_stdlib_wrapper_call(
                 emitter,
                 ctx,
@@ -1380,7 +1393,7 @@ pub(crate) fn lower_stdlib_call(
             )?;
             return Ok(true);
         }
-        "array_len" if args.len() == 1 => {
+        "array-len" if args.len() == 1 => {
             lower_array_len(
                 emitter,
                 ctx,
@@ -1392,7 +1405,7 @@ pub(crate) fn lower_stdlib_call(
             )?;
             return Ok(true);
         }
-        "array_push" if args.len() == 2 => {
+        "array-push" if args.len() == 2 => {
             lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?;
             lower_expr_into(emitter, ctx, &args[1], 1, functions, pending_calls, fn_name)?;
             emitter.emit_u32(aarch64::ldr64(2, 0, 0));
@@ -1406,9 +1419,14 @@ pub(crate) fn lower_stdlib_call(
         _ => {}
     }
 
-    // Strip type qualifier prefix if present (e.g., "Option::unwrap" → "unwrap")
-    let base = target.rsplit("::").next().unwrap_or(target);
-    match base {
+    // Strip type qualifier prefix if present (e.g., "Option::unwrap" → "unwrap").
+    // Normalize snake_case method names from Rust front to kebab-case.
+    let base_owned = target
+        .rsplit("::")
+        .next()
+        .unwrap_or(target)
+        .replace('_', "-");
+    match base_owned.as_str() {
         // String/Path/str::len → length is at offset 8 (after ptr at offset 0)
         "len"
             if args.len() == 1
@@ -1429,7 +1447,7 @@ pub(crate) fn lower_stdlib_call(
             Ok(true)
         }
         // String/Path/str::is_empty → compare len at offset 8 with 0
-        "is_empty"
+        "is-empty"
             if args.len() == 1
                 && (target.contains("String")
                     || target.contains("Path")
@@ -1450,7 +1468,7 @@ pub(crate) fn lower_stdlib_call(
             Ok(true)
         }
         // String/Path/str::to_string → return the receiver as a slice
-        "to_string"
+        "to-string"
             if args.len() == 1
                 && (target.contains("String")
                     || target.contains("Path")
@@ -1469,7 +1487,7 @@ pub(crate) fn lower_stdlib_call(
             emitter.emit_u32(aarch64::ldr64(rd, rd, 0));
             Ok(true)
         }
-        "to_path_buf" if args.len() == 1 && target.contains("Path") => {
+        "to-path-buf" if args.len() == 1 && target.contains("Path") => {
             let Expr::Ident(name) = &args[0] else {
                 return Err(format!(
                     "native-lower: Path::to_path_buf receiver must be a local in `{fn_name}`"
@@ -1501,7 +1519,7 @@ pub(crate) fn lower_stdlib_call(
             Ok(true)
         }
         // String/str::as_str → return slice {ptr, len}
-        "as_str" if args.len() == 1 && (target.contains("String") || target.contains("str")) => {
+        "as-str" if args.len() == 1 && (target.contains("String") || target.contains("str")) => {
             lower_expr_into(
                 emitter,
                 ctx,
@@ -1516,7 +1534,7 @@ pub(crate) fn lower_stdlib_call(
             Ok(true)
         }
         // PathBuf::as_path / Path::as_path → return slice {ptr, len}
-        "as_path" if args.len() == 1 && target.contains("Path") => {
+        "as-path" if args.len() == 1 && target.contains("Path") => {
             lower_expr_into(
                 emitter,
                 ctx,
@@ -1531,7 +1549,7 @@ pub(crate) fn lower_stdlib_call(
             Ok(true)
         }
         // Path::to_string_lossy → return slice {ptr, len} as a Cow<str> pass-through
-        "to_string_lossy" if args.len() == 1 && target.contains("Path") => {
+        "to-string-lossy" if args.len() == 1 && target.contains("Path") => {
             lower_expr_into(
                 emitter,
                 ctx,
@@ -1546,7 +1564,7 @@ pub(crate) fn lower_stdlib_call(
             Ok(true)
         }
         // String::from_utf8_lossy → return slice {ptr, len} as a Cow<str> pass-through
-        "from_utf8_lossy" if args.len() == 1 && target.contains("String") => {
+        "from-utf8-lossy" if args.len() == 1 && target.contains("String") => {
             lower_expr_into(
                 emitter,
                 ctx,
@@ -1561,18 +1579,18 @@ pub(crate) fn lower_stdlib_call(
             Ok(true)
         }
         // String::push_str → fast-path append when len + arg_len <= cap
-        "push_str" if args.len() == 2 && target.contains("String") => {
+        "push-str" if args.len() == 2 && target.contains("String") => {
             lower_string_push_str(emitter, ctx, args, rd, functions, pending_calls, fn_name)?;
             Ok(true)
         }
         // String::contains / starts_with / ends_with → delegate to native_stdlib wrapper
-        "contains" | "starts_with" | "ends_with"
+        "contains" | "starts-with" | "ends-with"
             if args.len() == 2 && target.contains("String") =>
         {
-            let wrapper = match base {
+            let wrapper = match base_owned.as_str() {
                 "contains" => "in_str_contains",
-                "starts_with" => "in_str_starts_with",
-                "ends_with" => "in_str_ends_with",
+                "starts-with" => "in_str_starts_with",
+                "ends-with" => "in_str_ends_with",
                 _ => unreachable!(),
             };
             emit_stdlib_wrapper_call(
@@ -1594,7 +1612,7 @@ pub(crate) fn lower_stdlib_call(
             Ok(true)
         }
         // Vec::is_empty → ldr x0, [x0]; cmp x0, #0; cset x0, eq
-        "is_empty" if args.len() == 1 => {
+        "is-empty" if args.len() == 1 => {
             lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?;
             emitter.emit_u32(aarch64::ldr64(0, 0, 0));
             emitter.emit_u32(aarch64::cmp_reg64(0, REG_XZR));
@@ -1620,7 +1638,7 @@ pub(crate) fn lower_stdlib_call(
             Ok(true)
         }
         // Vec::with_capacity(n) → not yet implemented in native lowering
-        "with_capacity"
+        "with-capacity"
             if args.len() == 1 && (target.contains("Vec") || target.contains("vec")) =>
         {
             Err(format!(
@@ -1640,7 +1658,7 @@ pub(crate) fn lower_stdlib_call(
             Ok(true)
         }
         // Option::is_some → cmp tag, #1; cset x0, eq
-        "is_some" if args.len() == 1 => {
+        "is-some" if args.len() == 1 => {
             lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?;
             // Option's tag is at offset 0 (first field)
             emitter.emit_u32(aarch64::ldr64(0, 0, 0));
@@ -1657,7 +1675,7 @@ pub(crate) fn lower_stdlib_call(
             Ok(true)
         }
         // Option::is_none → cmp tag, #0; cset x0, eq
-        "is_none" if args.len() == 1 => {
+        "is-none" if args.len() == 1 => {
             lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?;
             emitter.emit_u32(aarch64::ldr64(0, 0, 0));
             emitter.emit_u32(aarch64::cmp_reg64(0, REG_XZR));
@@ -1692,7 +1710,7 @@ pub(crate) fn lower_stdlib_call(
             Ok(true)
         }
         // Result::is_ok → cmp tag, #0; cset x0, eq
-        "is_ok" if args.len() == 1 && target.contains("Result") => {
+        "is-ok" if args.len() == 1 && target.contains("Result") => {
             lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?;
             emitter.emit_u32(aarch64::ldr64(0, 0, 0));
             emitter.emit_u32(aarch64::cmp_reg64(0, REG_XZR));
@@ -1738,7 +1756,7 @@ pub(crate) fn lower_stdlib_call(
             Ok(true)
         }
         // Option::and_then → if Some, call closure with value and return its result; else None
-        "and_then" if args.len() == 2 && target.contains("Option") => {
+        "and-then" if args.len() == 2 && target.contains("Option") => {
             if !is_resolvable_function_ref(&args[1], functions) {
                 return Ok(false);
             }
@@ -1761,7 +1779,7 @@ pub(crate) fn lower_stdlib_call(
             Ok(true)
         }
         // Option::unwrap_or → return value if Some, else default
-        "unwrap_or" if args.len() == 2 && target.contains("Option") => {
+        "unwrap-or" if args.len() == 2 && target.contains("Option") => {
             lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?;
             emitter.emit_u32(aarch64::ldr64(1, 0, 0));
             emitter.emit_insns(&aarch64::load_i64(2, 1));
@@ -1779,7 +1797,7 @@ pub(crate) fn lower_stdlib_call(
             Ok(true)
         }
         // Option::unwrap_or_else → return value if Some, else call closure
-        "unwrap_or_else" if args.len() == 2 && target.contains("Option") => {
+        "unwrap-or-else" if args.len() == 2 && target.contains("Option") => {
             if !is_resolvable_function_ref(&args[1], functions) {
                 return Ok(false);
             }
@@ -1802,7 +1820,7 @@ pub(crate) fn lower_stdlib_call(
             Ok(true)
         }
         // Option::ok_or_else → Some → Ok; None → Err(closure())
-        "ok_or_else" if args.len() == 2 && target.contains("Option") => {
+        "ok-or-else" if args.len() == 2 && target.contains("Option") => {
             if !is_resolvable_function_ref(&args[1], functions) {
                 return Ok(false);
             }
@@ -1860,7 +1878,7 @@ pub(crate) fn lower_stdlib_call(
             Ok(true)
         }
         // Result::map_err → if Err, apply closure to error and keep Err; else Ok
-        "map_err" if args.len() == 2 && target.contains("Result") => {
+        "map-err" if args.len() == 2 && target.contains("Result") => {
             if !is_resolvable_function_ref(&args[1], functions) {
                 return Ok(false);
             }
@@ -1890,7 +1908,7 @@ pub(crate) fn lower_stdlib_call(
             Ok(true)
         }
         // Result::and_then → if Ok, call closure with value and return its result; else Err
-        "and_then" if args.len() == 2 && target.contains("Result") => {
+        "and-then" if args.len() == 2 && target.contains("Result") => {
             if !is_resolvable_function_ref(&args[1], functions) {
                 return Ok(false);
             }
@@ -1912,7 +1930,7 @@ pub(crate) fn lower_stdlib_call(
             Ok(true)
         }
         // Result::unwrap_or → return value if Ok, else default
-        "unwrap_or" if args.len() == 2 && target.contains("Result") => {
+        "unwrap-or" if args.len() == 2 && target.contains("Result") => {
             lower_expr_into(emitter, ctx, &args[0], 0, functions, pending_calls, fn_name)?;
             emitter.emit_u32(aarch64::ldr64(1, 0, 0));
             emitter.emit_u32(aarch64::cmp_reg64(1, REG_XZR));
@@ -1929,7 +1947,7 @@ pub(crate) fn lower_stdlib_call(
             Ok(true)
         }
         // Result::unwrap_or_else → return value if Ok, else call closure
-        "unwrap_or_else" if args.len() == 2 && target.contains("Result") => {
+        "unwrap-or-else" if args.len() == 2 && target.contains("Result") => {
             if !is_resolvable_function_ref(&args[1], functions) {
                 return Ok(false);
             }

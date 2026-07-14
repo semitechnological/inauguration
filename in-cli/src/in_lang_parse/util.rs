@@ -10,6 +10,24 @@ pub(crate) fn brace_delta(line: &str) -> i32 {
     n
 }
 
+/// Inlang identifiers use kebab-case: letters, digits, and internal `-`.
+/// Underscores are not part of the surface language.
+pub(crate) fn is_ident_start(ch: char) -> bool {
+    ch.is_ascii_alphabetic()
+}
+
+pub(crate) fn is_ident_continue(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || ch == '-'
+}
+
+pub(crate) fn is_ident_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(ch) if is_ident_start(ch) => chars.all(is_ident_continue),
+        _ => false,
+    }
+}
+
 pub(crate) fn trim(s: &str) -> &str {
     s.trim()
 }
@@ -258,6 +276,20 @@ pub(crate) fn find_top_level_binary_op<'a>(s: &str, ops: &[&'a str]) -> Option<(
                     if s[i..].starts_with(op) {
                         if *op == "-" && s[i + 1..].starts_with('>') {
                             continue;
+                        }
+                        // Kebab-case identifiers: `foo-bar` is one name.
+                        // Keep numeric subtraction (`1-2`) and spaced minus (`a - b`).
+                        if *op == "-" {
+                            let prev = s[..i].chars().next_back();
+                            let next = s[i + 1..].chars().next();
+                            if let (Some(p), Some(n)) = (prev, next) {
+                                let mid_ident = is_ident_continue(p)
+                                    && is_ident_continue(n)
+                                    && !(p.is_ascii_digit() && n.is_ascii_digit());
+                                if mid_ident {
+                                    continue;
+                                }
+                            }
                         }
                         match best {
                             Some((prev, _)) if op.len() <= prev.len() => {}

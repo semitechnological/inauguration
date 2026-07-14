@@ -30,13 +30,7 @@ impl Drop for HumanInDebugGuard {
 pub(crate) fn human_call_stmt(line: &str) -> Option<String> {
     let trimmed = line.trim();
     let (name, rest) = trimmed.split_once(' ')?;
-    if name.is_empty()
-        || rest.is_empty()
-        || name.contains('(')
-        || !name
-            .chars()
-            .all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
-    {
+    if name.is_empty() || rest.is_empty() || name.contains('(') || !is_ident_name(name) {
         return None;
     }
     Some(format!("{name}({rest})"))
@@ -62,10 +56,7 @@ pub(crate) fn normalize_human_stmt(line: &str) -> String {
     {
         return trimmed.to_string();
     }
-    if trimmed
-        .chars()
-        .all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
-    {
+    if is_ident_name(trimmed) {
         return format!("{trimmed}()");
     }
     trimmed.to_string()

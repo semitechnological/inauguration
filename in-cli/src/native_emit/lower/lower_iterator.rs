@@ -16,9 +16,14 @@ pub(crate) fn lower_vec_for(
     fn_name: &str,
     ret_typ: &Typ,
 ) -> Result<(), String> {
-    if !binding.chars().enumerate().all(|(index, ch)| {
-        ch == '_' || ch.is_ascii_alphanumeric() && (index > 0 || ch.is_ascii_alphabetic())
-    }) {
+    if !binding
+        .chars()
+        .enumerate()
+        .all(|(index, ch)| match (index, ch) {
+            (0, c) => c.is_ascii_alphabetic(),
+            (_, c) => c.is_ascii_alphanumeric() || c == '-',
+        })
+    {
         return Err(format!(
             "native-lower[vec-iterator-pattern-unsupported]: unsupported for pattern `{binding}` in `{fn_name}`"
         ));

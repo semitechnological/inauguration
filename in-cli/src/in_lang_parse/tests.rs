@@ -186,8 +186,8 @@ fn surface_info_parses_imports_capabilities_and_externs() {
     let src = r#"
 import std.fs;
 capability fs.read;
-extern rust fn read_file(path: String) -> String;
-fn main() -> void { read_file("x"); return; }
+extern rust fn read-file(path: String) -> String;
+fn main() -> void { read-file("x"); return; }
 "#;
     let info = parse_in_surface_info(src).expect("surface");
     assert_eq!(info.imports, vec!["std.fs"]);
@@ -196,7 +196,7 @@ fn main() -> void { read_file("x"); return; }
         info.externs,
         vec![InExternBinding {
             language: "rust".into(),
-            name: "read_file".into(),
+            name: "read-file".into(),
             params: vec![("path".into(), Typ::String)],
             required_capabilities: Vec::new(),
             ret: Some(Typ::String),
@@ -281,12 +281,12 @@ fn surface_info_parses_orchestration_facts_without_core_lowering() {
     let src = r#"
 enable distributed-workers;
 @gpu
-distributed fn process_video(video: Video) -> void {
+distributed fn process-video(video: Video) -> void {
   return;
 }
 parallel {
-  warm_cache();
-  build_index();
+  warm-cache();
+  build-index();
 }
 struct Video { Int id }
 fn main() -> void { return; }
@@ -302,22 +302,22 @@ fn main() -> void { return; }
         vec![
             InParallelTaskFact {
                 region: 0,
-                name: "warm_cache".into()
+                name: "warm-cache".into()
             },
             InParallelTaskFact {
                 region: 0,
-                name: "build_index".into()
+                name: "build-index".into()
             }
         ]
     );
     assert_eq!(
         info.orchestration.distributed_functions,
-        vec!["process_video"]
+        vec!["process-video"]
     );
     assert_eq!(info.orchestration.annotations[0].name, "gpu");
     assert_eq!(
         info.orchestration.annotations[0].target.as_deref(),
-        Some("process_video")
+        Some("process-video")
     );
 
     let module = parse_in_source(src).expect("parse");
@@ -325,7 +325,7 @@ fn main() -> void { return; }
         !module
             .decls
             .iter()
-            .any(|decl| matches!(decl, Decl::Function { name, .. } if name == "process_video"))
+            .any(|decl| matches!(decl, Decl::Function { name, .. } if name == "process-video"))
     );
 }
 
@@ -336,14 +336,14 @@ import std.io
 
 needs process.stdout
 
-host_log(text: String) uses process.stdout
+host-log(text: String) uses process.stdout
 
 Message:
   text: String
 
 main:
   print "hello from .in"
-  host_log "compiler-visible effect"
+  host-log "compiler-visible effect"
 "#;
     let module = parse_in_source(src).expect("parse");
     assert!(
@@ -368,7 +368,7 @@ main:
 
 #[test]
 fn malformed_orchestration_syntax_is_rejected() {
-    let err = parse_in_source("parallel warm_cache();\nfn main() -> void { return; }\n")
+    let err = parse_in_source("parallel warm-cache();\nfn main() -> void { return; }\n")
         .expect_err("parallel shape");
     assert!(err.contains("parallel"), "{err}");
 
@@ -423,8 +423,8 @@ fn main() -> void { postgres("select 1"); return; }
 fn extern_binding_parses_required_capabilities() {
     let src = r#"
 capability fs.read;
-extern rust fn read_file(path: String) -> String requires fs.read, json.parse;
-fn main() -> void { read_file("x"); return; }
+extern rust fn read-file(path: String) -> String requires fs.read, json.parse;
+fn main() -> void { read-file("x"); return; }
 "#;
     let info = parse_in_surface_info(src).expect("surface");
     assert_eq!(
@@ -436,8 +436,8 @@ fn main() -> void { read_file("x"); return; }
 #[test]
 fn extern_binding_lowers_as_empty_function_decl() {
     let src = r#"
-extern rust fn read_file(path: String) -> String;
-fn main() -> void { read_file("x"); return; }
+extern rust fn read-file(path: String) -> String;
+fn main() -> void { read-file("x"); return; }
 "#;
     let m = parse_in_source(src).expect("ok");
     let extern_decl = m.decls.iter().find_map(|d| match d {
@@ -447,10 +447,10 @@ fn main() -> void { read_file("x"); return; }
             ret,
             body,
             ..
-        } if name == "read_file" => Some((params, ret, body)),
+        } if name == "read-file" => Some((params, ret, body)),
         _ => None,
     });
-    let (params, ret, body) = extern_decl.expect("read_file");
+    let (params, ret, body) = extern_decl.expect("read-file");
     assert_eq!(params.len(), 1);
     assert!(matches!(ret, Typ::String));
     assert!(body.is_empty());
@@ -538,37 +538,37 @@ fn std_import_adds_core_function_declarations() {
 
 #[test]
 fn std_http_import_adds_core_function_declaration() {
-    let src = "import std.http;\ncapability network.http;\nfn main() -> String { return http_get(\"https://example.com\"); }\n";
+    let src = "import std.http;\ncapability network.http;\nfn main() -> String { return http-get(\"https://example.com\"); }\n";
     let module = parse_in_source(src).expect("std http import");
     let decl = module.decls.iter().find_map(|decl| match decl {
         Decl::Function {
             name, params, ret, ..
-        } if name == "http_get" => Some((params, ret)),
+        } if name == "http-get" => Some((params, ret)),
         _ => None,
     });
-    let (params, ret) = decl.expect("http_get");
+    let (params, ret) = decl.expect("http-get");
     assert_eq!(params, &vec![("url".to_string(), Typ::String)]);
     assert_eq!(ret, &Typ::String);
 }
 
 #[test]
 fn std_fs_import_adds_runtime_function_declarations() {
-    let src = "import std.fs;\ncapability fs.read;\ncapability fs.write;\nfn main() -> Bool { return write_file(\"/tmp/a\", \"b\"); }\n";
+    let src = "import std.fs;\ncapability fs.read;\ncapability fs.write;\nfn main() -> Bool { return write-file(\"/tmp/a\", \"b\"); }\n";
     let module = parse_in_source(src).expect("std fs import");
     let read_decl = module.decls.iter().find_map(|decl| match decl {
         Decl::Function {
             name, params, ret, ..
-        } if name == "read_file" => Some((params, ret)),
+        } if name == "read-file" => Some((params, ret)),
         _ => None,
     });
     let write_decl = module.decls.iter().find_map(|decl| match decl {
         Decl::Function {
             name, params, ret, ..
-        } if name == "write_file" => Some((params, ret)),
+        } if name == "write-file" => Some((params, ret)),
         _ => None,
     });
-    let (read_params, read_ret) = read_decl.expect("read_file");
-    let (write_params, write_ret) = write_decl.expect("write_file");
+    let (read_params, read_ret) = read_decl.expect("read-file");
+    let (write_params, write_ret) = write_decl.expect("write-file");
     assert_eq!(read_params, &vec![("path".to_string(), Typ::String)]);
     assert_eq!(read_ret, &Typ::String);
     assert_eq!(
@@ -583,22 +583,22 @@ fn std_fs_import_adds_runtime_function_declarations() {
 
 #[test]
 fn std_json_import_adds_core_function_declarations() {
-    let src = "import std.json;\nfn main() -> String { return json_parse(\"{}\"); }\n";
+    let src = "import std.json;\nfn main() -> String { return json-parse(\"{}\"); }\n";
     let module = parse_in_source(src).expect("std json import");
     let parse_decl = module.decls.iter().find_map(|decl| match decl {
         Decl::Function {
             name, params, ret, ..
-        } if name == "json_parse" => Some((params, ret)),
+        } if name == "json-parse" => Some((params, ret)),
         _ => None,
     });
     let stringify_decl = module.decls.iter().find_map(|decl| match decl {
         Decl::Function {
             name, params, ret, ..
-        } if name == "json_stringify" => Some((params, ret)),
+        } if name == "json-stringify" => Some((params, ret)),
         _ => None,
     });
-    let (parse_params, parse_ret) = parse_decl.expect("json_parse");
-    let (stringify_params, stringify_ret) = stringify_decl.expect("json_stringify");
+    let (parse_params, parse_ret) = parse_decl.expect("json-parse");
+    let (stringify_params, stringify_ret) = stringify_decl.expect("json-stringify");
     assert_eq!(parse_params, &vec![("text".to_string(), Typ::String)]);
     assert_eq!(parse_ret, &Typ::String);
     assert_eq!(stringify_params, &vec![("text".to_string(), Typ::String)]);
@@ -607,15 +607,15 @@ fn std_json_import_adds_core_function_declarations() {
 
 #[test]
 fn std_process_import_adds_core_function_declaration() {
-    let src = "import std.process;\ncapability process.spawn;\nfn main() -> String { return process_run(\"pwd\"); }\n";
+    let src = "import std.process;\ncapability process.spawn;\nfn main() -> String { return process-run(\"pwd\"); }\n";
     let module = parse_in_source(src).expect("std process import");
     let decl = module.decls.iter().find_map(|decl| match decl {
         Decl::Function {
             name, params, ret, ..
-        } if name == "process_run" => Some((params, ret)),
+        } if name == "process-run" => Some((params, ret)),
         _ => None,
     });
-    let (params, ret) = decl.expect("process_run");
+    let (params, ret) = decl.expect("process-run");
     assert_eq!(params, &vec![("command".to_string(), Typ::String)]);
     assert_eq!(ret, &Typ::String);
 }
@@ -627,7 +627,7 @@ fn std_cli_import_adds_core_function_declarations() {
     let count_decl = module.decls.iter().find_map(|decl| match decl {
         Decl::Function {
             name, params, ret, ..
-        } if name == "arg_count" => Some((params, ret)),
+        } if name == "arg-count" => Some((params, ret)),
         _ => None,
     });
     let arg_decl = module.decls.iter().find_map(|decl| match decl {
@@ -636,7 +636,7 @@ fn std_cli_import_adds_core_function_declarations() {
         } if name == "arg" => Some((params, ret)),
         _ => None,
     });
-    let (count_params, count_ret) = count_decl.expect("arg_count");
+    let (count_params, count_ret) = count_decl.expect("arg-count");
     let (arg_params, arg_ret) = arg_decl.expect("arg");
     assert_eq!(count_params, &Vec::<(String, Typ)>::new());
     assert_eq!(count_ret, &Typ::Int);
@@ -647,29 +647,29 @@ fn std_cli_import_adds_core_function_declarations() {
 #[test]
 fn std_env_import_adds_core_function_declarations() {
     let src =
-        "import std.env;\ncapability env.read;\nfn main() -> Bool { return env_has(\"HOME\"); }\n";
+        "import std.env;\ncapability env.read;\nfn main() -> Bool { return env-has(\"HOME\"); }\n";
     let module = parse_in_source(src).expect("std env import");
     let get_decl = module.decls.iter().find_map(|decl| match decl {
         Decl::Function {
             name, params, ret, ..
-        } if name == "env_get" => Some((params, ret)),
+        } if name == "env-get" => Some((params, ret)),
         _ => None,
     });
     let set_decl = module.decls.iter().find_map(|decl| match decl {
         Decl::Function {
             name, params, ret, ..
-        } if name == "env_set" => Some((params, ret)),
+        } if name == "env-set" => Some((params, ret)),
         _ => None,
     });
     let has_decl = module.decls.iter().find_map(|decl| match decl {
         Decl::Function {
             name, params, ret, ..
-        } if name == "env_has" => Some((params, ret)),
+        } if name == "env-has" => Some((params, ret)),
         _ => None,
     });
-    let (get_params, get_ret) = get_decl.expect("env_get");
-    let (set_params, set_ret) = set_decl.expect("env_set");
-    let (has_params, has_ret) = has_decl.expect("env_has");
+    let (get_params, get_ret) = get_decl.expect("env-get");
+    let (set_params, set_ret) = set_decl.expect("env-set");
+    let (has_params, has_ret) = has_decl.expect("env-has");
     assert_eq!(get_params, &vec![("name".to_string(), Typ::String)]);
     assert_eq!(get_ret, &Typ::String);
     assert_eq!(
@@ -696,29 +696,29 @@ fn std_env_import_declares_capability_requirements() {
             ))
             .collect::<Vec<_>>(),
         vec![
-            ("env_get", &["env.read".to_string()][..]),
-            ("env_set", &["env.write".to_string()][..]),
-            ("env_has", &["env.read".to_string()][..])
+            ("env-get", &["env.read".to_string()][..]),
+            ("env-set", &["env.write".to_string()][..]),
+            ("env-has", &["env.read".to_string()][..])
         ]
     );
 }
 
 #[test]
 fn std_path_import_adds_core_function_declarations() {
-    let src = "import std.path;\nfn main() -> String { return path_join(\"/tmp\", \"app\"); }\n";
+    let src = "import std.path;\nfn main() -> String { return path-join(\"/tmp\", \"app\"); }\n";
     let module = parse_in_source(src).expect("std path import");
     let expected = [
         (
-            "path_join",
+            "path-join",
             vec![
                 ("base".to_string(), Typ::String),
                 ("child".to_string(), Typ::String),
             ],
         ),
-        ("path_dirname", vec![("path".to_string(), Typ::String)]),
-        ("path_basename", vec![("path".to_string(), Typ::String)]),
-        ("path_extname", vec![("path".to_string(), Typ::String)]),
-        ("path_normalize", vec![("path".to_string(), Typ::String)]),
+        ("path-dirname", vec![("path".to_string(), Typ::String)]),
+        ("path-basename", vec![("path".to_string(), Typ::String)]),
+        ("path-extname", vec![("path".to_string(), Typ::String)]),
+        ("path-normalize", vec![("path".to_string(), Typ::String)]),
     ];
     for (expected_name, expected_params) in expected {
         let decl = module.decls.iter().find_map(|decl| match decl {
@@ -1727,8 +1727,8 @@ fn parse_match_pattern_literals() {
     assert_eq!(MatchPattern::parse("else").unwrap(), MatchPattern::WildPat);
     assert_eq!(MatchPattern::parse("..").unwrap(), MatchPattern::RestPat);
     assert_eq!(
-        MatchPattern::parse("my_var").unwrap(),
-        MatchPattern::IdentPat("my_var".into())
+        MatchPattern::parse("my-var").unwrap(),
+        MatchPattern::IdentPat("my-var".into())
     );
 }
 
@@ -1835,7 +1835,7 @@ component BadField {
   deterministic true
   checkpoint none
 
-  unknown_field foo
+  unknown-field foo
 }
 
 fn main() -> void {}

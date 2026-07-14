@@ -439,7 +439,7 @@ fn in_report_checks_std_http_import_capabilities() {
         "in",
         r#"
 import std.http;
-fn main() -> String { return http_get("https://example.com"); }
+fn main() -> String { return http-get("https://example.com"); }
 "#,
     );
     let report = json_report(&temp.path, &AgentModeConfig::default()).expect("report");
@@ -447,7 +447,7 @@ fn main() -> String { return http_get("https://example.com"); }
     assert!(
         report
             .effects
-            .contains(&"extern:std:http_get:requires=network.http".to_string())
+            .contains(&"extern:std:http-get:requires=network.http".to_string())
     );
 }
 
@@ -458,7 +458,7 @@ fn in_report_includes_std_json_import_effects() {
         "in",
         r#"
 import std.json;
-fn main() -> String { return json_parse("{}"); }
+fn main() -> String { return json-parse("{}"); }
 "#,
     );
     let report = json_report(&temp.path, &AgentModeConfig::default()).expect("report");
@@ -466,12 +466,12 @@ fn main() -> String { return json_parse("{}"); }
     assert!(
         report
             .effects
-            .contains(&"extern:std:json_parse".to_string())
+            .contains(&"extern:std:json-parse".to_string())
     );
     assert!(
         report
             .effects
-            .contains(&"extern:std:json_stringify".to_string())
+            .contains(&"extern:std:json-stringify".to_string())
     );
 }
 
@@ -482,7 +482,7 @@ fn in_report_checks_std_process_import_capabilities() {
         "in",
         r#"
 import std.process;
-fn main() -> String { return process_run("pwd"); }
+fn main() -> String { return process-run("pwd"); }
 "#,
     );
     let report = json_report(&temp.path, &AgentModeConfig::default()).expect("report");
@@ -490,7 +490,7 @@ fn main() -> String { return process_run("pwd"); }
     assert!(
         report
             .effects
-            .contains(&"extern:std:process_run:requires=process.spawn".to_string())
+            .contains(&"extern:std:process-run:requires=process.spawn".to_string())
     );
 }
 
@@ -514,7 +514,7 @@ fn main() -> String { return arg(0); }
     assert!(
         report
             .effects
-            .contains(&"extern:std:arg_count:requires=process.args".to_string())
+            .contains(&"extern:std:arg-count:requires=process.args".to_string())
     );
 }
 
@@ -525,7 +525,7 @@ fn in_report_checks_std_env_import_capabilities() {
         "in",
         r#"
 import std.env;
-fn main() -> String { return env_get("HOME"); }
+fn main() -> String { return env-get("HOME"); }
 "#,
     );
     let report = json_report(&temp.path, &AgentModeConfig::default()).expect("report");
@@ -533,17 +533,17 @@ fn main() -> String { return env_get("HOME"); }
     assert!(
         report
             .effects
-            .contains(&"extern:std:env_get:requires=env.read".to_string())
+            .contains(&"extern:std:env-get:requires=env.read".to_string())
     );
     assert!(
         report
             .effects
-            .contains(&"extern:std:env_set:requires=env.write".to_string())
+            .contains(&"extern:std:env-set:requires=env.write".to_string())
     );
     assert!(
         report
             .effects
-            .contains(&"extern:std:env_has:requires=env.read".to_string())
+            .contains(&"extern:std:env-has:requires=env.read".to_string())
     );
 }
 
