@@ -1,18 +1,18 @@
 // @expect parse: ok
-// @expect has-function: int_identity
-// @expect has-function: string_identity
+// @expect has-function: int-identity
+// @expect has-function: string-identity
 // @expect has-function: main
 // @expect bytecode: executes
 // @expect result: 7
 
-fn int_identity(x: Int) -> Int {
+fn int-identity(x: Int) -> Int {
   return x;
 }
 
-fn string_identity(s: String) -> String {
+fn string-identity(s: String) -> String {
   return s;
 }
 
 fn main() -> Int {
-  return int_identity(7);
+  return int-identity(7);
 }

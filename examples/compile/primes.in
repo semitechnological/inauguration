@@ -1,7 +1,7 @@
 package primes;
 module primes.main;
 
-fn is_prime(n: Int) -> Bool {
+fn is-prime(n: Int) -> Bool {
   if n <= 1 { return false; }
   let i = 2;
   while i * i <= n {
@@ -11,12 +11,12 @@ fn is_prime(n: Int) -> Bool {
   return true;
 }
 
-fn count_primes(limit: Int) -> Int {
+fn count-primes(limit: Int) -> Int {
   let count = 0;
   for n in 2..(limit + 1) {
-    if is_prime(n) { count = count + 1; }
+    if is-prime(n) { count = count + 1; }
   }
   return count;
 }
 
-fn main() -> Int { return count_primes(30); }
+fn main() -> Int { return count-primes(30); }

@@ -86,8 +86,8 @@ require(
     "graph orchestration missing gpu-optimizer extension",
 )
 require(
-    "process_video" in (orch.get("distributed_functions") or []),
-    "graph orchestration missing distributed process_video fact",
+    "process-video" in (orch.get("distributed_functions") or []),
+    "graph orchestration missing distributed process-video fact",
 )
 require(orch.get("parallel_regions") == 1, "graph orchestration parallel region count was not 1")
 
@@ -108,11 +108,11 @@ plan = {
     for step in orch.get("local_plan") or []
 }
 require(
-    ("parallel_task", "warm_cache", "local-deterministic-sequential") in plan,
+    ("parallel_task", "warm-cache", "local-deterministic-sequential") in plan,
     "graph orchestration missing local parallel task plan",
 )
 require(
-    ("distributed_fn", "process_video", "local-worker-simulator") in plan,
+    ("distributed_fn", "process-video", "local-worker-simulator") in plan,
     "graph orchestration missing local distributed function plan",
 )
 jobs = {
@@ -120,7 +120,7 @@ jobs = {
     for job in orch.get("distributed_jobs") or []
 }
 require(
-    ("process_video", "local-simulated-worker", "planned") in jobs,
+    ("process-video", "local-simulated-worker", "planned") in jobs,
     "graph orchestration missing local distributed job fact",
 )
 PY
@@ -142,8 +142,8 @@ def require(condition, message):
 require(not data.get("diagnostics"), "agent report had diagnostics")
 orch = data.get("orchestration") or {}
 require(
-    "process_video" in (orch.get("distributed_functions") or []),
-    "agent orchestration missing distributed process_video fact",
+    "process-video" in (orch.get("distributed_functions") or []),
+    "agent orchestration missing distributed process-video fact",
 )
 require(orch.get("parallel_regions") == 1, "agent orchestration parallel region count was not 1")
 statuses = {
@@ -155,7 +155,7 @@ require(
     "agent orchestration missing local distributed simulator fact",
 )
 require(
-    any(job.get("function") == "process_video" for job in orch.get("distributed_jobs") or []),
+    any(job.get("function") == "process-video" for job in orch.get("distributed_jobs") or []),
     "agent orchestration missing local distributed job fact",
 )
 PY

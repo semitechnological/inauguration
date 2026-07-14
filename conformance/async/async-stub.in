@@ -2,11 +2,11 @@
 // Status: STUB — async features are Wave 3 design.
 // Parse-only fixture for parser validation.
 
-fn slow_op() -> Int {
+fn slow-op() -> Int {
   return 42;
 }
 
 fn main() -> void {
-  let result: Int = slow_op();
+  let result: Int = slow-op();
   return;
 }

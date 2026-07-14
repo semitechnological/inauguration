@@ -4,5 +4,5 @@
 
 fn main() -> Int {
   let a: [Int] = [10, 20, 30];
-  return array_len(a);
+  return array-len(a);
 }

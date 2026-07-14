@@ -49,7 +49,7 @@ fn add(a: Int, b: Int) -> Int { return a + b; }
 @gpu
 fn render() -> void { return; }
 
-@parallel_safe
+@parallel-safe
 fn hash(data: String) -> Int { return 0; }
 ```
 
@@ -59,7 +59,7 @@ fn hash(data: String) -> Int { return 0; }
 const MAX_SIZE = 64
 const PCI_CONFIG_ADDR = 0xCF8
 
-var heap_next: Int = 0
+var heap-next: Int = 0
 var line: Int = 0
 ```
 
@@ -67,9 +67,9 @@ var line: Int = 0
 
 ```in
 struct KernelState {
-  Int root_table_id
-  Int realm_id
-  Bool cpu_ready
+  Int root-table-id
+  Int realm-id
+  Bool cpu-ready
 }
 
 struct Point {
@@ -103,7 +103,7 @@ Classes desugar to structs + mangled functions at Core IR → SIL: `Dog_bark(d)`
 
 ```in
 interface BootEntry {
-  fn start(mb_info: Int) -> Int
+  fn start(mb-info: Int) -> Int
 }
 
 interface DebugConsole {
@@ -142,8 +142,8 @@ fn main() -> void {
   return;
 }
 
-fn pci_read32(bus: Int, dev: Int, func: Int, off: Int) -> Int {
-  outl(PCI_CONFIG_ADDR, pci_addr(bus, dev, func, off))
+fn pci-read32(bus: Int, dev: Int, func: Int, off: Int) -> Int {
+  outl(PCI_CONFIG_ADDR, pci-addr(bus, dev, func, off))
   return inl(PCI_CONFIG_DATA)
 }
 ```
@@ -165,7 +165,7 @@ Declares external bindings without embedding a foreign parser. Optional `require
 ### Distributed functions
 
 ```in
-distributed fn train_model(data: String) -> Int {
+distributed fn train-model(data: String) -> Int {
   return 0;
 }
 ```
@@ -176,9 +176,9 @@ Parsed as orchestration fact, exposed as local simulated worker job. No remote e
 
 ```in
 parallel {
-  process_chunk(data, 0)
-  process_chunk(data, 1)
-  process_chunk(data, 2)
+  process-chunk(data, 0)
+  process-chunk(data, 1)
+  process-chunk(data, 2)
 }
 ```
 
@@ -210,7 +210,7 @@ for i in 0..8 {
 let a = 42
 let b = a + 10
 let c = (a << 16) | b
-let d = some_function(arg1, arg2)
+let d = some-function(arg1, arg2)
 let e = obj.method()
 ```
 
@@ -245,15 +245,15 @@ cli()
 pause()
 invlpg(virt)
 lidt(idtr)
-let cr2 = read_cr2()
+let cr2 = read-cr2()
 ```
 
 ### Function pointer invocation
 
 ```in
 invoke(entry)
-invoke1(fn_ptr, arg1)
-invoke2(fn_ptr, arg1, arg2)
+invoke1(fn-ptr, arg1)
+invoke2(fn-ptr, arg1, arg2)
 ```
 
 ### Array access

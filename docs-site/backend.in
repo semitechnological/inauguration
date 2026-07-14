@@ -8,6 +8,6 @@ capability process.spawn;
 
 fn main() -> void {
   print("inauguration docs-site");
-  process_run("in execute docs-site/build.in --module-id inauguration.docs.build");
+  process-run("in execute docs-site/build.in --module-id inauguration.docs.build");
   return;
 }

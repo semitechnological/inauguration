@@ -1,7 +1,7 @@
 package sum;
 module sum.main;
 
-fn sum_to(n: Int) -> Int {
+fn sum-to(n: Int) -> Int {
   let total = 0;
   for i in 1..(n + 1) {
     total = total + i;
@@ -9,4 +9,4 @@ fn sum_to(n: Int) -> Int {
   return total;
 }
 
-fn main() -> Int { return sum_to(100); }
+fn main() -> Int { return sum-to(100); }

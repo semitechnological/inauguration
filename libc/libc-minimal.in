@@ -17,7 +17,7 @@ package space.kernel.libc
 // boundary capability is wired for the C frontend (see ../docs/libc-migration-plan.md).
 
 // String functions
-fn strlen_c(s: Int) -> Int {
+fn strlen-c(s: Int) -> Int {
   let i = 0
   while load8(s + i) != 0 {
     i = i + 1
@@ -25,7 +25,7 @@ fn strlen_c(s: Int) -> Int {
   return i
 }
 
-fn strcmp_c(s1: Int, s2: Int) -> Int {
+fn strcmp-c(s1: Int, s2: Int) -> Int {
   let i = 0
   while true {
     let c1 = load8(s1 + i)
@@ -40,7 +40,7 @@ fn strcmp_c(s1: Int, s2: Int) -> Int {
   }
 }
 
-fn strcpy_c(dst: Int, src: Int) -> Int {
+fn strcpy-c(dst: Int, src: Int) -> Int {
   let i = 0
   while load8(src + i) != 0 {
     store8(dst + i, load8(src + i))
@@ -51,7 +51,7 @@ fn strcpy_c(dst: Int, src: Int) -> Int {
 }
 
 // Memory functions
-fn memset_c(dst: Int, c: Int, n: Int) -> Int {
+fn memset-c(dst: Int, c: Int, n: Int) -> Int {
   let i = 0
   while i < n {
     store8(dst + i, c)
@@ -60,7 +60,7 @@ fn memset_c(dst: Int, c: Int, n: Int) -> Int {
   return dst
 }
 
-fn memcpy_c(dst: Int, src: Int, n: Int) -> Int {
+fn memcpy-c(dst: Int, src: Int, n: Int) -> Int {
   let i = 0
   while i < n {
     store8(dst + i, load8(src + i))
@@ -69,7 +69,7 @@ fn memcpy_c(dst: Int, src: Int, n: Int) -> Int {
   return dst
 }
 
-fn memcmp_c(s1: Int, s2: Int, n: Int) -> Int {
+fn memcmp-c(s1: Int, s2: Int, n: Int) -> Int {
   let i = 0
   while i < n {
     let a = load8(s1 + i)
@@ -82,7 +82,7 @@ fn memcmp_c(s1: Int, s2: Int, n: Int) -> Int {
   return 0
 }
 
-fn memmove_c(dst: Int, src: Int, n: Int) -> Int {
+fn memmove-c(dst: Int, src: Int, n: Int) -> Int {
   if dst < src {
     let i = 0
     while i < n {
@@ -100,7 +100,7 @@ fn memmove_c(dst: Int, src: Int, n: Int) -> Int {
 }
 
 // String search
-fn strchr_c(s: Int, c: Int) -> Int {
+fn strchr-c(s: Int, c: Int) -> Int {
   let i = 0
   while true {
     let ch = load8(s + i)
@@ -114,19 +114,19 @@ fn strchr_c(s: Int, c: Int) -> Int {
   }
 }
 
-fn strstr_c(haystack: Int, needle: Int) -> Int {
+fn strstr-c(haystack: Int, needle: Int) -> Int {
   let i = 0
   while load8(haystack + i) != 0 {
     let j = 0
-    let is_match = 1
+    let is-match = 1
     while load8(needle + j) != 0 {
       if load8(haystack + i + j) != load8(needle + j) {
-        is_match = 0
+        is-match = 0
         break
       }
       j = j + 1
     }
-    if is_match != 0 {
+    if is-match != 0 {
       return haystack + i
     }
     i = i + 1
@@ -135,43 +135,43 @@ fn strstr_c(haystack: Int, needle: Int) -> Int {
 }
 
 // Character type
-fn isdigit_c(c: Int) -> Int {
+fn isdigit-c(c: Int) -> Int {
   if c >= 48 && c <= 57 { return 1 }
   return 0
 }
 
-fn isspace_c(c: Int) -> Int {
+fn isspace-c(c: Int) -> Int {
   if c == 32 || c == 9 || c == 10 || c == 13 || c == 12 || c == 11 { return 1 }
   return 0
 }
 
-fn isalpha_c(c: Int) -> Int {
+fn isalpha-c(c: Int) -> Int {
   if c >= 65 && c <= 90 { return 1 }
   if c >= 97 && c <= 122 { return 1 }
   return 0
 }
 
-fn toupper_c(c: Int) -> Int {
+fn toupper-c(c: Int) -> Int {
   if c >= 97 && c <= 122 { return c - 32 }
   return c
 }
 
-fn tolower_c(c: Int) -> Int {
+fn tolower-c(c: Int) -> Int {
   if c >= 65 && c <= 90 { return c + 32 }
   return c
 }
 
-fn isprint_c(c: Int) -> Int {
+fn isprint-c(c: Int) -> Int {
   if c >= 32 && c <= 126 { return 1 }
   return 0
 }
 
 // Numeric conversion
-fn atoi_c(s: Int) -> Int {
+fn atoi-c(s: Int) -> Int {
   let i = 0
   let neg = 0
   let result = 0
-  while isspace_c(load8(s + i)) != 0 {
+  while isspace-c(load8(s + i)) != 0 {
     i = i + 1
   }
   if load8(s + i) == 45 {
@@ -182,7 +182,7 @@ fn atoi_c(s: Int) -> Int {
       i = i + 1
     }
   }
-  while isdigit_c(load8(s + i)) != 0 {
+  while isdigit-c(load8(s + i)) != 0 {
     result = result * 10 + (load8(s + i) - 48)
     i = i + 1
   }
@@ -192,16 +192,16 @@ fn atoi_c(s: Int) -> Int {
   return result
 }
 
-fn abs_c(x: Int) -> Int {
+fn abs-c(x: Int) -> Int {
   if x < 0 { return -x }
   return x
 }
 
-fn min_c(a: Int, b: Int) -> Int {
+fn min-c(a: Int, b: Int) -> Int {
   if a < b { return a }
   return b
 }
 
-fn max_c(a: Int, b: Int) -> Int {
+fn max-c(a: Int, b: Int) -> Int {
   if a > b { return a }
   return b

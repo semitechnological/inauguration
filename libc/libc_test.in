@@ -1,5 +1,5 @@
 // libc_test.in — test that .in can call C-compiled libc functions
-package space.kernel.libc_test
+package space.kernel.libc-test
 
 // These functions are implemented in libc/libc_full.c and compiled to Core IR
 // alongside this .in file. Both lower to the same Core IR, so the calls
@@ -8,11 +8,11 @@ package space.kernel.libc_test
 // Import the C libc functions as extern — they're resolved at link time
 // because both .in and C compile through the same Core IR pipeline.
 
-fn test_strlen(port: Int) -> Int {
+fn test-strlen(port: Int) -> Int {
     // strlen is from the C libc
     let len = 5  // strlen("hello") should return 5
-    serial_write_cstr(port, "libc: C strlen('hello') = ")
-    serial_write_dec_wide(port, len)
-    serial_nl(port)
+    serial-write-cstr(port, "libc: C strlen('hello') = ")
+    serial-write-dec-wide(port, len)
+    serial-nl(port)
     return 0
 }

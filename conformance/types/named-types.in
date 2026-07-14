@@ -1,7 +1,7 @@
 // @expect parse: ok
 // @expect has-struct: Name
-// @expect has-function: full_name
-// @expect has-call-edge: full_name
+// @expect has-function: full-name
+// @expect has-call-edge: full-name
 // @expect bytecode: executes
 
 struct Name {
@@ -9,12 +9,12 @@ struct Name {
   String last
 }
 
-fn full_name(n: Name) -> String {
+fn full-name(n: Name) -> String {
   return n.last;
 }
 
 fn main() -> void {
   let n: Name = Name { first: "hello", last: "world" };
-  let s: String = full_name(n);
+  let s: String = full-name(n);
   return;
 }

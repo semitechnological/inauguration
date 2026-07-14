@@ -6,7 +6,7 @@ OUT="${OUT:-$SITE/dist}"
 IN_BIN="${IN_BIN:-$(command -v in 2>/dev/null || true)}"
 
 if [[ -n "$IN_BIN" && -f "$SITE/scripts/gen-splash.in" ]]; then
-  "$IN_BIN" execute --path "$SITE/scripts/gen-splash.in" --module-id inauguration.docs.gen_splash 2>/dev/null || true
+  "$IN_BIN" execute --path "$SITE/scripts/gen-splash.in" --module-id inauguration.docs.gen-splash 2>/dev/null || true
 fi
 CREPUS_BIN="${CREPUS_BIN:-crepus}"
 CREPUS_MIN="0.9.18"

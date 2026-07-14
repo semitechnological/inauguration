@@ -21,25 +21,25 @@ package std
 // Built-in bump allocator (freestanding — no kernel dependency)
 // ===========================================================================
 
-const HEAP_SIZE = 65536
-var heap_base: Int = 0
-var heap_pos: Int = 0
+const HEAP-SIZE = 65536
+var heap-base: Int = 0
+var heap-pos: Int = 0
 
-fn alloc_internal(size: Int) -> Int {
-    if heap_base == 0 {
-        heap_base = 0x800000  // fixed address for freestanding
-        heap_pos = 0
+fn alloc-internal(size: Int) -> Int {
+    if heap-base == 0 {
+        heap-base = 0x800000  // fixed address for freestanding
+        heap-pos = 0
     }
-    let ptr = heap_base + heap_pos
-    heap_pos = heap_pos + size
-    if heap_pos > HEAP_SIZE {
-        heap_pos = size
-        return heap_base
+    let ptr = heap-base + heap-pos
+    heap-pos = heap-pos + size
+    if heap-pos > HEAP-SIZE {
+        heap-pos = size
+        return heap-base
     }
     return ptr
 }
 
-fn free_internal(ptr: Int) -> void {
+fn free-internal(ptr: Int) -> void {
     return  // no-op bump allocator
 }
 
@@ -66,13 +66,13 @@ fn free_internal(ptr: Int) -> void {
 
 // Build a Str from a C-style null-terminated string pointer.
 // Scans for the null terminator — O(n) on construction only.
-fn str_from_cstr(ptr: Int) -> Int {
+fn str-from-cstr(ptr: Int) -> Int {
     let len = 0
     while load8(ptr + len) != 0 {
         len = len + 1
     }
     // Allocate header + data
-    let result = alloc_internal(len + 8)
+    let result = alloc-internal(len + 8)
     store64(result, len)        // header: length
     let data = result + 8
     let i = 0
@@ -84,17 +84,17 @@ fn str_from_cstr(ptr: Int) -> Int {
 }
 
 // Length of a Str (O(1) — reads the header).
-fn str_len(s: Int) -> Int {
+fn str-len(s: Int) -> Int {
     return load64(s)
 }
 
 // Data pointer of a Str (the bytes after the header).
-fn str_data(s: Int) -> Int {
+fn str-data(s: Int) -> Int {
     return s + 8
 }
 
 // Get byte at index. Panics if out of bounds.
-fn str_at(s: Int, i: Int) -> Int {
+fn str-at(s: Int, i: Int) -> Int {
     let len = load64(s)
     if i >= len {
         return 0  // bounds check — return null byte instead of crashing
@@ -103,7 +103,7 @@ fn str_at(s: Int, i: Int) -> Int {
 }
 
 // Compare two Strs by content (not pointer).
-fn str_eq(a: Int, b: Int) -> Int {
+fn str-eq(a: Int, b: Int) -> Int {
     let la = load64(a)
     let lb = load64(b)
     if la != lb {
@@ -120,9 +120,9 @@ fn str_eq(a: Int, b: Int) -> Int {
 }
 
 // Copy a Str into a new allocation.
-fn str_clone(s: Int) -> Int {
+fn str-clone(s: Int) -> Int {
     let len = load64(s)
-    let result = alloc_internal(len + 8)
+    let result = alloc-internal(len + 8)
     store64(result, len)
     let i = 0
     while i < len {
@@ -133,10 +133,10 @@ fn str_clone(s: Int) -> Int {
 }
 
 // Concatenate two Strs.
-fn str_concat(a: Int, b: Int) -> Int {
+fn str-concat(a: Int, b: Int) -> Int {
     let la = load64(a)
     let lb = load64(b)
-    let result = alloc_internal(la + lb + 8)
+    let result = alloc-internal(la + lb + 8)
     store64(result, la + lb)
     let i = 0
     while i < la {
@@ -152,13 +152,13 @@ fn str_concat(a: Int, b: Int) -> Int {
 }
 
 // Slice a Str from start to end (exclusive).
-fn str_slice(s: Int, start: Int, end: Int) -> Int {
+fn str-slice(s: Int, start: Int, end: Int) -> Int {
     let len = load64(s)
     let slen = end - start
     if start < 0 { start = 0 }
     if end > len { end = len }
     if slen < 0 { slen = 0 }
-    let result = alloc_internal(slen + 8)
+    let result = alloc-internal(slen + 8)
     store64(result, slen)
     let i = 0
     while i < slen {
@@ -169,9 +169,9 @@ fn str_slice(s: Int, start: Int, end: Int) -> Int {
 }
 
 // Convert a Str to a null-terminated C string pointer (for POSIX compat).
-fn str_to_cstr(s: Int) -> Int {
+fn str-to-cstr(s: Int) -> Int {
     let len = load64(s)
-    let ptr = alloc_internal(len + 1)
+    let ptr = alloc-internal(len + 1)
     let i = 0
     while i < len {
         store8(ptr + i, load8(s + 8 + i))
@@ -199,10 +199,10 @@ fn fmt(template: Int, a0: Int, a1: Int, a2: Int, a3: Int) -> Int {
     while load8(template + tlen) != 0 {
         tlen = tlen + 1
     }
-    let buf = alloc_internal(tlen + 80)
+    let buf = alloc-internal(tlen + 80)
     let pos = 0
     let i = 0
-    let args: Int = alloc_internal(32)
+    let args: Int = alloc-internal(32)
     store64(args + 0, a0)
     store64(args + 8, a1)
     store64(args + 16, a2)
@@ -217,7 +217,7 @@ fn fmt(template: Int, a0: Int, a1: Int, a2: Int, a3: Int) -> Int {
                 i = i + 1
             } else {
                 // Parse argument index (0-3)
-                let arg_idx = load8(template + i) - 48  // '0' = 48
+                let arg-idx = load8(template + i) - 48  // '0' = 48
                 i = i + 1
                 // Check for format specifier after ':'
                 let format = 100  // default: decimal
@@ -236,8 +236,8 @@ fn fmt(template: Int, a0: Int, a1: Int, a2: Int, a3: Int) -> Int {
                     i = i + 1
                 }
                 // Format the argument
-                let val = load64(args + arg_idx * 8)
-                let digits: Int = alloc_internal(20)
+                let val = load64(args + arg-idx * 8)
+                let digits: Int = alloc-internal(20)
                 let di = 0
                 if format == 16 {
                     // Hex
@@ -299,7 +299,7 @@ fn fmt(template: Int, a0: Int, a1: Int, a2: Int, a3: Int) -> Int {
         }
     }
     // Build Str result
-    let result = alloc_internal(pos + 8)
+    let result = alloc-internal(pos + 8)
     store64(result, pos)
     let j = 0
     while j < pos {
@@ -313,50 +313,50 @@ fn fmt(template: Int, a0: Int, a1: Int, a2: Int, a3: Int) -> Int {
 // Vec — dynamic array
 // ===========================================================================
 
-fn vec_new(elem_size: Int) -> Int {
-    let v = alloc_internal(24)
+fn vec-new(elem-size: Int) -> Int {
+    let v = alloc-internal(24)
     store64(v + 0, 0)
     store64(v + 8, 0)
     store64(v + 16, 0)
     return v
 }
 
-fn vec_len(v: Int) -> Int {
+fn vec-len(v: Int) -> Int {
     return load64(v + 8)
 }
 
-fn vec_cap(v: Int) -> Int {
+fn vec-cap(v: Int) -> Int {
     return load64(v + 16)
 }
 
-fn vec_data(v: Int) -> Int {
+fn vec-data(v: Int) -> Int {
     return load64(v)
 }
 
-fn vec_grow(v: Int, min_cap: Int) -> void {
+fn vec-grow(v: Int, min-cap: Int) -> void {
     let cap = load64(v + 16)
-    let new_cap = cap
-    if new_cap == 0 { new_cap = 4 }
-    while new_cap < min_cap {
-        new_cap = new_cap * 2
+    let new-cap = cap
+    if new-cap == 0 { new-cap = 4 }
+    while new-cap < min-cap {
+        new-cap = new-cap * 2
     }
-    let data = alloc_internal(new_cap * 8)
-    let old_data = load64(v)
+    let data = alloc-internal(new-cap * 8)
+    let old-data = load64(v)
     let len = load64(v + 8)
     let i = 0
     while i < len {
-        store64(data + i * 8, load64(old_data + i * 8))
+        store64(data + i * 8, load64(old-data + i * 8))
         i = i + 1
     }
     store64(v + 0, data)
-    store64(v + 16, new_cap)
+    store64(v + 16, new-cap)
 }
 
-fn vec_push(v: Int, val: Int) -> Int {
+fn vec-push(v: Int, val: Int) -> Int {
     let len = load64(v + 8)
     let cap = load64(v + 16)
     if len >= cap {
-        vec_grow(v, len + 1)
+        vec-grow(v, len + 1)
     }
     let data = load64(v)
     store64(data + len * 8, val)
@@ -364,7 +364,7 @@ fn vec_push(v: Int, val: Int) -> Int {
     return 1
 }
 
-fn vec_get(v: Int, i: Int) -> Int {
+fn vec-get(v: Int, i: Int) -> Int {
     let len = load64(v + 8)
     if i >= len {
         return 0
@@ -372,49 +372,49 @@ fn vec_get(v: Int, i: Int) -> Int {
     return load64(load64(v) + i * 8)
 }
 
-fn vec_extend(v: Int, src: Int) -> Int {
+fn vec-extend(v: Int, src: Int) -> Int {
     let len = load64(v + 8)
-    let src_len = load64(src + 8)
-    let src_data = load64(src)
-    if len + src_len > load64(v + 16) {
-        vec_grow(v, len + src_len)
+    let src-len = load64(src + 8)
+    let src-data = load64(src)
+    if len + src-len > load64(v + 16) {
+        vec-grow(v, len + src-len)
     }
     let data = load64(v)
     let i = 0
-    while i < src_len {
-        store64(data + (len + i) * 8, load64(src_data + i * 8))
+    while i < src-len {
+        store64(data + (len + i) * 8, load64(src-data + i * 8))
         i = i + 1
     }
-    store64(v + 8, len + src_len)
-    return src_len
+    store64(v + 8, len + src-len)
+    return src-len
 }
 
 // ===========================================================================
 // Maybe — optional value (Some/None)
 // ===========================================================================
 
-fn maybe_some(val: Int) -> Int {
-    let m = alloc_internal(12)
+fn maybe-some(val: Int) -> Int {
+    let m = alloc-internal(12)
     store64(m + 0, 1)     // tag: Some
     store64(m + 4, val)    // value
     return m
 }
 
-fn maybe_none() -> Int {
-    let m = alloc_internal(8)
+fn maybe-none() -> Int {
+    let m = alloc-internal(8)
     store64(m + 0, 0)     // tag: None
     return m
 }
 
-fn maybe_is_some(m: Int) -> Int {
+fn maybe-is-some(m: Int) -> Int {
     return load64(m)
 }
 
-fn maybe_is_none(m: Int) -> Int {
+fn maybe-is-none(m: Int) -> Int {
     return 1 - load64(m)
 }
 
-fn maybe_unwrap(m: Int) -> Int {
+fn maybe-unwrap(m: Int) -> Int {
     return load64(m + 4)
 }
 
@@ -423,7 +423,7 @@ fn maybe_unwrap(m: Int) -> Int {
 // ===========================================================================
 
 // Parse a Str as a decimal integer. Returns Maybe: None on invalid input.
-fn parse_int(s: Int) -> Int {
+fn parse-int(s: Int) -> Int {
     let len = load64(s)
     let data = s + 8
     let i = 0
@@ -450,7 +450,7 @@ fn parse_int(s: Int) -> Int {
 
     // Digits
     if i >= len || load8(data + i) < 48 || load8(data + i) > 57 {
-        return maybe_none()  // not a valid number
+        return maybe-none()  // not a valid number
     }
     while i < len {
         let c = load8(data + i)
@@ -465,11 +465,11 @@ fn parse_int(s: Int) -> Int {
     if neg != 0 {
         result = -result
     }
-    return maybe_some(result)
+    return maybe-some(result)
 }
 
 // Convenience: parse or panic.
-fn parse_int_unwrap(s: Int) -> Int {
-    let m = parse_int(s)
-    return maybe_unwrap(m)
+fn parse-int-unwrap(s: Int) -> Int {
+    let m = parse-int(s)
+    return maybe-unwrap(m)
 }

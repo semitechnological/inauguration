@@ -1,17 +1,17 @@
 package inauguration.docs;
-module inauguration.docs.gen_splash;
+module inauguration.docs.gen-splash;
 
 import std.io;
 import std.fs;
 
 capability fs.write;
 
-fn splash_js() -> String {
+fn splash-js() -> String {
   return "(function () {\n  var lines = [\n    \"inside with you\",\n    \"also try in eval\",\n    \"LLVM? never heard of her\",\n    \"40 fronts, one door\",\n    \"mmap goes brr\",\n    \"warm the daemon\",\n    \"icore in your pocket\",\n    \"Tree-sitter ate my braces\",\n    \"MIR means something here\",\n    \"no bytecode, just pages\",\n    \"hello from .in\",\n    \"lower is a lifestyle\",\n    \"JIT-primary don't @ me\",\n    \"crepuscular compilation\",\n    \"sysroot optional trauma\",\n    \"polyglot until bedtime\",\n    \"one Core IR to rule them\",\n    \"parse normalize emit repeat\",\n    \"still faster than cmake\",\n    \"your shebang is valid\",\n    \"capabilities are friends\",\n    \"native emit or bust\",\n    \"in . and chill\",\n  ];\n  var el = document.getElementById(\"in-splash\");\n  if (!el) return;\n  el.textContent = lines[Math.floor(Math.random() * lines.length)];\n})();\n";
 }
 
 fn main() -> void {
-  if write_file("docs-site/static/splash.js", splash_js()) {
+  if write-file("docs-site/static/splash.js", splash-js()) {
     print("wrote docs-site/static/splash.js");
   } else {
     print("write failed docs-site/static/splash.js");

@@ -7,7 +7,7 @@ fn grade(n: Int) -> Int {
   match n {
     1 -> { return 1; }
     2 -> { return 2; }
-    _ -> { return 0; }
+    - -> { return 0; }
   }
 }
 
