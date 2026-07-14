@@ -129,6 +129,7 @@ pub(crate) fn lower_call(
         ));
     }
 
+    let temp_base = ctx.acquire_call_arg_temps(fn_name)?;
     let mut reg = 0u8;
     for (arg, (param_name, typ)) in args.iter().zip(&target_info.params) {
         let first_reg = reg;
@@ -147,7 +148,7 @@ pub(crate) fn lower_call(
             emitter.emit_u32(aarch64::str64(
                 current,
                 aarch64::REG_SP,
-                ctx.call_arg_temps[current as usize],
+                ctx.call_arg_temps[temp_base + current as usize],
             ));
         }
     }
@@ -155,7 +156,7 @@ pub(crate) fn lower_call(
         emitter.emit_u32(aarch64::ldr64(
             current,
             aarch64::REG_SP,
-            ctx.call_arg_temps[current as usize],
+            ctx.call_arg_temps[temp_base + current as usize],
         ));
     }
 
@@ -165,6 +166,7 @@ pub(crate) fn lower_call(
         site: call_site,
         target: target.clone(),
     });
+    ctx.release_call_arg_temps();
 
     if rd != 0 {
         emitter.emit_u32(aarch64::mov_reg64(rd, 0));

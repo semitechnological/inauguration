@@ -404,8 +404,8 @@ pub(crate) fn lower_binary(
     pending_calls: &mut Vec<PendingCall>,
     fn_name: &str,
 ) -> Result<(), String> {
-    let is_float =
-        matches!(expr_type(lhs), Some(Typ::Float)) || matches!(expr_type(rhs), Some(Typ::Float));
+    let is_float = matches!(native_expr_type(lhs, ctx, functions), Some(Typ::Float))
+        || matches!(native_expr_type(rhs, ctx, functions), Some(Typ::Float));
     if is_float {
         return lower_float_binary(
             emitter,
@@ -420,8 +420,8 @@ pub(crate) fn lower_binary(
         );
     }
     if op == "+"
-        && (matches!(expr_type(lhs), Some(Typ::String))
-            || matches!(expr_type(rhs), Some(Typ::String)))
+        && (matches!(native_expr_type(lhs, ctx, functions), Some(Typ::String))
+            || matches!(native_expr_type(rhs, ctx, functions), Some(Typ::String)))
     {
         return lower_string_concat(
             emitter,
@@ -510,6 +510,32 @@ pub(crate) fn lower_binary(
     };
     emitter.emit_u32(insn);
     Ok(())
+}
+
+fn native_expr_type(
+    expr: &Expr,
+    ctx: &LowerCtx<'_>,
+    functions: &HashMap<String, FunctionInfo>,
+) -> Option<Typ> {
+    expr_type(expr).or_else(|| match expr {
+        Expr::Ident(name) => ctx.scalar_type(name),
+        Expr::Call { callee, .. } => match callee.as_ref() {
+            Expr::Ident(name) => functions.get(name).map(|function| function.ret.clone()),
+            _ => None,
+        },
+        Expr::Binary { op, lhs, rhs, .. } if op == "+" => {
+            let lhs = native_expr_type(lhs, ctx, functions);
+            let rhs = native_expr_type(rhs, ctx, functions);
+            if matches!(lhs, Some(Typ::String)) || matches!(rhs, Some(Typ::String)) {
+                Some(Typ::String)
+            } else if matches!(lhs, Some(Typ::Float)) || matches!(rhs, Some(Typ::Float)) {
+                Some(Typ::Float)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    })
 }
 
 fn lower_string_concat(

@@ -480,12 +480,12 @@ struct Point {
   Int y
 }
 
-fn make_point() -> Point {
+fn make-point() -> Point {
   return Point { x: 2, y: 5 };
 }
 
 fn main() -> Int {
-  let p: Point = make_point();
+  let p: Point = make-point();
   return p.y;
 }
 "#,
@@ -611,7 +611,7 @@ fn lowers_local_array_len() {
         r#"
 fn main() -> Int {
   let values: [Int] = [2, 5, 8];
-  return array_len(values);
+  return array-len(values);
 }
 "#,
     )
@@ -625,8 +625,8 @@ fn lowers_split_array_assignment() {
     let module = crate::in_lang_parse::parse_in_source(
         r#"
 fn main() -> Int {
-  let values: [String] = str_split_lines("one\ntwo");
-  return array_len(values);
+  let values: [String] = str-split-lines("one\ntwo");
+  return array-len(values);
 }
 "#,
     )
@@ -641,8 +641,8 @@ fn jit_executes_split_array_len() {
     let module = crate::in_lang_parse::parse_in_source(
         r#"
 fn main() -> Int {
-  let values: [String] = str_split_lines("one\ntwo");
-  return array_len(values);
+  let values: [String] = str-split-lines("one\ntwo");
+  return array-len(values);
 }
 "#,
     )
@@ -665,8 +665,8 @@ fn jit_executes_split_array_string_index() {
     let module = crate::in_lang_parse::parse_in_source(
         r#"
 fn main() -> Int {
-  let values: [String] = str_split_lines("one\ntwo");
-  return str_eq(values[1], "two");
+  let values: [String] = str-split-lines("one\ntwo");
+  return str-eq(values[1], "two");
 }
 "#,
     )
@@ -689,8 +689,8 @@ fn jit_executes_split_array_string_lookup() {
     let module = crate::in_lang_parse::parse_in_source(
         r#"
 fn main() -> Int {
-  let values: [String] = str_split_lines("one\ntwo");
-  return str_table_has("one|two", values[1]);
+  let values: [String] = str-split-lines("one\ntwo");
+  return str-table-has("one|two", values[1]);
 }
 "#,
     )
@@ -757,19 +757,19 @@ fn lowers_fixed_array_map_collect_to_aggregate_vec() {
 fn lowers_bool_and_string_array_argument_return_paths() {
     let module = crate::in_lang_parse::parse_in_source(
         r#"
-fn pick_bool(xs: [Bool], i: Int) -> Bool {
+fn pick-bool(xs: [Bool], i: Int) -> Bool {
   return xs[i];
 }
 
-fn identity_strings(xs: [String]) -> [String] {
+fn identity-strings(xs: [String]) -> [String] {
   return xs;
 }
 
 fn main() -> Int {
   let flags: [Bool] = [false, true];
   let words: [String] = ["no", "ok"];
-  let returned: [String] = identity_strings(words);
-  if pick_bool(flags, 1) && returned[1] == "ok" {
+  let returned: [String] = identity-strings(words);
+  if pick-bool(flags, 1) && returned[1] == "ok" {
     return 7;
   }
   return 1;
@@ -1240,12 +1240,12 @@ struct Point {
   Int y
 }
 
-fn make_point() -> Point {
+fn make-point() -> Point {
   return Point { x: 2, y: 5 };
 }
 
 fn main() -> Int {
-  let p: Point = make_point();
+  let p: Point = make-point();
   return p.y;
 }
 "#,
@@ -1448,19 +1448,19 @@ fn main() -> Int {
 fn bool_string_array_executable_exits_with_comparison_value() {
     let module = crate::in_lang_parse::parse_in_source(
         r#"
-fn pick_bool(xs: [Bool], i: Int) -> Bool {
+fn pick-bool(xs: [Bool], i: Int) -> Bool {
   return xs[i];
 }
 
-fn identity_strings(xs: [String]) -> [String] {
+fn identity-strings(xs: [String]) -> [String] {
   return xs;
 }
 
 fn main() -> Int {
   let flags: [Bool] = [false, true];
   let words: [String] = ["no", "ok"];
-  let returned: [String] = identity_strings(words);
-  if pick_bool(flags, 1) && returned[1] == "ok" {
+  let returned: [String] = identity-strings(words);
+  if pick-bool(flags, 1) && returned[1] == "ok" {
     return 7;
   }
   return 1;
@@ -2028,7 +2028,7 @@ fn jit_executes_three_argument_string_slice() {
     let module = crate::in_lang_parse::parse_in_source(
         r#"
 fn main() -> Int {
-  return str_eq(str_slice("abcdef", 2, 5), "cde");
+  return str-eq(str-slice("abcdef", 2, 5), "cde");
 }
 "#,
     )
@@ -2051,7 +2051,7 @@ fn jit_executes_string_concat_with_nested_call() {
     let module = crate::in_lang_parse::parse_in_source(
         r#"
 fn main() -> Int {
-  return str_eq("value=" + to_string(7), "value=7");
+  return str-eq("value=" + to-string(7), "value=7");
 }
 "#,
     )
@@ -2075,10 +2075,69 @@ fn jit_executes_internal_string_return_in_concat() {
         r#"
 import std.json;
 fn quote(text: String) -> String {
-  return json_stringify(text);
+  return json-stringify(text);
+}
+
+fn main() -> Int {
+  return str-eq("prefix" + quote("kind"), "prefix\"kind\"");
+}
+"#,
+    )
+    .expect("parse");
+    let lowered = lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
+    let function_offsets = lowered
+        .function_offsets
+        .iter()
+        .map(|(name, offset)| (name.clone(), *offset, 0))
+        .collect::<Vec<_>>();
+    let mut rt = crate::jit_runtime::JitRuntime::new();
+    rt.load(&lowered.code, &function_offsets, &lowered.relocations)
+        .expect("jit load");
+    assert_eq!(unsafe { rt.invoke("main", &[]).expect("invoke") }, 1);
+}
+
+#[test]
+#[cfg(target_arch = "aarch64")]
+fn jit_executes_two_internal_string_returns_in_concat() {
+    let module = crate::in_lang_parse::parse_in_source(
+        r#"
+import std.json;
+fn quote(text: String) -> String {
+  return json-stringify(text);
+}
+
+fn main() -> Int {
+  return str-eq("{" + quote("a") + ":" + quote("b") + "}", "{\"a\":\"b\"}");
+}
+"#,
+    )
+    .expect("parse");
+    let lowered = lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
+    let function_offsets = lowered
+        .function_offsets
+        .iter()
+        .map(|(name, offset)| (name.clone(), *offset, 0))
+        .collect::<Vec<_>>();
+    let mut rt = crate::jit_runtime::JitRuntime::new();
+    rt.load(&lowered.code, &function_offsets, &lowered.relocations)
+        .expect("jit load");
+    assert_eq!(unsafe { rt.invoke("main", &[]).expect("invoke") }, 1);
+}
+
+#[test]
+#[cfg(target_arch = "aarch64")]
+fn jit_preserves_nested_internal_call_arguments() {
+    let module = crate::in_lang_parse::parse_in_source(
+        r#"
+import std.json;
+fn quote(text: String) -> String {
+  return json-stringify(text);
+}
+fn combine(left: String, right: String) -> String {
+  return left + right;
 }
 fn main() -> Int {
-  return str_eq("prefix" + quote("kind"), "prefix\"kind\"");
+  return str-eq(combine(quote("a"), quote("b")), "\"a\"\"b\"");
 }
 "#,
     )
@@ -2101,7 +2160,7 @@ fn jit_executes_string_concat_chain() {
     let module = crate::in_lang_parse::parse_in_source(
         r#"
 fn main() -> Int {
-  return str_eq("a" + "b" + "c" + "d", "abcd");
+  return str-eq("a" + "b" + "c" + "d", "abcd");
 }
 "#,
     )

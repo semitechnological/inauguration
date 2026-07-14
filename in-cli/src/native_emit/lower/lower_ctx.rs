@@ -186,10 +186,12 @@ impl VecForPlan {
 pub(crate) struct LowerCtx<'a> {
     /// Parameter name → stack offset (params fully spilled, no register residency)
     pub(crate) params: HashMap<String, u32>,
+    pub(crate) param_types: HashMap<String, Typ>,
     pub(crate) param_stores: Vec<(u8, u32)>,
     /// Stack-based params: (incoming_stack_offset, local_stack_offset)
     pub(crate) stack_params: Vec<(u32, u32)>,
     pub(crate) locals: HashMap<String, LocalSlot>,
+    pub(crate) scalar_types: HashMap<String, Typ>,
     pub(crate) vec_for_slots: VecForPlan,
     pub(crate) structs: &'a HashMap<String, Vec<(String, Typ)>>,
     pub(crate) strings: &'a HashMap<String, i64>,
@@ -205,7 +207,8 @@ pub(crate) struct LowerCtx<'a> {
     pub(crate) binop_temp: u32,
     pub(crate) binop_temps: [u32; 64],
     pub(crate) binop_depth: usize,
-    pub(crate) call_arg_temps: [u32; 8],
+    pub(crate) call_arg_temps: [u32; 64],
+    pub(crate) call_arg_depth: usize,
     pub(crate) vec_literal_header_offset: Option<u32>,
     pub(crate) aggregate_vector_scratch: Option<(u32, usize)>,
     pub(crate) iterator_chain_header_offset: Option<u32>,
@@ -333,9 +336,11 @@ impl<'a> LowerCtx<'a> {
     ) -> Result<Self, String> {
         let mut ctx = Self {
             params: HashMap::new(),
+            param_types: HashMap::new(),
             param_stores: Vec::new(),
             stack_params: Vec::new(),
             locals: HashMap::new(),
+            scalar_types: HashMap::new(),
             vec_for_slots: VecForPlan::default(),
             structs,
             strings,
@@ -350,7 +355,8 @@ impl<'a> LowerCtx<'a> {
             binop_temp: 0,
             binop_temps: [0; 64],
             binop_depth: 0,
-            call_arg_temps: [0; 8],
+            call_arg_temps: [0; 64],
+            call_arg_depth: 0,
             vec_literal_header_offset: None,
             aggregate_vector_scratch: None,
             iterator_chain_header_offset: None,
@@ -368,6 +374,7 @@ impl<'a> LowerCtx<'a> {
                         ctx.stack_params.push(((abi_idx - 8) as u32, offset));
                     }
                     ctx.params.insert(name.clone(), offset);
+                    ctx.param_types.insert(name.clone(), typ.clone());
                     abi_idx += 1;
                 }
                 Typ::Named(struct_name) => {
@@ -491,12 +498,15 @@ impl<'a> LowerCtx<'a> {
                 let offset = self.alloc_slot();
                 self.locals
                     .insert(name.to_string(), LocalSlot::Scalar(offset));
+                self.scalar_types.insert(name.to_string(), Typ::Int);
                 Ok(())
             }
             Some(Typ::Int | Typ::Bool | Typ::String | Typ::Float) => {
                 let offset = self.alloc_slot();
                 self.locals
                     .insert(name.to_string(), LocalSlot::Scalar(offset));
+                self.scalar_types
+                    .insert(name.to_string(), typ.expect("primitive type").clone());
                 Ok(())
             }
             Some(Typ::Array(_)) => Err(format!(
@@ -622,6 +632,21 @@ impl<'a> LowerCtx<'a> {
         self.binop_depth -= 1;
     }
 
+    pub(crate) fn acquire_call_arg_temps(&mut self, fn_name: &str) -> Result<usize, String> {
+        let base = self.call_arg_depth * 8;
+        if base + 8 > self.call_arg_temps.len() {
+            return Err(format!(
+                "native-lower: call nesting is too deep in `{fn_name}`"
+            ));
+        }
+        self.call_arg_depth += 1;
+        Ok(base)
+    }
+
+    pub(crate) fn release_call_arg_temps(&mut self) {
+        self.call_arg_depth -= 1;
+    }
+
     pub(crate) fn next_vec_for_slots(&mut self, fn_name: &str) -> Result<VecForSlots, String> {
         self.vec_for_slots.next(fn_name)
     }
@@ -632,6 +657,13 @@ impl<'a> LowerCtx<'a> {
 
     pub(crate) fn stack_reserve(&self) -> u32 {
         self.stack_size.next_multiple_of(16)
+    }
+
+    pub(crate) fn scalar_type(&self, name: &str) -> Option<Typ> {
+        self.param_types
+            .get(name)
+            .or_else(|| self.scalar_types.get(name))
+            .cloned()
     }
 
     pub(crate) fn string_id(&self, value: &str) -> Result<i64, String> {
