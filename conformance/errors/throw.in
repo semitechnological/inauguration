@@ -2,7 +2,7 @@
 // @expect bytecode: executes
 // @expect result: String("ok")
 
-fn might_fail(x: Int) -> void {
+fn might-fail(x: Int) -> void {
     if (x < 0) {
         throw "negative";
     }
@@ -11,7 +11,7 @@ fn might_fail(x: Int) -> void {
 
 fn main() -> String {
     try {
-        might_fail(1);
+        might-fail(1);
     } catch (e) {
         return "negative";
     }

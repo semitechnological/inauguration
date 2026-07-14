@@ -1,8 +1,8 @@
 // @expect parse: ok
 // @expect has-struct: Point
 // @expect has-struct: Labeled
-// @expect has-function: make_point
-// @expect has-call-edge: make_point
+// @expect has-function: make-point
+// @expect has-call-edge: make-point
 // @expect bytecode: executes
 
 struct Point {
@@ -15,12 +15,12 @@ struct Labeled {
   Point pos
 }
 
-fn make_point(x: Int, y: Int) -> Point {
+fn make-point(x: Int, y: Int) -> Point {
   return Point { x: x, y: y };
 }
 
 fn main() -> void {
   let p: Point = Point { x: 1, y: 2 };
-  let q: Point = make_point(3, 4);
+  let q: Point = make-point(3, 4);
   return;
 }

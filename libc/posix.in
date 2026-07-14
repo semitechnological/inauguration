@@ -110,15 +110,15 @@ fn strstr(haystack: Int, needle: Int) -> Int {
     let i = 0
     while load8(haystack + i) != 0 {
         let j = 0
-        let is_match = 1
+        let is-match = 1
         while load8(needle + j) != 0 {
             if load8(haystack + i + j) != load8(needle + j) {
-                is_match = 0
+                is-match = 0
                 break
             }
             j = j + 1
         }
-        if is_match != 0 { return haystack + i }
+        if is-match != 0 { return haystack + i }
         i = i + 1
     }
     return 0

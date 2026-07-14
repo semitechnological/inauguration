@@ -1,10 +1,10 @@
-package ecosystem_demo;
-module ecosystem_demo.main;
+package ecosystem-demo;
+module ecosystem-demo.main;
 use cargo:crepuscularity;
 use npm:hono;
 use pip:flask;
 use go:fiber;
 
 fn main() -> String {
-  return hono_greet() + ":" + flask_greet() + ":" + crepuscularity_greet() + ":" + fiber_greet();
+  return hono-greet() + ":" + flask-greet() + ":" + crepuscularity-greet() + ":" + fiber-greet();
 }

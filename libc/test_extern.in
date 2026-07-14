@@ -1,4 +1,4 @@
-package test_extern
+package test-extern
 
 extern c fn strlen(s: Int) -> Int;
 

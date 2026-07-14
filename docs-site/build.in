@@ -8,8 +8,8 @@ capability process.spawn;
 
 fn main() -> void {
   print("inauguration docs-site (inlang)");
-  process_run("in execute docs-site/scripts/gen-splash.in --module-id inauguration.docs.gen_splash");
-  process_run("bash scripts/build-docs-site.sh");
+  process-run("in execute docs-site/scripts/gen-splash.in --module-id inauguration.docs.gen-splash");
+  process-run("bash scripts/build-docs-site.sh");
   print("ok https://inauguration.tsc.hk");
   return;
 }

@@ -3,10 +3,10 @@
 // @expect result: String("ok")
 
 fn main() -> String {
-  let r: String = str_concat("hello ", "world");
-  let eq_true: Bool = str_eq(r, "hello world");
-  let has: Bool = str_contains(r, "world");
-  if eq_true && has {
+  let r: String = str-concat("hello ", "world");
+  let eq-true: Bool = str-eq(r, "hello world");
+  let has: Bool = str-contains(r, "world");
+  if eq-true && has {
     return "ok";
   }
   return "fail";

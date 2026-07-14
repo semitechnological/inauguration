@@ -1,6 +1,6 @@
 // .in v0.3: try/catch and throw
-fn dangerous(can_fail: Bool) -> Int {
-  if can_fail == true {
+fn dangerous(can-fail: Bool) -> Int {
+  if can-fail == true {
     throw 99;
   }
   return 0;

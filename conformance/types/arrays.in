@@ -1,9 +1,9 @@
 // @expect parse: ok
-// @expect has-function: first_elem
+// @expect has-function: first-elem
 // @expect has-function: main
 // @expect bytecode: executes
 
-fn first_elem() -> Int {
+fn first-elem() -> Int {
   let xs: [Int] = [1, 2, 3];
   return xs[0];
 }

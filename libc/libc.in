@@ -19,30 +19,30 @@ package space.kernel.libc
 // Built-in bump allocator (replaces kernel 'alloc' for freestanding use)
 // ===========================================================================
 
-const LIBC_HEAP_SIZE = 8192
-var libc_heap: Int = 0
-var libc_heap_pos: Int = 0
+const LIBC-HEAP-SIZE = 8192
+var libc-heap: Int = 0
+var libc-heap-pos: Int = 0
 
-fn libc_init() -> void {
-  if libc_heap == 0 {
-    libc_heap = 0x600000  // fixed address, safe in freestanding
-    libc_heap_pos = 0
+fn libc-init() -> void {
+  if libc-heap == 0 {
+    libc-heap = 0x600000  // fixed address, safe in freestanding
+    libc-heap-pos = 0
   }
 }
 
-fn libc_alloc(size: Int) -> Int {
-  if libc_heap == 0 { libc_init() }
-  let ptr = libc_heap + libc_heap_pos
-  libc_heap_pos = libc_heap_pos + size
-  if libc_heap_pos > LIBC_HEAP_SIZE {
+fn libc-alloc(size: Int) -> Int {
+  if libc-heap == 0 { libc-init() }
+  let ptr = libc-heap + libc-heap-pos
+  libc-heap-pos = libc-heap-pos + size
+  if libc-heap-pos > LIBC-HEAP-SIZE {
     // Wrap around for small allocations (not for production use)
-    libc_heap_pos = size
-    return libc_heap
+    libc-heap-pos = size
+    return libc-heap
   }
   return ptr
 }
 
-fn libc_free(ptr: Int) -> void {
+fn libc-free(ptr: Int) -> void {
   // No-op bump allocator — memory is reused on next boot
   return
 }
@@ -51,13 +51,13 @@ fn libc_free(ptr: Int) -> void {
 // string.h — string operations
 // ===========================================================================
 
-fn strlen_c(s: Int) -> Int {
+fn strlen-c(s: Int) -> Int {
   let i = 0
   while load8(s + i) != 0 { i = i + 1 }
   return i
 }
 
-fn strcmp_c(s1: Int, s2: Int) -> Int {
+fn strcmp-c(s1: Int, s2: Int) -> Int {
   let i = 0
   while true {
     let c1 = load8(s1 + i)
@@ -68,7 +68,7 @@ fn strcmp_c(s1: Int, s2: Int) -> Int {
   }
 }
 
-fn strncmp_c(s1: Int, s2: Int, n: Int) -> Int {
+fn strncmp-c(s1: Int, s2: Int, n: Int) -> Int {
   let i = 0
   while i < n {
     let c1 = load8(s1 + i)
@@ -80,7 +80,7 @@ fn strncmp_c(s1: Int, s2: Int, n: Int) -> Int {
   return 0
 }
 
-fn strcpy_c(dst: Int, src: Int) -> Int {
+fn strcpy-c(dst: Int, src: Int) -> Int {
   let i = 0
   while true {
     let c = load8(src + i)
@@ -91,7 +91,7 @@ fn strcpy_c(dst: Int, src: Int) -> Int {
   return dst
 }
 
-fn strncpy_c(dst: Int, src: Int, n: Int) -> Int {
+fn strncpy-c(dst: Int, src: Int, n: Int) -> Int {
   let i = 0
   while i < n {
     let c = load8(src + i)
@@ -109,8 +109,8 @@ fn strncpy_c(dst: Int, src: Int, n: Int) -> Int {
   return dst
 }
 
-fn strcat_c(dst: Int, src: Int) -> Int {
-  let i = strlen_c(dst)
+fn strcat-c(dst: Int, src: Int) -> Int {
+  let i = strlen-c(dst)
   let j = 0
   while true {
     let c = load8(src + j)
@@ -121,7 +121,7 @@ fn strcat_c(dst: Int, src: Int) -> Int {
   return dst
 }
 
-fn strchr_c(s: Int, c: Int) -> Int {
+fn strchr-c(s: Int, c: Int) -> Int {
   let i = 0
   while true {
     let ch = load8(s + i)
@@ -131,7 +131,7 @@ fn strchr_c(s: Int, c: Int) -> Int {
   }
 }
 
-fn strrchr_c(s: Int, c: Int) -> Int {
+fn strrchr-c(s: Int, c: Int) -> Int {
   let last: Int = 0
   let i = 0
   while true {
@@ -142,26 +142,26 @@ fn strrchr_c(s: Int, c: Int) -> Int {
   }
 }
 
-fn strstr_c(haystack: Int, needle: Int) -> Int {
+fn strstr-c(haystack: Int, needle: Int) -> Int {
   if load8(needle) == 0 { return haystack }
   let i = 0
   while load8(haystack + i) != 0 {
     let j = 0
-    let is_match = 1
+    let is-match = 1
     while load8(needle + j) != 0 {
       if load8(haystack + i + j) != load8(needle + j) {
-        is_match = 0
+        is-match = 0
         break
       }
       j = j + 1
     }
-    if is_match != 0 { return haystack + i }
+    if is-match != 0 { return haystack + i }
     i = i + 1
   }
   return 0
 }
 
-fn strspn_c(s: Int, accept: Int) -> Int {
+fn strspn-c(s: Int, accept: Int) -> Int {
   let count = 0
   while true {
     let c = load8(s + count)
@@ -178,7 +178,7 @@ fn strspn_c(s: Int, accept: Int) -> Int {
   return count
 }
 
-fn strcspn_c(s: Int, reject: Int) -> Int {
+fn strcspn-c(s: Int, reject: Int) -> Int {
   let count = 0
   while true {
     let c = load8(s + count)
@@ -193,10 +193,10 @@ fn strcspn_c(s: Int, reject: Int) -> Int {
   return count
 }
 
-fn strdup_c(s: Int) -> Int {
-  let len = strlen_c(s)
+fn strdup-c(s: Int) -> Int {
+  let len = strlen-c(s)
   // strdup without alloc — caller provides buffer or use bump allocator
-  let dst = libc_alloc(len + 1)
+  let dst = libc-alloc(len + 1)
   let i = 0
   while i <= len {
     store8(dst + i, load8(s + i))
@@ -209,7 +209,7 @@ fn strdup_c(s: Int) -> Int {
 // memory.h — memory operations
 // ===========================================================================
 
-fn memset_c(dst: Int, c: Int, n: Int) -> Int {
+fn memset-c(dst: Int, c: Int, n: Int) -> Int {
   let i = 0
   while i < n {
     store8(dst + i, c)
@@ -218,7 +218,7 @@ fn memset_c(dst: Int, c: Int, n: Int) -> Int {
   return dst
 }
 
-fn memcpy_c(dst: Int, src: Int, n: Int) -> Int {
+fn memcpy-c(dst: Int, src: Int, n: Int) -> Int {
   let i = 0
   while i < n {
     store8(dst + i, load8(src + i))
@@ -227,7 +227,7 @@ fn memcpy_c(dst: Int, src: Int, n: Int) -> Int {
   return dst
 }
 
-fn memmove_c(dst: Int, src: Int, n: Int) -> Int {
+fn memmove-c(dst: Int, src: Int, n: Int) -> Int {
   if dst < src {
     let i = 0
     while i < n {
@@ -244,7 +244,7 @@ fn memmove_c(dst: Int, src: Int, n: Int) -> Int {
   return dst
 }
 
-fn memcmp_c(s1: Int, s2: Int, n: Int) -> Int {
+fn memcmp-c(s1: Int, s2: Int, n: Int) -> Int {
   let i = 0
   while i < n {
     let a = load8(s1 + i)
@@ -259,67 +259,67 @@ fn memcmp_c(s1: Int, s2: Int, n: Int) -> Int {
 // ctype.h — character classification
 // ===========================================================================
 
-fn isdigit_c(c: Int) -> Int {
+fn isdigit-c(c: Int) -> Int {
   if c >= 48 && c <= 57 { return 1 }
   return 0
 }
 
-fn isalpha_c(c: Int) -> Int {
+fn isalpha-c(c: Int) -> Int {
   if c >= 65 && c <= 90 { return 1 }
   if c >= 97 && c <= 122 { return 1 }
   return 0
 }
 
-fn isalnum_c(c: Int) -> Int {
-  return isdigit_c(c) | isalpha_c(c)
+fn isalnum-c(c: Int) -> Int {
+  return isdigit-c(c) | isalpha-c(c)
 }
 
-fn isspace_c(c: Int) -> Int {
+fn isspace-c(c: Int) -> Int {
   if c == 32 { return 1 }
   if c >= 9 && c <= 13 { return 1 }
   return 0
 }
 
-fn isupper_c(c: Int) -> Int {
+fn isupper-c(c: Int) -> Int {
   if c >= 65 && c <= 90 { return 1 }
   return 0
 }
 
-fn islower_c(c: Int) -> Int {
+fn islower-c(c: Int) -> Int {
   if c >= 97 && c <= 122 { return 1 }
   return 0
 }
 
-fn isprint_c(c: Int) -> Int {
+fn isprint-c(c: Int) -> Int {
   if c >= 32 && c <= 126 { return 1 }
   return 0
 }
 
-fn isgraph_c(c: Int) -> Int {
+fn isgraph-c(c: Int) -> Int {
   if c > 32 && c <= 126 { return 1 }
   return 0
 }
 
-fn ispunct_c(c: Int) -> Int {
-  if isprint_c(c) == 0 { return 0 }
-  if isalnum_c(c) != 0 { return 0 }
-  if isspace_c(c) != 0 { return 0 }
+fn ispunct-c(c: Int) -> Int {
+  if isprint-c(c) == 0 { return 0 }
+  if isalnum-c(c) != 0 { return 0 }
+  if isspace-c(c) != 0 { return 0 }
   return 1
 }
 
-fn isxdigit_c(c: Int) -> Int {
-  if isdigit_c(c) != 0 { return 1 }
+fn isxdigit-c(c: Int) -> Int {
+  if isdigit-c(c) != 0 { return 1 }
   if c >= 65 && c <= 70 { return 1 }
   if c >= 97 && c <= 102 { return 1 }
   return 0
 }
 
-fn toupper_c(c: Int) -> Int {
+fn toupper-c(c: Int) -> Int {
   if c >= 97 && c <= 122 { return c - 32 }
   return c
 }
 
-fn tolower_c(c: Int) -> Int {
+fn tolower-c(c: Int) -> Int {
   if c >= 65 && c <= 90 { return c + 32 }
   return c
 }
@@ -328,14 +328,14 @@ fn tolower_c(c: Int) -> Int {
 // stdlib.h — general utilities
 // ===========================================================================
 
-fn atoi_c(s: Int) -> Int {
+fn atoi-c(s: Int) -> Int {
   let i = 0
   let neg = 0
   let result = 0
-  while isspace_c(load8(s + i)) != 0 { i = i + 1 }
+  while isspace-c(load8(s + i)) != 0 { i = i + 1 }
   if load8(s + i) == 0x2D { neg = 1; i = i + 1 }
   if load8(s + i) == 0x2B { i = i + 1 }
-  while isdigit_c(load8(s + i)) != 0 {
+  while isdigit-c(load8(s + i)) != 0 {
     result = result * 10 + (load8(s + i) - 48)
     i = i + 1
   }
@@ -343,26 +343,26 @@ fn atoi_c(s: Int) -> Int {
   return result
 }
 
-fn atol_c(s: Int) -> Int {
-  return atoi_c(s)
+fn atol-c(s: Int) -> Int {
+  return atoi-c(s)
 }
 
-fn abs_c(x: Int) -> Int {
+fn abs-c(x: Int) -> Int {
   if x < 0 { return -x }
   return x
 }
 
-fn min_c(a: Int, b: Int) -> Int {
+fn min-c(a: Int, b: Int) -> Int {
   if a < b { return a }
   return b
 }
 
-fn max_c(a: Int, b: Int) -> Int {
+fn max-c(a: Int, b: Int) -> Int {
   if a > b { return a }
   return b
 }
 
-fn rand_c() -> Int {
+fn rand-c() -> Int {
   // Simple LCG — same as glibc default
   let seed: Int = load64(0x5000)
   seed = seed * 1103515245 + 12345
@@ -370,7 +370,7 @@ fn rand_c() -> Int {
   return (seed / 65536) % 32768
 }
 
-fn srand_c(seed: Int) -> void {
+fn srand-c(seed: Int) -> void {
   store64(0x5000, seed)
   return
 }
@@ -379,9 +379,9 @@ fn srand_c(seed: Int) -> void {
 // stdio.h — minimal formatted output
 // ===========================================================================
 
-fn sprintf_c(buf: Int, fmt: Int, a: Int, b: Int, c: Int, d: Int) -> Int {
+fn sprintf-c(buf: Int, fmt: Int, a: Int, b: Int, c: Int, d: Int) -> Int {
   let pos = 0
-  let args: Int = libc_alloc(32)
+  let args: Int = libc-alloc(32)
   store64(args + 0, a)
   store64(args + 8, b)
   store64(args + 16, c)
@@ -409,7 +409,7 @@ fn sprintf_c(buf: Int, fmt: Int, a: Int, b: Int, c: Int, d: Int) -> Int {
           pos = pos + 1
           val = -val
         }
-        let digits: Int = libc_alloc(12)
+        let digits: Int = libc-alloc(12)
         let di = 0
         if val == 0 {
           store8(digits + di, 48)
@@ -428,7 +428,7 @@ fn sprintf_c(buf: Int, fmt: Int, a: Int, b: Int, c: Int, d: Int) -> Int {
       } else if ch == 120 {  // 'x' = %x
         let val = load64(args + argi * 8)
         argi = argi + 1
-        let digits = libc_alloc(16)
+        let digits = libc-alloc(16)
         let di = 0
         if val == 0 {
           store8(digits + di, 48)
@@ -472,7 +472,7 @@ fn sprintf_c(buf: Int, fmt: Int, a: Int, b: Int, c: Int, d: Int) -> Int {
 // math.h — basic math
 // ===========================================================================
 
-fn pow_int_c(base: Int, exp: Int) -> Int {
+fn pow-int-c(base: Int, exp: Int) -> Int {
   let result = 1
   let i = 0
   while i < exp {
@@ -486,13 +486,13 @@ fn pow_int_c(base: Int, exp: Int) -> Int {
 // Utility — pointer-based string literal creation
 // ===========================================================================
 
-fn cstr_from_int(val: Int, buf: Int) -> Int {
+fn cstr-from-int(val: Int, buf: Int) -> Int {
   let i = 0
   if val < 0 {
     store8(buf + i, 45)
     i = i + 1
     let v = -val
-    let digits: Int = libc_alloc(12)
+    let digits: Int = libc-alloc(12)
     let di = 0
     if v == 0 {
       store8(digits + di, 48)
@@ -510,7 +510,7 @@ fn cstr_from_int(val: Int, buf: Int) -> Int {
     }
   } else {
     let v = val
-    let digits: Int = libc_alloc(12)
+    let digits: Int = libc-alloc(12)
     let di = 0
     if v == 0 {
       store8(digits + di, 48)

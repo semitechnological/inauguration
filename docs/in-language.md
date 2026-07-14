@@ -2,6 +2,8 @@
 
 **inlang** is inauguration’s surface for compiler orchestration, agent reports, and bounded programs. You can write it in **human-readable** form (colons + indentation, no braces) or **brace form**; the parser normalizes human syntax to braces before Core IR. Pipeline: **Core IR** → **MIR** → **native JIT** (no LLVM, no bytecode VM).
 
+**Identifiers** use **kebab-case** (`read-file`, `str-eq`). Underscores are not part of names; the lone `_` remains the match wildcard. Binary minus needs spacing or numeric operands (`a - b`, `1-2`); `foo-bar` is one identifier.
+
 **Crepuscularity** is the sibling UI stack (`.crepus`, GPUI, WASM sites). Inauguration owns compilation; crepuscularity owns rendering. The **docs-site** is a crepuscularity web target (`crepus web build` / `web serve`), same as crepuscularity’s own docs-site.
 
 Workflow flags and CI entry points stay in the repo [README](../../README.md#core-commands). This page is grammar, imports, and IR shape.
@@ -15,14 +17,14 @@ import std.io
 
 needs process.stdout
 
-host_log(text: String) uses process.stdout
+host-log(text: String) uses process.stdout
 
 Message:
   text: String
 
 main:
   print "hello from inlang"
-  host_log "visible to in agent"
+  host-log "visible to in agent"
 ```
 
 Same program in **brace form** (what you see after canonicalize / in tools that emit braces):
@@ -32,7 +34,7 @@ import std.io;
 
 capability process.stdout;
 
-extern human fn host_log(text: String) -> void requires process.stdout;
+extern human fn host-log(text: String) -> void requires process.stdout;
 
 struct Message {
   String text;
@@ -40,7 +42,7 @@ struct Message {
 
 fn main() -> void {
   print("hello from inlang");
-  host_log("visible to in agent");
+  host-log("visible to in agent");
   return;
 }
 ```
@@ -66,7 +68,7 @@ Params are always **`name: Type`** in signatures. Prefer **human-readable** for 
 | `fn name(a: Int) -> String:` | Function with indented body |
 | `main:` | Entry function (same as `fn main() -> void`) |
 | `print "text"` | Call — becomes `print("text")` |
-| `host_log "msg"` | Bare words → call with string arg |
+| `host-log "msg"` | Bare words → call with string arg |
 | `bump` on its own line | Bare identifier → `bump()` |
 | `done` | `return` |
 | `sig uses cap.a, cap.b` | `extern human fn sig -> void requires cap.a, cap.b;` |
@@ -215,7 +217,7 @@ fn main() -> void {
 }
 ```
 
-Missing `capability` lines for `requires` show up as `in agent` warnings (`AGENT_MISSING_CAPABILITY`).
+Missing `capability` lines for `requires` show up as `in agent` warnings (`AGENT-MISSING-CAPABILITY`).
 
 ### Orchestration metadata
 
@@ -279,7 +281,7 @@ fn halt_loop() -> void {
 }
 ```
 
-`load*` / `store*`, `inb` / `outb`, `hlt`, `sti`, `cli`, and friends target freestanding emit paths; availability depends on target and type support in `native_emit`.
+`load*` / `store*`, `inb` / `outb`, `hlt`, `sti`, `cli`, and friends target freestanding emit paths; availability depends on target and type support in `native-emit`.
 
 ### Expressions and operators
 

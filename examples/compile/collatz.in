@@ -1,7 +1,7 @@
 package collatz;
 module collatz.main;
 
-fn collatz_steps(n: Int) -> Int {
+fn collatz-steps(n: Int) -> Int {
   let steps = 0;
   let x = n;
   while x != 1 {
@@ -15,4 +15,4 @@ fn collatz_steps(n: Int) -> Int {
   return steps;
 }
 
-fn main() -> Int { return collatz_steps(27); }
+fn main() -> Int { return collatz-steps(27); }

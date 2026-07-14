@@ -2,5 +2,5 @@ import std.env;
 capability env.read;
 
 fn main() -> Bool {
-  return env_has("PATH");
+  return env-has("PATH");
 }

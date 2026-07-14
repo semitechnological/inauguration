@@ -45,4 +45,4 @@ extern c fn abs(x: Int) -> Int;
 extern c fn sprintf(buf: Int, fmt: Int, a: Int, b: Int, c: Int, d: Int) -> Int;
 
 // math.h
-extern c fn pow_int(base: Int, exp: Int) -> Int;
+extern c fn pow-int(base: Int, exp: Int) -> Int;
