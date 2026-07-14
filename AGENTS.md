@@ -70,7 +70,8 @@ If touching benchmarks or runtime timing, also run `in bench` (reads checked-in 
 
 ## Release & crates.io
 
-- **Do not** run `cargo publish` locally. Bump `in-cli/Cargo.toml` version, commit, push `master`, tag `v*`, push tag — **`.github/workflows/release.yml`** publishes to crates.io (`secrets.CARGO_REGISTRY_TOKEN`).
+- GitHub release binaries: bump `in-cli/Cargo.toml` version, commit, push `master`, tag `v*`, push tag — **`.github/workflows/release.yml`** builds tarballs and creates the GitHub release.
+- crates.io: publish **locally** when ready (`cargo publish --manifest-path in-cli/Cargo.toml --locked`). Do **not** re-add crates publish to CI.
 - Site hosting: **Cloudflare** (e.g. Pages) — build `docs-site/dist` with `./scripts/build-docs-site.sh`, deploy yourself; no GitHub Pages workflow.
 
 ## Commit style
