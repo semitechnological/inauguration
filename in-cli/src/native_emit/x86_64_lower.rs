@@ -2113,9 +2113,8 @@ fn lower_call_expr(
         return Ok(());
     }
 
-    lower_call_args(emitter, ctx, args, &target_name, pending_calls)?;
-
     if !ctx.functions.contains_key(&target_name) {
+        lower_call_args(emitter, ctx, args, &target_name, pending_calls)?;
         // Extern function: emit CALL instruction with relocation.
         // The linker resolves the target — until then, displacement=0.
         let site = emitter.len() as u32;
@@ -2141,6 +2140,8 @@ fn lower_call_expr(
         }
         emitter.emit_insns(&x86_64::push_r(reg));
     }
+
+    lower_call_args(emitter, ctx, args, &target_name, pending_calls)?;
 
     let site = emitter.len() as u32;
     emitter.emit_insns(&x86_64::call_rel32(0));
@@ -2716,6 +2717,39 @@ fn main() -> void { return 0 }
             code.windows(save_rcx_above_stack_arg.len())
                 .any(|w| w == save_rcx_above_stack_arg),
             "missing clobbered RCX save above stack arg: expected `mov [rbp+48], rcx`"
+        );
+    }
+
+    #[test]
+    fn seventh_argument_is_next_to_the_return_address() {
+        let src = r#"
+fn seven(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int) -> Int {
+  return g
+}
+
+fn main() -> Int {
+  return seven(1, 2, 3, 4, 5, 6, 63)
+}
+"#;
+        let module = crate::in_lang_parse::parse_in_source(src).expect("parse");
+        let result = lower_module(&module, "main").expect("lower");
+        let stack_arg = [0x48, 0xB8, 63, 0, 0, 0, 0, 0, 0, 0, 0x50];
+        let stack_arg_end = result
+            .code
+            .windows(stack_arg.len())
+            .position(|bytes| bytes == stack_arg)
+            .expect("stack argument")
+            + stack_arg.len();
+        let call = result.code[stack_arg_end..]
+            .iter()
+            .position(|&byte| byte == 0xE8)
+            .expect("call")
+            + stack_arg_end;
+        assert!(
+            !result.code[stack_arg_end..call]
+                .windows(2)
+                .any(|bytes| bytes == [0x41, 0x53]),
+            "caller register saves must precede stack arguments"
         );
     }
 
