@@ -7,13 +7,17 @@ use crate::core_ir::{Decl, Expr, Stmt, Typ};
 use std::collections::{HashMap, HashSet};
 
 pub fn optimize(decls: &mut Vec<Decl>) {
+    optimize_with_entry(decls, None);
+}
+
+pub fn optimize_with_entry(decls: &mut Vec<Decl>, entry: Option<&str>) {
     // Order: inline → simplify → fold → propagate → DCE → dead-func
     inline_small_functions(decls);
     algebraic_simplify(decls);
     fold_constants_in_decls(decls);
     propagate_constants(decls);
     dead_code_eliminate(decls);
-    remove_dead_functions(decls);
+    remove_dead_functions(decls, entry);
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -614,7 +618,7 @@ fn simplify_expr(e: Expr) -> Expr {
 // ─── Dead Function Elimination ─────────────────────────────────────────────
 
 /// Remove functions that are never called and not referenced as pointers.
-fn remove_dead_functions(decls: &mut Vec<Decl>) {
+fn remove_dead_functions(decls: &mut Vec<Decl>, entry: Option<&str>) {
     // Collect all called function names
     let mut called: HashSet<String> = HashSet::new();
     for d in decls.iter() {
@@ -632,8 +636,13 @@ fn remove_dead_functions(decls: &mut Vec<Decl>) {
     }
 
     // Keep entry, remove the rest
-    let entry = "kernel_entry";
-    called.insert(entry.to_string());
+    if let Some(e) = entry {
+        called.insert(e.to_string());
+    } else {
+        // Fallback for callers that don't know the entry name
+        called.insert("kernel_entry".to_string());
+        called.insert("kernel-entry".to_string());
+    }
     decls.retain(|d| match d {
         Decl::Function { name, .. } => called.contains(name),
         _ => true,

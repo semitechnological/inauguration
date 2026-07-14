@@ -205,7 +205,7 @@ fn cmd_emit_boot(
     let mut module = inauguration::in_lang_parse::parse_in_library_file(source_path)
         .map_err(|e| InError::Message(format!("parse {}: {e}", source_path.display())))?;
 
-    inauguration::core_opt::optimize(&mut module.decls);
+    inauguration::core_opt::optimize_with_entry(&mut module.decls, Some(entry_name));
 
     let (_mir, code) =
         inauguration::compiler::mir_lower::lower_boot_image(&module, entry_name, target_triple)
