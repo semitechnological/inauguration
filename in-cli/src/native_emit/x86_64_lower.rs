@@ -2150,15 +2150,15 @@ fn lower_call_expr(
         target: target_name,
     });
 
-    // Restore saved regs in reverse (saved regs at lower addresses than stack args)
+    emit_stack_cleanup(emitter, args.len());
+
+    // Restore saved regs in reverse.
     for &reg in saved.iter().rev() {
         if reg == target_reg {
             continue;
         }
         emitter.emit_insns(&x86_64::pop_r(reg));
     }
-
-    emit_stack_cleanup(emitter, args.len());
 
     if target_reg != RAX {
         emitter.emit_insns(&x86_64::mov_rr(target_reg, RAX));
@@ -2750,6 +2750,20 @@ fn main() -> Int {
                 .windows(2)
                 .any(|bytes| bytes == [0x41, 0x53]),
             "caller register saves must precede stack arguments"
+        );
+        let cleanup = result.code[call..]
+            .windows(7)
+            .position(|bytes| bytes == [0x48, 0x81, 0xC4, 8, 0, 0, 0])
+            .expect("stack cleanup")
+            + call;
+        let restore = result.code[call..]
+            .windows(2)
+            .position(|bytes| bytes == [0x41, 0x5B])
+            .expect("saved r11 restore")
+            + call;
+        assert!(
+            cleanup < restore,
+            "stack arguments must be removed before restoring registers"
         );
     }
 
