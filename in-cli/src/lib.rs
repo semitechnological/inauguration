@@ -139,21 +139,21 @@ fn main() -> void { let seed: Int = 0; note("ready"); return; }
         let src = r#"
 import host.log;
 capability process.stdout;
-extern rust fn host_log(text: String) -> void;
-fn main() -> void { host_log("ready"); return; }
+extern rust fn host-log(text: String) -> void;
+fn main() -> void { host-log("ready"); return; }
 "#;
         let module = in_lang_parse::parse_in_source(src).expect("parse .in");
         let sil = lower_core::lower_to_textual_sil(&module, "App");
-        assert!(sil.contains("sil @host_log"), "sil:\n{sil}");
+        assert!(sil.contains("sil @host-log"), "sil:\n{sil}");
         assert!(sil.contains("sil @main"), "sil:\n{sil}");
-        assert!(sil.contains("function_ref @host_log"), "sil:\n{sil}");
+        assert!(sil.contains("function_ref @host-log"), "sil:\n{sil}");
         let artifact = hybrid_sil::parse_textual_sil(&sil);
         let cleaned = hybrid_sil::remove_debug_insts(&artifact);
         let report = hybrid_sil::extract_call_graph(&cleaned);
         assert!(
             report
                 .call_edges
-                .contains(&("main".into(), "host_log".into())),
+                .contains(&("main".into(), "host-log".into())),
             "sil:\n{sil}"
         );
     }

@@ -65,30 +65,30 @@ pub fn in_standard_import_bindings(import: &str) -> Vec<InExternBinding> {
     match normalize_import_path(import) {
         "std.io" => vec![std_binding("print", vec!["process.stdout".into()])],
         "std.fs" => vec![
-            std_binding("read_file", vec!["fs.read".into()]),
-            std_binding("write_file", vec!["fs.write".into()]),
+            std_binding("read-file", vec!["fs.read".into()]),
+            std_binding("write-file", vec!["fs.write".into()]),
         ],
-        "std.http" => vec![std_binding("http_get", vec!["network.http".into()])],
+        "std.http" => vec![std_binding("http-get", vec!["network.http".into()])],
         "std.json" => vec![
-            std_binding("json_parse", Vec::new()),
-            std_binding("json_stringify", Vec::new()),
+            std_binding("json-parse", Vec::new()),
+            std_binding("json-stringify", Vec::new()),
         ],
-        "std.process" => vec![std_binding("process_run", vec!["process.spawn".into()])],
+        "std.process" => vec![std_binding("process-run", vec!["process.spawn".into()])],
         "std.cli" => vec![
-            std_binding("arg_count", vec!["process.args".into()]),
+            std_binding("arg-count", vec!["process.args".into()]),
             std_binding("arg", vec!["process.args".into()]),
         ],
         "std.env" => vec![
-            std_binding("env_get", vec!["env.read".into()]),
-            std_binding("env_set", vec!["env.write".into()]),
-            std_binding("env_has", vec!["env.read".into()]),
+            std_binding("env-get", vec!["env.read".into()]),
+            std_binding("env-set", vec!["env.write".into()]),
+            std_binding("env-has", vec!["env.read".into()]),
         ],
         "std.path" => vec![
-            std_binding("path_join", Vec::new()),
-            std_binding("path_dirname", Vec::new()),
-            std_binding("path_basename", Vec::new()),
-            std_binding("path_extname", Vec::new()),
-            std_binding("path_normalize", Vec::new()),
+            std_binding("path-join", Vec::new()),
+            std_binding("path-dirname", Vec::new()),
+            std_binding("path-basename", Vec::new()),
+            std_binding("path-extname", Vec::new()),
+            std_binding("path-normalize", Vec::new()),
         ],
         _ => Vec::new(),
     }
@@ -114,42 +114,42 @@ pub(crate) fn binding_decl(binding: &InExternBinding) -> Decl {
             body: Vec::new(),
             type_params: vec![],
         },
-        "read_file" => Decl::Function {
+        "read-file" => Decl::Function {
             name: binding.name.clone(),
             params: vec![("path".into(), Typ::String)],
             ret: Typ::String,
             body: Vec::new(),
             type_params: vec![],
         },
-        "write_file" => Decl::Function {
+        "write-file" => Decl::Function {
             name: binding.name.clone(),
             params: vec![("path".into(), Typ::String), ("text".into(), Typ::String)],
             ret: Typ::Bool,
             body: Vec::new(),
             type_params: vec![],
         },
-        "http_get" => Decl::Function {
+        "http-get" => Decl::Function {
             name: binding.name.clone(),
             params: vec![("url".into(), Typ::String)],
             ret: Typ::String,
             body: Vec::new(),
             type_params: vec![],
         },
-        "json_parse" | "json_stringify" => Decl::Function {
+        "json-parse" | "json-stringify" => Decl::Function {
             name: binding.name.clone(),
             params: vec![("text".into(), Typ::String)],
             ret: Typ::String,
             body: Vec::new(),
             type_params: vec![],
         },
-        "process_run" => Decl::Function {
+        "process-run" => Decl::Function {
             name: binding.name.clone(),
             params: vec![("command".into(), Typ::String)],
             ret: Typ::String,
             body: Vec::new(),
             type_params: vec![],
         },
-        "arg_count" => Decl::Function {
+        "arg-count" => Decl::Function {
             name: binding.name.clone(),
             params: Vec::new(),
             ret: Typ::Int,
@@ -163,35 +163,35 @@ pub(crate) fn binding_decl(binding: &InExternBinding) -> Decl {
             body: Vec::new(),
             type_params: vec![],
         },
-        "env_get" => Decl::Function {
+        "env-get" => Decl::Function {
             name: binding.name.clone(),
             params: vec![("name".into(), Typ::String)],
             ret: Typ::String,
             body: Vec::new(),
             type_params: vec![],
         },
-        "env_set" => Decl::Function {
+        "env-set" => Decl::Function {
             name: binding.name.clone(),
             params: vec![("name".into(), Typ::String), ("value".into(), Typ::String)],
             ret: Typ::Void,
             body: Vec::new(),
             type_params: vec![],
         },
-        "env_has" => Decl::Function {
+        "env-has" => Decl::Function {
             name: binding.name.clone(),
             params: vec![("name".into(), Typ::String)],
             ret: Typ::Bool,
             body: Vec::new(),
             type_params: vec![],
         },
-        "path_join" => Decl::Function {
+        "path-join" => Decl::Function {
             name: binding.name.clone(),
             params: vec![("base".into(), Typ::String), ("child".into(), Typ::String)],
             ret: Typ::String,
             body: Vec::new(),
             type_params: vec![],
         },
-        "path_dirname" | "path_basename" | "path_extname" | "path_normalize" => Decl::Function {
+        "path-dirname" | "path-basename" | "path-extname" | "path-normalize" => Decl::Function {
             name: binding.name.clone(),
             params: vec![("path".into(), Typ::String)],
             ret: Typ::String,
@@ -226,20 +226,13 @@ pub(crate) fn parse_annotation_name(line: &str) -> Result<String, String> {
         .trim_end_matches(';')
         .trim();
     match name {
-        "pure" | "gpu" | "parallel_safe" => Ok(name.to_string()),
+        "pure" | "gpu" | "parallel-safe" => Ok(name.to_string()),
         _ => Err(format!(".in: unsupported annotation `{name}`")),
     }
 }
 
 pub(crate) fn valid_package_or_module_name(name: &str) -> bool {
-    !name.is_empty()
-        && name.split('.').all(|part| {
-            let mut chars = part.chars();
-            chars
-                .next()
-                .is_some_and(|ch| ch == '_' || ch.is_ascii_alphabetic())
-                && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
-        })
+    !name.is_empty() && name.split('.').all(is_ident_name)
 }
 
 pub(crate) fn parse_package_or_module_name(kind: &str, rest: &str) -> Result<String, String> {
@@ -263,14 +256,7 @@ pub(crate) fn parse_semantic_binding(rest: &str) -> Result<InSemanticBinding, St
     if alias.is_empty() {
         return Err(".in: bind alias missing".into());
     }
-    if !alias
-        .chars()
-        .next()
-        .is_some_and(|ch| ch == '_' || ch.is_ascii_alphabetic())
-        || !alias
-            .chars()
-            .all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
-    {
+    if !is_ident_name(alias) {
         return Err(format!(".in: invalid bind alias `{alias}`"));
     }
     Ok(InSemanticBinding {
@@ -339,9 +325,16 @@ pub(crate) fn parallel_tasks_from_content(content: &str, region: usize) -> Vec<I
             let token = trim(token);
             let name = token.split_once('(')?.0.trim();
             if name.is_empty()
-                || !name
-                    .chars()
-                    .all(|ch| ch == '_' || ch == '.' || ch.is_ascii_alphanumeric())
+                || !name.split('.').all(|part| {
+                    !part.is_empty()
+                        && part.chars().enumerate().all(|(i, ch)| {
+                            if i == 0 {
+                                is_ident_start(ch)
+                            } else {
+                                is_ident_continue(ch)
+                            }
+                        })
+                })
             {
                 return None;
             }

@@ -400,10 +400,10 @@ pub(crate) fn desugar_method_calls_in_expr(
             {
                 match base_typ {
                     Typ::Named(struct_name) => {
-                        **callee = Expr::Ident(format!("{struct_name}_{method}"));
+                        **callee = Expr::Ident(format!("{struct_name}-{method}"));
                     }
                     Typ::Int | Typ::Float | Typ::Bool | Typ::String if method == "toStr" => {
-                        **callee = Expr::Ident("to_string".to_string());
+                        **callee = Expr::Ident("to-string".to_string());
                     }
                     _ => {}
                 }
@@ -470,7 +470,7 @@ pub(crate) fn infer_in_expr_type(
         Expr::Call { callee, .. } => {
             if let Expr::Ident(name) = callee.as_ref() {
                 fn_rets.get(name).cloned().or(match name.as_str() {
-                    "to_string" => Some(Typ::String),
+                    "to-string" => Some(Typ::String),
                     _ => None,
                 })
             } else {

@@ -878,46 +878,46 @@ fn is_builtin_fn(name: &str) -> bool {
     matches!(
         name,
         "print"
-            | "print_int"
-            | "print_string"
-            | "to_int"
-            | "to_string"
+            | "print-int"
+            | "print-string"
+            | "to-int"
+            | "to-string"
             | "len"
-            | "throw_error"
-            | "str_concat"
-            | "str_eq"
-            | "str_contains"
-            | "str_trim"
-            | "str_to_int"
-            | "str_starts_with"
-            | "str_index_of"
-            | "str_slice"
-            | "str_is_int"
-            | "str_table_has"
-            | "str_table_get_int"
-            | "array_push"
-            | "array_pop"
-            | "array_len"
-            | "bool_to_int"
-            | "int_to_bool"
+            | "throw-error"
+            | "str-concat"
+            | "str-eq"
+            | "str-contains"
+            | "str-trim"
+            | "str-to-int"
+            | "str-starts-with"
+            | "str-index-of"
+            | "str-slice"
+            | "str-is-int"
+            | "str-table-has"
+            | "str-table-get-int"
+            | "array-push"
+            | "array-pop"
+            | "array-len"
+            | "bool-to-int"
+            | "int-to-bool"
             // x86 bare-metal intrinsics
             | "outb" | "inb" | "outl" | "inl"
             | "load8" | "load16" | "load32" | "load64"
             | "store8" | "store16" | "store32" | "store64"
             | "hlt" | "cli" | "sti" | "pause"
-            | "lidt" | "invlpg" | "read_cr2" | "read_cr3"
+            | "lidt" | "invlpg" | "read-cr2" | "read-cr3"
             | "invoke" | "invoke1" | "invoke2"
     )
 }
 
 fn builtin_return_type(name: &str) -> Typ {
     match name {
-        "len" | "array_len" | "bool_to_int" | "to_int" | "str_to_int" | "str_index_of"
-        | "str_table_get_int" | "inb" | "inl" | "load8" | "load16" | "load32" | "load64"
-        | "read_cr2" | "read_cr3" | "invoke" | "invoke1" | "invoke2" => Typ::Int,
-        "str_eq" | "str_contains" | "str_starts_with" | "str_is_int" | "str_table_has"
-        | "int_to_bool" => Typ::Bool,
-        "str_concat" | "str_trim" | "str_slice" | "to_string" => Typ::String,
+        "len" | "array-len" | "bool-to-int" | "to-int" | "str-to-int" | "str-index-of"
+        | "str-table-get-int" | "inb" | "inl" | "load8" | "load16" | "load32" | "load64"
+        | "read-cr2" | "read-cr3" | "invoke" | "invoke1" | "invoke2" => Typ::Int,
+        "str-eq" | "str-contains" | "str-starts-with" | "str-is-int" | "str-table-has"
+        | "int-to-bool" => Typ::Bool,
+        "str-concat" | "str-trim" | "str-slice" | "to-string" => Typ::String,
         _ => Typ::Void,
     }
 }

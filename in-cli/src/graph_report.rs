@@ -662,8 +662,8 @@ fn main() -> void { print("ok"); return; }
             r#"
 enable distributed-workers;
 @gpu
-distributed fn process_video(video: Video) -> void { return; }
-parallel { process_video(video()); }
+distributed fn process-video(video: Video) -> void { return; }
+parallel { process-video(video()); }
 struct Video { Int id }
 fn main() -> void { return; }
 "#,
@@ -682,7 +682,7 @@ fn main() -> void { return; }
         );
         assert_eq!(
             report.orchestration.distributed_functions,
-            vec!["process_video"]
+            vec!["process-video"]
         );
         assert_eq!(report.orchestration.parallel_regions, 1);
         assert!(
@@ -690,11 +690,11 @@ fn main() -> void { return; }
                 .orchestration
                 .local_plan
                 .iter()
-                .any(|step| step.kind == "parallel_task" && step.name == "process_video")
+                .any(|step| step.kind == "parallel_task" && step.name == "process-video")
         );
         assert_eq!(
             report.orchestration.distributed_jobs[0].function,
-            "process_video"
+            "process-video"
         );
         assert!(report.orchestration.runtime_status.iter().any(
             |status| status.implemented && status.reason_code == "local-distributed-simulator"

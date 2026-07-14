@@ -144,12 +144,13 @@ pub fn native_link_name(name: &str) -> String {
         "std::process::exit" | "std::process::abort" => "_exit".to_string(),
         "std::io::_print" | "print" => "_printf".to_string(),
         _ => {
-            // Replace :: with . for valid assembly symbol names (Mach-O accepts dots)
+            // Replace :: with . for valid assembly symbol names (Mach-O accepts dots).
+            // Inlang kebab-case (`make-point`) is not asm-safe; map `-` → `_`.
             // Strip angle-bracket generic params: serde_json.from_str.<BenchMetric> → serde_json.from_str
             let no_generics: String = cleaned.chars().filter(|&c| c != '<' && c != '>').collect();
             // Remove trailing dots
             let trimmed = no_generics.trim_end_matches('.');
-            let asm_safe = trimmed.replace("::", ".");
+            let asm_safe = trimmed.replace("::", ".").replace('-', "_");
             if asm_safe.is_empty() {
                 return "_unknown".to_string();
             }

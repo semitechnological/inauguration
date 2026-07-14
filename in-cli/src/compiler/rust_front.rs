@@ -1102,12 +1102,12 @@ fn lower_expr_with_types(expr: &syn::Expr, local_types: &mut HashMap<String, Str
                     let mut result = Expr::StringLit(segments[0].to_string());
                     for (arg, suffix) in args.into_iter().zip(segments.into_iter().skip(1)) {
                         result = Expr::Call {
-                            callee: Box::new(Expr::Ident("str_concat".to_string())),
+                            callee: Box::new(Expr::Ident("str-concat".to_string())),
                             args: vec![result, lower_expr_with_types(&arg, local_types)],
                         };
                         if !suffix.is_empty() {
                             result = Expr::Call {
-                                callee: Box::new(Expr::Ident("str_concat".to_string())),
+                                callee: Box::new(Expr::Ident("str-concat".to_string())),
                                 args: vec![result, Expr::StringLit(suffix.to_string())],
                             };
                         }
@@ -1335,7 +1335,7 @@ fn main() -> Result<i64, i64> {
             panic!("main must be a function");
         };
         assert!(
-            matches!(body.last(), Some(Stmt::Return(Some(Expr::Call { callee, .. }))) if matches!(callee.as_ref(), Expr::Ident(name) if name == "str_concat"))
+            matches!(body.last(), Some(Stmt::Return(Some(Expr::Call { callee, .. }))) if matches!(callee.as_ref(), Expr::Ident(name) if name == "str-concat"))
         );
     }
 

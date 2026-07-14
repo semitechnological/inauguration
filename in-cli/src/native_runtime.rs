@@ -128,7 +128,7 @@ impl NativeRuntime {
             }),
         );
         self.register(
-            "is_dir",
+            "is-dir",
             Box::new(|args| {
                 if let Some(Value::String(s)) = args.first() {
                     Ok(Value::Bool(PathBuf::from(s).is_dir()))
@@ -165,7 +165,7 @@ impl NativeRuntime {
             }),
         );
         self.register(
-            "file_stem",
+            "file-stem",
             Box::new(|args| {
                 if let Some(Value::String(s)) = args.first() {
                     let stem = PathBuf::from(s)
@@ -182,7 +182,7 @@ impl NativeRuntime {
             }),
         );
         self.register(
-            "to_string_lossy",
+            "to-string-lossy",
             Box::new(|args| {
                 if let Some(Value::String(s)) = args.first() {
                     Ok(Value::String(s.clone()))
@@ -195,7 +195,7 @@ impl NativeRuntime {
 
     fn register_string_methods(&mut self) {
         self.register(
-            "to_string",
+            "to-string",
             Box::new(|args| {
                 Ok(Value::String(
                     args.iter()
@@ -210,11 +210,11 @@ impl NativeRuntime {
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
         self.register(
-            "as_deref",
+            "as-deref",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
         self.register(
-            "unwrap_or_default",
+            "unwrap-or-default",
             Box::new(|args| match args.first() {
                 Some(Value::Nil) => Ok(Value::String(String::new())),
                 Some(v) => Ok(v.clone()),
@@ -222,11 +222,11 @@ impl NativeRuntime {
             }),
         );
         self.register(
-            "map_err",
+            "map-err",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
         self.register(
-            "unwrap_or",
+            "unwrap-or",
             Box::new(|args| {
                 if let Some(v) = args.first() {
                     if matches!(v, Value::Nil) {
@@ -252,20 +252,20 @@ impl NativeRuntime {
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
         self.register(
-            "is_ok",
+            "is-ok",
             Box::new(|args| Ok(Value::Bool(!matches!(args.first(), Some(Value::Nil))))),
         );
         self.register(
-            "is_err",
+            "is-err",
             Box::new(|args| Ok(Value::Bool(matches!(args.first(), Some(Value::Nil))))),
         );
         self.register(
-            "is_some_and",
+            "is-some-and",
             Box::new(|args| Ok(Value::Bool(!matches!(args.first(), Some(Value::Nil))))),
         );
         self.register("any", Box::new(|_args| Ok(Value::Bool(false))));
         self.register(
-            "is_empty",
+            "is-empty",
             Box::new(|args| {
                 Ok(Value::Bool(
                     matches!(args.first(), Some(Value::Array(a)) if a.is_empty()),
@@ -273,7 +273,7 @@ impl NativeRuntime {
             }),
         );
         self.register(
-            "ends_with",
+            "ends-with",
             Box::new(|args| {
                 if let (Some(Value::String(s)), Some(Value::String(suffix))) =
                     (args.first(), args.get(1))
@@ -317,7 +317,7 @@ impl NativeRuntime {
         self.register("Instant :: now", Box::new(|_args| Ok(Value::Int(0))));
         self.register("elapsed", Box::new(|_args| Ok(Value::Int(0))));
         self.register(
-            "as_secs_f64",
+            "as-secs-f64",
             Box::new(|_args| Ok(Value::String("0.000".to_string()))),
         );
     }
@@ -408,7 +408,7 @@ impl NativeRuntime {
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
         self.register(
-            "current_dir",
+            "current-dir",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
         self.register("status", Box::new(|_args| Ok(Value::Bool(true))));
@@ -422,10 +422,10 @@ impl NativeRuntime {
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
         self.register(
-            "enable_all",
+            "enable-all",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
-        self.register("block_on", Box::new(|_args| Ok(Value::Nil)));
+        self.register("block-on", Box::new(|_args| Ok(Value::Nil)));
         self.register("spawn", Box::new(|_args| Ok(Value::Nil)));
         self.register("sleep", Box::new(|_args| Ok(Value::Nil)));
         self.register(
@@ -437,7 +437,7 @@ impl NativeRuntime {
 
     fn register_inauguration_internal(&mut self) {
         self.register(
-            "resolve_invocation_path",
+            "resolve-invocation-path",
             Box::new(|args| {
                 if args.len() >= 2 {
                     let cwd = value_to_string(&args[0]);
@@ -450,7 +450,7 @@ impl NativeRuntime {
             }),
         );
         self.register(
-            "workspace_root",
+            "workspace-root",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
     }
@@ -461,7 +461,7 @@ impl NativeRuntime {
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
         self.register(
-            "as_str",
+            "as-str",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
     }
