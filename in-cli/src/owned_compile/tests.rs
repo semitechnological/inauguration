@@ -649,6 +649,7 @@ fn native_polyglot_answer_entries_compile_on_aarch64_host() {
             "sample.zig",
             "fn answer() i32 {\n    return 42;\n}\n\npub fn main() void {}\n",
         ),
+        #[cfg(feature = "parse-extended")]
         (
             "sample.php",
             "<?php\n\nfunction answer(): int {\n    return 42;\n}\n\nfunction main(): void {\n}\n",

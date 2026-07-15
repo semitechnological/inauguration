@@ -47,28 +47,48 @@ tree-sitter-rust = "0.24.2"
 tree-sitter-swift = "0.7.3"
 tree-sitter-typescript = "0.23.2"
 tree-sitter-zig = "1.1.2"
-tree-sitter-c-sharp = "0.23.5"
-tree-sitter-dart = "0.2.0"
-tree-sitter-elixir = "0.3.5"
-tree-sitter-erlang = "0.19.0"
-tree-sitter-fsharp = "0.3.1"
-tree-sitter-groovy = "0.1.2"
-tree-sitter-haskell = "0.23.1"
-tree-sitter-holyc = "0.1.1"
-tree-sitter-julia = "0.23.1"
-tree-sitter-kotlin-ng = "1.1.0"
+# Active parsers (extraction logic wired) — always compiled
 tree-sitter-lua = "0.5.0"
-tree-sitter-objc = "3.0.2"
-tree-sitter-ocaml = "0.25.0"
 tree-sitter-perl = "1.1.2"
-tree-sitter-php = "0.24.2"
-tree-sitter-r = "1.2.0"
+# HolyC and Ruby have extraction logic, keep as active
+tree-sitter-holyc = "0.1.1"
 tree-sitter-ruby = "0.23.1"
-tree-sitter-scala = "0.26.0"
-tree-sitter-v = "0.0.3"
+# Speculative parsers — gated behind parse-extended feature
+tree-sitter-c-sharp = { version = "0.23.5", optional = true }
+tree-sitter-dart = { version = "0.2.0", optional = true }
+tree-sitter-elixir = { version = "0.3.5", optional = true }
+tree-sitter-erlang = { version = "0.19.0", optional = true }
+tree-sitter-fsharp = { version = "0.3.1", optional = true }
+tree-sitter-groovy = { version = "0.1.2", optional = true }
+tree-sitter-haskell = { version = "0.23.1", optional = true }
+tree-sitter-julia = { version = "0.23.1", optional = true }
+tree-sitter-kotlin-ng = { version = "1.1.0", optional = true }
+tree-sitter-objc = { version = "3.0.2", optional = true }
+tree-sitter-ocaml = { version = "0.25.0", optional = true }
+tree-sitter-php = { version = "0.24.2", optional = true }
+tree-sitter-r = { version = "1.2.0", optional = true }
+tree-sitter-scala = { version = "0.26.0", optional = true }
+tree-sitter-v = { version = "0.0.3", optional = true }
 [features]
 default = []
-extended = []  # kept for compatibility; all parsers are now default
+parse-extended = [
+    "tree-sitter-c-sharp",
+    "tree-sitter-dart",
+    "tree-sitter-elixir",
+    "tree-sitter-erlang",
+    "tree-sitter-fsharp",
+    "tree-sitter-groovy",
+    "tree-sitter-haskell",
+    "tree-sitter-julia",
+    "tree-sitter-kotlin-ng",
+    "tree-sitter-objc",
+    "tree-sitter-ocaml",
+    "tree-sitter-php",
+    "tree-sitter-r",
+    "tree-sitter-scala",
+    "tree-sitter-v",
+]
+extended = ["parse-extended"]
 
 [target.'cfg(unix)'.dependencies]
 libloading = "0.9"

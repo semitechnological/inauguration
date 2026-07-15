@@ -33,32 +33,47 @@ pub fn polyglot_sample_for(entry: &LanguageSupport) -> Option<&'static str> {
         "Swift" => Some("apps/polyglot-sample/sample.swift"),
         "Rust" => Some("apps/polyglot-sample/sample.rs"),
         "Go" => Some("apps/polyglot-sample/sample.go"),
+        #[cfg(feature = "parse-extended")]
         "V" => Some("apps/polyglot-sample/sample.v"),
         "C" => Some("apps/polyglot-sample/sample.c"),
         "C++" => Some("apps/polyglot-sample/sample.cpp"),
+        #[cfg(feature = "parse-extended")]
         "Objective-C" => Some("apps/polyglot-sample/sample.m"),
         "Objective-C++" => Some("apps/polyglot-sample/sample.mm"),
         "Java" => Some("apps/polyglot-sample/Sample.java"),
+        #[cfg(feature = "parse-extended")]
         "Groovy" => Some("apps/polyglot-sample/Sample.groovy"),
         "JavaScript" => Some("apps/polyglot-sample/sample.js"),
         "TypeScript" => Some("apps/polyglot-sample/sample.ts"),
+        #[cfg(feature = "parse-extended")]
         "Kotlin" => Some("apps/polyglot-sample/Sample.kt"),
+        #[cfg(feature = "parse-extended")]
         "Scala" => Some("apps/polyglot-sample/sample.scala"),
+        #[cfg(feature = "parse-extended")]
         "C#" => Some("apps/polyglot-sample/Program.cs"),
+        #[cfg(feature = "parse-extended")]
         "F#" => Some("apps/polyglot-sample/sample.fs"),
         "Python" => Some("apps/polyglot-sample/sample.py"),
         "Ruby" => Some("apps/polyglot-sample/sample.rb"),
+        #[cfg(feature = "parse-extended")]
         "PHP" => Some("apps/polyglot-sample/sample.php"),
         "Perl" => Some("apps/polyglot-sample/sample.pl"),
         "Zig" => Some("apps/polyglot-sample/sample.zig"),
+        #[cfg(feature = "parse-extended")]
         "Dart" => Some("apps/polyglot-sample/sample.dart"),
         "Lua" => Some("apps/polyglot-sample/sample.lua"),
+        #[cfg(feature = "parse-extended")]
         "Elixir" => Some("apps/polyglot-sample/sample.ex"),
+        #[cfg(feature = "parse-extended")]
         "Erlang" => Some("apps/polyglot-sample/sample.erl"),
+        #[cfg(feature = "parse-extended")]
         "Haskell" => Some("apps/polyglot-sample/sample.hs"),
         "Nim" => Some("apps/polyglot-sample/sample.nim"),
+        #[cfg(feature = "parse-extended")]
         "OCaml" => Some("apps/polyglot-sample/sample.ml"),
+        #[cfg(feature = "parse-extended")]
         "Julia" => Some("apps/polyglot-sample/sample.jl"),
+        #[cfg(feature = "parse-extended")]
         "R" => Some("apps/polyglot-sample/sample.r"),
         "Odin" => Some("apps/polyglot-sample/sample.odin"),
         "Hare" => Some("apps/polyglot-sample/sample.ha"),
@@ -278,6 +293,7 @@ mod tests {
         assert!(report.passed_gates.contains(&GATE_SEMANTIC_TYPECHECK));
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn jvm_and_dotnet_samples_reach_family_typecheck() {
         let root = repo_root();
@@ -291,6 +307,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn promoted_tree_and_boundary_samples_reach_declared_gates() {
         let root = repo_root();
@@ -312,6 +329,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn mandatory_samples_pass_core_ir_decls() {
         let root = repo_root();

@@ -461,6 +461,7 @@ fn parse_c_integer_literal(t: &str) -> Option<i64> {
     t.parse::<i64>().ok()
 }
 
+#[cfg_attr(not(feature = "parse-extended"), allow(dead_code))]
 pub(super) fn objc_like<'a>(src: &[u8], n: Node<'a>) -> Option<Decl> {
     if n.kind() == "function_definition" {
         return c_like_function_decl(src, n);
