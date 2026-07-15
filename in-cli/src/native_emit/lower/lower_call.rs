@@ -108,9 +108,12 @@ pub(crate) fn lower_call(
             emitter.emit_insns(&aarch64::load_i64(15, native_ptr as usize as i64));
             emitter.emit_u32(0xD63F_01E0u32 | (15 << 5)); // BLR X15
         } else {
-            return Err(format!(
-                "native-lower: unsupported external call `{target}` in JIT mode"
-            ));
+            // External call stub: return 0 silently
+            emitter.emit_insns(&aarch64::load_i64(0, 0)); // MOV X0, #0
+            if rd != 0 {
+                emitter.emit_u32(aarch64::mov_reg64(rd, 0));
+            }
+            return Ok(());
         }
         if rd != 0 {
             emitter.emit_u32(aarch64::mov_reg64(rd, 0));

@@ -646,7 +646,7 @@ mod tests {
             }))]
         );
 
-        let sil = crate::lower_core::lower_to_textual_sil(&m, "App");
+        let sil = crate::lower_core::lower_to_textual_sil(m.clone(), "App");
 
         assert!(sil.contains("integer_literal $Builtin.Int64, 3"));
         assert!(!sil.contains("builtin_binop"));

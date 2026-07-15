@@ -496,7 +496,7 @@ fn lower_textual_sil(module: &UnifiedModule, module_id: &str) -> String {
     let sil = crate::compiler::driver::lower_unified_module(module, effective_module_id);
     debug_assert_eq!(
         sil,
-        crate::lower_core::lower_to_textual_sil(module, effective_module_id)
+        crate::lower_core::lower_to_textual_sil(module.clone(), effective_module_id)
     );
     sil
 }

@@ -31,30 +31,7 @@ fn fn_bodies_mut(decls: &mut [Decl]) -> impl Iterator<Item = &mut Vec<Stmt>> {
 
 fn walk_expr<F: FnMut(&Expr)>(e: &Expr, f: &mut F) {
     f(e);
-    match e {
-        Expr::Call { callee, args, .. } => {
-            walk_expr(callee, f);
-            for a in args {
-                walk_expr(a, f);
-            }
-        }
-        Expr::Binary { lhs, rhs, .. } => {
-            walk_expr(lhs, f);
-            walk_expr(rhs, f);
-        }
-        Expr::Unary { expr, .. } => walk_expr(expr, f),
-        Expr::Field { base, .. } => walk_expr(base, f),
-        Expr::Index { base, index, .. } => {
-            walk_expr(base, f);
-            walk_expr(index, f);
-        }
-        Expr::StructInit { fields, .. } => {
-            for (_, e) in fields {
-                walk_expr(e, f);
-            }
-        }
-        _ => {}
-    }
+    crate::core_ir::for_each_expr_child(e, &mut |child| walk_expr(child, f));
 }
 
 fn map_expr_mut<F: FnMut(&mut Expr)>(e: &mut Expr, f: &mut F) {
