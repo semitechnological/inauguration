@@ -18,7 +18,7 @@ use super::pipeline::Compiler;
 /// Lower a unified module to the same textual SIL shape as `.in` / native subset emitters.
 #[must_use]
 pub fn lower_unified_module(module: &crate::core_ir::UnifiedModule, module_id: &str) -> String {
-    crate::lower_core::lower_to_textual_sil(module, module_id)
+    crate::lower_core::lower_to_textual_sil(module.clone(), module_id)
 }
 
 /// Compile a `.in` source file into an artifact with metadata sidecar.

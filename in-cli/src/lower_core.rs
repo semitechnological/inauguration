@@ -1292,12 +1292,12 @@ fn find_fn<'a>(module: &'a UnifiedModule, name: &str) -> Option<&'a Decl> {
 
 /// Emit textual SIL: helper functions first (sorted), then `@main` with `function_ref` callees and a
 /// unique SSA id space.
-pub fn lower_to_textual_sil(module: &UnifiedModule, _module_id: &str) -> String {
+pub fn lower_to_textual_sil(module: UnifiedModule, _module_id: &str) -> String {
     lower_to_textual_sil_inner(module)
 }
 
-fn lower_to_textual_sil_inner(module: &UnifiedModule) -> String {
-    let mut module = module.clone();
+fn lower_to_textual_sil_inner(module: UnifiedModule) -> String {
+    let mut module = module;
     desugar_module(&mut module);
     let mut fn_names: Vec<String> = module
         .decls
@@ -1380,7 +1380,7 @@ mod tests {
                 },
             ],
         };
-        let sil = lower_to_textual_sil(&module, "App");
+        let sil = lower_to_textual_sil(module.clone(), "App");
         assert!(sil.contains("sil @main"));
         assert!(sil.contains("sil @alpha"));
         assert!(sil.contains("sil @zeta"));
@@ -1415,7 +1415,7 @@ mod tests {
                 },
             ],
         };
-        let sil = lower_to_textual_sil(&module, "App");
+        let sil = lower_to_textual_sil(module.clone(), "App");
         assert!(sil.contains("sil @twice"));
         assert!(sil.contains("integer_literal $Builtin.Int64, 2"));
         assert!(sil.contains("return %"));
@@ -1445,7 +1445,7 @@ mod tests {
                 },
             ],
         };
-        let sil = lower_to_textual_sil(&module, "App");
+        let sil = lower_to_textual_sil(module.clone(), "App");
         assert!(sil.contains("function_ref @helper"));
         assert!(sil.contains("apply %"));
     }
@@ -1466,7 +1466,7 @@ mod tests {
             }],
         };
 
-        let sil = lower_to_textual_sil(&module, "App");
+        let sil = lower_to_textual_sil(module.clone(), "App");
 
         assert!(sil.contains("argument 0"));
         assert!(!sil.contains("store_var unused"));
@@ -1489,7 +1489,7 @@ mod tests {
             }],
         };
 
-        let sil = lower_to_textual_sil(&module, "App");
+        let sil = lower_to_textual_sil(module.clone(), "App");
 
         assert!(sil.contains("store_var used"));
     }
@@ -1511,7 +1511,7 @@ mod tests {
             }],
         };
 
-        let sil = lower_to_textual_sil(&module, "App");
+        let sil = lower_to_textual_sil(module.clone(), "App");
 
         assert!(sil.contains("integer_literal $Builtin.Int64, 5"));
         assert!(!sil.contains("builtin_binop"));
@@ -1522,7 +1522,7 @@ mod tests {
         let module = crate::in_lang_parse::parse_in_source("fn main() -> Int { return 7 % 4; }\n")
             .expect("parse");
 
-        let sil = lower_to_textual_sil(&module, "App");
+        let sil = lower_to_textual_sil(module.clone(), "App");
 
         assert!(sil.contains("integer_literal $Builtin.Int64, 3"));
         assert!(!sil.contains("builtin_binop"));
@@ -1562,7 +1562,7 @@ mod tests {
             }],
         };
 
-        let sil = lower_to_textual_sil(&module, "App");
+        let sil = lower_to_textual_sil(module.clone(), "App");
 
         assert!(sil.contains("integer_literal $Builtin.Int64, -3"));
         assert!(sil.contains("bool_literal true"));
@@ -1599,7 +1599,7 @@ mod tests {
             }],
         };
 
-        let sil = lower_to_textual_sil(&module, "App");
+        let sil = lower_to_textual_sil(module.clone(), "App");
 
         assert!(sil.contains("builtin_binop \"==\""));
         assert!(sil.contains("cond_br"));
@@ -1626,7 +1626,7 @@ mod tests {
                 type_params: vec![],
             }],
         };
-        let sil = lower_to_textual_sil(&module, "App");
+        let sil = lower_to_textual_sil(module.clone(), "App");
         assert!(
             sil.contains("sil @Point_sum"),
             "should contain mangled function"
@@ -1666,7 +1666,7 @@ mod tests {
                 type_params: vec![],
             }],
         };
-        let sil = lower_to_textual_sil(&module, "App");
+        let sil = lower_to_textual_sil(module.clone(), "App");
         assert!(sil.contains("sil @Point_sum"), "should contain Point_sum");
         assert!(
             sil.contains("sil @Point_scale"),
@@ -1719,7 +1719,7 @@ mod tests {
                 },
             ],
         };
-        let sil = lower_to_textual_sil(&module, "App");
+        let sil = lower_to_textual_sil(module.clone(), "App");
         assert!(
             sil.contains("function_ref @Point_move_x"),
             "should rewrite to Point_move_x"
@@ -1984,7 +1984,7 @@ mod tests {
                 type_params: vec![],
             }],
         };
-        let sil = lower_to_textual_sil(&module, "App");
+        let sil = lower_to_textual_sil(module.clone(), "App");
         assert!(
             sil.contains("field_access"),
             "should emit field_access for struct pattern"
@@ -2026,7 +2026,7 @@ mod tests {
                 type_params: vec![],
             }],
         };
-        let sil = lower_to_textual_sil(&module, "App");
+        let sil = lower_to_textual_sil(module.clone(), "App");
         assert!(
             sil.contains("index_access"),
             "should emit index_access for array pattern"
@@ -2060,7 +2060,7 @@ mod tests {
                 type_params: vec![],
             }],
         };
-        let sil = lower_to_textual_sil(&module, "App");
+        let sil = lower_to_textual_sil(module.clone(), "App");
         assert!(
             sil.contains("index_access"),
             "should emit index_access for tuple pattern"
@@ -2101,7 +2101,7 @@ mod tests {
                 },
             ],
         };
-        let sil = lower_to_textual_sil(&module, "App");
+        let sil = lower_to_textual_sil(module.clone(), "App");
         assert!(
             sil.contains("sil @Circle_draw"),
             "should emit Circle_draw for interface method"
@@ -2167,7 +2167,7 @@ mod tests {
                 },
             ],
         };
-        let sil = lower_to_textual_sil(&module, "App");
+        let sil = lower_to_textual_sil(module.clone(), "App");
         assert!(
             sil.contains("function_ref @Circle_draw"),
             "should dispatch to Circle_draw for interface method call"
@@ -2221,7 +2221,7 @@ mod tests {
                 },
             ],
         };
-        let sil = lower_to_textual_sil(&module, "App");
+        let sil = lower_to_textual_sil(module.clone(), "App");
         // For now, interface methods are NOT dispatched (would require full type inference)
         // The test verifies we don't incorrectly rewrite unknown interface calls
         assert!(

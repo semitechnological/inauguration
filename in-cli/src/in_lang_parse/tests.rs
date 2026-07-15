@@ -408,7 +408,7 @@ bind database.postgres as postgres;
 fn main() -> void { postgres("select 1"); return; }
 "#;
     let module = parse_in_source(src).expect("parse");
-    let sil = crate::lower_core::lower_to_textual_sil(&module, "test");
+    let sil = crate::lower_core::lower_to_textual_sil(module.clone(), "test");
     assert!(
         sil.contains("function_ref @postgres"),
         "bind alias should lower to function_ref\n{sil}"

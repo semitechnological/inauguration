@@ -488,6 +488,45 @@ pub enum Decl {
     },
 }
 
+/// Visit every immediate child expression of `e`, calling `f` for each.
+/// Useful for building recursive AST walkers without duplicating the variant match.
+pub fn for_each_expr_child(e: &Expr, f: &mut impl FnMut(&Expr)) {
+    match e {
+        Expr::Call { callee, args, .. } => {
+            f(callee);
+            for a in args {
+                f(a);
+            }
+        }
+        Expr::Binary { lhs, rhs, .. } => {
+            f(lhs);
+            f(rhs);
+        }
+        Expr::Unary { expr, .. } => f(expr),
+        Expr::Field { base, .. } => f(base),
+        Expr::Index { base, index, .. } => {
+            f(base);
+            f(index);
+        }
+        Expr::StructInit { fields, .. } => {
+            for (_, fe) in fields {
+                f(fe);
+            }
+        }
+        Expr::ArrayLit(items) => {
+            for i in items {
+                f(i);
+            }
+        }
+        Expr::IntLit(_)
+        | Expr::FloatLit(_)
+        | Expr::StringLit(_)
+        | Expr::BoolLit(_)
+        | Expr::Ident(_)
+        | Expr::Closure { .. } => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -56,7 +56,7 @@ fn bench_desugar_closures(c: &mut Criterion) {
 
     c.bench_function("lower_to_textual_sil_closures", |b| {
         b.iter(|| {
-            lower_to_textual_sil(black_box(&module), "test");
+            lower_to_textual_sil(black_box(module.clone()), "test");
         })
     });
 }

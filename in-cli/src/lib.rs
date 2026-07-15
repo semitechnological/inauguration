@@ -108,7 +108,7 @@ mod in_pipeline_tests {
     fn minimal_in_source_to_sil_contains_main() {
         let src = "fn main() -> void\n";
         let module = in_lang_parse::parse_in_source(src).expect("parse .in");
-        let sil = lower_core::lower_to_textual_sil(&module, "App");
+        let sil = lower_core::lower_to_textual_sil(module, "App");
         assert!(
             sil.contains("sil @main"),
             "expected textual SIL to declare @main, got:\n{sil}"
@@ -126,7 +126,7 @@ fn note(text: String) -> void { return; }
 fn main() -> void { let seed: Int = 0; note("ready"); return; }
 "#;
         let module = in_lang_parse::parse_in_source(src).expect("parse .in");
-        let sil = lower_core::lower_to_textual_sil(&module, "App");
+        let sil = lower_core::lower_to_textual_sil(module, "App");
         assert!(sil.contains("integer_literal $Builtin.Int64, 0"));
         assert!(sil.contains("function_ref @note"));
         assert!(sil.contains("return %"));
@@ -141,7 +141,7 @@ extern rust fn host-log(text: String) -> void;
 fn main() -> void { host-log("ready"); return; }
 "#;
         let module = in_lang_parse::parse_in_source(src).expect("parse .in");
-        let sil = lower_core::lower_to_textual_sil(&module, "App");
+        let sil = lower_core::lower_to_textual_sil(module, "App");
         assert!(sil.contains("sil @host-log"), "sil:\n{sil}");
         assert!(sil.contains("sil @main"), "sil:\n{sil}");
         assert!(sil.contains("function_ref @host-log"), "sil:\n{sil}");

@@ -78,39 +78,14 @@ fn walk_stmts(stmts: &[Stmt], locals: &HashSet<String>, out: &mut Vec<String>) {
 }
 
 fn walk_expr(expr: &Expr, locals: &HashSet<String>, out: &mut Vec<String>) {
-    match expr {
-        Expr::Call { callee, args, .. } => {
-            if let Expr::Ident(target) = callee.as_ref() {
-                if !locals.contains(target) && !target.starts_with("__inrt_") {
-                    out.push(target.clone());
-                }
-            }
-            for a in args {
-                walk_expr(a, locals, out);
+    if let Expr::Call { callee, .. } = expr {
+        if let Expr::Ident(target) = callee.as_ref() {
+            if !locals.contains(target) && !target.starts_with("__inrt_") {
+                out.push(target.clone());
             }
         }
-        Expr::Binary { lhs, rhs, .. } => {
-            walk_expr(lhs, locals, out);
-            walk_expr(rhs, locals, out);
-        }
-        Expr::Unary { expr, .. } => walk_expr(expr, locals, out),
-        Expr::Field { base, .. } => walk_expr(base, locals, out),
-        Expr::Index { base, index, .. } => {
-            walk_expr(base, locals, out);
-            walk_expr(index, locals, out);
-        }
-        Expr::StructInit { fields, .. } => {
-            for (_, f) in fields {
-                walk_expr(f, locals, out);
-            }
-        }
-        Expr::ArrayLit(items) => {
-            for i in items {
-                walk_expr(i, locals, out);
-            }
-        }
-        _ => {}
     }
+    crate::core_ir::for_each_expr_child(expr, &mut |child| walk_expr(child, locals, out));
 }
 
 /// Main entry: resolve all external deps by loading crate sources.
