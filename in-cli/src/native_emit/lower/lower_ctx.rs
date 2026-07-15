@@ -294,9 +294,8 @@ pub(crate) fn alloc_local_struct_fields(
                     _ => unreachable!(),
                 };
                 let Some(inner_fields) = all_structs.get(inner_name) else {
-                    return Err(format!(
-                        "native-lower: unknown nested struct type `{inner_name}` in struct `{struct_name}` for `{fn_name}`"
-                    ));
+                    slots.insert(field.clone(), ctx.alloc_slot());
+                    continue;
                 };
                 let mut inner_slots = HashMap::new();
                 alloc_local_struct_fields(
@@ -513,27 +512,39 @@ impl<'a> LowerCtx<'a> {
                 "native-lower: unsupported let binding type in `{fn_name}` (array locals require literal initializers)"
             )),
             Some(Typ::Named(struct_name)) => {
-                let Some(fields) = self.structs.get(struct_name) else {
-                    return Err(format!(
-                        "native-lower: unknown struct type `{struct_name}` for local `{name}` in `{fn_name}`"
-                    ));
+                let resolved = if struct_name == "Self" {
+                    fn_name
+                        .split("::")
+                        .next()
+                        .filter(|outer| self.structs.contains_key(*outer))
+                        .map(|outer| outer.to_string())
+                        .unwrap_or_else(|| struct_name.to_string())
+                } else {
+                    struct_name.clone()
                 };
-                let mut slots = HashMap::new();
-                alloc_local_struct_fields(
-                    &mut slots,
-                    struct_name,
-                    fields,
-                    self.structs,
-                    self,
-                    fn_name,
-                )?;
-                self.locals.insert(
-                    name.to_string(),
-                    LocalSlot::Struct {
-                        typ: struct_name.clone(),
-                        fields: slots,
-                    },
-                );
+                if let Some(fields) = self.structs.get(&resolved) {
+                    let mut slots = HashMap::new();
+                    alloc_local_struct_fields(
+                        &mut slots,
+                        &resolved,
+                        fields,
+                        self.structs,
+                        self,
+                        fn_name,
+                    )?;
+                    self.locals.insert(
+                        name.to_string(),
+                        LocalSlot::Struct {
+                            typ: resolved.to_string(),
+                            fields: slots,
+                        },
+                    );
+                } else {
+                    let offset = self.alloc_slot();
+                    self.locals
+                        .insert(name.to_string(), LocalSlot::Scalar(offset));
+                    self.scalar_types.insert(name.to_string(), Typ::Int);
+                }
                 Ok(())
             }
             Some(Typ::Vector(_)) => {

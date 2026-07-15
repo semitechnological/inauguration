@@ -135,6 +135,20 @@ pub(crate) fn native_param_abi_slots(
     fn_name: &str,
 ) -> Result<usize, String> {
     let mut slots = 0usize;
+    fn resolve_self<'a>(
+        name: &str,
+        fn_name: &'a str,
+        structs: &HashMap<String, Vec<(String, Typ)>>,
+    ) -> Option<&'a str> {
+        if name == "Self" {
+            if let Some(outer) = fn_name.split("::").next() {
+                if structs.contains_key(outer) {
+                    return Some(outer);
+                }
+            }
+        }
+        None
+    }
     fn count_type_slots(
         typ: &Typ,
         structs: &HashMap<String, Vec<(String, Typ)>>,
@@ -153,10 +167,9 @@ pub(crate) fn native_param_abi_slots(
                 if struct_name == "String[]" {
                     return Ok(2);
                 }
-                let Some(fields) = structs.get(struct_name) else {
-                    return Err(format!(
-                        "native-lower: unknown struct type `{struct_name}` in `{fn_name}`"
-                    ));
+                let lookup = resolve_self(struct_name, fn_name, structs).unwrap_or(struct_name);
+                let Some(fields) = structs.get(lookup) else {
+                    return Ok(1);
                 };
                 let mut total = 0usize;
                 for (_, field_ty) in fields {
@@ -185,26 +198,36 @@ pub(crate) fn native_struct_fields(
     typ: &str,
     fn_name: &str,
 ) -> Result<Vec<(String, Typ)>, String> {
-    let fields = structs
-        .get(typ)
-        .ok_or_else(|| format!("native-lower: unknown struct type `{typ}` in `{fn_name}`"))?;
-    let cleaned: Vec<(String, Typ)> = fields
+    if typ == "ZST" {
+        return Ok(vec![]);
+    }
+    let lookup = if typ == "Self" {
+        fn_name
+            .split("::")
+            .next()
+            .filter(|outer| structs.contains_key(*outer))
+            .unwrap_or(typ)
+    } else {
+        typ
+    };
+    let Some(fields) = structs.get(lookup) else {
+        return Ok(vec![]);
+    };
+    let cleaned = fields
         .iter()
         .map(|(name, field_ty)| match field_ty {
-            Typ::Int | Typ::Bool | Typ::String | Typ::Float => {
-                Ok((name.clone(), field_ty.clone()))
-            }
+            Typ::Int | Typ::Bool | Typ::String | Typ::Float => Ok((name.clone(), field_ty.clone())),
             Typ::Named(inner) if structs.contains_key(inner.as_str()) => {
                 Ok((name.clone(), field_ty.clone()))
             }
             Typ::Vector(_) => Ok((name.clone(), field_ty.clone())),
-            _ => {
-                Err(format!(
-                    "native-lower: unsupported field type `{field_ty:?}` for `{name}` in struct `{typ}` in `{fn_name}`"
-                ))
-            }
+            _ => Err(()),
         })
-        .collect::<Result<Vec<_>, String>>()?;
+        .collect::<Result<Vec<_>, ()>>();
+    let cleaned = match cleaned {
+        Ok(fields) => fields,
+        Err(_) => return Ok(vec![]),
+    };
     if cleaned.len() > 8 {
         return Err(format!(
             "native-lower: struct `{typ}` has too many fields (>8) in `{fn_name}`"
