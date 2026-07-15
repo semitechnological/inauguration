@@ -1,30 +1,45 @@
 //! Tree-sitter grammars → [`UnifiedModule`] with per-language declaration extraction and bounded
 //! scalar body lowering where wired.
 
+#[cfg_attr(not(feature = "parse-extended"), allow(unused_imports))]
 use super::c_family::{c_like_function_decl, extract_cpp_with_classes, objc_like};
+#[cfg(feature = "parse-extended")]
 use super::csharp::extract_csharp;
+#[cfg(feature = "parse-extended")]
 use super::dart::extract_dart;
+#[cfg(feature = "parse-extended")]
 use super::elixir::extract_elixir;
+#[cfg(feature = "parse-extended")]
 use super::erlang::extract_erlang;
+#[cfg(feature = "parse-extended")]
 use super::fsharp::extract_fsharp;
 use super::go::{go_body, go_params, go_return_type};
+#[cfg(feature = "parse-extended")]
 use super::haskell::extract_haskell;
 use super::holyc::extract_holyc;
+#[cfg_attr(not(feature = "parse-extended"), allow(unused_imports))]
 use super::java::{extract_java_style_methods, extract_java_with_classes};
 use super::js::extract_js_with_classes;
+#[cfg(feature = "parse-extended")]
 use super::julia::extract_julia;
+#[cfg(feature = "parse-extended")]
 use super::kotlin::extract_kotlin;
 use super::lua::extract_lua;
+#[cfg(feature = "parse-extended")]
 use super::ocaml::extract_ocaml;
 use super::perl::extract_perl;
+#[cfg(feature = "parse-extended")]
 use super::php::extract_php;
 use super::python::extract_python_with_classes;
+#[cfg(feature = "parse-extended")]
 use super::r_lang::extract_r_lang;
 use super::ruby::extract_ruby;
 use super::rust::extract_rust;
+#[cfg(feature = "parse-extended")]
 use super::scala::extract_scala;
 use super::swift::extract_swift;
 use super::ts::extract_ts_with_classes;
+#[cfg(feature = "parse-extended")]
 use super::v_lang::{v_body, v_params, v_return_type};
 use super::zig::{extract_zig, extract_zig_boundary_module};
 use crate::boundary_ir::CompileArtifact;
@@ -35,24 +50,39 @@ use std::collections::HashSet;
 use std::path::Path;
 use tree_sitter::{Language, Node, Parser};
 
+#[cfg(feature = "parse-extended")]
 use tree_sitter_c_sharp;
+#[cfg(feature = "parse-extended")]
 use tree_sitter_dart;
+#[cfg(feature = "parse-extended")]
 use tree_sitter_elixir;
+#[cfg(feature = "parse-extended")]
 use tree_sitter_erlang;
+#[cfg(feature = "parse-extended")]
 use tree_sitter_fsharp;
+#[cfg(feature = "parse-extended")]
 use tree_sitter_groovy;
+#[cfg(feature = "parse-extended")]
 use tree_sitter_haskell;
 use tree_sitter_holyc;
+#[cfg(feature = "parse-extended")]
 use tree_sitter_julia;
+#[cfg(feature = "parse-extended")]
 use tree_sitter_kotlin_ng;
 use tree_sitter_lua;
+#[cfg(feature = "parse-extended")]
 use tree_sitter_objc;
+#[cfg(feature = "parse-extended")]
 use tree_sitter_ocaml;
 use tree_sitter_perl;
+#[cfg(feature = "parse-extended")]
 use tree_sitter_php;
+#[cfg(feature = "parse-extended")]
 use tree_sitter_r;
 use tree_sitter_ruby;
+#[cfg(feature = "parse-extended")]
 use tree_sitter_scala;
+#[cfg(feature = "parse-extended")]
 use tree_sitter_v;
 
 /// Try to resolve a ParserId to a Tree-sitter Language.
@@ -68,24 +98,39 @@ fn try_lang_for(id: ParserId) -> Option<Language> {
         ParserId::Go => tree_sitter_go::LANGUAGE.into(),
         ParserId::Swift => tree_sitter_swift::LANGUAGE.into(),
         ParserId::TypeScript => tree_sitter_typescript::LANGUAGE_TSX.into(),
-        ParserId::ObjC => tree_sitter_objc::LANGUAGE.into(),
-        ParserId::Kotlin => tree_sitter_kotlin_ng::LANGUAGE.into(),
-        ParserId::Scala => tree_sitter_scala::LANGUAGE.into(),
-        ParserId::Groovy => tree_sitter_groovy::LANGUAGE.into(),
-        ParserId::CSharp => tree_sitter_c_sharp::LANGUAGE.into(),
-        ParserId::FSharp => tree_sitter_fsharp::LANGUAGE_FSHARP.into(),
-        ParserId::Ruby => tree_sitter_ruby::LANGUAGE.into(),
-        ParserId::Php => tree_sitter_php::LANGUAGE_PHP.into(),
-        ParserId::Perl => tree_sitter_perl::LANGUAGE.into(),
-        ParserId::Dart => tree_sitter_dart::LANGUAGE.into(),
         ParserId::Lua => tree_sitter_lua::LANGUAGE.into(),
-        ParserId::Elixir => tree_sitter_elixir::LANGUAGE.into(),
-        ParserId::Erlang => tree_sitter_erlang::LANGUAGE.into(),
-        ParserId::Haskell => tree_sitter_haskell::LANGUAGE.into(),
-        ParserId::Julia => tree_sitter_julia::LANGUAGE.into(),
-        ParserId::OCaml => tree_sitter_ocaml::LANGUAGE_OCAML.into(),
-        ParserId::R => tree_sitter_r::LANGUAGE.into(),
+        ParserId::Perl => tree_sitter_perl::LANGUAGE.into(),
+        ParserId::Ruby => tree_sitter_ruby::LANGUAGE.into(),
         ParserId::HolyC => tree_sitter_holyc::LANGUAGE.into(),
+        #[cfg(feature = "parse-extended")]
+        ParserId::ObjC => tree_sitter_objc::LANGUAGE.into(),
+        #[cfg(feature = "parse-extended")]
+        ParserId::Kotlin => tree_sitter_kotlin_ng::LANGUAGE.into(),
+        #[cfg(feature = "parse-extended")]
+        ParserId::Scala => tree_sitter_scala::LANGUAGE.into(),
+        #[cfg(feature = "parse-extended")]
+        ParserId::Groovy => tree_sitter_groovy::LANGUAGE.into(),
+        #[cfg(feature = "parse-extended")]
+        ParserId::CSharp => tree_sitter_c_sharp::LANGUAGE.into(),
+        #[cfg(feature = "parse-extended")]
+        ParserId::FSharp => tree_sitter_fsharp::LANGUAGE_FSHARP.into(),
+        #[cfg(feature = "parse-extended")]
+        ParserId::Php => tree_sitter_php::LANGUAGE_PHP.into(),
+        #[cfg(feature = "parse-extended")]
+        ParserId::Dart => tree_sitter_dart::LANGUAGE.into(),
+        #[cfg(feature = "parse-extended")]
+        ParserId::Elixir => tree_sitter_elixir::LANGUAGE.into(),
+        #[cfg(feature = "parse-extended")]
+        ParserId::Erlang => tree_sitter_erlang::LANGUAGE.into(),
+        #[cfg(feature = "parse-extended")]
+        ParserId::Haskell => tree_sitter_haskell::LANGUAGE.into(),
+        #[cfg(feature = "parse-extended")]
+        ParserId::Julia => tree_sitter_julia::LANGUAGE.into(),
+        #[cfg(feature = "parse-extended")]
+        ParserId::OCaml => tree_sitter_ocaml::LANGUAGE_OCAML.into(),
+        #[cfg(feature = "parse-extended")]
+        ParserId::R => tree_sitter_r::LANGUAGE.into(),
+        #[cfg(feature = "parse-extended")]
         ParserId::V => tree_sitter_v::LANGUAGE.into(),
         _ => return None,
     })
@@ -97,6 +142,7 @@ pub fn parse_polyglot_file(id: ParserId, path: &Path) -> Result<UnifiedModule, S
             "internal: `{}` must use the dedicated front, not tree_front",
             id.as_str()
         )),
+        #[cfg(feature = "parse-extended")]
         ParserId::V => {
             let src = std::fs::read_to_string(path)
                 .map_err(|e| format!("read {}: {e}", path.display()))?;
@@ -132,6 +178,12 @@ pub fn parse_polyglot_file(id: ParserId, path: &Path) -> Result<UnifiedModule, S
         _ => {
             let src = std::fs::read_to_string(path)
                 .map_err(|e| format!("read {}: {e}", path.display()))?;
+            if try_lang_for(id).is_none() {
+                return Err(format!(
+                    "Parser `{}` unavailable in this build",
+                    id.as_str()
+                ));
+            }
             dispatch(id, path, &src)
         }
     }
@@ -159,6 +211,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
             src,
             extract_cpp_with_classes,
         ),
+        #[cfg(feature = "parse-extended")]
         ParserId::ObjC => parse_lang(
             try_lang_for(ParserId::ObjC).ok_or_else(|| {
                 format!(
@@ -186,6 +239,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
             src,
             extract_java_with_classes,
         ),
+        #[cfg(feature = "parse-extended")]
         ParserId::Kotlin => parse_lang(
             try_lang_for(ParserId::Kotlin).ok_or_else(|| {
                 format!(
@@ -196,6 +250,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
             src,
             extract_kotlin,
         ),
+        #[cfg(feature = "parse-extended")]
         ParserId::Scala => parse_lang(
             try_lang_for(ParserId::Scala).ok_or_else(|| {
                 format!(
@@ -206,6 +261,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
             src,
             extract_scala,
         ),
+        #[cfg(feature = "parse-extended")]
         ParserId::Groovy => parse_lang(
             try_lang_for(ParserId::Groovy).ok_or_else(|| {
                 format!(
@@ -216,6 +272,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
             src,
             extract_java_style_methods,
         ),
+        #[cfg(feature = "parse-extended")]
         ParserId::CSharp => parse_lang(
             try_lang_for(ParserId::CSharp).ok_or_else(|| {
                 format!(
@@ -226,6 +283,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
             src,
             extract_csharp,
         ),
+        #[cfg(feature = "parse-extended")]
         ParserId::FSharp => parse_lang(
             try_lang_for(ParserId::FSharp).ok_or_else(|| {
                 format!(
@@ -256,6 +314,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
             src,
             extract_ruby,
         ),
+        #[cfg(feature = "parse-extended")]
         ParserId::Php => parse_lang(
             try_lang_for(ParserId::Php).ok_or_else(|| {
                 format!(
@@ -348,6 +407,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
             src,
             extract_zig,
         ),
+        #[cfg(feature = "parse-extended")]
         ParserId::Dart => parse_lang(
             try_lang_for(ParserId::Dart).ok_or_else(|| {
                 format!(
@@ -368,6 +428,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
             src,
             extract_lua,
         ),
+        #[cfg(feature = "parse-extended")]
         ParserId::Elixir => parse_lang(
             try_lang_for(ParserId::Elixir).ok_or_else(|| {
                 format!(
@@ -378,6 +439,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
             src,
             extract_elixir,
         ),
+        #[cfg(feature = "parse-extended")]
         ParserId::Erlang => parse_lang(
             try_lang_for(ParserId::Erlang).ok_or_else(|| {
                 format!(
@@ -388,6 +450,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
             src,
             extract_erlang,
         ),
+        #[cfg(feature = "parse-extended")]
         ParserId::Haskell => parse_lang(
             try_lang_for(ParserId::Haskell).ok_or_else(|| {
                 format!(
@@ -398,6 +461,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
             src,
             extract_haskell,
         ),
+        #[cfg(feature = "parse-extended")]
         ParserId::Julia => parse_lang(
             try_lang_for(ParserId::Julia).ok_or_else(|| {
                 format!(
@@ -418,6 +482,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
             src,
             extract_swift,
         ),
+        #[cfg(feature = "parse-extended")]
         ParserId::OCaml => parse_lang(
             try_lang_for(ParserId::OCaml).ok_or_else(|| {
                 format!(
@@ -428,6 +493,7 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
             src,
             extract_ocaml,
         ),
+        #[cfg(feature = "parse-extended")]
         ParserId::R => parse_lang(
             try_lang_for(ParserId::R).ok_or_else(|| {
                 format!(
@@ -448,16 +514,10 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
             src,
             extract_holyc,
         ),
-        ParserId::In
-        | ParserId::Icore
-        | ParserId::Clojure
-        | ParserId::Nim
-        | ParserId::D
-        | ParserId::Crystal
-        | ParserId::VbNet
-        | ParserId::Odin
-        | ParserId::Hare
-        | ParserId::V => unreachable!("filtered above"),
+        _ => Err(format!(
+            "Parser `{}` unavailable in this build",
+            id.as_str()
+        )),
     }
 }
 
@@ -1544,6 +1604,8 @@ mod tests {
         .expect("parse typescript control flow");
         assert_eq!(body_shape(main_body(&ts_module)), expected);
 
+        #[cfg(feature = "parse-extended")]
+        {
         let dart_module = parse_lang(
             try_lang_for(ParserId::Dart).unwrap(),
             &repo_sample("control_flow.dart"),
@@ -1551,6 +1613,7 @@ mod tests {
         )
         .expect("parse dart control flow");
         assert_eq!(body_shape(main_body(&dart_module)), expected);
+        }
     }
 
     #[test]
@@ -2108,6 +2171,7 @@ function main(): void {
         }
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn csharp_methods_extract_bounded_bodies() {
         let src = r#"
@@ -2158,6 +2222,7 @@ class X {
         }
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn csharp_lowers_scalar_body_shapes() {
         let src = r#"
@@ -2607,6 +2672,7 @@ pub fn main() void {
         }
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn kotlin_functions_extract_bounded_bodies() {
         let src = "fun helper(value: Int): Int { return value }\nfun main() { value = helper(2); helper(value); return }\n";
@@ -2652,6 +2718,7 @@ pub fn main() void {
         }
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn kotlin_lowers_scalar_body_shapes() {
         let src = r#"
@@ -2821,6 +2888,7 @@ int main(void) {
         }
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn dart_functions_extract_params_return_and_body() {
         let src = r#"
@@ -3197,6 +3265,7 @@ class Counter {
         assert!(ctor.is_some(), "expected parameterized constructor");
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn csharp_class_declarations_extract_with_fields_and_methods() {
         let src = r#"
@@ -3249,6 +3318,7 @@ class Accumulator {
         );
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn csharp_interface_declarations_extract_with_method_sigs() {
         let src = r#"
@@ -3701,6 +3771,7 @@ def risky(x):
         }
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn php_function_with_body_extracts() {
         let src = "<?php\nfunction helper($value) {\n    return $value;\n}\nfunction main() {\n    $value = 1;\n    helper($value);\n    return;\n}\n";
@@ -3740,6 +3811,7 @@ def risky(x):
         }
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn php_class_with_method_extracts_decl_class() {
         let src = r#"<?php
@@ -3784,6 +3856,7 @@ class Calculator {
         );
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn php_echo_statement_extracts_as_expression() {
         let src = "<?php\nfunction main() {\n    echo \"hello\";\n}\n";
@@ -3799,6 +3872,7 @@ class Calculator {
         );
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn php_eval_main_body_extracts() {
         let src = "<?php\nfunction main() {\n    print(\"hi\");\n}\n";
@@ -3814,6 +3888,7 @@ class Calculator {
         }
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn php_eval_print_shape_extracts() {
         let src = "<?php\nfunction main() {\n    print(1 + 2);\n}\n";
@@ -3836,6 +3911,7 @@ class Calculator {
         }
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn php_interface_with_method_sigs_extracts() {
         let src = "<?php\ninterface Printable {\n    public function format(): string;\n    public function version(): int;\n}\n";
@@ -3939,6 +4015,7 @@ end
         );
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn scala_function_with_body_extracts() {
         let src = r#"
@@ -3976,6 +4053,7 @@ def main(): Unit = {
         );
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn scala_class_with_val_field_extracts() {
         let src = r#"
@@ -4015,6 +4093,7 @@ class Counter(val value: Int) {
         );
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn scala_trait_with_method_sigs_extracts() {
         let src = r#"
@@ -4039,6 +4118,7 @@ trait Drawable {
         assert!(iface.iter().any(|s| s.name == "getBounds"));
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn php_functions_extract_bounded_bodies() {
         let src = r#"<?php
@@ -4092,6 +4172,7 @@ function main() {
         }
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn extract_fsharp_function_with_body() {
         let src = r#"let answer x = x + 42
@@ -4116,6 +4197,7 @@ let main _ =
         );
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn extract_fsharp_eval_main_body() {
         let src = r#"let main _ =
@@ -4135,6 +4217,7 @@ let main _ =
         }
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn extract_erlang_function_clause() {
         let src = r#"-module(calculator).
@@ -4168,6 +4251,7 @@ main() ->
         assert!(found_answer || found_in_class, "answer function not found");
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn extract_erlang_eval_print_shape() {
         let src = "-module(app).\n-export([main/0]).\n\nmain() ->\n    print(\"hi\").\n";
@@ -4192,6 +4276,7 @@ main() ->
         }
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn extract_elixir_defmodule() {
         let src = r#"defmodule Calculator do
@@ -4225,6 +4310,7 @@ end
         );
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn extract_julia_struct() {
         let src = r#"mutable struct Point
@@ -4254,6 +4340,7 @@ end
         assert!(found_answer, "answer function not found");
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn extract_julia_eval_main_body() {
         let src = r#"function main()
@@ -4272,6 +4359,7 @@ end
         }
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn extract_ocaml_eval_print_shape() {
         let src = "let main () =\n  print \"hi\"\n";
@@ -4295,6 +4383,7 @@ end
         }
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn extract_r_function() {
         let src = r#"answer <- function(x) {
@@ -4327,6 +4416,7 @@ main <- function() {
         );
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn extract_r_eval_main_body() {
         let src = r#"main <- function() {
@@ -4345,6 +4435,7 @@ main <- function() {
         }
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn extract_julia_eval_print_shape() {
         let src = r#"function main()
@@ -4369,6 +4460,7 @@ end
         }
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn extract_r_eval_print_shape() {
         let src = r#"main <- function() {
@@ -4393,6 +4485,7 @@ end
         }
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn extract_r_eval_numeric_print_shape() {
         let src = r#"main <- function() {
@@ -4584,6 +4677,7 @@ end
         }
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn extract_v_function_return_type() {
         let src = "module main\n\nfn answer() int {\n\treturn 42\n}\n";

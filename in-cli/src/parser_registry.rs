@@ -600,6 +600,7 @@ mod tests {
         ));
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn ocaml_front_parses_polyglot_sample_shape() {
         let path = temp_file_path("sample.ml");
@@ -719,6 +720,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "parse-extended")]
     #[test]
     fn v_front_parses_main_function() {
         let path = temp_file_path("main.v");

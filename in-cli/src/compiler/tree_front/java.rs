@@ -45,6 +45,7 @@ const JAVA_AST: AstShape = AstShape {
     strict_args: true,
 };
 
+#[cfg_attr(not(feature = "parse-extended"), allow(dead_code))]
 pub(super) fn extract_java_style_methods(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, String> {
     let mut hits = Vec::new();
     collect_kinds(root, &["method_declaration"], &mut hits);
