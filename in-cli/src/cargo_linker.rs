@@ -121,7 +121,6 @@ pub fn compile_cargo_dependencies(project_dir: &Path) -> Vec<(String, UnifiedMod
     // Only compile specific crates that we KNOW we need and can parse
     // (the exact set of direct dependencies from Cargo.toml)
     let direct_dep_names: std::collections::HashSet<&str> = [
-        "blake3",
         "clap",
         "serde",
         "serde_json",

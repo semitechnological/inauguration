@@ -5,6 +5,7 @@ use crate::boundary_ir::{
 use crate::core_ir::{Decl, Typ, UnifiedModule};
 use crate::native_emit::macho::ExportSymbol;
 use std::collections::HashMap;
+use std::hash::Hasher;
 
 pub(crate) fn boundary_from_module(
     module: &UnifiedModule,
@@ -125,5 +126,9 @@ pub(crate) fn symbol_signature_hash(name: &str, params: &[(String, Typ)], ret: &
             .join(","),
         boundary_typ_name(ret)
     );
-    format!("blake3-{}", blake3::hash(payload.as_bytes()).to_hex())
+    {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        std::hash::Hash::hash(&payload, &mut h);
+        format!("siphash-{:016x}", h.finish())
+    }
 }

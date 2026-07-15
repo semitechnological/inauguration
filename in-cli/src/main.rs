@@ -251,11 +251,6 @@ enum Commands {
         #[command(subcommand)]
         action: DaemonAction,
     },
-    #[command(about = "Swift subset parse/check → JSON artifact (Rust; legacy subcommand name)")]
-    Ocaml {
-        #[arg(default_value = "stdin.swift")]
-        path: String,
-    },
     #[command(about = "Run hotreload daemon only")]
     Run {
         #[arg(long, default_value = "apps/sample-swiftui")]
@@ -449,9 +444,7 @@ fn run() -> Result<()> {
     use crate::graph::cmd_graph;
     use crate::package::{cmd_install, cmd_package, cmd_package_lock};
     use crate::plugin::cmd_plugin;
-    use crate::tools::{
-        cmd_agent, cmd_canonicalize, cmd_explain, cmd_fix, cmd_languages, cmd_ocaml,
-    };
+    use crate::tools::{cmd_agent, cmd_canonicalize, cmd_explain, cmd_fix, cmd_languages};
     use crate::update::{cmd_update, cmd_update_remote};
     use crate::util::{cwd, workspace_root};
 
@@ -556,7 +549,6 @@ fn run() -> Result<()> {
             DaemonAction::Stop => cmd_daemon_stop(),
             DaemonAction::Status => cmd_daemon_status(),
         },
-        Commands::Ocaml { path } => cmd_ocaml(&invocation_cwd, &path),
         Commands::Run {
             watch_root,
             socket,

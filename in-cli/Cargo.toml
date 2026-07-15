@@ -26,7 +26,6 @@ name = "protocol-gen"
 path = "src/bin/protocol_gen.rs"
 
 [dependencies]
-blake3 = "1"
 clap = { version = "4", features = ["derive"] }
 libc = "0.2"
 quote = "1"

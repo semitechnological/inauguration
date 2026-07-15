@@ -230,7 +230,7 @@ mod tests {
             layouts: vec![sample_layout()],
             symbols: vec![],
             allocators: vec![],
-            layout_hash: "blake3-deadbeef".to_string(),
+            layout_hash: "siphash-deadbeef".to_string(),
         };
         let report = boundary_ir_verify(&module);
         assert!(!report.ok);

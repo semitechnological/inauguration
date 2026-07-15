@@ -427,15 +427,7 @@ mod tests {
 
     #[test]
     fn dedicated_fronts_have_max_capabilities() {
-        for language in [
-            "in",
-            "icore",
-            "C",
-            "C++",
-            "V",
-            "JavaScript",
-            "TypeScript",
-        ] {
+        for language in ["in", "icore", "C", "C++", "V", "JavaScript", "TypeScript"] {
             let entry = LANGUAGE_SUPPORT
                 .iter()
                 .find(|entry| entry.language == language)
