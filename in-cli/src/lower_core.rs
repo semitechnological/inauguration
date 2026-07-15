@@ -31,7 +31,8 @@ pub fn desugar_module(module: &mut UnifiedModule) {
                     } = method
                     {
                         let mangled = format!("{}_{}", name, method_name);
-                        method_map.insert(method_name, mangled.clone());
+                        method_map.insert(method_name.clone(), mangled.clone());
+                        method_map.insert(format!("{}-{}", name, method_name), mangled.clone());
                         let mut new_params = vec![("self".to_string(), Typ::Named(name.clone()))];
                         new_params.extend(params);
                         new_decls.push(Decl::Function {
@@ -425,6 +426,12 @@ fn rewrite_method_calls_in_expr(expr: &mut Expr, method_map: &HashMap<String, St
                     *args = new_args;
                 } else {
                     rewrite_method_calls_in_expr(base, method_map);
+                }
+            } else if let Expr::Ident(name) = callee.as_mut() {
+                if name.contains('-') {
+                    if let Some(mangled) = method_map.get(name.as_str()) {
+                        **callee = Expr::Ident(mangled.clone());
+                    }
                 }
             } else {
                 rewrite_method_calls_in_expr(callee, method_map);
