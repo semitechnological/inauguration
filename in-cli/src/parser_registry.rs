@@ -470,39 +470,6 @@ pub fn parse_with_resolved(
                 .map(Some)
         }
 
-        ResolvedBuildParser::CoreIr(ParserId::Nim) => {
-            crate::compiler::nim_boundary::parse_nim_file(path)
-                .map_err(ParserRegistryError::Msg)
-                .map(Some)
-        }
-        ResolvedBuildParser::CoreIr(ParserId::Odin) => {
-            crate::compiler::odin_boundary::parse_odin_file(path)
-                .map_err(ParserRegistryError::Msg)
-                .map(Some)
-        }
-        ResolvedBuildParser::CoreIr(ParserId::Hare) => {
-            crate::compiler::hare_boundary::parse_hare_file(path)
-                .map_err(ParserRegistryError::Msg)
-                .map(Some)
-        }
-        ResolvedBuildParser::CoreIr(ParserId::D) => crate::compiler::d_boundary::parse_d_file(path)
-            .map_err(ParserRegistryError::Msg)
-            .map(Some),
-        ResolvedBuildParser::CoreIr(ParserId::Crystal) => {
-            crate::compiler::crystal_boundary::parse_crystal_file(path)
-                .map_err(ParserRegistryError::Msg)
-                .map(Some)
-        }
-        ResolvedBuildParser::CoreIr(ParserId::Clojure) => {
-            crate::compiler::clojure_boundary::parse_clojure_file(path)
-                .map_err(ParserRegistryError::Msg)
-                .map(Some)
-        }
-        ResolvedBuildParser::CoreIr(ParserId::VbNet) => {
-            crate::compiler::vb_boundary::parse_vb_file(path)
-                .map_err(ParserRegistryError::Msg)
-                .map(Some)
-        }
         ResolvedBuildParser::CoreIr(id) => {
             crate::compiler::tree_front::parse_polyglot_file(id, path)
                 .map_err(ParserRegistryError::Msg)
@@ -718,21 +685,6 @@ mod tests {
     }
 
     #[test]
-    fn clojure_boundary_front_parses_polyglot_sample_shape() {
-        let path = temp_file_path("sample.clj");
-        std::fs::write(&path, "(defn answer [] 42)\n(defn main [] nil)\n").expect("write temp");
-        let m = parse_with_resolved(ResolvedBuildParser::CoreIr(ParserId::Clojure), &path)
-            .expect("parse")
-            .expect("module");
-        let _ = std::fs::remove_file(&path);
-        assert!(
-            m.decls.iter().any(
-                |d| matches!(d, crate::core_ir::Decl::Function { name, .. } if name == "answer")
-            )
-        );
-    }
-
-    #[test]
     fn polyglot_java_static_void_main_ok() {
         let path = temp_file_path("entry.java");
         std::fs::write(
@@ -782,41 +734,6 @@ mod tests {
         assert!(
             m.decls.iter().any(
                 |d| matches!(d, crate::core_ir::Decl::Function { name, .. } if name == "main")
-            )
-        );
-    }
-
-    #[test]
-    fn nim_boundary_front_parses_polyglot_sample_shape() {
-        let path = temp_file_path("sample.nim");
-        std::fs::write(&path, "proc answer(): int = 42\n\nproc main() = discard\n")
-            .expect("write temp");
-        let m = parse_with_resolved(ResolvedBuildParser::CoreIr(ParserId::Nim), &path)
-            .expect("parse")
-            .expect("module");
-        let _ = std::fs::remove_file(&path);
-        assert!(
-            m.decls.iter().any(
-                |d| matches!(d, crate::core_ir::Decl::Function { name, .. } if name == "answer")
-            )
-        );
-    }
-
-    #[test]
-    fn odin_boundary_front_parses_polyglot_sample_shape() {
-        let path = temp_file_path("sample.odin");
-        std::fs::write(
-            &path,
-            "package main\n\nanswer :: proc() -> int {\n\treturn 42\n}\n\nmain :: proc() {}\n",
-        )
-        .expect("write temp");
-        let m = parse_with_resolved(ResolvedBuildParser::CoreIr(ParserId::Odin), &path)
-            .expect("parse")
-            .expect("module");
-        let _ = std::fs::remove_file(&path);
-        assert!(
-            m.decls.iter().any(
-                |d| matches!(d, crate::core_ir::Decl::Function { name, .. } if name == "answer")
             )
         );
     }

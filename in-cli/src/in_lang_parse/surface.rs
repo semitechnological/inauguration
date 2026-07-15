@@ -430,9 +430,6 @@ pub fn parse_in_surface_info(source: &str) -> Result<InSurfaceInfo, String> {
                 if extension.is_empty() {
                     return Err(".in: enable extension missing".into());
                 }
-                if !crate::extension_registry::is_known_extension(extension) {
-                    return Err(format!(".in: unknown extension `{extension}`"));
-                }
                 info.orchestration
                     .enabled_extensions
                     .push(extension.to_string());

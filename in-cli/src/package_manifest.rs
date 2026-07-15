@@ -1032,12 +1032,6 @@ fn parse_package_manifest(source: &str) -> Result<PackageManifest, String> {
             ));
         }
     }
-    for extension in &manifest.extensions {
-        if !crate::extension_registry::is_known_extension(extension) {
-            return Err(format!("unknown extension `{extension}`"));
-        }
-    }
-
     Ok(manifest)
 }
 
@@ -1712,20 +1706,6 @@ scripts:
 
         assert!(err.contains("line 3"), "{err}");
         assert!(err.contains("scripts"), "{err}");
-    }
-
-    #[test]
-    fn rejects_unknown_extension() {
-        let err = parse_text(
-            r#"name: bad
-version: 0.1.0
-extensions:
-  - unknown-runtime
-"#,
-        )
-        .expect_err("reject unknown extension");
-
-        assert!(err.contains("unknown extension"), "{err}");
     }
 
     #[test]

@@ -83,47 +83,11 @@ mod tests {
     }
 
     #[test]
-    fn dedicated_boundary_fronts_can_boundary() {
-        for parser_id in [
-            ParserId::Clojure,
-            ParserId::D,
-            ParserId::Crystal,
-            ParserId::Hare,
-            ParserId::VbNet,
-        ] {
-            let entry = language_support_for_parser(parser_id.as_str())
-                .unwrap_or_else(|| panic!("{}", parser_id.as_str()));
-            let cap = boundary_capability_for(entry);
-            assert!(
-                cap.can_boundary,
-                "{} should support boundary",
-                entry.language
-            );
-            assert!(
-                cap.can_typecheck,
-                "{} should support typecheck",
-                entry.language
-            );
-        }
-    }
-
-    #[test]
     fn rust_has_boundary_and_typecheck() {
         let entry = language_support_for_parser(ParserId::Rust.as_str()).expect("rust");
         let cap = boundary_capability_for(entry);
         assert!(cap.can_boundary);
         assert!(cap.can_typecheck);
-    }
-
-    #[test]
-    fn nim_odin_can_boundary() {
-        for parser_id in [ParserId::Nim, ParserId::Odin] {
-            let entry = language_support_for_parser(parser_id.as_str())
-                .unwrap_or_else(|| panic!("{}", parser_id.as_str()));
-            let cap = boundary_capability_for(entry);
-            assert!(cap.can_boundary, "{}", entry.language);
-            assert!(cap.can_typecheck, "{}", entry.language);
-        }
     }
 
     #[test]

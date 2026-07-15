@@ -178,30 +178,6 @@ fn load_boundary(
         ResolvedBuildParser::CoreIr(ParserId::Rust) => {
             crate::compiler::rust_front::parse_rust_artifact(path).ok()
         }
-        ResolvedBuildParser::CoreIr(parser_id @ (ParserId::JavaScript | ParserId::TypeScript)) => {
-            crate::compiler::ecmascript_boundary::parse_ecmascript_artifact(*parser_id, path).ok()
-        }
-        ResolvedBuildParser::CoreIr(ParserId::Nim) => {
-            crate::compiler::nim_boundary::parse_nim_artifact(path).ok()
-        }
-        ResolvedBuildParser::CoreIr(ParserId::Odin) => {
-            crate::compiler::odin_boundary::parse_odin_artifact(path).ok()
-        }
-        ResolvedBuildParser::CoreIr(ParserId::Hare) => {
-            crate::compiler::hare_boundary::parse_hare_artifact(path).ok()
-        }
-        ResolvedBuildParser::CoreIr(ParserId::D) => {
-            crate::compiler::d_boundary::parse_d_artifact(path).ok()
-        }
-        ResolvedBuildParser::CoreIr(ParserId::Crystal) => {
-            crate::compiler::crystal_boundary::parse_crystal_artifact(path).ok()
-        }
-        ResolvedBuildParser::CoreIr(ParserId::Clojure) => {
-            crate::compiler::clojure_boundary::parse_clojure_artifact(path).ok()
-        }
-        ResolvedBuildParser::CoreIr(ParserId::VbNet) => {
-            crate::compiler::vb_boundary::parse_vb_artifact(path).ok()
-        }
         _ => None,
     }?;
     artifact.boundary
@@ -289,19 +265,17 @@ mod tests {
     }
 
     #[test]
-    fn javascript_sample_reaches_boundary_ir_attach_gate() {
+    fn javascript_sample_reaches_typecheck() {
         let entry = language_support_for_parser("javascript").expect("javascript");
         let report = evaluate_language_gates(entry, &repo_root());
         assert!(report.passed_gates.contains(&GATE_SEMANTIC_TYPECHECK));
-        assert!(report.passed_gates.contains(&GATE_BOUNDARY_IR_ATTACH));
     }
 
     #[test]
-    fn typescript_sample_reaches_boundary_ir_attach_gate() {
+    fn typescript_sample_reaches_typecheck() {
         let entry = language_support_for_parser("typescript").expect("typescript");
         let report = evaluate_language_gates(entry, &repo_root());
         assert!(report.passed_gates.contains(&GATE_SEMANTIC_TYPECHECK));
-        assert!(report.passed_gates.contains(&GATE_BOUNDARY_IR_ATTACH));
     }
 
     #[test]
@@ -328,12 +302,6 @@ mod tests {
             "typescript",
             "scala",
             "perl",
-            "nim",
-            "hare",
-            "d",
-            "crystal",
-            "clojure",
-            "vb",
         ] {
             let entry = language_support_for_parser(parser_id).expect(parser_id);
             let report = evaluate_language_gates(entry, &root);
@@ -366,7 +334,7 @@ mod tests {
     }
 
     #[test]
-    fn javascript_inline_boundary_can_reach_level_four_gates() {
+    fn javascript_inline_boundary_still_passes_typecheck() {
         let path = std::env::temp_dir().join(format!(
             "in-js-boundary-{}-{}.js",
             std::process::id(),
@@ -374,8 +342,7 @@ mod tests {
         ));
         std::fs::write(
             &path,
-            r#"//? in_boundary {"abi_version":1,"module":"sample.js","layouts":[{"name":"Point","kind":"struct","repr":"c","size":8,"align":4,"stride":8,"fields":[{"name":"x","offset":0,"type":"i32","transfer":"copy"},{"name":"y","offset":4,"type":"i32","transfer":"copy"}]}],"symbols":[{"name":"point_new","signature_hash":"point_new_v1","ownership":"returns-owned-handle","calling_convention":"c"}]}
-function answer() {
+            r#"function answer() {
   return 42;
 }
 function main() {}
@@ -385,12 +352,7 @@ function main() {}
         let entry = language_support_for_parser("javascript").expect("javascript");
         let report = evaluate_path(&path, entry);
         let _ = std::fs::remove_file(&path);
-        assert!(
-            report.passed_gates.contains(&GATE_BOUNDARY_IR_ATTACH),
-            "{report:?}"
-        );
-        assert!(report.passed_gates.contains(&GATE_BOUNDARY_IR_ATTACH));
-        assert!(report.passed_gates.contains(&GATE_BOUNDARY_IR_VERIFY));
-        assert!(report.passed_gates.contains(&GATE_ABI_LAYOUT_HASH));
+        assert!(report.passed_gates.contains(&GATE_SEMANTIC_TYPECHECK));
+        assert!(report.passed_gates.contains(&GATE_TEXTUAL_SIL));
     }
 }
