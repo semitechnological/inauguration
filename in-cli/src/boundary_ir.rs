@@ -1,5 +1,6 @@
 use crate::core_ir::UnifiedModule;
 use serde::{Deserialize, Serialize};
+use std::hash::Hasher;
 
 pub const IN_ABI_VERSION: u32 = 1;
 
@@ -108,8 +109,9 @@ impl BoundaryModule {
         payload.insert("layouts".to_string(), layouts);
         payload.insert("symbols".to_string(), symbols);
         let canonical = serde_json::to_string(&payload).unwrap_or_default();
-        let hash = blake3::hash(canonical.as_bytes());
-        format!("blake3-{}", hash.to_hex())
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        std::hash::Hash::hash(&canonical, &mut h);
+        format!("siphash-{:016x}", h.finish())
     }
 
     pub fn with_layout_hash(mut self) -> Self {
@@ -291,14 +293,14 @@ mod tests {
         let h1 = m.compute_layout_hash();
         let h2 = m.compute_layout_hash();
         assert_eq!(h1, h2);
-        assert!(h1.starts_with("blake3-"));
+        assert!(h1.starts_with("siphash-"));
     }
 
     #[test]
     fn boundary_module_with_layout_hash() {
         let m = BoundaryModule::default().with_layout_hash();
         assert!(!m.layout_hash.is_empty());
-        assert!(m.layout_hash.starts_with("blake3-"));
+        assert!(m.layout_hash.starts_with("siphash-"));
     }
 
     #[test]

@@ -1,7 +1,7 @@
 use crate::util::resolve_invocation_path;
 use crate::{InError, Result};
 use inauguration::agent_mode;
-use inauguration::parser_registry::{ParserCli, ParserId};
+use inauguration::parser_registry::ParserCli;
 use std::fs;
 use std::path::Path;
 
@@ -121,22 +121,6 @@ pub(crate) fn cmd_languages(json: bool) -> Result<()> {
             entry.front,
             entry.runtime_boundary
         );
-    }
-    Ok(())
-}
-
-pub(crate) fn cmd_ocaml(invocation_cwd: &Path, path: &str) -> Result<()> {
-    let resolved = if std::path::Path::new(path).is_absolute() {
-        std::path::PathBuf::from(path)
-    } else {
-        invocation_cwd.join(path)
-    };
-    let module =
-        inauguration::compiler::tree_front::parse_polyglot_file(ParserId::OCaml, &resolved)
-            .map_err(|e| InError::Message(format!("ocaml front: {e}")))?;
-    println!("parsed {} declarations", module.decls.len());
-    for (i, decl) in module.decls.iter().enumerate() {
-        println!("  {}: {:?}", i + 1, decl);
     }
     Ok(())
 }

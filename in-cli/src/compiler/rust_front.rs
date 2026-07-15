@@ -11,6 +11,7 @@ use crate::core_ir::{CatchArm, Expr, LoopKind, MatchArm, Stmt, Typ};
 use crate::core_ir::{Decl, UnifiedModule};
 use quote::ToTokens;
 use std::collections::HashMap;
+use std::hash::Hasher;
 use std::path::{Path, PathBuf};
 use syn::parse::Parser;
 
@@ -418,7 +419,9 @@ fn boundary_symbol_from_fn(f: &syn::ItemFn, layout_specs: &RustLayoutSpecs) -> B
     };
     parts.push(ret);
     let canonical = parts.join(";");
-    let hash = blake3::hash(canonical.as_bytes());
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    std::hash::Hash::hash(&canonical, &mut h);
+    let hash = h.finish();
     let ownership = match &f.sig.output {
         syn::ReturnType::Type(_, ty) if matches!(ty.as_ref(), syn::Type::Reference(_)) => {
             BoundaryOwnership::Borrowed
@@ -427,7 +430,7 @@ fn boundary_symbol_from_fn(f: &syn::ItemFn, layout_specs: &RustLayoutSpecs) -> B
     };
     BoundarySymbol {
         name,
-        signature_hash: format!("blake3-{}", hash.to_hex()),
+        signature_hash: format!("siphash-{:016x}", hash),
         ownership,
         calling_convention: "c".to_string(),
     }

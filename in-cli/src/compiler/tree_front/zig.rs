@@ -9,6 +9,7 @@ use crate::boundary_ir::{
 use crate::boundary_verify::boundary_ir_verify;
 use crate::core_ir::{Decl, Stmt, Typ};
 use std::collections::HashMap;
+use std::hash::Hasher;
 use tree_sitter::Node;
 
 type ZigLayoutFields = Vec<(String, String)>;
@@ -283,10 +284,12 @@ fn zig_boundary_symbol_from_fn(
             .unwrap_or_else(|| zig_fn_return_type_name(src, fun)),
     );
     let canonical = parts.join(";");
-    let hash = blake3::hash(canonical.as_bytes());
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    std::hash::Hash::hash(&canonical, &mut h);
+    let hash = h.finish();
     Some(BoundarySymbol {
         name,
-        signature_hash: format!("blake3-{}", hash.to_hex()),
+        signature_hash: format!("siphash-{:016x}", hash),
         ownership: BoundaryOwnership::ReturnsOwnedHandle,
         calling_convention: "c".to_string(),
     })

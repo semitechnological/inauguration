@@ -35,7 +35,7 @@ mod tests {
         let manifest = emit_abi_manifest(&module);
         let parsed: BoundaryModule = serde_json::from_str(&manifest).expect("json");
         assert!(!parsed.layout_hash.is_empty());
-        assert!(parsed.layout_hash.starts_with("blake3-"));
+        assert!(parsed.layout_hash.starts_with("siphash-"));
     }
 
     #[test]
