@@ -61,6 +61,7 @@ pub(crate) fn lower_expr_into(
                     LocalSlot::Array { .. }
                     | LocalSlot::ArrayParam { .. }
                     | LocalSlot::Struct { .. } => {
+                        #[cfg(debug_assertions)]
                         eprintln!(
                             "[TRACE] AGGREGATE IDENT: name={name} fn={fn_name} slot={slot:?}"
                         );
