@@ -8,3 +8,10 @@ conformance/control-flow/match-string.in
 conformance/functions/nested-calls.in
 conformance/types/bool-ops.in
 conformance/types/float-arithmetic.in
+conformance/classes/class-basic.in
+conformance/classes/class-extends.in
+conformance/classes/class-interface-dispatch.in
+conformance/classes/class-method-override.in
+conformance/classes/class-methods.in
+conformance/classes/interface-basic.in
+conformance/control-flow/match.in
