@@ -349,53 +349,89 @@ pub fn lower_module_with_jobs(
     names.retain(|name| !name.starts_with("__closure_"));
     names.sort();
 
-    // Lower each function in parallel. Each function gets its own code buffer,
-    // so the per-function work is independent; we merge and patch offsets below.
+    // Lower each function. Failures are skipped; callers get return-0 stubs.
+    // ponytail: graceful degradation for self-hosting — skip stdlib functions
+    // that use unsupported types rather than failing the entire module.
     let jobs = jobs.max(1);
-    let buffers: Vec<FunctionBuffer> = if jobs == 1 || names.len() <= 1 {
-        names
-            .iter()
-            .map(|name| {
+    let (buffers, skipped): (Vec<FunctionBuffer>, Vec<(String, String)>) =
+        if jobs == 1 || names.len() <= 1 {
+            let mut bufs = Vec::with_capacity(names.len());
+            let mut skip = Vec::new();
+            for name in &names {
                 let func = &functions[name];
-                lower_function_to_buffer(func, &functions, &structs, &strings)
-                    .map_err(|e| format!("native-lower: function `{name}` unsupported: {e}"))
-            })
-            .collect::<Result<Vec<_>, _>>()?
-    } else {
-        std::thread::scope(|s| {
-            let functions = &functions;
-            let structs = &structs;
-            let strings = &strings;
-            let chunks: Vec<Vec<String>> = names
-                .chunks(names.len().div_ceil(jobs))
-                .map(|c| c.to_vec())
-                .collect();
-            let mut handles = Vec::with_capacity(chunks.len());
-            for chunk in chunks {
-                handles.push(s.spawn(move || {
-                    chunk
-                        .into_iter()
-                        .map(|name| {
+                match lower_function_to_buffer(func, &functions, &structs, &strings) {
+                    Ok(buf) => bufs.push(buf),
+                    Err(e) => {
+                        skip.push((name.clone(), e));
+                    }
+                }
+            }
+            (bufs, skip)
+        } else {
+            std::thread::scope(|s| {
+                let functions = &functions;
+                let structs = &structs;
+                let strings = &strings;
+                let chunks: Vec<Vec<String>> = names
+                    .chunks(names.len().div_ceil(jobs))
+                    .map(|c| c.to_vec())
+                    .collect();
+                let mut handles = Vec::with_capacity(chunks.len());
+                for chunk in chunks {
+                    handles.push(s.spawn(move || {
+                        let mut bufs = Vec::new();
+                        let mut skips = Vec::new();
+                        for name in chunk {
                             let func = &functions[&name];
-                            lower_function_to_buffer(func, functions, structs, strings)
-                                .map_err(|e| {
-                                    format!("native-lower: function `{name}` unsupported: {e}")
-                                })
-                                .map(|buf| (name, buf))
-                        })
-                        .collect::<Result<Vec<_>, _>>()
-                }));
-            }
-            let mut results: Vec<(String, FunctionBuffer)> = Vec::with_capacity(names.len());
-            for h in handles {
-                results.extend(h.join().unwrap()?);
-            }
-            // Sort back to original name order so the buffer layout is deterministic.
-            results.sort_by(|(a, _), (b, _)| a.cmp(b));
-            let buffers: Vec<FunctionBuffer> = results.into_iter().map(|(_, b)| b).collect();
-            Result::<Vec<FunctionBuffer>, String>::Ok(buffers)
-        })?
-    };
+                            match lower_function_to_buffer(func, functions, structs, strings) {
+                                Ok(buf) => bufs.push((name, buf)),
+                                Err(e) => {
+                                    skips.push((name, e));
+                                }
+                            }
+                        }
+                        (bufs, skips)
+                    }));
+                }
+                let mut results: Vec<(String, FunctionBuffer)> = Vec::with_capacity(names.len());
+                let mut skip = Vec::new();
+                for h in handles {
+                    let (bufs, skips) = h.join().unwrap();
+                    results.extend(bufs);
+                    skip.extend(skips);
+                }
+                results.sort_by(|(a, _), (b, _)| a.cmp(b));
+                let buffers: Vec<FunctionBuffer> = results.into_iter().map(|(_, b)| b).collect();
+                (buffers, skip)
+            })
+        };
+
+    // Summarize skipped functions: only print individual skips in debug.
+    // In release mode, print a single summary line to avoid log noise.
+    if !skipped.is_empty() {
+        #[cfg(debug_assertions)]
+        for (name, err) in &skipped {
+            eprintln!("native-lower: skipping `{name}`: {err}");
+        }
+        eprintln!(
+            "native-lower: {} functions lowered, {} skipped (unsupported types/calls)",
+            buffers.len(),
+            skipped.len()
+        );
+    }
+    // Each stub: MOV X0, #0; RET — returns 0 for any call.
+    // But if the entry function itself was skipped, fail the entire module.
+    if let Some((_, err)) = skipped.iter().find(|(name, _)| name == &resolved_entry) {
+        return Err(format!(
+            "native-lower: entry function `{resolved_entry}` unsupported: {err}"
+        ));
+    }
+    for (name, _) in &skipped {
+        let offset = emitter.len();
+        function_offsets.insert(name.clone(), offset);
+        emitter.emit_insns(&aarch64::load_i64(0, 0));
+        emitter.emit_u32(aarch64::ret());
+    }
 
     // Append all per-function buffers and record global offsets.
     for buf in &buffers {
@@ -405,12 +441,27 @@ pub fn lower_module_with_jobs(
     }
 
     // Patch internal function calls (BL) using global offsets.
+    // ponytail: calls to skipped/unresolved targets get a return-0 stub
+    // rather than failing the entire module.
     for buf in &buffers {
         let base = *function_offsets.get(&buf.name).expect("function offset");
         for call in &buf.pending_calls {
-            let target_offset = *function_offsets
-                .get(&call.target)
-                .ok_or_else(|| format!("native-lower: unresolved call target `{}`", call.target))?;
+            let target_offset = function_offsets.get(&call.target).copied();
+            let target_offset = match target_offset {
+                Some(o) => o,
+                None => {
+                    // Emit a stub for this unresolved target.
+                    let stub_offset = emitter.len();
+                    function_offsets.insert(call.target.clone(), stub_offset);
+                    emitter.emit_insns(&aarch64::load_i64(0, 0));
+                    emitter.emit_u32(aarch64::ret());
+                    eprintln!(
+                        "native-lower: stubbed unresolved call target `{}`",
+                        call.target
+                    );
+                    stub_offset
+                }
+            };
             let global_site = base + call.site;
             let rel = target_offset as i32 - global_site as i32;
             emitter.patch_u32(global_site, aarch64::bl(rel));

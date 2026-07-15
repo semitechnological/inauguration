@@ -45,6 +45,7 @@ pub(crate) fn lower_call(
         return Ok(());
     }
     if !functions.contains_key(target) {
+        #[cfg(debug_assertions)]
         eprintln!(
             "[TRACE] EXTERNAL path for target={target}, all fns: {:?}",
             functions.keys().collect::<Vec<_>>()
