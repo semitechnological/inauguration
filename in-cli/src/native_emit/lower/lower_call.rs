@@ -45,6 +45,10 @@ pub(crate) fn lower_call(
         return Ok(());
     }
     if !functions.contains_key(target) {
+        eprintln!(
+            "[TRACE] EXTERNAL path for target={target}, all fns: {:?}",
+            functions.keys().collect::<Vec<_>>()
+        );
         // ponytail: try the bare function name from a module-qualified path
         // e.g., "inauguration::agent_mode::analyze_path" → try "analyze_path"
         let bare_name = if let Some(idx) = target.rfind("::") {

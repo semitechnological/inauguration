@@ -1375,7 +1375,7 @@ fn lower_match(
 fn is_default_match_pattern(pattern: &str) -> bool {
     matches!(
         pattern.trim().trim_end_matches(':'),
-        "_" | "else" | "default" | "case else" | "case default"
+        "_" | "-" | "else" | "default" | "case else" | "case default"
     )
 }
 

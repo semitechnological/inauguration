@@ -61,6 +61,14 @@ pub(crate) fn lower_expr_into(
                     LocalSlot::Array { .. }
                     | LocalSlot::ArrayParam { .. }
                     | LocalSlot::Struct { .. } => {
+                        eprintln!(
+                            "[TRACE] AGGREGATE IDENT: name={name} fn={fn_name} slot={slot:?}"
+                        );
+                        #[cfg(debug_assertions)]
+                        eprintln!(
+                            "[TRACE] backtrace:\n{}",
+                            std::backtrace::Backtrace::force_capture()
+                        );
                         return Err(format!(
                             "native-lower: aggregate local `{name}` used as scalar value in `{fn_name}`"
                         ));

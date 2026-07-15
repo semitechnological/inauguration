@@ -254,7 +254,7 @@ impl MatchPattern {
         if s.is_empty() {
             return Err(".in: empty pattern".into());
         }
-        if s == "_" || s == "else" || s == "default" {
+        if s == "_" || s == "-" || s == "else" || s == "default" {
             return Ok(MatchPattern::WildPat);
         }
         if s == ".." {
@@ -578,6 +578,7 @@ mod tests {
     #[test]
     fn match_pattern_wild() {
         assert_eq!(MatchPattern::parse("_").unwrap(), MatchPattern::WildPat);
+        assert_eq!(MatchPattern::parse("-").unwrap(), MatchPattern::WildPat);
         assert_eq!(MatchPattern::parse("else").unwrap(), MatchPattern::WildPat);
         assert_eq!(
             MatchPattern::parse("default").unwrap(),
