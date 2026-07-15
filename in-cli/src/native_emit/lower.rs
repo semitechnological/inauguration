@@ -396,14 +396,16 @@ pub fn lower_module_with_jobs(
                 let mut results: Vec<(String, FunctionBuffer)> = Vec::with_capacity(names.len());
                 let mut skip = Vec::new();
                 for h in handles {
-                    let (bufs, skips) = h.join().unwrap();
+                    let (bufs, skips) = h
+                        .join()
+                        .map_err(|e| format!("native-lower: worker thread panicked: {e:?}"))?;
                     results.extend(bufs);
                     skip.extend(skips);
                 }
                 results.sort_by(|(a, _), (b, _)| a.cmp(b));
                 let buffers: Vec<FunctionBuffer> = results.into_iter().map(|(_, b)| b).collect();
-                (buffers, skip)
-            })
+                Ok::<_, String>((buffers, skip))
+            })?
         };
 
     // Summarize skipped functions: only print individual skips in debug.
@@ -444,7 +446,9 @@ pub fn lower_module_with_jobs(
     // ponytail: calls to skipped/unresolved targets get a return-0 stub
     // rather than failing the entire module.
     for buf in &buffers {
-        let base = *function_offsets.get(&buf.name).expect("function offset");
+        let base = *function_offsets
+            .get(&buf.name)
+            .ok_or_else(|| format!("native-lower: missing function offset for `{}`", buf.name))?;
         for call in &buf.pending_calls {
             let target_offset = function_offsets.get(&call.target).copied();
             let target_offset = match target_offset {
@@ -471,7 +475,9 @@ pub fn lower_module_with_jobs(
     // Collect pending static arrays, strings, and inrt calls from all buffers,
     // translating local sites to global offsets.
     for buf in buffers {
-        let base = *function_offsets.get(&buf.name).expect("function offset");
+        let base = *function_offsets
+            .get(&buf.name)
+            .ok_or_else(|| format!("native-lower: missing function offset for `{}`", buf.name))?;
         pending_static_arrays.extend(buf.pending_static_arrays.into_iter().map(|a| {
             PendingStaticArray {
                 adr_site: base + a.adr_site,
@@ -527,13 +533,18 @@ pub fn lower_module_with_jobs(
 
     let mut export_names: Vec<String> = function_offsets.keys().cloned().collect();
     export_names.sort();
-    let exports = export_names
+    let exports: Vec<ExportSymbol> = export_names
         .into_iter()
-        .map(|name| ExportSymbol {
-            name: name.clone(),
-            offset: *function_offsets.get(&name).expect("export offset"),
+        .map(|name| {
+            let offset = *function_offsets
+                .get(&name)
+                .ok_or_else(|| format!("native-lower: missing export offset for `{}`", name))?;
+            Ok(ExportSymbol {
+                name: name.clone(),
+                offset,
+            })
         })
-        .collect();
+        .collect::<Result<_, String>>()?;
 
     let external_refs = TL_EXTERNAL_REFS.with(|refs| std::mem::take(&mut *refs.borrow_mut()));
     Ok(LoweredModule {

@@ -305,7 +305,10 @@ pub(crate) fn lower_store_local(
     fn_name: &str,
 ) -> Result<(), String> {
     let slot = if ctx.locals.contains_key(name) {
-        ctx.locals.get(name).cloned().unwrap()
+        ctx.locals
+            .get(name)
+            .cloned()
+            .ok_or_else(|| format!("native-lower: local `{name}` not found in `{fn_name}`"))?
     } else {
         let offset = ctx.alloc_slot();
         ctx.locals

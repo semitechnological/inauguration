@@ -1293,10 +1293,10 @@ fn find_fn<'a>(module: &'a UnifiedModule, name: &str) -> Option<&'a Decl> {
 /// Emit textual SIL: helper functions first (sorted), then `@main` with `function_ref` callees and a
 /// unique SSA id space.
 pub fn lower_to_textual_sil(module: &UnifiedModule, _module_id: &str) -> String {
-    lower_to_textual_sil_inner(module, false)
+    lower_to_textual_sil_inner(module)
 }
 
-fn lower_to_textual_sil_inner(module: &UnifiedModule, synthesize_main_helper_refs: bool) -> String {
+fn lower_to_textual_sil_inner(module: &UnifiedModule) -> String {
     let mut module = module.clone();
     desugar_module(&mut module);
     let mut fn_names: Vec<String> = module
@@ -1326,19 +1326,6 @@ fn lower_to_textual_sil_inner(module: &UnifiedModule, synthesize_main_helper_ref
     }
 
     sil.push_str("sil @main\nbb0:\n");
-    if synthesize_main_helper_refs {
-        for callee in fn_names
-            .iter()
-            .map(String::as_str)
-            .filter(|name| *name != "main")
-        {
-            let r = ssa;
-            ssa += 1;
-            sil.push_str(&format!(
-                "%{r} = function_ref @{callee} : $@convention(thin)\n"
-            ));
-        }
-    }
     if let Some(Decl::Function { params, body, .. }) = find_fn(&module, "main") {
         if body.is_empty() {
             let ret = ssa;
