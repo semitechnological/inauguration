@@ -1606,13 +1606,13 @@ mod tests {
 
         #[cfg(feature = "parse-extended")]
         {
-        let dart_module = parse_lang(
-            try_lang_for(ParserId::Dart).unwrap(),
-            &repo_sample("control_flow.dart"),
-            extract_dart,
-        )
-        .expect("parse dart control flow");
-        assert_eq!(body_shape(main_body(&dart_module)), expected);
+            let dart_module = parse_lang(
+                try_lang_for(ParserId::Dart).unwrap(),
+                &repo_sample("control_flow.dart"),
+                extract_dart,
+            )
+            .expect("parse dart control flow");
+            assert_eq!(body_shape(main_body(&dart_module)), expected);
         }
     }
 
