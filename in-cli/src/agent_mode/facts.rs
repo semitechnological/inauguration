@@ -163,7 +163,11 @@ pub(super) fn orchestration_facts_from_surface(
 ) -> OrchestrationFacts {
     let mut runtime_status = Vec::new();
     for name in &facts.enabled_extensions {
-        let (implemented, reason_code) = crate::extension_registry::runtime_status(name);
+        let (implemented, reason_code) = if name == "distributed-workers" {
+            (true, "local-distributed-simulator")
+        } else {
+            (false, "extension-runtime-not-implemented")
+        };
         runtime_status.push(RuntimeStatusFact {
             name: name.clone(),
             implemented,

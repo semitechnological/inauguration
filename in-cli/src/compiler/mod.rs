@@ -13,24 +13,15 @@
 
 pub mod backend;
 pub mod boundary_common;
-pub mod clojure_boundary;
 pub mod core;
-pub mod crystal_boundary;
-pub mod d_boundary;
 pub mod driver;
-pub mod ecmascript_boundary;
-pub mod hare_boundary;
 pub mod icore;
 pub mod metadata;
 pub mod mir;
 pub mod mir_emit;
 pub mod mir_emit_x86;
 pub mod mir_lower;
-pub mod nim_boundary;
-pub mod odin_boundary;
 pub mod passes;
 pub mod pipeline;
 pub mod rust_front;
-pub mod simple_front;
 pub mod tree_front;
-pub mod vb_boundary;

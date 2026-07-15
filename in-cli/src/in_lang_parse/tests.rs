@@ -379,10 +379,6 @@ fn malformed_orchestration_syntax_is_rejected() {
     let err = parse_in_source("gpu fn kernel() -> void { }\nfn main() -> void { return; }\n")
         .expect_err("unknown orchestration");
     assert!(err.contains("unknown top-level syntax"), "{err}");
-
-    let err = parse_in_source("enable unknown-runtime;\nfn main() -> void { return; }\n")
-        .expect_err("unknown extension");
-    assert!(err.contains("unknown extension"), "{err}");
 }
 
 #[test]

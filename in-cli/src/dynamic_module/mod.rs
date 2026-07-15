@@ -80,13 +80,9 @@ pub fn validate_descriptor(descriptor: &ModuleDescriptor) -> Result<(), DynamicM
 
 #[cfg(unix)]
 mod unix;
-#[cfg(windows)]
-mod windows;
 
 #[cfg(unix)]
 pub use unix::load_dynamic_module;
-#[cfg(windows)]
-pub use windows::load_dynamic_module;
 
 #[cfg(not(any(unix, windows)))]
 pub fn load_dynamic_module(
