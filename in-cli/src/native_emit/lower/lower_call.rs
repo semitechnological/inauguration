@@ -555,40 +555,51 @@ pub(crate) fn lower_struct_call_arg(
     pending_calls: &mut Vec<PendingCall>,
     fn_name: &str,
 ) -> Result<u8, String> {
-    let Some(fields) = ctx.structs.get(struct_name) else {
-        return Err(format!(
-            "native-lower: call references unknown struct type `{struct_name}` in `{fn_name}`"
-        ));
+    let resolved_struct = if struct_name == "Self" {
+        fn_name
+            .split("::")
+            .next()
+            .filter(|outer| ctx.structs.contains_key(*outer))
+            .unwrap_or(struct_name)
+    } else {
+        struct_name
+    };
+    let Some(fields) = ctx.structs.get(resolved_struct) else {
+        return lower_struct_ptr_arg(emitter, ctx, arg, reg);
     };
     match arg {
-        Expr::Ident(local) => {
-            let Some(LocalSlot::Struct { typ, fields: slots }) = ctx.locals.get(local) else {
-                return Err(format!(
-                    "native-lower: expected struct `{struct_name}` argument, found non-struct local `{local}` in `{fn_name}`"
-                ));
-            };
-            if typ != struct_name {
-                return Err(format!(
-                    "native-lower: struct argument type mismatch: expected `{struct_name}`, found `{typ}` in `{fn_name}`"
-                ));
-            }
-            for (field, field_ty) in fields {
-                if matches!(field_ty, Typ::Int | Typ::Bool | Typ::String | Typ::Float) {
-                    let Some(offset) = find_field_offset(slots, field) else {
-                        return Err(format!(
-                            "native-lower: struct `{struct_name}` missing field `{field}` in `{fn_name}`"
-                        ));
-                    };
-                    emitter.emit_u32(aarch64::ldr64(reg, aarch64::REG_SP, *offset));
-                } else {
+        Expr::Ident(local) => match ctx.locals.get(local) {
+            Some(LocalSlot::Struct { typ, fields: slots }) => {
+                if typ != struct_name && typ != resolved_struct {
                     return Err(format!(
-                        "native-lower: non-scalar field `{field}` in struct `{struct_name}` argument is not supported in `{fn_name}`"
+                        "native-lower: struct argument type mismatch: expected `{struct_name}`, found `{typ}` in `{fn_name}`"
                     ));
                 }
-                reg += 1;
+                for (field, field_ty) in fields {
+                    if matches!(field_ty, Typ::Int | Typ::Bool | Typ::String | Typ::Float) {
+                        let Some(offset) = find_field_offset(slots, field) else {
+                            return Err(format!(
+                                "native-lower: struct `{struct_name}` missing field `{field}` in `{fn_name}`"
+                            ));
+                        };
+                        emitter.emit_u32(aarch64::ldr64(reg, aarch64::REG_SP, *offset));
+                    } else {
+                        return Err(format!(
+                            "native-lower: non-scalar field `{field}` in struct `{struct_name}` argument is not supported in `{fn_name}`"
+                        ));
+                    }
+                    reg += 1;
+                }
+                Ok(reg)
             }
-            Ok(reg)
-        }
+            Some(LocalSlot::Scalar(off)) => {
+                emitter.emit_u32(aarch64::add_imm64(reg, aarch64::REG_SP, *off as u16));
+                Ok(reg + 1)
+            }
+            _ => Err(format!(
+                "native-lower: expected struct `{struct_name}` argument, found non-struct local `{local}` in `{fn_name}`"
+            )),
+        },
         Expr::StructInit {
             name,
             fields: values,
