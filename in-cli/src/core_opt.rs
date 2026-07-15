@@ -1868,7 +1868,7 @@ mod tests {
             make_fn("helper", vec![Stmt::Return(None)]),
             make_fn("unused", vec![Stmt::Return(None)]),
         ];
-        remove_dead_functions(&mut decls);
+        remove_dead_functions(&mut decls, None);
         let names: Vec<&str> = decls
             .iter()
             .filter_map(|d| match d {
@@ -1887,7 +1887,7 @@ mod tests {
             make_fn("kernel_entry", vec![Stmt::Return(None)]),
             make_fn("dead", vec![Stmt::Return(None)]),
         ];
-        remove_dead_functions(&mut decls);
+        remove_dead_functions(&mut decls, Some("kernel_entry"));
         assert_eq!(decls.len(), 1);
     }
 
