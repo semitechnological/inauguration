@@ -7,8 +7,10 @@ use std::collections::HashMap;
 /// `Pin<P>` → `Pin`, `io::Cursor<T>` → `Cursor`, `Vec<u8>` → `Vec`.
 /// Returns the original string if no generic params or path prefix found.
 pub(crate) fn base_struct_name(name: &str) -> &str {
-    let name = name.rsplit("::").next().unwrap_or(name);
-    name.split('<').next().unwrap_or(name).trim()
+    // Strip generic params FIRST (before path splitting) to handle
+    // names like `CachePadded :: < T >` where spaces surround :: and <>
+    let name = name.split('<').next().unwrap_or(name);
+    name.rsplit("::").next().unwrap_or(name).trim()
 }
 
 pub(crate) fn canonical_type(typ: &Typ) -> Typ {
