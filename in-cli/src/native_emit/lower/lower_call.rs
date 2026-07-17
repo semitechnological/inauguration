@@ -124,9 +124,9 @@ pub(crate) fn lower_call(
         unreachable!();
     };
     let abi_arg_count = native_param_abi_slots(&target_info.params, ctx.structs, target)?;
-    if abi_arg_count > 16 {
+    if abi_arg_count > 32 {
         return Err(format!(
-            "native-lower: function `{target}` requires {abi_arg_count} ABI argument slots, only 16 are supported"
+            "native-lower: function `{target}` requires {abi_arg_count} ABI argument slots, only 32 are supported"
         ));
     }
     if args.len() != target_info.params.len() {
@@ -508,9 +508,25 @@ pub(crate) fn lower_struct_ptr_arg(
 ) -> Result<u8, String> {
     // Handle Field access: self.field → pointer to that field
     // Supports nested fields like self.de.read (Field { base: Field { base: Ident("self"), name: "de" }, name: "read" })
+    // Handle Field access: self.field → pointer to that field
+    // Supports nested fields like self.de.read and ser.formatter where ser is a param
     if let Expr::Field { base, name } = arg {
         match base.as_ref() {
             Expr::Ident(local) => {
+                // Try to find field offset: if local is a known struct, look up the field in its field map
+                if let Some(LocalSlot::Struct { fields: slots, .. }) = ctx.locals.get(local) {
+                    if let Some(offset) = find_field_offset(slots, name) {
+                        // param or local: emit address of the base, then add field offset
+                        let base_off = ctx.params.get(local).copied();
+                        if let Some(boff) = base_off {
+                            emitter.emit_u32(aarch64::add_imm64(reg, aarch64::REG_SP, boff as u16 + *offset as u16));
+                        } else {
+                            emitter.emit_u32(aarch64::add_imm64(reg, aarch64::REG_SP, *offset as u16));
+                        }
+                        return Ok(reg + 1);
+                    }
+                }
+                // Fallback: treat as opaque scalar
                 if let Some(offset) = ctx.params.get(local) {
                     emitter.emit_u32(aarch64::add_imm64(reg, aarch64::REG_SP, *offset as u16));
                     return Ok(reg + 1);
