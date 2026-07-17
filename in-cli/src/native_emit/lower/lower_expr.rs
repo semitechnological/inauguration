@@ -358,6 +358,7 @@ pub(crate) fn lower_index(
                 emitter.emit_u32(aarch64::ldr64(scratch, aarch64::REG_SP, offset));
                 scratch
             }
+            #[allow(unreachable_patterns)]
             _ => {
                 return Err(format!(
                     "native-lower: unsupported array index base in `{fn_name}`"
