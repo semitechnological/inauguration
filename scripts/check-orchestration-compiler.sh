@@ -100,7 +100,7 @@ require(
     "graph orchestration missing local distributed simulator fact",
 )
 require(
-    ("gpu-optimizer", False, "gpu-runtime-not-implemented") in statuses,
+    ("gpu-optimizer", False, "extension-runtime-not-implemented") in statuses,
     "graph orchestration missing gpu status-only runtime fact",
 )
 plan = {
