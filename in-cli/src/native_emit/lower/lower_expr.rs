@@ -130,9 +130,7 @@ pub(crate) fn lower_expr_into(
         ),
         Expr::StructInit { name, fields } => {
             // Struct init in value context.
-            let schema = super::lower_util::native_struct_fields(
-                ctx.structs, name, fn_name,
-            )?;
+            let schema = super::lower_util::native_struct_fields(ctx.structs, name, fn_name)?;
             if schema.is_empty() {
                 emitter.emit_insns(&aarch64::load_i64(rd, 0));
                 return Ok(());
@@ -163,7 +161,11 @@ pub(crate) fn lower_expr_into(
                 }
             }
             // Return pointer to first field
-            emitter.emit_u32(aarch64::add_imm64(rd, aarch64::REG_SP, ctx.call_arg_temps[temp_base] as u16));
+            emitter.emit_u32(aarch64::add_imm64(
+                rd,
+                aarch64::REG_SP,
+                ctx.call_arg_temps[temp_base] as u16,
+            ));
             ctx.release_call_arg_temps();
             Ok(())
         }
@@ -235,7 +237,10 @@ pub(crate) fn lower_index(
                 }
             }
         }
-        Expr::Field { base: field_base, name: field_name } => {
+        Expr::Field {
+            base: field_base,
+            name: field_name,
+        } => {
             // self.buf[i] — resolve field ptr/len from struct slot map
             let local = match field_base.as_ref() {
                 Expr::Ident(n) => n,
@@ -250,9 +255,7 @@ pub(crate) fn lower_index(
                     let fptr = format!("{}.ptr", field_name);
                     let flen = format!("{}.len", field_name);
                     match (fields.get(&fptr), fields.get(&flen)) {
-                        (Some(&p), Some(&l)) => {
-                            (LocalSlot::Scalar(0), Some(p), Some(l))
-                        }
+                        (Some(&p), Some(&l)) => (LocalSlot::Scalar(0), Some(p), Some(l)),
                         _ => {
                             // Field ptr/len not found: emit 0
                             emitter.emit_insns(&aarch64::load_i64(rd, 0));
@@ -292,18 +295,54 @@ pub(crate) fn lower_index(
         emitter.emit_u32(aarch64::ldr64(scratch, aarch64::REG_SP, ptr_off));
         scratch
     } else {
-    match slot {
-        LocalSlot::Array { offsets, .. } => {
-            if offsets.is_empty() {
-                return Err(format!(
-                    "native-lower: unsupported empty array index in `{fn_name}`"
-                ));
+        match slot {
+            LocalSlot::Array { offsets, .. } => {
+                if offsets.is_empty() {
+                    return Err(format!(
+                        "native-lower: unsupported empty array index in `{fn_name}`"
+                    ));
+                }
+                emitter.emit_insns(&aarch64::load_i64(len_reg, offsets.len() as i64));
+                let base_offset = offsets[0];
+                if base_offset == 0 {
+                    aarch64::REG_SP
+                } else {
+                    let scratch = pick_scratch(&[rd, index_reg, len_reg]);
+                    emitter.emit_u32(aarch64::add_imm64(
+                        scratch,
+                        aarch64::REG_SP,
+                        base_offset as u16,
+                    ));
+                    scratch
+                }
             }
-            emitter.emit_insns(&aarch64::load_i64(len_reg, offsets.len() as i64));
-            let base_offset = offsets[0];
-            if base_offset == 0 {
-                aarch64::REG_SP
-            } else {
+            LocalSlot::ArrayParam {
+                ptr_offset,
+                len_offset,
+                ..
+            } => {
+                emitter.emit_u32(aarch64::ldr64(len_reg, aarch64::REG_SP, len_offset));
+                let scratch = pick_scratch(&[rd, index_reg, len_reg]);
+                emitter.emit_u32(aarch64::ldr64(scratch, aarch64::REG_SP, ptr_offset));
+                scratch
+            }
+            LocalSlot::Struct { fields: slots, .. } => {
+                // Struct-backed inline array: fields like _0, _1, _2 are array elements
+                let mut field_offsets: Vec<(u32, u32)> = slots
+                    .iter()
+                    .filter_map(|(k, &v)| {
+                        k.strip_prefix('_')
+                            .and_then(|n| n.parse::<u32>().ok())
+                            .map(|idx| (idx, v))
+                    })
+                    .collect();
+                if field_offsets.is_empty() {
+                    emitter.emit_insns(&aarch64::load_i64(rd, 0));
+                    return Ok(());
+                }
+                field_offsets.sort_by_key(|(idx, _)| *idx);
+                let base_offset = field_offsets[0].1;
+                emitter.emit_insns(&aarch64::load_i64(len_reg, field_offsets.len() as i64));
                 let scratch = pick_scratch(&[rd, index_reg, len_reg]);
                 emitter.emit_u32(aarch64::add_imm64(
                     scratch,
@@ -312,39 +351,12 @@ pub(crate) fn lower_index(
                 ));
                 scratch
             }
-        }
-        LocalSlot::ArrayParam {
-            ptr_offset,
-            len_offset,
-            ..
-        } => {
-            emitter.emit_u32(aarch64::ldr64(len_reg, aarch64::REG_SP, len_offset));
-            let scratch = pick_scratch(&[rd, index_reg, len_reg]);
-            emitter.emit_u32(aarch64::ldr64(scratch, aarch64::REG_SP, ptr_offset));
-            scratch
-        }
-        LocalSlot::Struct { fields: slots, .. } => {
-            // Struct-backed inline array: fields like _0, _1, _2 are array elements
-            let mut field_offsets: Vec<(u32, u32)> = slots.iter()
-                .filter_map(|(k, &v)| k.strip_prefix('_').and_then(|n| n.parse::<u32>().ok()).map(|idx| (idx, v)))
-                .collect();
-            if field_offsets.is_empty() {
-                emitter.emit_insns(&aarch64::load_i64(rd, 0));
-                return Ok(());
+            _ => {
+                return Err(format!(
+                    "native-lower: unsupported array index base in `{fn_name}`"
+                ));
             }
-            field_offsets.sort_by_key(|(idx, _)| *idx);
-            let base_offset = field_offsets[0].1;
-            emitter.emit_insns(&aarch64::load_i64(len_reg, field_offsets.len() as i64));
-            let scratch = pick_scratch(&[rd, index_reg, len_reg]);
-            emitter.emit_u32(aarch64::add_imm64(scratch, aarch64::REG_SP, base_offset as u16));
-            scratch
         }
-        _ => {
-            return Err(format!(
-                "native-lower: unsupported array index base in `{fn_name}`"
-            ));
-        }
-    }
     };
     emitter.emit_u32(aarch64::cmp_reg64(index_reg, len_reg));
     let oob_branch = emitter.emit_insn(aarch64::b_cond(10, 0));

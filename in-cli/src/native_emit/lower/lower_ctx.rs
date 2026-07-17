@@ -1,4 +1,6 @@
-use super::lower_util::{array_item_matches, base_struct_name, ensure_native_array_element, expr_type};
+use super::lower_util::{
+    array_item_matches, base_struct_name, ensure_native_array_element, expr_type,
+};
 use super::{PendingInrtCall, PendingStaticArray};
 use crate::core_ir::{Expr, LoopKind, Stmt, Typ};
 use crate::native_emit::aarch64::{self, CodeEmitter};
@@ -225,7 +227,16 @@ pub(crate) fn alloc_nested_struct_slots(
     fn_name: &str,
 ) -> Result<HashMap<String, u32>, String> {
     let mut slots = HashMap::new();
-    alloc_nested_struct_slots_inner(ctx, struct_name, fields, structs, abi_idx, fn_name, &mut Vec::new(), &mut slots)?;
+    alloc_nested_struct_slots_inner(
+        ctx,
+        struct_name,
+        fields,
+        structs,
+        abi_idx,
+        fn_name,
+        &mut Vec::new(),
+        &mut slots,
+    )?;
     if slots.is_empty() {
         slots.insert("__base".to_string(), ctx.alloc_slot());
     }

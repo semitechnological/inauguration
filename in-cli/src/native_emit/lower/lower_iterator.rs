@@ -18,43 +18,56 @@ pub(crate) fn lower_vec_for(
 ) -> Result<(), String> {
     let binding = binding.trim();
     // Parse the binding pattern into (element_names, offsets, stride_per_element)
-    let (elem_names, offsets, stride): (Vec<&str>, Vec<u32>, u32) =
-        if binding.starts_with('(') && binding.ends_with(')') {
-            // Tuple pattern: "(x , y)" or "(w , p)"
-            let inner = &binding[1..binding.len()-1];
-            let names: Vec<&str> = inner.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
-            let n = names.len() as u32;
-            let mut offs = Vec::new();
-            for name in names.iter().copied() {
-                if name == "_" {
-                    offs.push(0);
-                } else if let Some(&off) = ctx.locals.get(name).and_then(|s| match s { LocalSlot::Scalar(o) => Some(o), _ => None }) {
-                    offs.push(off);
-                } else {
-                    // Element not in locals (Rust front didn't allocate it): treat as wildcard
-                    offs.push(0);
-                }
+    let (elem_names, offsets, stride): (Vec<&str>, Vec<u32>, u32) = if binding.starts_with('(')
+        && binding.ends_with(')')
+    {
+        // Tuple pattern: "(x , y)" or "(w , p)"
+        let inner = &binding[1..binding.len() - 1];
+        let names: Vec<&str> = inner
+            .split(',')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect();
+        let n = names.len() as u32;
+        let mut offs = Vec::new();
+        for name in names.iter().copied() {
+            if name == "_" {
+                offs.push(0);
+            } else if let Some(&off) = ctx.locals.get(name).and_then(|s| match s {
+                LocalSlot::Scalar(o) => Some(o),
+                _ => None,
+            }) {
+                offs.push(off);
+            } else {
+                // Element not in locals (Rust front didn't allocate it): treat as wildcard
+                offs.push(0);
             }
-            (names, offs, n * 8)
-        } else if binding == "_" {
-            // Wildcard: iterate but don't store anything
-            (vec![], vec![], 0)
-        } else {
-            // Simple identifier or reference pattern "& x"
-            let name = binding.strip_prefix("& ").unwrap_or(binding);
-            if !name.chars().enumerate().all(|(i, c)| match i { 0 => c.is_ascii_alphabetic(), _ => c.is_ascii_alphanumeric() || c == '-' }) {
+        }
+        (names, offs, n * 8)
+    } else if binding == "_" {
+        // Wildcard: iterate but don't store anything
+        (vec![], vec![], 0)
+    } else {
+        // Simple identifier or reference pattern "& x"
+        let name = binding.strip_prefix("& ").unwrap_or(binding);
+        if !name.chars().enumerate().all(|(i, c)| match i {
+            0 => c.is_ascii_alphabetic(),
+            _ => c.is_ascii_alphanumeric() || c == '-',
+        }) {
+            return Err(format!(
+                "native-lower[vec-iterator-pattern-unsupported]: unsupported for pattern `{binding}` in `{fn_name}`"
+            ));
+        }
+        let off = match ctx.locals.get(name) {
+            Some(LocalSlot::Scalar(offset)) => *offset,
+            _ => {
                 return Err(format!(
-                    "native-lower[vec-iterator-pattern-unsupported]: unsupported for pattern `{binding}` in `{fn_name}`"
+                    "native-lower[vec-iterator-binding-unsupported]: unsupported for binding `{name}` in `{fn_name}`"
                 ));
             }
-            let off = match ctx.locals.get(name) {
-                Some(LocalSlot::Scalar(offset)) => *offset,
-                _ => return Err(format!(
-                    "native-lower[vec-iterator-binding-unsupported]: unsupported for binding `{name}` in `{fn_name}`"
-                )),
-            };
-            (vec![name], vec![off], 8)
         };
+        (vec![name], vec![off], 8)
+    };
 
     let slots = ctx.next_vec_for_slots(fn_name)?;
     lower_struct_expr_into_regs(

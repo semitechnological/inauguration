@@ -1,7 +1,7 @@
 use super::lower_expr;
 use super::lower_util::{
-    array_item_matches, emit_epilogue, emit_failure_return, expr_contains_call,
-    expr_type, find_field_offset, is_native_scalar_type, native_struct_fields,
+    array_item_matches, emit_epilogue, emit_failure_return, expr_contains_call, expr_type,
+    find_field_offset, is_native_scalar_type, native_struct_fields,
 };
 use super::{FunctionInfo, LocalSlot, LowerCtx, PendingCall};
 use crate::core_ir::{Expr, LoopKind, Stmt, Typ};
@@ -776,9 +776,7 @@ pub(crate) fn lower_struct_expr_into_regs(
         Expr::Ident(local) => {
             let entry = ctx.locals.get(local).cloned();
             let (local_typ, fields) = match entry {
-                Some(LocalSlot::Struct {
-                    typ, fields, ..
-                }) => (typ, fields),
+                Some(LocalSlot::Struct { typ, fields, .. }) => (typ, fields),
                 Some(LocalSlot::Scalar(offset)) => {
                     // Opaque struct: load scalar value as return value
                     emitter.emit_u32(aarch64::ldr64(0, aarch64::REG_SP, offset));
@@ -804,40 +802,62 @@ pub(crate) fn lower_struct_expr_into_regs(
             }
             Ok(())
         }
-        Expr::Call { callee, args, .. } => {
-            super::lower_call::lower_call(
-                emitter,
-                ctx,
-                callee,
-                args,
-                0,
-                functions,
-                pending_calls,
-                fn_name,
-            )
-        }
+        Expr::Call { callee, args, .. } => super::lower_call::lower_call(
+            emitter,
+            ctx,
+            callee,
+            args,
+            0,
+            functions,
+            pending_calls,
+            fn_name,
+        ),
         Expr::Field { base, name, .. } => {
             if let Expr::Ident(local) = base.as_ref() {
-                let offset = ctx.params.get(local).copied()
-                    .or_else(|| ctx.locals.get(local).and_then(|s| match s {
+                let offset = ctx.params.get(local).copied().or_else(|| {
+                    ctx.locals.get(local).and_then(|s| match s {
                         LocalSlot::Struct { fields, .. } => fields.get(name).copied(),
                         LocalSlot::Scalar(off) => Some(*off),
                         _ => None,
-                    }));
+                    })
+                });
                 if let Some(off) = offset {
                     emitter.emit_u32(aarch64::ldr64(0, aarch64::REG_SP, off));
                     return Ok(());
                 }
             }
             // Fall through to general expr lowering
-            super::lower_expr::lower_expr_into(emitter, ctx, expr, 0, functions, pending_calls, fn_name)?;
+            super::lower_expr::lower_expr_into(
+                emitter,
+                ctx,
+                expr,
+                0,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
             Ok(())
         }
-        Expr::Index { base, index, .. } => {
-            super::lower_expr::lower_index(emitter, ctx, base, index, 0, functions, pending_calls, fn_name)
-        }
+        Expr::Index { base, index, .. } => super::lower_expr::lower_index(
+            emitter,
+            ctx,
+            base,
+            index,
+            0,
+            functions,
+            pending_calls,
+            fn_name,
+        ),
         Expr::Unary { op, expr, .. } if op == "*" => {
-            super::lower_expr::lower_expr_into(emitter, ctx, expr, 0, functions, pending_calls, fn_name)?;
+            super::lower_expr::lower_expr_into(
+                emitter,
+                ctx,
+                expr,
+                0,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
             // x0 holds the pointer; dereference it
             emitter.emit_u32(aarch64::ldr64(0, 0, 0));
             Ok(())
