@@ -351,6 +351,13 @@ pub(crate) fn lower_index(
                 ));
                 scratch
             }
+            LocalSlot::Scalar(offset) => {
+                // Scalar used as array base — try [ptr @ offset, len @ offset+8] pattern
+                emitter.emit_u32(aarch64::ldr64(len_reg, aarch64::REG_SP, offset + 8));
+                let scratch = pick_scratch(&[rd, index_reg, len_reg]);
+                emitter.emit_u32(aarch64::ldr64(scratch, aarch64::REG_SP, offset));
+                scratch
+            }
             _ => {
                 return Err(format!(
                     "native-lower: unsupported array index base in `{fn_name}`"
