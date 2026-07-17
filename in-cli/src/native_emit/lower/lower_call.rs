@@ -507,26 +507,48 @@ pub(crate) fn lower_struct_ptr_arg(
     fn_name: &str,
 ) -> Result<u8, String> {
     // Handle Field access: self.field → pointer to that field
+    // Supports nested fields like self.de.read (Field { base: Field { base: Ident("self"), name: "de" }, name: "read" })
     if let Expr::Field { base, name } = arg {
-        if let Expr::Ident(local) = base.as_ref() {
-            // Check locals first, then params
-            if let Some(offset) = ctx.params.get(local) {
-                // Field on a scalar param: emit address of the param's slot
-                emitter.emit_u32(aarch64::add_imm64(reg, aarch64::REG_SP, *offset as u16));
-                return Ok(reg + 1);
-            }
-            match ctx.locals.get(local) {
-                Some(LocalSlot::Struct { fields: slots, .. }) => {
-                    emit_ptr_to_slot(emitter, slots, reg, name)?;
-                    return Ok(reg + 1);
-                }
-                Some(LocalSlot::Scalar(offset)) => {
-                    // Opaque struct field: emit address of the scalar slot
+        match base.as_ref() {
+            Expr::Ident(local) => {
+                if let Some(offset) = ctx.params.get(local) {
                     emitter.emit_u32(aarch64::add_imm64(reg, aarch64::REG_SP, *offset as u16));
                     return Ok(reg + 1);
                 }
-                _ => {}
+                match ctx.locals.get(local) {
+                    Some(LocalSlot::Struct { fields: slots, .. }) => {
+                        emit_ptr_to_slot(emitter, slots, reg, name)?;
+                        return Ok(reg + 1);
+                    }
+                    Some(LocalSlot::Scalar(offset)) => {
+                        emitter.emit_u32(aarch64::add_imm64(reg, aarch64::REG_SP, *offset as u16));
+                        return Ok(reg + 1);
+                    }
+                    _ => {}
+                }
             }
+            Expr::Field { .. } => {
+                // Nested field: recursively resolve inner field to get base address
+                let scratch = if reg == 14 { 15 } else { 14 };
+                lower_struct_ptr_arg(emitter, ctx, base, scratch, functions, pending_calls, fn_name)?;
+                // scratch now holds address of inner struct
+                // Try to resolve the outer field offset by scanning all struct field maps
+                let mut found = false;
+                for slot in ctx.locals.values() {
+                    if let LocalSlot::Struct { fields: slots, .. } = slot {
+                        if let Some(&off) = slots.get(name) {
+                            emitter.emit_u32(aarch64::add_imm64(reg, scratch, off as u16));
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+                if !found {
+                    emitter.emit_u32(aarch64::mov_reg64(reg, scratch));
+                }
+                return Ok(reg + 1);
+            }
+            _ => {}
         }
     }
     // Handle IntLit(0) — null struct pointer (e.g. Library::open returns null on failure)
