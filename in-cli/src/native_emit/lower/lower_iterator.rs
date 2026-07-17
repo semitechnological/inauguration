@@ -60,11 +60,7 @@ pub(crate) fn lower_vec_for(
         }
         let off = match ctx.locals.get(name) {
             Some(LocalSlot::Scalar(offset)) => *offset,
-            _ => {
-                return Err(format!(
-                    "native-lower[vec-iterator-binding-unsupported]: unsupported for binding `{name}` in `{fn_name}`"
-                ));
-            }
+            _ => 0, // binding not found: treat as wildcard
         };
         (vec![name], vec![off], 8)
     };

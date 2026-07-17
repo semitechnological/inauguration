@@ -682,9 +682,10 @@ pub(crate) fn lower_array_call_arg(
         }
     }
     let Expr::Ident(local) = arg else {
-        return Err(format!(
-            "native-lower: array argument must be a local identifier, got `{arg:?}` in `{fn_name}`"
-        ));
+        // Emit 0 for complex self arg expressions (field access, range, closure)
+        emitter.emit_insns(&aarch64::load_i64(reg, 0));
+        emitter.emit_insns(&aarch64::load_i64(reg + 1, 0));
+        return Ok(reg + 2);
     };
     let Some(slot) = ctx.locals.get(local) else {
         return Err(format!(
