@@ -134,7 +134,6 @@ pub(crate) fn lower_expr_into(
                 ctx.structs, name, fn_name,
             )?;
             if schema.is_empty() {
-                // ZST: return null
                 emitter.emit_insns(&aarch64::load_i64(rd, 0));
                 return Ok(());
             }
@@ -147,9 +146,26 @@ pub(crate) fn lower_expr_into(
                 };
                 return lower_expr_into(emitter, ctx, value, rd, functions, pending_calls, fn_name);
             }
-            Err(format!(
-                "native-lower: unsupported expression in `{fn_name}` (multi-field struct init in value context)"
-            ))
+            // Multi-field struct: use call-arg temps as scratch space
+            let temp_base = ctx.acquire_call_arg_temps(fn_name)?;
+            let mut field_idx = 0u32;
+            for (field_name, field_typ) in &schema {
+                if matches!(field_typ, Typ::Int | Typ::Bool | Typ::String | Typ::Float) {
+                    let Some((_, value)) = fields.iter().find(|(n, _)| n == field_name) else {
+                        return Err(format!(
+                            "native-lower: missing field `{field_name}` in struct init for `{name}` in `{fn_name}`"
+                        ));
+                    };
+                    lower_expr_into(emitter, ctx, value, 0, functions, pending_calls, fn_name)?;
+                    let off = ctx.call_arg_temps[temp_base + field_idx as usize];
+                    emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, off));
+                    field_idx += 1;
+                }
+            }
+            // Return pointer to first field
+            emitter.emit_u32(aarch64::add_imm64(rd, aarch64::REG_SP, ctx.call_arg_temps[temp_base] as u16));
+            ctx.release_call_arg_temps();
+            Ok(())
         }
         Expr::ArrayLit(_) | Expr::Closure { .. } => Err(format!(
             "native-lower: unsupported expression in `{fn_name}` (array literal or closure in value context)"
