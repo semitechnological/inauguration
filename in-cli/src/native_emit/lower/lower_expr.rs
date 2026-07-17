@@ -149,7 +149,11 @@ pub(crate) fn lower_expr_into(
                 if matches!(field_typ, Typ::Int | Typ::Bool | Typ::String | Typ::Float) {
                     let Some((_, value)) = fields.iter().find(|(n, _)| n == field_name) else {
                         emitter.emit_insns(&aarch64::load_i64(0, 0));
-                        emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, ctx.call_arg_temps[temp_base + field_idx as usize]));
+                        emitter.emit_u32(aarch64::str64(
+                            0,
+                            aarch64::REG_SP,
+                            ctx.call_arg_temps[temp_base + field_idx as usize],
+                        ));
                         field_idx += 1;
                         continue;
                     };
