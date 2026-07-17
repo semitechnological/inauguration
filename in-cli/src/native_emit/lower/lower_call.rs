@@ -602,6 +602,15 @@ pub(crate) fn lower_struct_ptr_arg(
         Some(LocalSlot::Scalar(offset)) => {
             emitter.emit_u32(aarch64::add_imm64(reg, aarch64::REG_SP, *offset as u16));
         }
+        Some(LocalSlot::ArrayParam { ptr_offset, .. }) => {
+            // Vec parameter: load the data pointer
+            emitter.emit_u32(aarch64::ldr64(reg, aarch64::REG_SP, *ptr_offset));
+        }
+        Some(LocalSlot::Array { offsets, .. }) => {
+            // Inline array: address of first element
+            let first_off = offsets.first().copied().unwrap_or(0);
+            emitter.emit_u32(aarch64::add_imm64(reg, aarch64::REG_SP, first_off as u16));
+        }
         _ => {
             return Err(format!(
                 "native-lower: `self` argument `{local}` is not a struct local"
@@ -623,6 +632,22 @@ pub(crate) fn lower_array_call_arg(
         return Err(format!(
             "native-lower: array argument must have scalar element type, got `{elem:?}` in `{fn_name}`"
         ));
+    }
+    // Handle self.field for array fields
+    if let Expr::Field { base, name } = arg {
+        if let Expr::Ident(local) = base.as_ref() {
+            if let Some(LocalSlot::Struct { fields: slots, .. }) = ctx.locals.get(local) {
+                // Find the field value — it's an Array slot at some offset
+                // Load ptr and len from that offset
+                let ptr_key = format!("{name}.ptr");
+                let len_key = format!("{name}.len");
+                if let (Some(&p_off), Some(&l_off)) = (slots.get(&ptr_key), slots.get(&len_key)) {
+                    emitter.emit_u32(aarch64::ldr64(reg, aarch64::REG_SP, p_off));
+                    emitter.emit_u32(aarch64::ldr64(reg + 1, aarch64::REG_SP, l_off));
+                    return Ok(reg + 2);
+                }
+            }
+        }
     }
     let Expr::Ident(local) = arg else {
         return Err(format!(
