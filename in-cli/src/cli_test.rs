@@ -161,8 +161,10 @@ fn in_build_command(root: &Path, path: &str, parser: &str) -> TestCommand {
         program: in_bin,
         args: vec![
             "build".to_string(),
-            "--parser".to_string(), parser.to_string(),
-            "--path".to_string(), path.to_string(),
+            "--parser".to_string(),
+            parser.to_string(),
+            "--path".to_string(),
+            path.to_string(),
         ],
         cwd: root.to_path_buf(),
     }
@@ -174,9 +176,12 @@ fn in_compile_jit_command(root: &Path, path: &str) -> TestCommand {
         program: in_bin,
         args: vec![
             "compile".to_string(),
-            "--path".to_string(), path.to_string(),
-            "--target".to_string(), "jit".to_string(),
-            "--out".to_string(), "/dev/null".to_string(),
+            "--path".to_string(),
+            path.to_string(),
+            "--target".to_string(),
+            "jit".to_string(),
+            "--out".to_string(),
+            "/dev/null".to_string(),
         ],
         cwd: root.to_path_buf(),
     }
@@ -202,7 +207,11 @@ fn in_lang_test_groups(root: &Path) -> Vec<TestGroup> {
         },
         TestGroup {
             name: ".in lang compile (agent-native.in)",
-            commands: vec![in_build_command(root, "apps/in-sample/agent-native.in", "in")],
+            commands: vec![in_build_command(
+                root,
+                "apps/in-sample/agent-native.in",
+                "in",
+            )],
         },
         TestGroup {
             name: ".in lang compile (try_catch.in)",
@@ -218,43 +227,52 @@ fn in_lang_test_groups(root: &Path) -> Vec<TestGroup> {
         },
         TestGroup {
             name: "owned polyglot compile",
-            commands: vec![in_build_command(root, "apps/polyglot-sample/sample.in", "in")],
+            commands: vec![in_build_command(
+                root,
+                "apps/polyglot-sample/sample.in",
+                "in",
+            )],
         },
         TestGroup {
             name: "native answer sample",
-            commands: vec![in_compile_jit_command(root, "apps/native-artifact-sample/answer.in")],
+            commands: vec![in_compile_jit_command(
+                root,
+                "apps/native-artifact-sample/answer.in",
+            )],
         },
     ]
 }
 
 fn self_host_test_groups(root: &Path) -> Vec<TestGroup> {
     let mut groups: Vec<TestGroup> = in_lang_test_groups(root);
-    groups.extend(test_step_names()
-        .into_iter()
-        .map(|name| {
-            let script = if name.contains("polyglot") {
-                if name.contains("graph") {
-                    "scripts/check-graph-polyglot-sample.sh"
-                } else if name.contains("eval") {
-                    "scripts/check-eval-polyglot-sample.sh"
-                } else if name.contains("native answer") {
-                    "scripts/check-native-answer-polyglot-subset.sh"
+    groups.extend(
+        test_step_names()
+            .into_iter()
+            .map(|name| {
+                let script = if name.contains("polyglot") {
+                    if name.contains("graph") {
+                        "scripts/check-graph-polyglot-sample.sh"
+                    } else if name.contains("eval") {
+                        "scripts/check-eval-polyglot-sample.sh"
+                    } else if name.contains("native answer") {
+                        "scripts/check-native-answer-polyglot-subset.sh"
+                    } else {
+                        "scripts/check-polyglot-sample.sh"
+                    }
+                } else if name.contains("jit") {
+                    "scripts/check-jit-compiler.sh"
+                } else if name.contains("conformance") {
+                    "scripts/run-conformance.sh"
                 } else {
-                    "scripts/check-polyglot-sample.sh"
+                    "scripts/check-orchestration-compiler.sh"
+                };
+                TestGroup {
+                    name,
+                    commands: vec![bash_command(root, script)],
                 }
-            } else if name.contains("jit") {
-                "scripts/check-jit-compiler.sh"
-            } else if name.contains("conformance") {
-                "scripts/run-conformance.sh"
-            } else {
-                "scripts/check-orchestration-compiler.sh"
-            };
-            TestGroup {
-                name,
-                commands: vec![bash_command(root, script)],
-            }
-        })
-        .collect::<Vec<_>>());
+            })
+            .collect::<Vec<_>>(),
+    );
     groups
 }
 

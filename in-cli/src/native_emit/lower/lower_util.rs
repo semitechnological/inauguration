@@ -267,7 +267,10 @@ pub(crate) fn contains_call(expr: &Expr) -> bool {
 }
 
 pub(crate) fn is_native_scalar_type(typ: &Typ) -> bool {
-    matches!(canonical_type(typ), Typ::Int | Typ::Bool | Typ::String | Typ::Float)
+    matches!(
+        canonical_type(typ),
+        Typ::Int | Typ::Bool | Typ::String | Typ::Float
+    )
 }
 
 pub(crate) fn ensure_native_array_element(

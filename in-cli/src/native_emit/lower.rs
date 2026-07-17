@@ -677,9 +677,10 @@ fn lower_function(
         emitter.emit_u32(aarch64::str64(15, aarch64::REG_SP, *local_off));
     }
     // Handle implicit return: last stmt is an Expr with multi-field struct init
-    let last_is_struct_init = func.body.last().map_or(false, |s| {
-        matches!(s, Stmt::Expr(Expr::StructInit { .. }))
-    });
+    let last_is_struct_init = func
+        .body
+        .last()
+        .map_or(false, |s| matches!(s, Stmt::Expr(Expr::StructInit { .. })));
     if last_is_struct_init {
         let last = func.body.last().unwrap();
         let init_name = match last {

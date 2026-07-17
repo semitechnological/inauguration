@@ -167,15 +167,13 @@ pub(crate) fn lower_call(
     let stack_slots = if reg > 8 { reg as usize - 8 } else { 0 };
     if stack_slots > 0 {
         emitter.emit_u32(aarch64::sub_imm64(
-            aarch64::REG_SP, aarch64::REG_SP, stack_slots as u16 * 8,
+            aarch64::REG_SP,
+            aarch64::REG_SP,
+            stack_slots as u16 * 8,
         ));
         for i in 0..stack_slots {
             let slot_reg = 8 + i as u8;
-            emitter.emit_u32(aarch64::str64(
-                slot_reg,
-                aarch64::REG_SP,
-                i as u32 * 8,
-            ));
+            emitter.emit_u32(aarch64::str64(slot_reg, aarch64::REG_SP, i as u32 * 8));
         }
     }
 
@@ -184,7 +182,9 @@ pub(crate) fn lower_call(
     // Restore SP after stack-based args
     if stack_slots > 0 {
         emitter.emit_u32(aarch64::add_imm64(
-            aarch64::REG_SP, aarch64::REG_SP, stack_slots as u16 * 8,
+            aarch64::REG_SP,
+            aarch64::REG_SP,
+            stack_slots as u16 * 8,
         ));
     }
     pending_calls.push(PendingCall {
@@ -500,10 +500,18 @@ pub(crate) fn lower_struct_ptr_arg(
                             let off = *offset;
                             let boff = ctx.params.get(local).copied();
                             if boff.is_some() {
-                                emitter.emit_u32(aarch64::ldr64(reg, aarch64::REG_SP, boff.unwrap()));
+                                emitter.emit_u32(aarch64::ldr64(
+                                    reg,
+                                    aarch64::REG_SP,
+                                    boff.unwrap(),
+                                ));
                                 emitter.emit_u32(aarch64::add_imm64(reg, reg, off as u16));
                             } else {
-                                emitter.emit_u32(aarch64::add_imm64(reg, aarch64::REG_SP, off as u16));
+                                emitter.emit_u32(aarch64::add_imm64(
+                                    reg,
+                                    aarch64::REG_SP,
+                                    off as u16,
+                                ));
                             }
                             return Ok(reg + 1);
                         }
@@ -533,7 +541,15 @@ pub(crate) fn lower_struct_ptr_arg(
             Expr::Field { .. } => {
                 // Nested field: recursively resolve inner field to get base address
                 let scratch = if reg == 14 { 15 } else { 14 };
-                lower_struct_ptr_arg(emitter, ctx, base, scratch, functions, pending_calls, fn_name)?;
+                lower_struct_ptr_arg(
+                    emitter,
+                    ctx,
+                    base,
+                    scratch,
+                    functions,
+                    pending_calls,
+                    fn_name,
+                )?;
                 // scratch now holds address of inner struct
                 // Try to resolve the outer field offset by scanning all struct field maps
                 let mut found = false;
@@ -565,7 +581,14 @@ pub(crate) fn lower_struct_ptr_arg(
     // Handle Call expr — lower the call, result is the struct pointer
     if let Expr::Call { callee, args } = arg {
         super::lower_call::lower_call(
-            emitter, ctx, callee, args, reg, functions, pending_calls, fn_name,
+            emitter,
+            ctx,
+            callee,
+            args,
+            reg,
+            functions,
+            pending_calls,
+            fn_name,
         )?;
         return Ok(reg + 1);
     }
@@ -638,8 +661,13 @@ pub(crate) fn lower_array_call_arg(
                     return Ok(reg + 2);
                 }
                 // Fallback: inline array field — compute base address and element count
-                let mut field_elems: Vec<(u32, u32)> = slots.iter()
-                    .filter_map(|(k, &v)| k.strip_prefix(&format!("{name}.")).and_then(|suffix| suffix.parse::<u32>().ok()).map(|idx| (idx, v)))
+                let mut field_elems: Vec<(u32, u32)> = slots
+                    .iter()
+                    .filter_map(|(k, &v)| {
+                        k.strip_prefix(&format!("{name}."))
+                            .and_then(|suffix| suffix.parse::<u32>().ok())
+                            .map(|idx| (idx, v))
+                    })
                     .collect();
                 if !field_elems.is_empty() {
                     field_elems.sort_by_key(|(idx, _)| *idx);
@@ -734,10 +762,20 @@ pub(crate) fn lower_struct_call_arg(
             }
             match ctx.locals.get(local) {
                 Some(LocalSlot::Scalar(_)) => {
-                    return lower_struct_ptr_arg(emitter, ctx, arg, reg, functions, pending_calls, fn_name);
+                    return lower_struct_ptr_arg(
+                        emitter,
+                        ctx,
+                        arg,
+                        reg,
+                        functions,
+                        pending_calls,
+                        fn_name,
+                    );
                 }
                 Some(LocalSlot::Struct { typ, fields: slots }) => {
-                    if base_struct_name(typ) != resolved_struct && base_struct_name(typ) != base_struct_name(struct_name) {
+                    if base_struct_name(typ) != resolved_struct
+                        && base_struct_name(typ) != base_struct_name(struct_name)
+                    {
                         return Err(format!(
                             "native-lower: struct argument type mismatch: expected `{struct_name}`, found `{typ}` in `{fn_name}`"
                         ));
@@ -747,7 +785,15 @@ pub(crate) fn lower_struct_call_arg(
                         !matches!(ft, Typ::Int | Typ::Bool | Typ::String | Typ::Float)
                     });
                     if has_non_scalar {
-                        return lower_struct_ptr_arg(emitter, ctx, arg, reg, functions, pending_calls, fn_name);
+                        return lower_struct_ptr_arg(
+                            emitter,
+                            ctx,
+                            arg,
+                            reg,
+                            functions,
+                            pending_calls,
+                            fn_name,
+                        );
                     }
                     for (field, field_ty) in fields {
                         if matches!(field_ty, Typ::Int | Typ::Bool | Typ::String | Typ::Float) {
@@ -762,13 +808,13 @@ pub(crate) fn lower_struct_call_arg(
                     }
                     Ok(reg)
                 }
-            _ => {
-                // Unknown ident (enum variant, constant): emit 0 and treat as scalar
-                emitter.emit_insns(&aarch64::load_i64(reg, 0));
-                return Ok(reg + 1);
+                _ => {
+                    // Unknown ident (enum variant, constant): emit 0 and treat as scalar
+                    emitter.emit_insns(&aarch64::load_i64(reg, 0));
+                    return Ok(reg + 1);
+                }
             }
         }
-        },
         Expr::StructInit {
             name,
             fields: values,
@@ -797,19 +843,34 @@ pub(crate) fn lower_struct_call_arg(
         }
         Expr::Call { callee, args } => {
             // Call returning a struct: lower the call, result is in x0..xN
-            lower_call(emitter, ctx, callee, args, 0, functions, pending_calls, fn_name)?;
-            let slot_count = native_param_abi_slots(&[(struct_name.to_string(), Typ::Named(struct_name.to_string()))], ctx.structs, fn_name).unwrap_or(1);
+            lower_call(
+                emitter,
+                ctx,
+                callee,
+                args,
+                0,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            let slot_count = native_param_abi_slots(
+                &[(struct_name.to_string(), Typ::Named(struct_name.to_string()))],
+                ctx.structs,
+                fn_name,
+            )
+            .unwrap_or(1);
             Ok(reg + slot_count as u8)
         }
         Expr::Field { base, name } => {
             // Field access on a local: load field value into register
             if let Expr::Ident(local) = base.as_ref() {
-                let offset = ctx.params.get(local).copied()
-                    .or_else(|| ctx.locals.get(local).and_then(|s| match s {
+                let offset = ctx.params.get(local).copied().or_else(|| {
+                    ctx.locals.get(local).and_then(|s| match s {
                         LocalSlot::Struct { fields, .. } => fields.get(name).copied(),
                         LocalSlot::Scalar(off) => Some(*off),
                         _ => None,
-                    }));
+                    })
+                });
                 if let Some(off) = offset {
                     emitter.emit_u32(aarch64::ldr64(reg, aarch64::REG_SP, off));
                     return Ok(reg + 1);
