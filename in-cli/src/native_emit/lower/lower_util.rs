@@ -3,6 +3,14 @@ use crate::core_ir::{Expr, Typ};
 use crate::native_emit::aarch64::{self, CodeEmitter};
 use std::collections::HashMap;
 
+/// Strip generic parameters and path prefix from a struct type name.
+/// `Pin<P>` → `Pin`, `io::Cursor<T>` → `Cursor`, `Vec<u8>` → `Vec`.
+/// Returns the original string if no generic params or path prefix found.
+pub(crate) fn base_struct_name(name: &str) -> &str {
+    let name = name.rsplit("::").next().unwrap_or(name);
+    name.split('<').next().unwrap_or(name).trim()
+}
+
 pub(crate) fn canonical_type(typ: &Typ) -> Typ {
     typ.canonical()
 }
@@ -153,12 +161,11 @@ pub(crate) fn native_param_abi_slots(
         typ: &Typ,
         structs: &HashMap<String, Vec<(String, Typ)>>,
         fn_name: &str,
+        visited: &mut Vec<String>,
         depth: u32,
     ) -> Result<usize, String> {
-        if depth > 10 {
-            return Err(format!(
-                "native-lower: recursive struct type detected in `{fn_name}`"
-            ));
+        if depth > 40 {
+            return Ok(1); // deep nesting, treat as opaque
         }
         match typ {
             Typ::Int | Typ::Bool | Typ::String | Typ::Float => Ok(1),
@@ -168,13 +175,19 @@ pub(crate) fn native_param_abi_slots(
                     return Ok(2);
                 }
                 let lookup = resolve_self(struct_name, fn_name, structs).unwrap_or(struct_name);
-                let Some(fields) = structs.get(lookup) else {
+                let base = base_struct_name(lookup);
+                if visited.contains(&base.to_string()) {
+                    return Ok(1);
+                }
+                let Some(fields) = structs.get(base) else {
                     return Ok(1);
                 };
+                visited.push(base.to_string());
                 let mut total = 0usize;
                 for (_, field_ty) in fields {
-                    total += count_type_slots(field_ty, structs, fn_name, depth + 1)?;
+                    total += count_type_slots(field_ty, structs, fn_name, visited, depth + 1)?;
                 }
+                visited.pop();
                 Ok(total)
             }
             Typ::Array(elem) => {
@@ -188,7 +201,8 @@ pub(crate) fn native_param_abi_slots(
         }
     }
     for (_, typ) in params {
-        slots += count_type_slots(typ, structs, fn_name, 0)?;
+        let mut visited = Vec::new();
+        slots += count_type_slots(typ, structs, fn_name, &mut visited, 0)?;
     }
     Ok(slots)
 }
@@ -210,7 +224,8 @@ pub(crate) fn native_struct_fields(
     } else {
         typ
     };
-    let Some(fields) = structs.get(lookup) else {
+    let base = base_struct_name(lookup);
+    let Some(fields) = structs.get(base) else {
         return Ok(vec![]);
     };
     let cleaned = fields
@@ -250,7 +265,7 @@ pub(crate) fn contains_call(expr: &Expr) -> bool {
 }
 
 pub(crate) fn is_native_scalar_type(typ: &Typ) -> bool {
-    matches!(canonical_type(typ), Typ::Int | Typ::Bool | Typ::String)
+    matches!(canonical_type(typ), Typ::Int | Typ::Bool | Typ::String | Typ::Float)
 }
 
 pub(crate) fn ensure_native_array_element(
@@ -259,7 +274,7 @@ pub(crate) fn ensure_native_array_element(
     context: &str,
 ) -> Result<(), String> {
     match canonical_type(elem) {
-        Typ::Int | Typ::Bool | Typ::String => Ok(()),
+        Typ::Int | Typ::Bool | Typ::String | Typ::Float => Ok(()),
         Typ::Array(_) => Err(format!(
             "native-lower[native-array-nested-unsupported]: unsupported {context} array element type in `{fn_name}` (nested arrays are not supported)"
         )),
