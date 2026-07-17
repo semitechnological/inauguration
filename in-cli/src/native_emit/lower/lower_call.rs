@@ -477,32 +477,6 @@ pub(crate) fn aggregate_scratch_fields(
     Ok(fields)
 }
 
-fn emit_ptr_to_slot(
-    emitter: &mut CodeEmitter,
-    ctx: &LowerCtx<'_>,
-    slots: &HashMap<String, u32>,
-    reg: u8,
-    field: &str,
-) -> Result<(), String> {
-    // Try the given slots first
-    if let Some(&first_off) = find_field_offset(slots, field) {
-        emitter.emit_u32(aarch64::add_imm64(reg, aarch64::REG_SP, first_off as u16));
-        return Ok(());
-    }
-    // Fallback: scan all struct field maps in locals for the field name
-    for slot in ctx.locals.values() {
-        if let LocalSlot::Struct { fields: slots2, .. } = slot {
-            if let Some(&first_off) = find_field_offset(slots2, field) {
-                emitter.emit_u32(aarch64::add_imm64(reg, aarch64::REG_SP, first_off as u16));
-                return Ok(());
-            }
-        }
-    }
-    Err(format!(
-        "native-lower: field `{field}` not found in struct"
-    ))
-}
-
 pub(crate) fn lower_struct_ptr_arg(
     emitter: &mut CodeEmitter,
     ctx: &mut LowerCtx<'_>,
@@ -519,25 +493,34 @@ pub(crate) fn lower_struct_ptr_arg(
     if let Expr::Field { base, name } = arg {
         match base.as_ref() {
             Expr::Ident(local) => {
-                // If local is a param, the param slot holds a POINTER to the struct data
-                // Need to load the pointer first before adding field offset
-                if let Some(&boff) = ctx.params.get(local) {
-                    if let Some(LocalSlot::Struct { fields: slots, .. }) = ctx.locals.get(local) {
-                        if let Some(&off) = find_field_offset(slots, name) {
-                            // Load struct pointer from param slot, then add field offset
-                            let scratch = if reg == 15 { 14 } else { 15 };
-                            emitter.emit_u32(aarch64::ldr64(scratch, aarch64::REG_SP, boff));
-                            emitter.emit_u32(aarch64::add_imm64(reg, scratch, off as u16));
+                // Try to find field in the struct's field map
+                let _field_found = match ctx.locals.get(local) {
+                    Some(LocalSlot::Struct { fields: slots, .. }) => {
+                        if let Some(offset) = find_field_offset(slots, name) {
+                            let off = *offset;
+                            let boff = ctx.params.get(local).copied();
+                            if boff.is_some() {
+                                emitter.emit_u32(aarch64::ldr64(reg, aarch64::REG_SP, boff.unwrap()));
+                                emitter.emit_u32(aarch64::add_imm64(reg, reg, off as u16));
+                            } else {
+                                emitter.emit_u32(aarch64::add_imm64(reg, aarch64::REG_SP, off as u16));
+                            }
                             return Ok(reg + 1);
                         }
+                        false
                     }
-                    // Opaque param: return param slot address (caller treats as pointer)
-                    emitter.emit_u32(aarch64::add_imm64(reg, aarch64::REG_SP, boff as u16));
+                    _ => false,
+                };
+                // Field not found: fall back to base struct address (e.g., self.ser where ser == self)
+                if let Some(offset) = ctx.params.get(local) {
+                    emitter.emit_u32(aarch64::add_imm64(reg, aarch64::REG_SP, *offset as u16));
                     return Ok(reg + 1);
                 }
                 match ctx.locals.get(local) {
                     Some(LocalSlot::Struct { fields: slots, .. }) => {
-                        emit_ptr_to_slot(emitter, ctx, slots, reg, name)?;
+                        // Try local struct's base address
+                        let min = slots.values().min().copied().unwrap_or(0);
+                        emitter.emit_u32(aarch64::add_imm64(reg, aarch64::REG_SP, min as u16));
                         return Ok(reg + 1);
                     }
                     Some(LocalSlot::Scalar(offset)) => {
@@ -649,6 +632,18 @@ pub(crate) fn lower_array_call_arg(
                 if let (Some(&p_off), Some(&l_off)) = (slots.get(&ptr_key), slots.get(&len_key)) {
                     emitter.emit_u32(aarch64::ldr64(reg, aarch64::REG_SP, p_off));
                     emitter.emit_u32(aarch64::ldr64(reg + 1, aarch64::REG_SP, l_off));
+                    return Ok(reg + 2);
+                }
+                // Fallback: inline array field — compute base address and element count
+                let mut field_elems: Vec<(u32, u32)> = slots.iter()
+                    .filter_map(|(k, &v)| k.strip_prefix(&format!("{name}.")).and_then(|suffix| suffix.parse::<u32>().ok()).map(|idx| (idx, v)))
+                    .collect();
+                if !field_elems.is_empty() {
+                    field_elems.sort_by_key(|(idx, _)| *idx);
+                    let base = field_elems[0].1;
+                    let count = field_elems.len();
+                    emitter.emit_u32(aarch64::add_imm64(reg, aarch64::REG_SP, base as u16));
+                    emitter.emit_insns(&aarch64::load_i64(reg + 1, count as i64));
                     return Ok(reg + 2);
                 }
             }
