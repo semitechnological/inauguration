@@ -1,0 +1,11 @@
+[package]
+name = "inauguration-crepuscularity-runner"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "invoke"
+path = "src/main.rs"
+
+[dependencies]
+crepuscularity = { path = ".." }

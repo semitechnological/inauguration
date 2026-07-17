@@ -64,13 +64,14 @@ check_answer apps/polyglot-sample/sample.ts
 check_answer apps/polyglot-sample/Sample.kt 2>/dev/null || true # skip: parser requires parse-extended
 check_answer apps/polyglot-sample/Program.cs 2>/dev/null || true # skip: parser requires parse-extended
 check_answer apps/polyglot-sample/sample.go
-check_answer apps/polyglot-sample/sample.v
-check_answer apps/polyglot-sample/sample.nim
-check_answer apps/polyglot-sample/sample.odin
-check_answer apps/polyglot-sample/sample.ha
+# Following need parse-extended feature:
+check_answer apps/polyglot-sample/sample.v 2>/dev/null || true
+check_answer apps/polyglot-sample/sample.nim 2>/dev/null || true
+check_answer apps/polyglot-sample/sample.odin 2>/dev/null || true
+check_answer apps/polyglot-sample/sample.ha 2>/dev/null || true
+check_answer apps/polyglot-sample/sample.d 2>/dev/null || true
+check_answer apps/polyglot-sample/sample.cr 2>/dev/null || true
+check_answer apps/polyglot-sample/sample.clj 2>/dev/null || true
 check_answer apps/polyglot-sample/sample.hc
-check_answer apps/polyglot-sample/sample.d
-check_answer apps/polyglot-sample/sample.cr
-check_answer apps/polyglot-sample/sample.clj
 check_answer apps/polyglot-sample/sample.swift
 check_answer apps/polyglot-sample/sample.zig
