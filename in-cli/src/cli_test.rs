@@ -155,6 +155,33 @@ pub(crate) fn test_step_names() -> [&'static str; 7] {
     ]
 }
 
+fn in_build_command(root: &Path, path: &str, parser: &str) -> TestCommand {
+    let in_bin = std::env::var("IN_BIN").unwrap_or_else(|_| "in".to_string());
+    TestCommand {
+        program: in_bin,
+        args: vec![
+            "build".to_string(),
+            "--parser".to_string(), parser.to_string(),
+            "--path".to_string(), path.to_string(),
+        ],
+        cwd: root.to_path_buf(),
+    }
+}
+
+fn in_compile_jit_command(root: &Path, path: &str) -> TestCommand {
+    let in_bin = std::env::var("IN_BIN").unwrap_or_else(|_| "in".to_string());
+    TestCommand {
+        program: in_bin,
+        args: vec![
+            "compile".to_string(),
+            "--path".to_string(), path.to_string(),
+            "--target".to_string(), "jit".to_string(),
+            "--out".to_string(), "/dev/null".to_string(),
+        ],
+        cwd: root.to_path_buf(),
+    }
+}
+
 fn toolchain_test_step_names() -> [&'static str; 3] {
     [
         "protocol models (scripts/check-protocol-models.sh)",
@@ -167,8 +194,42 @@ fn external_parity_test_step_names() -> [&'static str; 1] {
     ["external compiler parity (scripts/check-external-compiler-parity.sh)"]
 }
 
+fn in_lang_test_groups(root: &Path) -> Vec<TestGroup> {
+    vec![
+        TestGroup {
+            name: ".in lang compile (hello.in)",
+            commands: vec![in_build_command(root, "apps/in-sample/hello.in", "in")],
+        },
+        TestGroup {
+            name: ".in lang compile (agent-native.in)",
+            commands: vec![in_build_command(root, "apps/in-sample/agent-native.in", "in")],
+        },
+        TestGroup {
+            name: ".in lang compile (try_catch.in)",
+            commands: vec![in_build_command(root, "apps/in-sample/try_catch.in", "in")],
+        },
+        TestGroup {
+            name: ".icore compile",
+            commands: vec![in_compile_jit_command(root, "apps/icore-sample/min.icore")],
+        },
+        TestGroup {
+            name: "self-host compile",
+            commands: vec![in_compile_jit_command(root, "in-cli/src/main.rs")],
+        },
+        TestGroup {
+            name: "owned polyglot compile",
+            commands: vec![in_build_command(root, "apps/polyglot-sample/sample.in", "in")],
+        },
+        TestGroup {
+            name: "native answer sample",
+            commands: vec![in_compile_jit_command(root, "apps/native-artifact-sample/answer.in")],
+        },
+    ]
+}
+
 fn self_host_test_groups(root: &Path) -> Vec<TestGroup> {
-    test_step_names()
+    let mut groups: Vec<TestGroup> = in_lang_test_groups(root);
+    groups.extend(test_step_names()
         .into_iter()
         .map(|name| {
             let script = if name.contains("polyglot") {
@@ -193,7 +254,8 @@ fn self_host_test_groups(root: &Path) -> Vec<TestGroup> {
                 commands: vec![bash_command(root, script)],
             }
         })
-        .collect()
+        .collect::<Vec<_>>());
+    groups
 }
 
 fn external_parity_test_groups(root: &Path) -> Vec<TestGroup> {
@@ -344,10 +406,23 @@ fn print_test_group_result(result: &TestGroupResult) {
     }
 }
 
+pub(crate) fn in_lang_test_step_names() -> [&'static str; 7] {
+    [
+        ".in lang compile (hello.in)",
+        ".in lang compile (agent-native.in)",
+        ".in lang compile (try_catch.in)",
+        ".icore compile",
+        "self-host compile",
+        "owned polyglot compile",
+        "native answer sample",
+    ]
+}
+
 pub(crate) fn all_test_step_names() -> Vec<&'static str> {
     let mut names = Vec::new();
     names.extend(owned_native_test_step_names());
     names.extend(test_step_names());
+    names.extend(in_lang_test_step_names());
     names.extend(external_parity_test_step_names());
     names.extend(toolchain_test_step_names());
     names
