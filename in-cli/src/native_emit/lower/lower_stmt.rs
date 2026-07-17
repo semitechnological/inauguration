@@ -833,9 +833,9 @@ pub(crate) fn lower_struct_expr_into_regs(
             super::lower_expr::lower_expr_into(emitter, ctx, expr, 0, functions, pending_calls, fn_name)?;
             Ok(())
         }
-        Expr::Index { .. } => Err(format!(
-            "native-lower: unsupported struct return index expression `{expr:?}` for `{typ}` in `{fn_name}`"
-        )),
+        Expr::Index { base, index, .. } => {
+            super::lower_expr::lower_index(emitter, ctx, base, index, 0, functions, pending_calls, fn_name)
+        }
         Expr::Unary { op, expr, .. } if op == "*" => {
             super::lower_expr::lower_expr_into(emitter, ctx, expr, 0, functions, pending_calls, fn_name)?;
             // x0 holds the pointer; dereference it
