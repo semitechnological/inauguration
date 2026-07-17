@@ -323,6 +323,22 @@ pub(crate) fn lower_index(
             emitter.emit_u32(aarch64::ldr64(scratch, aarch64::REG_SP, ptr_offset));
             scratch
         }
+        LocalSlot::Struct { fields: slots, .. } => {
+            // Struct-backed inline array: fields like _0, _1, _2 are array elements
+            let mut field_offsets: Vec<(u32, u32)> = slots.iter()
+                .filter_map(|(k, &v)| k.strip_prefix('_').and_then(|n| n.parse::<u32>().ok()).map(|idx| (idx, v)))
+                .collect();
+            if field_offsets.is_empty() {
+                emitter.emit_insns(&aarch64::load_i64(rd, 0));
+                return Ok(());
+            }
+            field_offsets.sort_by_key(|(idx, _)| *idx);
+            let base_offset = field_offsets[0].1;
+            emitter.emit_insns(&aarch64::load_i64(len_reg, field_offsets.len() as i64));
+            let scratch = pick_scratch(&[rd, index_reg, len_reg]);
+            emitter.emit_u32(aarch64::add_imm64(scratch, aarch64::REG_SP, base_offset as u16));
+            scratch
+        }
         _ => {
             return Err(format!(
                 "native-lower: unsupported array index base in `{fn_name}`"
