@@ -5,7 +5,7 @@ use super::lower_stdlib;
 use super::lower_stmt::lower_struct_expr_into_slots;
 use super::{
     FunctionInfo, LocalSlot, LowerCtx, PendingCall, PendingInrtCall, TL_EXTERNAL_REFS,
-    TL_NATIVE_MODE, find_field_offset, is_native_scalar_type, native_link_name,
+    TL_NATIVE_MODE, base_struct_name, find_field_offset, is_native_scalar_type, native_link_name,
     native_param_abi_slots, native_struct_fields,
 };
 use crate::core_ir::{Expr, Typ};
@@ -124,9 +124,9 @@ pub(crate) fn lower_call(
         unreachable!();
     };
     let abi_arg_count = native_param_abi_slots(&target_info.params, ctx.structs, target)?;
-    if abi_arg_count > 8 {
+    if abi_arg_count > 16 {
         return Err(format!(
-            "native-lower: function `{target}` requires {abi_arg_count} ABI argument slots, only 8 are supported"
+            "native-lower: function `{target}` requires {abi_arg_count} ABI argument slots, only 16 are supported"
         ));
     }
     if args.len() != target_info.params.len() {
@@ -152,7 +152,7 @@ pub(crate) fn lower_call(
             fn_name,
             param_name,
         )?;
-        for current in first_reg..reg {
+        for current in first_reg..reg.min(8) {
             emitter.emit_u32(aarch64::str64(
                 current,
                 aarch64::REG_SP,
@@ -160,16 +160,38 @@ pub(crate) fn lower_call(
             ));
         }
     }
-    for current in 0..reg {
+    // Load first 8 args into registers x0-x7
+    for current in 0..reg.min(8) {
         emitter.emit_u32(aarch64::ldr64(
             current,
             aarch64::REG_SP,
             ctx.call_arg_temps[temp_base + current as usize],
         ));
     }
+    // Stack-based args (beyond 8): allocate stack space and store
+    let stack_slots = if reg > 8 { reg as usize - 8 } else { 0 };
+    if stack_slots > 0 {
+        emitter.emit_u32(aarch64::sub_imm64(
+            aarch64::REG_SP, aarch64::REG_SP, stack_slots as u16 * 8,
+        ));
+        for i in 0..stack_slots {
+            let slot_reg = 8 + i as u8;
+            emitter.emit_u32(aarch64::str64(
+                slot_reg,
+                aarch64::REG_SP,
+                i as u32 * 8,
+            ));
+        }
+    }
 
     let call_site = emitter.len();
     emitter.emit_u32(aarch64::bl(0));
+    // Restore SP after stack-based args
+    if stack_slots > 0 {
+        emitter.emit_u32(aarch64::add_imm64(
+            aarch64::REG_SP, aarch64::REG_SP, stack_slots as u16 * 8,
+        ));
+    }
     pending_calls.push(PendingCall {
         site: call_site,
         target: target.clone(),
@@ -272,7 +294,7 @@ pub(crate) fn lower_call_arg(
             // ponytail: "self" parameter in impl methods is always &self (reference)
             if param_name == "self" {
                 // Pass pointer to struct by emitting address of first field into reg
-                lower_struct_ptr_arg(emitter, ctx, arg, reg)
+                lower_struct_ptr_arg(emitter, ctx, arg, reg, functions, pending_calls, fn_name)
             } else {
                 lower_struct_call_arg(
                     emitter,
@@ -460,29 +482,96 @@ pub(crate) fn aggregate_scratch_fields(
     Ok(fields)
 }
 
+fn emit_ptr_to_slot(
+    emitter: &mut CodeEmitter,
+    slots: &HashMap<String, u32>,
+    reg: u8,
+    field: &str,
+) -> Result<(), String> {
+    let Some(&first_off) = find_field_offset(slots, field) else {
+        return Err(format!(
+            "native-lower: field `{field}` not found in struct"
+        ));
+    };
+    emitter.emit_u32(aarch64::add_imm64(reg, aarch64::REG_SP, first_off as u16));
+    Ok(())
+}
+
 pub(crate) fn lower_struct_ptr_arg(
     emitter: &mut CodeEmitter,
     ctx: &mut LowerCtx<'_>,
     arg: &Expr,
     reg: u8,
+    functions: &HashMap<String, FunctionInfo>,
+    pending_calls: &mut Vec<PendingCall>,
+    fn_name: &str,
 ) -> Result<u8, String> {
+    // Handle Field access: self.field → pointer to that field
+    if let Expr::Field { base, name } = arg {
+        if let Expr::Ident(local) = base.as_ref() {
+            // Check locals first, then params
+            if let Some(offset) = ctx.params.get(local) {
+                // Field on a scalar param: emit address of the param's slot
+                emitter.emit_u32(aarch64::add_imm64(reg, aarch64::REG_SP, *offset as u16));
+                return Ok(reg + 1);
+            }
+            match ctx.locals.get(local) {
+                Some(LocalSlot::Struct { fields: slots, .. }) => {
+                    emit_ptr_to_slot(emitter, slots, reg, name)?;
+                    return Ok(reg + 1);
+                }
+                Some(LocalSlot::Scalar(offset)) => {
+                    // Opaque struct field: emit address of the scalar slot
+                    emitter.emit_u32(aarch64::add_imm64(reg, aarch64::REG_SP, *offset as u16));
+                    return Ok(reg + 1);
+                }
+                _ => {}
+            }
+        }
+    }
+    // Handle IntLit(0) — null struct pointer (e.g. Library::open returns null on failure)
+    if let Expr::IntLit(val) = arg {
+        emitter.emit_insns(&aarch64::load_i64(reg, *val));
+        return Ok(reg + 1);
+    }
+    // Handle Call expr — lower the call, result is the struct pointer
+    if let Expr::Call { callee, args } = arg {
+        super::lower_call::lower_call(
+            emitter, ctx, callee, args, reg, functions, pending_calls, fn_name,
+        )?;
+        return Ok(reg + 1);
+    }
+    // Handle Unary deref: *x → load from pointer in x
+    if let Expr::Unary { op, expr } = arg {
+        if op == "*" {
+            lower_expr_into(emitter, ctx, expr, reg, functions, pending_calls, fn_name)?;
+            emitter.emit_u32(aarch64::ldr64(reg, reg, 0));
+            return Ok(reg + 1);
+        }
+    }
     let Expr::Ident(local) = arg else {
         return Err(format!(
             "native-lower: `self` argument must be a local identifier, got `{arg:?}`"
         ));
     };
-    let Some(LocalSlot::Struct { fields: slots, .. }) = ctx.locals.get(local) else {
-        return Err(format!(
-            "native-lower: `self` argument `{local}` is not a struct local"
-        ));
-    };
-    let Some(&first_off) = slots.values().min() else {
-        return Err(format!(
-            "native-lower: `self` argument `{local}` has no fields to take address of"
-        ));
-    };
-    // add reg, sp, first_off
-    emitter.emit_u32(aarch64::add_imm64(reg, aarch64::REG_SP, first_off as u16));
+    match ctx.locals.get(local) {
+        Some(LocalSlot::Struct { fields: slots, .. }) => {
+            let Some(&first_off) = slots.values().min() else {
+                return Err(format!(
+                    "native-lower: `self` argument `{local}` has no fields to take address of"
+                ));
+            };
+            emitter.emit_u32(aarch64::add_imm64(reg, aarch64::REG_SP, first_off as u16));
+        }
+        Some(LocalSlot::Scalar(offset)) => {
+            emitter.emit_u32(aarch64::add_imm64(reg, aarch64::REG_SP, *offset as u16));
+        }
+        _ => {
+            return Err(format!(
+                "native-lower: `self` argument `{local}` is not a struct local"
+            ));
+        }
+    }
     Ok(reg + 1)
 }
 
@@ -565,43 +654,56 @@ pub(crate) fn lower_struct_call_arg(
             .filter(|outer| ctx.structs.contains_key(*outer))
             .unwrap_or(struct_name)
     } else {
-        struct_name
+        base_struct_name(struct_name)
     };
     let Some(fields) = ctx.structs.get(resolved_struct) else {
-        return lower_struct_ptr_arg(emitter, ctx, arg, reg);
+        // Not a known struct (e.g. enum type): lower as scalar value
+        lower_expr_into(emitter, ctx, arg, reg, functions, pending_calls, fn_name)?;
+        return Ok(reg + 1);
     };
     match arg {
-        Expr::Ident(local) => match ctx.locals.get(local) {
-            Some(LocalSlot::Struct { typ, fields: slots }) => {
-                if typ != struct_name && typ != resolved_struct {
-                    return Err(format!(
-                        "native-lower: struct argument type mismatch: expected `{struct_name}`, found `{typ}` in `{fn_name}`"
-                    ));
+        Expr::Ident(local) => {
+            if let Some(offset) = ctx.params.get(local) {
+                // Param as struct pointer: emit address
+                emitter.emit_u32(aarch64::add_imm64(reg, aarch64::REG_SP, *offset as u16));
+                return Ok(reg + 1);
+            }
+            match ctx.locals.get(local) {
+                Some(LocalSlot::Scalar(_)) => {
+                    return lower_struct_ptr_arg(emitter, ctx, arg, reg, functions, pending_calls, fn_name);
                 }
-                for (field, field_ty) in fields {
-                    if matches!(field_ty, Typ::Int | Typ::Bool | Typ::String | Typ::Float) {
-                        let Some(offset) = find_field_offset(slots, field) else {
-                            return Err(format!(
-                                "native-lower: struct `{struct_name}` missing field `{field}` in `{fn_name}`"
-                            ));
-                        };
-                        emitter.emit_u32(aarch64::ldr64(reg, aarch64::REG_SP, *offset));
-                    } else {
+                Some(LocalSlot::Struct { typ, fields: slots }) => {
+                    if base_struct_name(typ) != resolved_struct && base_struct_name(typ) != base_struct_name(struct_name) {
                         return Err(format!(
-                            "native-lower: non-scalar field `{field}` in struct `{struct_name}` argument is not supported in `{fn_name}`"
+                            "native-lower: struct argument type mismatch: expected `{struct_name}`, found `{typ}` in `{fn_name}`"
                         ));
                     }
-                    reg += 1;
+                    // If any field is non-scalar, pass by pointer instead of flattening
+                    let has_non_scalar = fields.iter().any(|(_, ft)| {
+                        !matches!(ft, Typ::Int | Typ::Bool | Typ::String | Typ::Float)
+                    });
+                    if has_non_scalar {
+                        return lower_struct_ptr_arg(emitter, ctx, arg, reg, functions, pending_calls, fn_name);
+                    }
+                    for (field, field_ty) in fields {
+                        if matches!(field_ty, Typ::Int | Typ::Bool | Typ::String | Typ::Float) {
+                            let Some(offset) = find_field_offset(slots, field) else {
+                                return Err(format!(
+                                    "native-lower: struct `{struct_name}` missing field `{field}` in `{fn_name}`"
+                                ));
+                            };
+                            emitter.emit_u32(aarch64::ldr64(reg, aarch64::REG_SP, *offset));
+                        }
+                        reg += 1;
+                    }
+                    Ok(reg)
                 }
-                Ok(reg)
+            _ => {
+                // Unknown ident (enum variant, constant): emit 0 and treat as scalar
+                emitter.emit_insns(&aarch64::load_i64(reg, 0));
+                return Ok(reg + 1);
             }
-            Some(LocalSlot::Scalar(off)) => {
-                emitter.emit_u32(aarch64::add_imm64(reg, aarch64::REG_SP, *off as u16));
-                Ok(reg + 1)
-            }
-            _ => Err(format!(
-                "native-lower: expected struct `{struct_name}` argument, found non-struct local `{local}` in `{fn_name}`"
-            )),
+        }
         },
         Expr::StructInit {
             name,
@@ -628,6 +730,30 @@ pub(crate) fn lower_struct_call_arg(
                 reg += 1;
             }
             Ok(reg)
+        }
+        Expr::Call { callee, args } => {
+            // Call returning a struct: lower the call, result is in x0..xN
+            lower_call(emitter, ctx, callee, args, 0, functions, pending_calls, fn_name)?;
+            let slot_count = native_param_abi_slots(&[(struct_name.to_string(), Typ::Named(struct_name.to_string()))], ctx.structs, fn_name).unwrap_or(1);
+            Ok(reg + slot_count as u8)
+        }
+        Expr::Field { base, name } => {
+            // Field access on a local: load field value into register
+            if let Expr::Ident(local) = base.as_ref() {
+                let offset = ctx.params.get(local).copied()
+                    .or_else(|| ctx.locals.get(local).and_then(|s| match s {
+                        LocalSlot::Struct { fields, .. } => fields.get(name).copied(),
+                        LocalSlot::Scalar(off) => Some(*off),
+                        _ => None,
+                    }));
+                if let Some(off) = offset {
+                    emitter.emit_u32(aarch64::ldr64(reg, aarch64::REG_SP, off));
+                    return Ok(reg + 1);
+                }
+            }
+            Err(format!(
+                "native-lower: unsupported struct argument expression `{arg:?}` for `{struct_name}` in `{fn_name}`"
+            ))
         }
         _ => Err(format!(
             "native-lower: unsupported struct argument expression `{arg:?}` for `{struct_name}` in `{fn_name}`"
