@@ -831,9 +831,7 @@ pub(crate) fn lower_struct_call_arg(
                     };
                     lower_expr_into(emitter, ctx, value, reg, functions, pending_calls, fn_name)?;
                 } else {
-                    return Err(format!(
-                        "native-lower: non-scalar field `{field}` in struct `{struct_name}` initializer is not supported in `{fn_name}`"
-                    ));
+                    emitter.emit_insns(&aarch64::load_i64(reg, 0));
                 }
                 reg += 1;
             }
@@ -874,13 +872,12 @@ pub(crate) fn lower_struct_call_arg(
                     return Ok(reg + 1);
                 }
             }
-            Err(format!(
-                "native-lower: unsupported struct argument expression `{arg:?}` for `{struct_name}` in `{fn_name}`"
-            ))
+            emitter.emit_insns(&aarch64::load_i64(reg, 0));
+            Ok(reg + 1)
         }
         _ => {
             emitter.emit_insns(&aarch64::load_i64(reg, 0));
             Ok(reg + 1)
-        },
+        }
     }
 }

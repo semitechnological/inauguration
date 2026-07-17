@@ -312,7 +312,7 @@ fn alloc_nested_struct_slots_inner(
 
 pub(crate) fn alloc_local_struct_fields(
     slots: &mut HashMap<String, u32>,
-    struct_name: &str,
+    _struct_name: &str,
     fields: &[(String, Typ)],
     all_structs: &HashMap<String, Vec<(String, Typ)>>,
     ctx: &mut LowerCtx<'_>,
