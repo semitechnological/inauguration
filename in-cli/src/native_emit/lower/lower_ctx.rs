@@ -1,4 +1,4 @@
-use super::lower_util::{array_item_matches, ensure_native_array_element, expr_type};
+use super::lower_util::{array_item_matches, base_struct_name, ensure_native_array_element, expr_type};
 use super::{PendingInrtCall, PendingStaticArray};
 use crate::core_ir::{Expr, LoopKind, Stmt, Typ};
 use crate::native_emit::aarch64::{self, CodeEmitter};
@@ -225,6 +225,29 @@ pub(crate) fn alloc_nested_struct_slots(
     fn_name: &str,
 ) -> Result<HashMap<String, u32>, String> {
     let mut slots = HashMap::new();
+    alloc_nested_struct_slots_inner(ctx, struct_name, fields, structs, abi_idx, fn_name, &mut Vec::new(), &mut slots)?;
+    if slots.is_empty() {
+        slots.insert("__base".to_string(), ctx.alloc_slot());
+    }
+    return Ok(slots);
+}
+
+fn alloc_nested_struct_slots_inner(
+    ctx: &mut LowerCtx<'_>,
+    struct_name: &str,
+    fields: &[(String, Typ)],
+    structs: &HashMap<String, Vec<(String, Typ)>>,
+    abi_idx: &mut usize,
+    fn_name: &str,
+    visited: &mut Vec<String>,
+    slots: &mut HashMap<String, u32>,
+) -> Result<(), String> {
+    let base_name = base_struct_name(struct_name);
+    if visited.contains(&base_name.to_string()) {
+        slots.insert(format!("{base_name}.__cycle"), ctx.alloc_slot());
+        return Ok(());
+    }
+    visited.push(base_name.to_string());
     for (field, field_ty) in fields {
         match field_ty {
             Typ::Int | Typ::Bool | Typ::String | Typ::Float => {
@@ -243,18 +266,21 @@ pub(crate) fn alloc_nested_struct_slots(
                     Typ::Vector(_) => "Vec",
                     _ => unreachable!(),
                 };
-                let Some(inner_fields) = structs.get(inner_name) else {
-                    return Err(format!(
-                        "native-lower: unknown nested struct type `{inner_name}` in struct `{struct_name}` for `{fn_name}`"
-                    ));
+                let base = base_struct_name(inner_name);
+                let Some(inner_fields) = structs.get(base) else {
+                    slots.insert(format!("{field}.__opaque"), ctx.alloc_slot());
+                    continue;
                 };
-                let inner_slots = alloc_nested_struct_slots(
+                let mut inner_slots = HashMap::new();
+                alloc_nested_struct_slots_inner(
                     ctx,
                     inner_name,
                     inner_fields,
                     structs,
                     abi_idx,
                     fn_name,
+                    visited,
+                    &mut inner_slots,
                 )?;
                 // Flatten: nested struct fields go into parent's slot map with <field>.<subfield> keys
                 for (sub_field, sub_offset) in inner_slots {
@@ -271,7 +297,7 @@ pub(crate) fn alloc_nested_struct_slots(
     if slots.is_empty() {
         slots.insert("__base".to_string(), ctx.alloc_slot());
     }
-    Ok(slots)
+    Ok(())
 }
 
 pub(crate) fn alloc_local_struct_fields(
@@ -364,7 +390,7 @@ impl<'a> LowerCtx<'a> {
         let mut abi_idx = 0usize;
         for (name, typ) in params {
             match typ {
-                Typ::Int | Typ::Bool | Typ::String => {
+                Typ::Int | Typ::Bool | Typ::String | Typ::Float => {
                     let offset = ctx.alloc_slot();
                     if abi_idx < 8 {
                         ctx.param_stores.push((abi_idx as u8, offset));
@@ -406,10 +432,18 @@ impl<'a> LowerCtx<'a> {
                         abi_idx += 2;
                         continue;
                     }
-                    let Some(fields) = structs.get(struct_name) else {
-                        return Err(format!(
-                            "native-lower: unknown struct parameter type `{struct_name}` in `{fn_name}`"
-                        ));
+                    let base = base_struct_name(struct_name);
+                    let Some(fields) = structs.get(base) else {
+                        let offset = ctx.alloc_slot();
+                        if abi_idx < 8 {
+                            ctx.param_stores.push((abi_idx as u8, offset));
+                        } else {
+                            ctx.stack_params.push(((abi_idx - 8) as u32, offset));
+                        }
+                        ctx.locals.insert(name.clone(), LocalSlot::Scalar(offset));
+                        ctx.param_types.insert(name.clone(), typ.clone());
+                        abi_idx += 1;
+                        continue;
                     };
                     let slots = alloc_nested_struct_slots(
                         &mut ctx,
