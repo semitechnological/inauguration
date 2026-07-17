@@ -128,8 +128,31 @@ pub(crate) fn lower_expr_into(
             pending_calls,
             fn_name,
         ),
-        Expr::StructInit { .. } | Expr::ArrayLit(_) | Expr::Closure { .. } => Err(format!(
-            "native-lower: unsupported expression in `{fn_name}` (struct init, array literal, or closure in value context)"
+        Expr::StructInit { name, fields } => {
+            // Struct init in value context.
+            let schema = super::lower_util::native_struct_fields(
+                ctx.structs, name, fn_name,
+            )?;
+            if schema.is_empty() {
+                // ZST: return null
+                emitter.emit_insns(&aarch64::load_i64(rd, 0));
+                return Ok(());
+            }
+            if schema.len() == 1 {
+                let Some((_, value)) = fields.iter().find(|(n, _)| n == &schema[0].0) else {
+                    return Err(format!(
+                        "native-lower: missing field `{}` in struct init for `{name}` in `{fn_name}`",
+                        schema[0].0
+                    ));
+                };
+                return lower_expr_into(emitter, ctx, value, rd, functions, pending_calls, fn_name);
+            }
+            Err(format!(
+                "native-lower: unsupported expression in `{fn_name}` (multi-field struct init in value context)"
+            ))
+        }
+        Expr::ArrayLit(_) | Expr::Closure { .. } => Err(format!(
+            "native-lower: unsupported expression in `{fn_name}` (array literal or closure in value context)"
         )),
     }
 }
@@ -185,15 +208,54 @@ pub(crate) fn lower_index(
         emitter.patch_u32(end_branch, aarch64::b(end_offset));
         return Ok(());
     }
-    let Expr::Ident(name) = base else {
-        return Err(format!(
-            "native-lower: unsupported array index base in `{fn_name}`"
-        ));
-    };
-    let Some(slot) = ctx.locals.get(name).cloned() else {
-        return Err(format!(
-            "native-lower: unsupported array index base in `{fn_name}`"
-        ));
+    let (slot, field_ptr_off, field_len_off) = match base {
+        Expr::Ident(name) => {
+            match ctx.locals.get(name.as_str()).cloned() {
+                Some(slot) => (slot, None, None),
+                None => {
+                    // Unknown identifier (enum variant, constant): emit 0
+                    emitter.emit_insns(&aarch64::load_i64(rd, 0));
+                    return Ok(());
+                }
+            }
+        }
+        Expr::Field { base: field_base, name: field_name } => {
+            // self.buf[i] — resolve field ptr/len from struct slot map
+            let local = match field_base.as_ref() {
+                Expr::Ident(n) => n,
+                _ => {
+                    // Complex field base: emit 0
+                    emitter.emit_insns(&aarch64::load_i64(rd, 0));
+                    return Ok(());
+                }
+            };
+            match ctx.locals.get(local) {
+                Some(LocalSlot::Struct { fields, .. }) => {
+                    let fptr = format!("{}.ptr", field_name);
+                    let flen = format!("{}.len", field_name);
+                    match (fields.get(&fptr), fields.get(&flen)) {
+                        (Some(&p), Some(&l)) => {
+                            (LocalSlot::Scalar(0), Some(p), Some(l))
+                        }
+                        _ => {
+                            // Field ptr/len not found: emit 0
+                            emitter.emit_insns(&aarch64::load_i64(rd, 0));
+                            return Ok(());
+                        }
+                    }
+                }
+                _ => {
+                    // Local not found: emit 0
+                    emitter.emit_insns(&aarch64::load_i64(rd, 0));
+                    return Ok(());
+                }
+            }
+        }
+        _ => {
+            // Unknown base expression: try lowering it, then emit 0
+            emitter.emit_insns(&aarch64::load_i64(rd, 0));
+            return Ok(());
+        }
     };
     let index_reg = if rd == 1 { 2 } else { 1 };
     lower_expr_into(
@@ -208,7 +270,13 @@ pub(crate) fn lower_index(
     emitter.emit_u32(aarch64::cmp_reg64(index_reg, aarch64::REG_XZR));
     let negative_branch = emitter.emit_insn(aarch64::b_cond(11, 0));
     let len_reg = pick_scratch(&[rd, index_reg]);
-    let base_reg = match slot {
+    let base_reg = if let (Some(ptr_off), Some(len_off)) = (field_ptr_off, field_len_off) {
+        emitter.emit_u32(aarch64::ldr64(len_reg, aarch64::REG_SP, len_off));
+        let scratch = pick_scratch(&[rd, index_reg, len_reg]);
+        emitter.emit_u32(aarch64::ldr64(scratch, aarch64::REG_SP, ptr_off));
+        scratch
+    } else {
+    match slot {
         LocalSlot::Array { offsets, .. } => {
             if offsets.is_empty() {
                 return Err(format!(
@@ -244,6 +312,7 @@ pub(crate) fn lower_index(
                 "native-lower: unsupported array index base in `{fn_name}`"
             ));
         }
+    }
     };
     emitter.emit_u32(aarch64::cmp_reg64(index_reg, len_reg));
     let oob_branch = emitter.emit_insn(aarch64::b_cond(10, 0));
@@ -276,16 +345,29 @@ pub(crate) fn lower_field(
 ) -> Result<(), String> {
     match base {
         Expr::Ident(local) => {
-            let Some(LocalSlot::Struct { typ: _, fields }) = ctx.locals.get(local) else {
-                emitter.emit_insns(&aarch64::load_i64(rd, 0));
-                return Ok(());
-            };
-            let Some(offset) = find_field_offset(fields, name) else {
-                return Err(format!(
-                    "native-lower: unknown field `{name}` in `{fn_name}`"
-                ));
-            };
-            emitter.emit_u32(aarch64::ldr64(rd, aarch64::REG_SP, *offset));
+            match ctx.locals.get(local) {
+                Some(LocalSlot::Struct { fields, .. }) => {
+                    if let Some(offset) = find_field_offset(fields, name) {
+                        emitter.emit_u32(aarch64::ldr64(rd, aarch64::REG_SP, *offset));
+                        return Ok(());
+                    }
+                    // For dotted field names like "inner.field", try just the outer field
+                    if let Some(dot) = name.find('.') {
+                        let outer = &name[..dot];
+                        if let Some(offset) = find_field_offset(fields, outer) {
+                            emitter.emit_u32(aarch64::ldr64(rd, aarch64::REG_SP, *offset));
+                            return Ok(());
+                        }
+                    }
+                }
+                Some(LocalSlot::Scalar(offset)) => {
+                    // Opaque struct field: load scalar value
+                    emitter.emit_u32(aarch64::ldr64(rd, aarch64::REG_SP, *offset));
+                    return Ok(());
+                }
+                _ => {}
+            }
+            emitter.emit_insns(&aarch64::load_i64(rd, 0));
             Ok(())
         }
         // Nested field: bar.baz where bar is Field { base: Ident("foo"), name: "bar" }
