@@ -283,9 +283,7 @@ pub(crate) fn ensure_native_array_element(
         Typ::Array(_) => Err(format!(
             "native-lower[native-array-nested-unsupported]: unsupported {context} array element type in `{fn_name}` (nested arrays are not supported)"
         )),
-        Typ::Named(_) => Err(format!(
-            "native-lower[native-array-aggregate-unsupported]: unsupported {context} array element type in `{fn_name}` (aggregate array elements are not supported)"
-        )),
+        Typ::Named(_) => Ok(()), // aggregate types: treat as opaque pointers
         _ => Err(format!(
             "native-lower[native-array-element-unsupported]: unsupported {context} array element type in `{fn_name}` (only Int/Bool/String elements)"
         )),
