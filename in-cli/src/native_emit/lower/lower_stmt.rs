@@ -539,7 +539,7 @@ pub(crate) fn lower_struct_expr_into_slots(
             name: init,
             fields: values,
         } => {
-            if init != typ {
+            if init != typ && typ != "Self" && init != "Self" && !init.contains(typ) && !typ.contains(init) {
                 return Err(format!(
                     "native-lower: struct initializer type mismatch: expected `{typ}`, found `{init}` in `{fn_name}`"
                 ));
@@ -675,6 +675,8 @@ pub(crate) fn lower_struct_expr_into_slots(
             {
                 if return_typ != &Typ::Named(typ.to_string())
                     && !(typ == "Vec" && matches!(return_typ, Typ::Vector(_)))
+                    && !matches!(return_typ, Typ::Named(n) if n == "Self")
+                    && typ != "Self"
                 {
                     return Err(format!(
                         "native-lower: struct assignment return type mismatch: expected `{typ}`, got `{return_typ:?}` in `{fn_name}`"
