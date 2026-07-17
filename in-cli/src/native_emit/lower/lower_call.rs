@@ -513,22 +513,20 @@ pub(crate) fn lower_struct_ptr_arg(
     if let Expr::Field { base, name } = arg {
         match base.as_ref() {
             Expr::Ident(local) => {
-                // Try to find field offset: if local is a known struct, look up the field in its field map
-                if let Some(LocalSlot::Struct { fields: slots, .. }) = ctx.locals.get(local) {
-                    if let Some(offset) = find_field_offset(slots, name) {
-                        // param or local: emit address of the base, then add field offset
-                        let base_off = ctx.params.get(local).copied();
-                        if let Some(boff) = base_off {
-                            emitter.emit_u32(aarch64::add_imm64(reg, aarch64::REG_SP, boff as u16 + *offset as u16));
-                        } else {
-                            emitter.emit_u32(aarch64::add_imm64(reg, aarch64::REG_SP, *offset as u16));
+                // If local is a param, the param slot holds a POINTER to the struct data
+                // Need to load the pointer first before adding field offset
+                if let Some(&boff) = ctx.params.get(local) {
+                    if let Some(LocalSlot::Struct { fields: slots, .. }) = ctx.locals.get(local) {
+                        if let Some(&off) = find_field_offset(slots, name) {
+                            // Load struct pointer from param slot, then add field offset
+                            let scratch = if reg == 15 { 14 } else { 15 };
+                            emitter.emit_u32(aarch64::ldr64(scratch, aarch64::REG_SP, boff));
+                            emitter.emit_u32(aarch64::add_imm64(reg, scratch, off as u16));
+                            return Ok(reg + 1);
                         }
-                        return Ok(reg + 1);
                     }
-                }
-                // Fallback: treat as opaque scalar
-                if let Some(offset) = ctx.params.get(local) {
-                    emitter.emit_u32(aarch64::add_imm64(reg, aarch64::REG_SP, *offset as u16));
+                    // Opaque param: return param slot address (caller treats as pointer)
+                    emitter.emit_u32(aarch64::add_imm64(reg, aarch64::REG_SP, boff as u16));
                     return Ok(reg + 1);
                 }
                 match ctx.locals.get(local) {

@@ -956,7 +956,10 @@ fn lower_expr_stmt(
             } else if let syn::Expr::Field(f) = &*a.left {
                 out.push(Stmt::FieldAssign {
                     base: lower_expr_with_types(&f.base, local_types),
-                    name: f.member.to_token_stream().to_string(),
+                    name: match &f.member {
+                        syn::Member::Unnamed(idx) => format!("_{}", idx.index),
+                        _ => f.member.to_token_stream().to_string(),
+                    },
                     value: lower_expr_with_types(&a.right, local_types),
                 });
             }
@@ -1184,7 +1187,10 @@ fn lower_expr_with_types(expr: &syn::Expr, local_types: &mut HashMap<String, Str
         },
         syn::Expr::Field(ef) => Expr::Field {
             base: Box::new(lower_expr_with_types(&ef.base, local_types)),
-            name: ef.member.to_token_stream().to_string(),
+            name: match &ef.member {
+                syn::Member::Unnamed(idx) => format!("_{}", idx.index),
+                _ => ef.member.to_token_stream().to_string(),
+            },
         },
         syn::Expr::Index(index) => Expr::Index {
             base: Box::new(lower_expr_with_types(&index.expr, local_types)),
@@ -1205,7 +1211,10 @@ fn lower_expr_with_types(expr: &syn::Expr, local_types: &mut HashMap<String, Str
                 .iter()
                 .map(|f| {
                     (
-                        f.member.to_token_stream().to_string(),
+                        match &f.member {
+                            syn::Member::Unnamed(idx) => format!("_{}", idx.index),
+                            _ => f.member.to_token_stream().to_string(),
+                        },
                         lower_expr_with_types(&f.expr, local_types),
                     )
                 })
