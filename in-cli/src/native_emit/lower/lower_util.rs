@@ -197,7 +197,6 @@ pub(crate) fn native_param_abi_slots(
                 Ok(2)
             }
             Typ::Vector(_) => Ok(3),
-            Typ::Void => Ok(0),
             _ => Err(format!(
                 "native-lower: unsupported parameter type `{typ:?}` in `{fn_name}`"
             )),
