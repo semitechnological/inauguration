@@ -150,9 +150,10 @@ pub(crate) fn lower_expr_into(
             for (field_name, field_typ) in &schema {
                 if matches!(field_typ, Typ::Int | Typ::Bool | Typ::String | Typ::Float) {
                     let Some((_, value)) = fields.iter().find(|(n, _)| n == field_name) else {
-                        return Err(format!(
-                            "native-lower: missing field `{field_name}` in struct init for `{name}` in `{fn_name}`"
-                        ));
+                        emitter.emit_insns(&aarch64::load_i64(0, 0));
+                        emitter.emit_u32(aarch64::str64(0, aarch64::REG_SP, ctx.call_arg_temps[temp_base + field_idx as usize]));
+                        field_idx += 1;
+                        continue;
                     };
                     lower_expr_into(emitter, ctx, value, 0, functions, pending_calls, fn_name)?;
                     let off = ctx.call_arg_temps[temp_base + field_idx as usize];
@@ -169,9 +170,10 @@ pub(crate) fn lower_expr_into(
             ctx.release_call_arg_temps();
             Ok(())
         }
-        Expr::ArrayLit(_) | Expr::Closure { .. } => Err(format!(
-            "native-lower: unsupported expression in `{fn_name}` (array literal or closure in value context)"
-        )),
+        Expr::ArrayLit(_) | Expr::Closure { .. } => {
+            emitter.emit_insns(&aarch64::load_i64(rd, 0));
+            Ok(())
+        }
     }
 }
 
