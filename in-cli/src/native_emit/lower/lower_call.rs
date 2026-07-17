@@ -551,7 +551,10 @@ pub(crate) fn lower_struct_ptr_arg(
                 }
                 return Ok(reg + 1);
             }
-            _ => {}
+            _ => {
+                emitter.emit_insns(&aarch64::load_i64(reg, 0));
+                return Ok(reg + 1);
+            }
         }
     }
     // Handle IntLit(0) — null struct pointer (e.g. Library::open returns null on failure)
