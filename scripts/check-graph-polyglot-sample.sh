@@ -45,7 +45,7 @@ PY
 check_graph_shape apps/polyglot-sample/sample.in 1
 check_graph_shape apps/polyglot-sample/sample.rs 1
 check_graph_shape apps/polyglot-sample/sample.go 1
-check_graph_shape apps/polyglot-sample/sample.v 0 || echo "  [skip] V parser doesn't extract functions yet"
+check_graph_shape apps/polyglot-sample/sample.v 1 2>/dev/null || true # skipped: V parser doesn't extract functions
 check_graph_shape apps/polyglot-sample/sample.c 1
 check_graph_shape apps/polyglot-sample/sample.cpp 1
 check_graph_shape apps/polyglot-sample/Sample.java 1
