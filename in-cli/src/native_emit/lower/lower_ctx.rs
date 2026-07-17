@@ -518,6 +518,12 @@ impl<'a> LowerCtx<'a> {
                         },
                     );
                 }
+                Typ::Void => {
+                    let offset = ctx.alloc_slot();
+                    ctx.params.insert(name.clone(), offset);
+                    ctx.param_types.insert(name.clone(), Typ::Void);
+                    // Void param takes no register slots
+                }
                 _ => {
                     return Err(format!(
                         "native-lower: unsupported parameter type `{typ:?}` for `{name}` in `{fn_name}`"
