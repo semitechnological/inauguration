@@ -556,11 +556,11 @@ pub(crate) fn lower_binary(
         ctx.release_binop_temp();
     }
     let insn = match op {
-        "+" => aarch64::add_reg64(rd, lhs_reg, rhs_reg),
-        "-" => aarch64::sub_reg64(rd, lhs_reg, rhs_reg),
+        "+" | "+=" => aarch64::add_reg64(rd, lhs_reg, rhs_reg),
+        "-" | "-=" => aarch64::sub_reg64(rd, lhs_reg, rhs_reg),
         "*" | "*=" => aarch64::mul64(rd, lhs_reg, rhs_reg),
-        "+=" => aarch64::add_reg64(rd, lhs_reg, rhs_reg),
-        "/" => {
+
+        "/" | "/=" => {
             return lower_checked_div_or_mod(emitter, ctx, rd, lhs_reg, rhs_reg, false);
         }
         "%" => {

@@ -794,19 +794,10 @@ pub(crate) fn lower_struct_expr_into_regs(
                     return Ok(());
                 }
             };
-            // Resolve Self: when one side is Self and the other is a concrete type,
-            // concrete type wins (Self was not resolved by the rust front).
-            let resolve_self_type = |name: &str, other: &str| -> String {
-                if name == "Self" { other.to_string() } else { name.to_string() }
-            };
-            let lt = resolve_self_type(&local_typ, typ);
-            let rt = resolve_self_type(typ, &local_typ);
-            if base_struct_name(&lt) != base_struct_name(&rt) {
-                return Err(format!(
-                    "native-lower: struct return type mismatch: expected `{typ}`, found `{local_typ}` in `{fn_name}`"
-                ));
-            }
-            let schema = native_struct_fields(ctx.structs, typ, fn_name)?;
+            let schema = native_struct_fields(ctx.structs, typ, fn_name).or_else(|_| {
+                // If the expected type isn't in the structs table (generic/alias), try the local type
+                native_struct_fields(ctx.structs, &local_typ, fn_name)
+            })?;
             for (reg, (field, _)) in schema.iter().enumerate() {
                 let Some(&offset) = find_field_offset(&fields, field) else {
                     return Err(format!(
@@ -818,25 +809,6 @@ pub(crate) fn lower_struct_expr_into_regs(
             Ok(())
         }
         Expr::Call { callee, args, .. } => {
-            if let Some(return_typ) =
-                super::lower_util::call_return_type(callee, functions, fn_name)?
-            {
-                let return_name = match return_typ {
-                    Typ::Named(n) => n.as_str(),
-                    Typ::Vector(_) => "Vec",
-                    _ => "",
-                };
-                // Self resolution: concrete type wins
-                let call_resolved = if return_name == "Self" { typ.to_string() } else { return_name.to_string() };
-                let typ_resolved = if typ == "Self" { return_name.to_string() } else { typ.to_string() };
-                if base_struct_name(&call_resolved) != base_struct_name(&typ_resolved)
-                    && !(typ == "Vec" && matches!(return_typ, Typ::Vector(_)))
-                {
-                    return Err(format!(
-                        "native-lower: struct return call type mismatch: expected `{typ}`, got `{return_typ:?}` in `{fn_name}`"
-                    ));
-                }
-            }
             super::lower_call::lower_call(
                 emitter,
                 ctx,

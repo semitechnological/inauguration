@@ -43,11 +43,11 @@ pub(crate) use lower_ctx::{
     append_string_table,
 };
 pub(crate) use lower_iterator::lower_vec_for;
-pub(crate) use lower_stmt::lower_stmt;
+pub(crate) use lower_stmt::{lower_stmt, lower_struct_expr_into_regs};
 pub(crate) use lower_util::{
-    contains_call, emit_epilogue, emit_failure_return, ensure_return_type, expr_type,
-    find_field_offset, is_native_scalar_type, lower_comparison_result, native_param_abi_slots,
-    native_struct_fields, pick_scratch, reject_unsupported_function,
+    base_struct_name, contains_call, emit_epilogue, emit_failure_return, ensure_return_type,
+    expr_type, find_field_offset, is_native_scalar_type, lower_comparison_result,
+    native_param_abi_slots, native_struct_fields, pick_scratch, reject_unsupported_function,
 };
 
 pub const TARGET_TRIPLE: &str = "aarch64-apple-darwin";
@@ -676,16 +676,59 @@ fn lower_function(
         emitter.emit_u32(aarch64::ldr64(15, aarch64::REG_SP, incoming_off));
         emitter.emit_u32(aarch64::str64(15, aarch64::REG_SP, *local_off));
     }
-    for stmt in &func.body {
-        lower_stmt(
+    // Handle implicit return: last stmt is an Expr with multi-field struct init
+    let last_is_struct_init = func.body.last().map_or(false, |s| {
+        matches!(s, Stmt::Expr(Expr::StructInit { .. }))
+    });
+    if last_is_struct_init {
+        let last = func.body.last().unwrap();
+        let init_name = match last {
+            Stmt::Expr(Expr::StructInit { name, .. }) => name.clone(),
+            _ => unreachable!(),
+        };
+        let init_fields = match last {
+            Stmt::Expr(Expr::StructInit { fields, .. }) => fields.clone(),
+            _ => unreachable!(),
+        };
+        for stmt in &func.body[..func.body.len() - 1] {
+            lower_stmt(
+                emitter,
+                &mut ctx,
+                stmt,
+                functions,
+                pending_calls,
+                &func.name,
+                &func.ret,
+            )?;
+        }
+        let ret_name = match &func.ret {
+            Typ::Named(n) => n.clone(),
+            _ => init_name.clone(),
+        };
+        lower_struct_expr_into_regs(
             emitter,
             &mut ctx,
-            stmt,
+            &Expr::StructInit {
+                name: init_name,
+                fields: init_fields,
+            },
+            &ret_name,
             functions,
             pending_calls,
             &func.name,
-            &func.ret,
         )?;
+    } else {
+        for stmt in &func.body {
+            lower_stmt(
+                emitter,
+                &mut ctx,
+                stmt,
+                functions,
+                pending_calls,
+                &func.name,
+                &func.ret,
+            )?;
+        }
     }
     ctx.assert_vec_for_slots_consumed(&func.name)?;
 
@@ -875,12 +918,11 @@ fn max_aggregate_vector_literal_words(
         typ: &Typ,
         structs: &HashMap<String, Vec<(String, Typ)>>,
         fn_name: &str,
+        visited: &mut Vec<String>,
         depth: u32,
     ) -> Result<usize, String> {
-        if depth > 10 {
-            return Err(format!(
-                "native-lower: recursive struct type detected in `{fn_name}`"
-            ));
+        if depth > 40 {
+            return Ok(0);
         }
         match typ {
             Typ::Vector(element) => {
@@ -893,11 +935,17 @@ fn max_aggregate_vector_literal_words(
                     element,
                     structs,
                     fn_name,
+                    visited,
                     depth + 1,
                 )?);
                 Ok(max)
             }
             Typ::Named(name) => {
+                let base = base_struct_name(name);
+                if visited.iter().any(|v| v == base) {
+                    return Ok(0);
+                }
+                visited.push(base.to_string());
                 let fields = lower_util::native_struct_fields(structs, name, fn_name)?;
                 let mut max = 0;
                 for (_, field_typ) in fields {
@@ -905,13 +953,15 @@ fn max_aggregate_vector_literal_words(
                         &field_typ,
                         structs,
                         fn_name,
+                        visited,
                         depth + 1,
                     )?);
                 }
+                visited.pop();
                 Ok(max)
             }
             Typ::Array(element) => {
-                max_nested_vector_element_words(element, structs, fn_name, depth + 1)
+                max_nested_vector_element_words(element, structs, fn_name, visited, depth + 1)
             }
             _ => Ok(0),
         }
@@ -931,10 +981,12 @@ fn max_aggregate_vector_literal_words(
                         fn_name,
                     )?;
                     *max = (*max).max(words);
+                    let mut visited = Vec::new();
                     *max = (*max).max(max_nested_vector_element_words(
                         &Typ::Named(name.clone()),
                         structs,
                         fn_name,
+                        &mut visited,
                         0,
                     )?);
                 }
@@ -973,10 +1025,12 @@ fn max_aggregate_vector_literal_words(
                             fn_name,
                         )?;
                         *max = (*max).max(words);
+                        let mut visited = Vec::new();
                         *max = (*max).max(max_nested_vector_element_words(
                             &Typ::Named(name.clone()),
                             structs,
                             fn_name,
+                            &mut visited,
                             0,
                         )?);
                     }
