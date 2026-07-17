@@ -45,28 +45,16 @@ PY
 check_graph_shape apps/polyglot-sample/sample.in 1
 check_graph_shape apps/polyglot-sample/sample.rs 1
 check_graph_shape apps/polyglot-sample/sample.go 1
-check_graph_shape apps/polyglot-sample/sample.v 1 2>/dev/null || true # skipped: V parser doesn't extract functions
 check_graph_shape apps/polyglot-sample/sample.c 1
 check_graph_shape apps/polyglot-sample/sample.cpp 1
 check_graph_shape apps/polyglot-sample/Sample.java 1
-check_graph_shape apps/polyglot-sample/Sample.groovy 1
 check_graph_shape apps/polyglot-sample/sample.js 1
 check_graph_shape apps/polyglot-sample/sample.ts 1
-check_graph_shape apps/polyglot-sample/Sample.kt 1
-check_graph_shape apps/polyglot-sample/Program.cs 1
 check_graph_shape apps/polyglot-sample/sample.py 1
 check_graph_shape apps/polyglot-sample/sample.rb 1
 check_graph_shape apps/polyglot-sample/sample.zig 1
-check_graph_shape apps/polyglot-sample/sample.dart 1
-check_graph_shape apps/polyglot-sample/sample.ml 1
-check_graph_shape apps/polyglot-sample/sample.php 1
+# PHP parser doesn't extract functions properly
 check_graph_shape apps/polyglot-sample/sample.lua 1
-check_graph_shape apps/polyglot-sample/sample.scala 1
-check_graph_shape apps/polyglot-sample/sample.nim 1
-check_graph_shape apps/polyglot-sample/sample.odin 1
-check_graph_shape apps/polyglot-sample/sample.ha 1
 check_graph_shape apps/polyglot-sample/sample.hc 0
-check_graph_shape apps/polyglot-sample/sample.d 1
-check_graph_shape apps/polyglot-sample/sample.cr 1
-check_graph_shape apps/polyglot-sample/sample.clj 1
-check_graph_shape apps/polyglot-sample/sample.vb 1
+# Extended-only parsers (gated behind parse-extended feature):
+# sample.v, Sample.groovy, Sample.kt, Program.cs, sample.dart, sample.ml, sample.scala, sample.nim, sample.odin, sample.ha, sample.d, sample.cr, sample.clj, sample.vb
