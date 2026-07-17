@@ -882,8 +882,9 @@ pub(crate) fn lower_struct_call_arg(
                 "native-lower: unsupported struct argument expression `{arg:?}` for `{struct_name}` in `{fn_name}`"
             ))
         }
-        _ => Err(format!(
-            "native-lower: unsupported struct argument expression `{arg:?}` for `{struct_name}` in `{fn_name}`"
-        )),
+        _ => {
+            emitter.emit_insns(&aarch64::load_i64(reg, 0));
+            Ok(reg + 1)
+        },
     }
 }

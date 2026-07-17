@@ -299,9 +299,8 @@ fn alloc_nested_struct_slots_inner(
                 }
             }
             _ => {
-                return Err(format!(
-                    "native-lower: unsupported field type in struct `{struct_name}` field `{field}` for `{fn_name}`"
-                ));
+                // Unknown field type: allocate as opaque scalar slot
+                slots.insert(field.clone(), ctx.alloc_slot());
             }
         }
     }
@@ -348,9 +347,7 @@ pub(crate) fn alloc_local_struct_fields(
                 }
             }
             _ => {
-                return Err(format!(
-                    "native-lower: unsupported field type in `{struct_name}.{field}` for `{fn_name}`"
-                ));
+                slots.insert(field.clone(), ctx.alloc_slot());
             }
         }
     }
