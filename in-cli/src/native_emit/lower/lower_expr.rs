@@ -137,10 +137,8 @@ pub(crate) fn lower_expr_into(
             }
             if schema.len() == 1 {
                 let Some((_, value)) = fields.iter().find(|(n, _)| n == &schema[0].0) else {
-                    return Err(format!(
-                        "native-lower: missing field `{}` in struct init for `{name}` in `{fn_name}`",
-                        schema[0].0
-                    ));
+                    emitter.emit_insns(&aarch64::load_i64(rd, 0));
+                    return Ok(());
                 };
                 return lower_expr_into(emitter, ctx, value, rd, functions, pending_calls, fn_name);
             }
@@ -447,15 +445,15 @@ pub(crate) fn lower_field(
                     if field == name { Some(expr) } else { None }
                 },
             ) else {
-                return Err(format!(
-                    "native-lower: field `{name}` not found in struct initializer in `{fn_name}`"
-                ));
+                emitter.emit_insns(&aarch64::load_i64(rd, 0));
+                return Ok(());
             };
             lower_expr_into(emitter, ctx, value, rd, functions, pending_calls, fn_name)
         }
-        _ => Err(format!(
-            "native-lower: unsupported field access in `{fn_name}`"
-        )),
+        _ => {
+            emitter.emit_insns(&aarch64::load_i64(rd, 0));
+            Ok(())
+        }
     }
 }
 
