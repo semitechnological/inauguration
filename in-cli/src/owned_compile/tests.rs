@@ -850,7 +850,8 @@ fn resolve_jit_entry_no_match_falls_through() {
         body: vec![],
         type_params: vec![],
     }]);
-    assert_eq!(resolve_jit_entry(&module, "main"), "main");
+    // Falls through to first non-closure function for library mode
+    assert_eq!(resolve_jit_entry(&module, "main"), "other");
 }
 
 #[test]
@@ -884,5 +885,6 @@ fn resolve_jit_entry_non_dot_suffix_not_matched() {
         body: vec![],
         type_params: vec![],
     }]);
-    assert_eq!(resolve_jit_entry(&module, "main"), "main");
+    // Falls through to first non-closure function for library mode
+    assert_eq!(resolve_jit_entry(&module, "main"), "also_main");
 }

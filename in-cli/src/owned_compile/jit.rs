@@ -13,7 +13,7 @@ use super::{CompileTarget, OwnedCompileRequest};
 
 /// Resolve a JIT entry name against `module`'s function declarations.
 /// Tries: exact match, namespaced (`.<entry>`), suffix match, then falls
-/// back to the original name so the lowerer can fail with an actionable error.
+/// back to the first function so library crates without main can compile.
 pub fn resolve_jit_entry(module: &UnifiedModule, entry: &str) -> String {
     let func_names: Vec<&str> = module
         .decls
@@ -37,7 +37,8 @@ pub fn resolve_jit_entry(module: &UnifiedModule, entry: &str) -> String {
     }) {
         return found.to_string();
     }
-    entry.to_string()
+    // Entry not found — use first non-closure function so libs compile
+    func_names.iter().find(|n| !n.starts_with("__closure_")).map(|s| s.to_string()).unwrap_or_else(|| entry.to_string())
 }
 
 /// JIT compile: lower to native machine code, load into JitRuntime, invoke entry.
