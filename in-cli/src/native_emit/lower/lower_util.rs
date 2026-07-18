@@ -245,9 +245,9 @@ pub(crate) fn native_struct_fields(
         Ok(fields) => fields,
         Err(_) => return Ok(vec![]),
     };
-    if cleaned.len() > 8 {
+    if cleaned.len() > 32 {
         return Err(format!(
-            "native-lower: struct `{typ}` has too many fields (>8) in `{fn_name}`"
+            "native-lower: struct `{typ}` has too many fields (>32) in `{fn_name}`"
         ));
     }
     Ok(cleaned)

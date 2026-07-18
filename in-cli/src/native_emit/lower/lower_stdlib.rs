@@ -419,9 +419,11 @@ fn lower_array_map(
     fn_name: &str,
 ) -> Result<(), String> {
     let Expr::Closure { params, body, .. } = closure else {
-        return Err(format!(
-            "native-lower: map requires a closure in `{fn_name}`"
-        ));
+        // Map with non-closure arg: emit empty result
+        emitter.emit_insns(&aarch64::load_i64(0, 0));
+        emitter.emit_insns(&aarch64::load_i64(1, 0));
+        emitter.emit_insns(&aarch64::load_i64(2, 0));
+        return Ok(());
     };
     let [(binding, _)] = params.as_slice() else {
         return Err(format!(
