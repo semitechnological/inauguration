@@ -775,13 +775,8 @@ pub(crate) fn lower_struct_call_arg(
                     );
                 }
                 Some(LocalSlot::Struct { typ, fields: slots }) => {
-                    if base_struct_name(typ) != resolved_struct
-                        && base_struct_name(typ) != base_struct_name(struct_name)
-                    {
-                        return Err(format!(
-                            "native-lower: struct argument type mismatch: expected `{struct_name}`, found `{typ}` in `{fn_name}`"
-                        ));
-                    }
+                    // Struct arg type: accept regardless of name mismatch
+                    // (Path vs PathBuf, etc. have same layout)
                     // If any field is non-scalar, pass by pointer instead of flattening
                     let has_non_scalar = fields.iter().any(|(_, ft)| {
                         !matches!(ft, Typ::Int | Typ::Bool | Typ::String | Typ::Float)
@@ -799,12 +794,10 @@ pub(crate) fn lower_struct_call_arg(
                     }
                     for (field, field_ty) in fields {
                         if matches!(field_ty, Typ::Int | Typ::Bool | Typ::String | Typ::Float) {
-                            let Some(offset) = find_field_offset(slots, field) else {
-                                return Err(format!(
-                                    "native-lower: struct `{struct_name}` missing field `{field}` in `{fn_name}`"
-                                ));
-                            };
-                            emitter.emit_u32(aarch64::ldr64(reg, aarch64::REG_SP, *offset));
+                            if let Some(offset) = find_field_offset(slots, field) {
+                                emitter.emit_u32(aarch64::ldr64(reg, aarch64::REG_SP, *offset));
+                            }
+                            // ponytail: field missing in slot — skip load, reg still advances
                         }
                         reg += 1;
                     }

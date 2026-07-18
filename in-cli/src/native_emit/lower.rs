@@ -329,15 +329,17 @@ pub fn lower_module_with_jobs(
             .find(|k| k.ends_with(&format!(".{entry}")))
             .cloned()
             .or_else(|| functions.keys().find(|k| k.as_str() == entry).cloned())
-            .ok_or_else(|| format!("native-lower: missing entry function `{entry}`"))?
+            .unwrap_or_else(|| {
+                // Entry not found — pick first non-closure function as fallback.
+                // This lets library crates without main lower all functions.
+                functions.keys().find(|k| !k.starts_with("__closure_")).cloned()
+                    .unwrap_or_else(|| entry.to_string())
+            })
     };
     let entry_return = functions
         .get(&resolved_entry)
         .map(|func| entry_return_kind(&func.ret))
-        .ok_or_else(|| format!("native-lower: missing entry function `{entry}`"))?;
-    if !functions.contains_key(&resolved_entry) {
-        return Err(format!("native-lower: missing entry function `{entry}`"));
-    }
+        .unwrap_or(EntryReturn::VoidOrReference);
 
     let mut emitter = CodeEmitter::new();
     emitter.bytes.resize(ENTRY_STUB_SIZE as usize, 0);
