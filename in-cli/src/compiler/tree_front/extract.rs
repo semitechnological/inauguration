@@ -534,10 +534,12 @@ fn parse_lang(
         .parse(src, None)
         .ok_or_else(|| "Tree-sitter parse returned None".to_string())?;
     let root = tree.root_node();
-    if root.has_error() {
-        return Err("Tree-sitter parse tree contains syntax errors".into());
+    let extracted = extract(src.as_bytes(), root)?;
+    let has_errors = root.has_error();
+    if has_errors && extracted.is_empty() {
+        return Err("Tree-sitter parse tree contains syntax errors (zero functions extracted)".into());
     }
-    let decls = dedup_fns(extract(src.as_bytes(), root)?);
+    let decls = dedup_fns(extracted);
     if decls.is_empty() {
         return Err(
             "parsed successfully but extracted zero functions — file may contain only types/data"
