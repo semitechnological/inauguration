@@ -56,13 +56,6 @@ pub fn arm32_return_i32_object_code(value: u8) -> Vec<u8> {
     code
 }
 
-/// Thumb-2 freestanding stub: `movs r0, #imm; bx lr`.
-pub fn thumb_return_i32_object_code(value: u8) -> Vec<u8> {
-    let mut code = Vec::new();
-    code.extend_from_slice(&(0x2000u16 | u16::from(value)).to_le_bytes());
-    code.extend_from_slice(&0x4770u16.to_le_bytes());
-    code
-}
 
 pub fn x86_64_linux_exit_code(status: u8) -> Vec<u8> {
     vec![

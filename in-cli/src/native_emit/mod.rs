@@ -11,6 +11,8 @@ pub mod object;
 pub mod raw;
 pub mod sci;
 pub mod target;
+pub mod thumb;
+pub mod thumb_lower;
 pub mod uf2;
 pub mod wasm;
 pub mod x86_64;
@@ -23,6 +25,7 @@ pub use elf::{
     x86_64_linux_exit_code, x86_64_return_i32_object_code,
 };
 pub use linker_layout::{LinkerLayout, MemoryRegion};
+pub use thumb_lower::{THUMB_TRIPLE, ThumbCompileResult, lower_module as lower_thumb_module};
 pub use uf2::{Uf2Options, UF2_FAMILY_RP2350_ARM_S, encode_uf2, write_uf2};
 pub use lower::{
     NativeLinkage, TARGET_TRIPLE, compile_native_artifact, compile_native_artifact_for_host,

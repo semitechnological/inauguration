@@ -6,11 +6,12 @@ use crate::native_emit::coff::{COFF_WINDOWS_TRIPLE, write_exit_process_exe};
 use crate::native_emit::elf::{
     AARCH64_LINUX_TRIPLE, ARMV7_LINUX_GNUEABIHF_TRIPLE, ELF_LINUX_TRIPLE, ElfExecutable, ElfObject,
     THUMBV8M_MAIN_NONE_EABI_TRIPLE, aarch64_linux_exit_code, aarch64_return_i32_object_code,
-    arm32_linux_exit_code, arm32_return_i32_object_code, thumb_return_i32_object_code,
-    write_aarch64_executable, write_aarch64_relocatable_object, write_arm32_executable,
-    write_arm32_relocatable_object, write_executable, write_i386_relocatable_object,
-    write_x86_64_relocatable_object, x86_64_linux_exit_code, x86_64_return_i32_object_code,
+    arm32_linux_exit_code, arm32_return_i32_object_code, write_aarch64_executable,
+    write_aarch64_relocatable_object, write_arm32_executable, write_arm32_relocatable_object,
+    write_executable, write_i386_relocatable_object, write_x86_64_relocatable_object,
+    x86_64_linux_exit_code, x86_64_return_i32_object_code,
 };
+use crate::native_emit::thumb_lower;
 use crate::native_emit::macho::{ExportSymbol, MachOImage, MachOLinkage, write_image};
 use crate::native_emit::target::AARCH64_NONE_TRIPLE;
 use crate::native_emit::wasm::{WASM32_UNKNOWN_TRIPLE, WasmModule, write_scalar_i32_module};
@@ -68,32 +69,41 @@ pub fn emit_native_object(request: &NativeObjectRequest<'_>) -> Option<NativeObj
             Some(emit_aarch64_freestanding_object(request))
         }
         (THUMBV8M_MAIN_NONE_EABI_TRIPLE, NativeLinkage::StaticLib) => {
-            Some(emit_thumbv8m_freestanding_object(request))
+            match emit_thumbv8m_freestanding_object(request) {
+                Ok(artifact) => Some(artifact),
+                Err(_) => None,
+            }
         }
         _ => None,
     }
 }
 
-fn emit_thumbv8m_freestanding_object(request: &NativeObjectRequest<'_>) -> NativeObjectArtifact {
-    // Const-evaluable scalar subset only: Thumb-2 return stub + ELF32 EM_ARM.
-    // Full Cortex-M lowering lands after ABI/layout fixtures stabilize.
+fn emit_thumbv8m_freestanding_object(
+    request: &NativeObjectRequest<'_>,
+) -> Result<NativeObjectArtifact, String> {
+    let result = thumb_lower::lower_module(request.module, request.entry)?;
     let object = ElfObject {
-        code: thumb_return_i32_object_code(request.exit_code),
+        code: result.code,
         export_name: request.entry.to_string(),
-        exports: vec![],
-        undefs: vec![],
+        exports: result
+            .exports
+            .into_iter()
+            .filter(|(name, off)| name != request.entry || *off != 0)
+            .map(|(name, off)| (name, off))
+            .collect(),
+        undefs: result.externs,
     };
     let mut bytes = Vec::new();
     write_arm32_relocatable_object(&object, &mut bytes);
-    NativeObjectArtifact {
+    Ok(NativeObjectArtifact {
         bytes,
         artifact_kind: "elf32-relocatable-object",
-        backend_level: "owned-object-subset-freestanding",
+        backend_level: "owned-native-subset-freestanding-thumb",
         runtime_level: "freestanding-none",
         reason_code: "native-thumbv8m-main-none-eabi-freestanding",
-        reason: "inauguration owns ELF32 Thumb freestanding object emission for const-evaluable scalar entry functions on thumbv8m.main-none-eabi",
+        reason: "inauguration owns ELF32 Thumb-2 freestanding object emission with real Core IR lowering for the owned scalar subset on thumbv8m.main-none-eabi",
         abi_manifest: Some(object_abi_manifest(request)),
-    }
+    })
 }
 
 fn emit_x86_64_pe_executable(request: &NativeObjectRequest<'_>) -> NativeObjectArtifact {
@@ -624,7 +634,13 @@ mod tests {
 
     #[test]
     fn dispatches_thumbv8m_freestanding_object() {
-        let module = UnifiedModule::new(Vec::new());
+        let module = crate::in_lang_parse::parse_in_source(
+            r#"
+fn answer() -> Int { return 42 }
+fn main() -> void { return }
+"#,
+        )
+        .expect("parse");
         let request = NativeObjectRequest {
             target_triple: THUMBV8M_MAIN_NONE_EABI_TRIPLE,
             linkage: NativeLinkage::StaticLib,
@@ -640,11 +656,29 @@ mod tests {
             artifact.reason_code,
             "native-thumbv8m-main-none-eabi-freestanding"
         );
+        assert_eq!(artifact.backend_level, "owned-native-subset-freestanding-thumb");
         assert_eq!(artifact.bytes[4], 1);
         assert_eq!(
             u16::from_le_bytes([artifact.bytes[18], artifact.bytes[19]]),
             40
         );
         assert!(artifact.bytes.windows(6).any(|w| w == b"answer"));
+        // Real lowering must emit movs r0,#42 (0x202A) somewhere in .text
+        assert!(artifact.bytes.windows(2).any(|w| w == [0x2A, 0x20]));
+    }
+
+    #[test]
+    fn thumbv8m_empty_module_fails_closed() {
+        let module = UnifiedModule::new(Vec::new());
+        let request = NativeObjectRequest {
+            target_triple: THUMBV8M_MAIN_NONE_EABI_TRIPLE,
+            linkage: NativeLinkage::StaticLib,
+            entry: "answer",
+            exit_code: 42,
+            module: &module,
+            module_id: "App",
+            base: None,
+        };
+        assert!(emit_native_object(&request).is_none());
     }
 }
