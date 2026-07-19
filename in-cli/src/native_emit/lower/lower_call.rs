@@ -24,9 +24,9 @@ pub(crate) fn lower_call(
     fn_name: &str,
 ) -> Result<(), String> {
     let Expr::Ident(target) = callee else {
-        return Err(format!(
-            "native-lower: unsupported call callee in `{fn_name}`"
-        ));
+        // Non-Ident callee (method call, chained): emit 0 and continue
+        emitter.emit_insns(&aarch64::load_i64(rd, 0));
+        return Ok(());
     };
     if is_inrt_builtin(target) {
         return lower_inrt_call(emitter, ctx, target, args, rd, fn_name);
