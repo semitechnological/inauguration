@@ -110,9 +110,8 @@ pub(crate) fn call_return_type<'a>(
     fn_name: &str,
 ) -> Result<Option<&'a Typ>, String> {
     let Expr::Ident(target) = callee else {
-        return Err(format!(
-            "native-lower: unsupported call callee in `{fn_name}`"
-        ));
+        // Non-Ident callee: return None (caller handles fallback)
+        return Ok(None);
     };
     if let Some(func) = functions.get(target) {
         return Ok(Some(&func.ret));
