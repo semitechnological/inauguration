@@ -774,7 +774,7 @@ pub(crate) fn lower_struct_call_arg(
                         fn_name,
                     );
                 }
-                Some(LocalSlot::Struct { typ, fields: slots }) => {
+                Some(LocalSlot::Struct { typ: _, fields: slots }) => {
                     // Struct arg type: accept regardless of name mismatch
                     // (Path vs PathBuf, etc. have same layout)
                     // If any field is non-scalar, pass by pointer instead of flattening
