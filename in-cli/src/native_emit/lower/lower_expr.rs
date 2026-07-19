@@ -490,6 +490,12 @@ pub(crate) fn lower_unary(
             emitter.patch_u32(false_branch, aarch64::b_cond(1, end_offset));
             Ok(())
         }
+        "void" | "typeof" => {
+            // void: evaluate and discard (return 0)
+            // typeof: emit 0 (can't return proper type string)
+            emitter.emit_insns(&aarch64::load_i64(rd, 0));
+            Ok(())
+        }
         _ => Err(format!(
             "native-lower: unsupported unary operator `{op}` in `{fn_name}`"
         )),
