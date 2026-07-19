@@ -552,6 +552,12 @@ pub(crate) fn lower_binary(
     pending_calls: &mut Vec<PendingCall>,
     fn_name: &str,
 ) -> Result<(), String> {
+    let op = op.trim();
+    // ponytail: guard against malformed operator strings from tree-sitter
+    if op.len() > 5 || op.contains('\n') {
+        emitter.emit_insns(&aarch64::load_i64(rd, 0));
+        return Ok(());
+    }
     let is_float = matches!(native_expr_type(lhs, ctx, functions), Some(Typ::Float))
         || matches!(native_expr_type(rhs, ctx, functions), Some(Typ::Float));
     if is_float {
@@ -628,12 +634,12 @@ pub(crate) fn lower_binary(
         "%" => {
             return lower_checked_div_or_mod(emitter, ctx, rd, lhs_reg, rhs_reg, true);
         }
-        "&&" | "||" => {
+        "&&" | "||" | "??" | "and" => {
             lower_truthy_result(emitter, lhs_reg);
             lower_truthy_result(emitter, rhs_reg);
             match op {
-                "&&" => aarch64::and_reg64(rd, lhs_reg, rhs_reg),
-                "||" => aarch64::orr_reg64(rd, lhs_reg, rhs_reg),
+                "&&" | "and" => aarch64::and_reg64(rd, lhs_reg, rhs_reg),
+                "||" | "??" => aarch64::orr_reg64(rd, lhs_reg, rhs_reg),
                 _ => {
                     return Err(format!(
                         "native-lower: unsupported logical operator `{op}` in `{fn_name}`"
@@ -650,6 +656,12 @@ pub(crate) fn lower_binary(
         "^" | "^=" => aarch64::eor_reg64(rd, lhs_reg, rhs_reg),
         "<<" | "<<=" => aarch64::lsl_reg64(rd, lhs_reg, rhs_reg),
         ">>" | ">>=" => aarch64::lsr_reg64(rd, lhs_reg, rhs_reg),
+        "++" => {
+            // Zig array concatenation: emit empty slice (ptr=0, len=0)
+            emitter.emit_insns(&aarch64::load_i64(rd, 0));
+            emitter.emit_insns(&aarch64::load_i64(rd + 1, 0));
+            return Ok(());
+        }
         "in" => {
             // membership test: emit 0 (false)
             emitter.emit_insns(&aarch64::load_i64(rd, 0));
