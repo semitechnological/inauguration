@@ -84,6 +84,17 @@ const ARM32_ELF_LINUX_TARGET: NativeEmitTargetStatus = NativeEmitTargetStatus {
     artifact_kind: "elf32-relocatable-object+elf32-executable",
 };
 
+pub const THUMBV8M_MAIN_NONE_EABI_TRIPLE: &str = "thumbv8m.main-none-eabi";
+
+const THUMBV8M_FREESTANDING_TARGET: NativeEmitTargetStatus = NativeEmitTargetStatus {
+    triple: THUMBV8M_MAIN_NONE_EABI_TRIPLE,
+    format: "elf",
+    implemented: true,
+    stage: "owned-object-subset-freestanding",
+    reason_code: NATIVE_EMIT_IMPLEMENTED,
+    artifact_kind: "elf32-relocatable-object+raw+uf2",
+};
+
 const X86_64_WINDOWS_TARGET: NativeEmitTargetStatus = NativeEmitTargetStatus {
     triple: "x86_64-pc-windows-msvc",
     format: "pe",
@@ -147,6 +158,7 @@ const NATIVE_EMIT_TARGETS: &[NativeEmitTargetStatus] = &[
     I386_FREESTANDING_TARGET,
     I686_FREESTANDING_TARGET,
     AARCH64_NONE_TARGET,
+    THUMBV8M_FREESTANDING_TARGET,
     ELF_LINUX_TARGET,
     AARCH64_ELF_LINUX_TARGET,
     ARM32_ELF_LINUX_TARGET,
@@ -205,7 +217,7 @@ mod tests {
     #[test]
     fn registry_lists_macho_and_elf_targets() {
         let targets = all_native_emit_targets();
-        assert_eq!(targets.len(), 11);
+        assert_eq!(targets.len(), 12);
         assert_eq!(targets[0].format, "mach-o");
         assert_eq!(targets[1].artifact_kind, "mach-o-static-archive+app-bundle");
         assert_eq!(targets[2].triple, "x86_64-unknown-none");
@@ -214,13 +226,15 @@ mod tests {
         assert_eq!(targets[4].triple, "i686-unknown-none");
         assert_eq!(targets[5].triple, "aarch64-unknown-none");
         assert_eq!(targets[5].format, "elf");
-        assert_eq!(targets[6].triple, "x86_64-unknown-linux-gnu");
-        assert_eq!(targets[6].format, "elf");
-        assert_eq!(targets[7].triple, "aarch64-unknown-linux-gnu");
-        assert_eq!(targets[8].triple, "armv7-unknown-linux-gnueabihf");
-        assert_eq!(targets[9].triple, "x86_64-pc-windows-msvc");
-        assert_eq!(targets[10].triple, "wasm32-unknown-unknown");
-        assert_eq!(targets[10].format, "wasm");
+        assert_eq!(targets[6].triple, "thumbv8m.main-none-eabi");
+        assert_eq!(targets[6].artifact_kind, "elf32-relocatable-object+raw+uf2");
+        assert_eq!(targets[7].triple, "x86_64-unknown-linux-gnu");
+        assert_eq!(targets[7].format, "elf");
+        assert_eq!(targets[8].triple, "aarch64-unknown-linux-gnu");
+        assert_eq!(targets[9].triple, "armv7-unknown-linux-gnueabihf");
+        assert_eq!(targets[10].triple, "x86_64-pc-windows-msvc");
+        assert_eq!(targets[11].triple, "wasm32-unknown-unknown");
+        assert_eq!(targets[11].format, "wasm");
     }
 
     #[test]

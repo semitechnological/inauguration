@@ -415,6 +415,8 @@ fn build_target_registry() -> Vec<TargetSpec> {
                 "inauguration owns PE32+ .exe emission for const-evaluable scalar entry functions on this target"
             } else if target == "armv7-unknown-linux-gnueabihf" {
                 "inauguration owns ELF32 ARM relocatable object emission for const-evaluable scalar entry functions on this target"
+            } else if target == "thumbv8m.main-none-eabi" {
+                "inauguration owns ELF32 Thumb freestanding object emission for const-evaluable scalar entry functions on this target"
             } else if target == "wasm32-unknown-unknown" {
                 "inauguration owns WebAssembly module emission for const-evaluable scalar entry functions on this target"
             } else {
@@ -431,6 +433,8 @@ fn build_target_registry() -> Vec<TargetSpec> {
                 "pe-executable"
             } else if target == "armv7-unknown-linux-gnueabihf" {
                 "elf32-relocatable-object"
+            } else if target == "thumbv8m.main-none-eabi" {
+                "elf32-relocatable-object+raw+uf2"
             } else if target == "wasm32-unknown-unknown" {
                 "wasm-module"
             } else {
@@ -450,6 +454,7 @@ fn implemented_target(target: &str) -> bool {
             | "aarch64-unknown-linux-gnu"
             | "aarch64-apple-darwin"
             | "armv7-unknown-linux-gnueabihf"
+            | "thumbv8m.main-none-eabi"
             | "x86_64-pc-windows-msvc"
             | "wasm32-unknown-unknown"
     )
@@ -477,6 +482,7 @@ mod tests {
             "aarch64-apple-darwin",
             "aarch64-unknown-linux-gnu",
             "armv7-unknown-linux-gnueabihf",
+            "thumbv8m.main-none-eabi",
             "x86_64-pc-windows-msvc",
             "wasm32-unknown-unknown",
             "riscv64gc-unknown-none-elf",
@@ -515,6 +521,13 @@ mod tests {
                 assert!(spec.implemented, "{target}");
                 assert_eq!(spec.stage, "owned-object-subset");
                 assert_eq!(spec.artifact_kind, "elf32-relocatable-object");
+                assert!(spec.backend_artifact_supported);
+                continue;
+            }
+            if target == "thumbv8m.main-none-eabi" {
+                assert!(spec.implemented, "{target}");
+                assert_eq!(spec.stage, "owned-object-subset");
+                assert_eq!(spec.artifact_kind, "elf32-relocatable-object+raw+uf2");
                 assert!(spec.backend_artifact_supported);
                 continue;
             }

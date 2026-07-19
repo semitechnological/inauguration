@@ -21,6 +21,7 @@ const PAGE_SIZE: u64 = 0x1000;
 pub const ELF_LINUX_TRIPLE: &str = "x86_64-unknown-linux-gnu";
 pub const AARCH64_LINUX_TRIPLE: &str = "aarch64-unknown-linux-gnu";
 pub const ARMV7_LINUX_GNUEABIHF_TRIPLE: &str = "armv7-unknown-linux-gnueabihf";
+pub const THUMBV8M_MAIN_NONE_EABI_TRIPLE: &str = "thumbv8m.main-none-eabi";
 
 pub struct ElfExecutable {
     pub code: Vec<u8>,
@@ -52,6 +53,14 @@ pub fn arm32_return_i32_object_code(value: u8) -> Vec<u8> {
     let mut code = Vec::new();
     code.extend_from_slice(&(0xE3A0_0000u32 | value as u32).to_le_bytes());
     code.extend_from_slice(&0xE12F_FF1Eu32.to_le_bytes());
+    code
+}
+
+/// Thumb-2 freestanding stub: `movs r0, #imm; bx lr`.
+pub fn thumb_return_i32_object_code(value: u8) -> Vec<u8> {
+    let mut code = Vec::new();
+    code.extend_from_slice(&(0x2000u16 | u16::from(value)).to_le_bytes());
+    code.extend_from_slice(&0x4770u16.to_le_bytes());
     code
 }
 

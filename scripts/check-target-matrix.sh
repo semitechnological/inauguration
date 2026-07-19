@@ -24,6 +24,7 @@ for triple in [
     "aarch64-apple-darwin",
     "aarch64-unknown-linux-gnu",
     "armv7-unknown-linux-gnueabihf",
+    "thumbv8m.main-none-eabi",
     "x86_64-pc-windows-msvc",
     "wasm32-unknown-unknown",
     "riscv64gc-unknown-none-elf",
@@ -293,5 +294,33 @@ if b"answer" not in data:
     raise SystemExit("wasm32 module missing answer export")
 if report.get("reason_code") != "native-object-subset":
     raise SystemExit("wasm32 module report has wrong reason_code")
+PY
+env in compile \
+  --path "$tmpdir/object.in" \
+  --target native \
+  --target-triple thumbv8m.main-none-eabi \
+  --linkage static-lib \
+  --entry answer \
+  --out "$tmpdir/thumbv8m.o" \
+  --json > "$tmpdir/thumbv8m.json"
+python3 - "$tmpdir/thumbv8m.o" "$tmpdir/thumbv8m.json" <<'PY'
+from pathlib import Path
+import json
+import sys
+data = Path(sys.argv[1]).read_bytes()
+report = json.loads(Path(sys.argv[2]).read_text())
+if data[:4] != b"\x7fELF":
+    raise SystemExit("thumbv8m object missing ELF magic")
+if data[4] != 1:
+    raise SystemExit("thumbv8m object is not ELFCLASS32")
+if int.from_bytes(data[16:18], "little") != 1:
+    raise SystemExit("thumbv8m object is not ET_REL")
+if int.from_bytes(data[18:20], "little") != 40:
+    raise SystemExit("thumbv8m object is not EM_ARM")
+for needle in [b".text", b".symtab", b".strtab", b".shstrtab", b"answer"]:
+    if needle not in data:
+        raise SystemExit(f"thumbv8m object missing {needle!r}")
+if report.get("reason_code") != "native-thumbv8m-main-none-eabi-freestanding":
+    raise SystemExit("thumbv8m object report has wrong reason_code")
 PY
 echo "target-matrix checks passed"
