@@ -650,6 +650,11 @@ pub(crate) fn lower_binary(
         "^" | "^=" => aarch64::eor_reg64(rd, lhs_reg, rhs_reg),
         "<<" | "<<=" => aarch64::lsl_reg64(rd, lhs_reg, rhs_reg),
         ">>" | ">>=" => aarch64::lsr_reg64(rd, lhs_reg, rhs_reg),
+        "in" => {
+            // membership test: emit 0 (false)
+            emitter.emit_insns(&aarch64::load_i64(rd, 0));
+            return Ok(());
+        }
         _ => {
             return Err(format!(
                 "native-lower: unsupported binary operator `{op}` in `{fn_name}`"
