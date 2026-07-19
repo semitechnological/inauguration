@@ -635,7 +635,7 @@ pub(crate) fn lower_binary(
                 }
             }
         }
-        "==" | "!=" | "<" | ">" | "<=" | ">=" => {
+        "==" | "!=" | "===" | "!==" | "<" | ">" | "<=" | ">=" => {
             emitter.emit_u32(aarch64::cmp_reg64(lhs_reg, rhs_reg));
             return lower_comparison_result(emitter, rd, op);
         }

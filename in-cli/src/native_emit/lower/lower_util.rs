@@ -52,8 +52,8 @@ pub(crate) fn lower_comparison_result(
     op: &str,
 ) -> Result<(), String> {
     let cond = match op {
-        "==" => 0,
-        "!=" => 1,
+        "==" | "===" => 0,
+        "!=" | "!==" => 1,
         "<" => 11,
         ">" => 12,
         "<=" => 13,
