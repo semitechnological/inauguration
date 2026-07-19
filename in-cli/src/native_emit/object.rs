@@ -5,11 +5,11 @@ use crate::native_emit::NativeLinkage;
 use crate::native_emit::coff::{COFF_WINDOWS_TRIPLE, write_exit_process_exe};
 use crate::native_emit::elf::{
     AARCH64_LINUX_TRIPLE, ARMV7_LINUX_GNUEABIHF_TRIPLE, ELF_LINUX_TRIPLE, ElfExecutable, ElfObject,
-    aarch64_linux_exit_code, aarch64_return_i32_object_code, arm32_linux_exit_code,
-    arm32_return_i32_object_code, write_aarch64_executable, write_aarch64_relocatable_object,
-    write_arm32_executable, write_arm32_relocatable_object, write_executable,
-    write_i386_relocatable_object, write_x86_64_relocatable_object, x86_64_linux_exit_code,
-    x86_64_return_i32_object_code,
+    THUMBV8M_MAIN_NONE_EABI_TRIPLE, aarch64_linux_exit_code, aarch64_return_i32_object_code,
+    arm32_linux_exit_code, arm32_return_i32_object_code, thumb_return_i32_object_code,
+    write_aarch64_executable, write_aarch64_relocatable_object, write_arm32_executable,
+    write_arm32_relocatable_object, write_executable, write_i386_relocatable_object,
+    write_x86_64_relocatable_object, x86_64_linux_exit_code, x86_64_return_i32_object_code,
 };
 use crate::native_emit::macho::{ExportSymbol, MachOImage, MachOLinkage, write_image};
 use crate::native_emit::target::AARCH64_NONE_TRIPLE;
@@ -67,7 +67,32 @@ pub fn emit_native_object(request: &NativeObjectRequest<'_>) -> Option<NativeObj
         (AARCH64_NONE_TRIPLE, NativeLinkage::StaticLib) => {
             Some(emit_aarch64_freestanding_object(request))
         }
+        (THUMBV8M_MAIN_NONE_EABI_TRIPLE, NativeLinkage::StaticLib) => {
+            Some(emit_thumbv8m_freestanding_object(request))
+        }
         _ => None,
+    }
+}
+
+fn emit_thumbv8m_freestanding_object(request: &NativeObjectRequest<'_>) -> NativeObjectArtifact {
+    // Const-evaluable scalar subset only: Thumb-2 return stub + ELF32 EM_ARM.
+    // Full Cortex-M lowering lands after ABI/layout fixtures stabilize.
+    let object = ElfObject {
+        code: thumb_return_i32_object_code(request.exit_code),
+        export_name: request.entry.to_string(),
+        exports: vec![],
+        undefs: vec![],
+    };
+    let mut bytes = Vec::new();
+    write_arm32_relocatable_object(&object, &mut bytes);
+    NativeObjectArtifact {
+        bytes,
+        artifact_kind: "elf32-relocatable-object",
+        backend_level: "owned-object-subset-freestanding",
+        runtime_level: "freestanding-none",
+        reason_code: "native-thumbv8m-main-none-eabi-freestanding",
+        reason: "inauguration owns ELF32 Thumb freestanding object emission for const-evaluable scalar entry functions on thumbv8m.main-none-eabi",
+        abi_manifest: Some(object_abi_manifest(request)),
     }
 }
 
@@ -595,5 +620,31 @@ mod tests {
             u16::from_le_bytes([artifact.bytes[18], artifact.bytes[19]]),
             40
         );
+    }
+
+    #[test]
+    fn dispatches_thumbv8m_freestanding_object() {
+        let module = UnifiedModule::new(Vec::new());
+        let request = NativeObjectRequest {
+            target_triple: THUMBV8M_MAIN_NONE_EABI_TRIPLE,
+            linkage: NativeLinkage::StaticLib,
+            entry: "answer",
+            exit_code: 42,
+            module: &module,
+            module_id: "App",
+            base: None,
+        };
+        let artifact = emit_native_object(&request).expect("thumbv8m freestanding artifact");
+        assert_eq!(artifact.artifact_kind, "elf32-relocatable-object");
+        assert_eq!(
+            artifact.reason_code,
+            "native-thumbv8m-main-none-eabi-freestanding"
+        );
+        assert_eq!(artifact.bytes[4], 1);
+        assert_eq!(
+            u16::from_le_bytes([artifact.bytes[18], artifact.bytes[19]]),
+            40
+        );
+        assert!(artifact.bytes.windows(6).any(|w| w == b"answer"));
     }
 }
