@@ -107,7 +107,7 @@ pub(crate) fn ensure_return_type(
 pub(crate) fn call_return_type<'a>(
     callee: &Expr,
     functions: &'a HashMap<String, FunctionInfo>,
-    fn_name: &str,
+    _fn_name: &str,
 ) -> Result<Option<&'a Typ>, String> {
     let Expr::Ident(target) = callee else {
         // Non-Ident callee: return None (caller handles fallback)
