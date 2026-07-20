@@ -76,7 +76,7 @@ pub fn movs_imm8(rd: u8, imm8: u8) -> u16 {
 /// `movs rd, rm` (T2, register)
 pub fn movs_reg(rd: u8, rm: u8) -> u16 {
     debug_assert!(rd < 8 && rm < 8);
-    0x0000 | ((rm as u16) << 3) | rd as u16
+    ((rm as u16) << 3) | rd as u16
 }
 
 /// `mov rd, rm` high/low via T1 MOV (register) encoding for low regs uses

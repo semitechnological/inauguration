@@ -13,7 +13,7 @@
 
 use crate::core_ir::{Decl, Expr, LoopKind, Stmt, Typ, UnifiedModule};
 use crate::native_emit::thumb::{
-    self, CodeEmitter, COND_EQ, COND_GE, COND_GT, COND_LE, COND_LT, COND_NE, R0, R1, R2, R3,
+    self, COND_EQ, COND_GE, COND_GT, COND_LE, COND_LT, COND_NE, CodeEmitter, R0, R1, R2, R3,
     REG_RET,
 };
 use std::collections::HashMap;
@@ -54,7 +54,11 @@ struct PendingCall {
 }
 
 impl<'a> LowerCtx<'a> {
-    fn new(fn_name: &str, params: &[(String, Typ)], functions: &'a HashMap<String, FunctionInfo>) -> Self {
+    fn new(
+        fn_name: &str,
+        params: &[(String, Typ)],
+        functions: &'a HashMap<String, FunctionInfo>,
+    ) -> Self {
         let mut ctx = Self {
             locals: HashMap::new(),
             frame_size: 0,
@@ -315,7 +319,10 @@ fn lower_stmt(
         Stmt::Let(name, _, expr) => {
             lower_expr_into(emitter, ctx, expr, R0, pending)?;
             let off = *ctx.locals.get(name).ok_or_else(|| {
-                format!("thumb-lower: missing slot for `{name}` in `{}`", ctx.fn_name)
+                format!(
+                    "thumb-lower: missing slot for `{name}` in `{}`",
+                    ctx.fn_name
+                )
             })?;
             emitter.emit_u16(thumb::str_sp(R0, off)?);
             Ok(())
@@ -346,7 +353,10 @@ fn lower_stmt(
             "thumb-lower: unsupported loop {:?} in `{}`",
             kind, ctx.fn_name
         )),
-        Stmt::Break => Err(format!("thumb-lower: break not supported in `{}`", ctx.fn_name)),
+        Stmt::Break => Err(format!(
+            "thumb-lower: break not supported in `{}`",
+            ctx.fn_name
+        )),
         other => Err(format!(
             "thumb-lower: unsupported stmt {:?} in `{}`",
             std::mem::discriminant(other),

@@ -70,8 +70,7 @@ pub fn write_uf2(payload: &[u8], options: &Uf2Options, out_path: &Path) -> Resul
         fs::create_dir_all(parent)
             .map_err(|err| format!("uf2: create parent `{}`: {err}", parent.display()))?;
     }
-    fs::write(out_path, bytes)
-        .map_err(|err| format!("uf2: write `{}`: {err}", out_path.display()))
+    fs::write(out_path, bytes).map_err(|err| format!("uf2: write `{}`: {err}", out_path.display()))
 }
 
 fn write_u32(buf: &mut [u8], offset: usize, value: u32) {
@@ -128,9 +127,11 @@ mod tests {
         assert_eq!(bytes.len(), UF2_BLOCK_SIZE * 2);
         assert_eq!(u32::from_le_bytes(bytes[24..28].try_into().unwrap()), 2);
         assert_eq!(
-            u32::from_le_bytes(bytes[UF2_BLOCK_SIZE + 20..UF2_BLOCK_SIZE + 24]
-                .try_into()
-                .unwrap()),
+            u32::from_le_bytes(
+                bytes[UF2_BLOCK_SIZE + 20..UF2_BLOCK_SIZE + 24]
+                    .try_into()
+                    .unwrap()
+            ),
             1
         );
     }

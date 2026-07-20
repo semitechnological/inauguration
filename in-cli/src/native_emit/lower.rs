@@ -332,7 +332,10 @@ pub fn lower_module_with_jobs(
             .unwrap_or_else(|| {
                 // Entry not found — pick first non-closure function as fallback.
                 // This lets library crates without main lower all functions.
-                functions.keys().find(|k| !k.starts_with("__closure_")).cloned()
+                functions
+                    .keys()
+                    .find(|k| !k.starts_with("__closure_"))
+                    .cloned()
                     .unwrap_or_else(|| entry.to_string())
             })
     };

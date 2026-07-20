@@ -23,7 +23,12 @@ pub struct LinkerLayout {
 }
 
 impl LinkerLayout {
-    pub fn cortex_m_default(flash_origin: u64, flash_len: u64, ram_origin: u64, ram_len: u64) -> Self {
+    pub fn cortex_m_default(
+        flash_origin: u64,
+        flash_len: u64,
+        ram_origin: u64,
+        ram_len: u64,
+    ) -> Self {
         Self {
             entry: "Reset".to_string(),
             regions: vec![
@@ -73,7 +78,11 @@ impl LinkerLayout {
             "  .data : {{ *(.data*) }} > {} AT > {}",
             self.data_region, self.text_region
         );
-        let _ = writeln!(out, "  .bss : {{ *(.bss*) *(COMMON) }} > {}", self.data_region);
+        let _ = writeln!(
+            out,
+            "  .bss : {{ *(.bss*) *(COMMON) }} > {}",
+            self.data_region
+        );
         out.push_str("}\n");
         out
     }
@@ -85,7 +94,8 @@ mod tests {
 
     #[test]
     fn an521_layout_script_contains_regions() {
-        let layout = LinkerLayout::cortex_m_default(0x1000_0000, 512 * 1024, 0x3800_0000, 256 * 1024);
+        let layout =
+            LinkerLayout::cortex_m_default(0x1000_0000, 512 * 1024, 0x3800_0000, 256 * 1024);
         let script = layout.to_ld_script();
         assert!(script.contains("ENTRY(Reset)"));
         assert!(script.contains("ORIGIN = 0x10000000"));

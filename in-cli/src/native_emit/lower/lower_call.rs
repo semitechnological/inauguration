@@ -499,13 +499,8 @@ pub(crate) fn lower_struct_ptr_arg(
                     Some(LocalSlot::Struct { fields: slots, .. }) => {
                         if let Some(offset) = find_field_offset(slots, name) {
                             let off = *offset;
-                            let boff = ctx.params.get(local).copied();
-                            if boff.is_some() {
-                                emitter.emit_u32(aarch64::ldr64(
-                                    reg,
-                                    aarch64::REG_SP,
-                                    boff.unwrap(),
-                                ));
+                            if let Some(boff) = ctx.params.get(local).copied() {
+                                emitter.emit_u32(aarch64::ldr64(reg, aarch64::REG_SP, boff));
                                 emitter.emit_u32(aarch64::add_imm64(reg, reg, off as u16));
                             } else {
                                 emitter.emit_u32(aarch64::add_imm64(
@@ -764,17 +759,12 @@ pub(crate) fn lower_struct_call_arg(
             }
             match ctx.locals.get(local) {
                 Some(LocalSlot::Scalar(_)) => {
-                    return lower_struct_ptr_arg(
-                        emitter,
-                        ctx,
-                        arg,
-                        reg,
-                        functions,
-                        pending_calls,
-                        fn_name,
-                    );
+                    lower_struct_ptr_arg(emitter, ctx, arg, reg, functions, pending_calls, fn_name)
                 }
-                Some(LocalSlot::Struct { typ: _, fields: slots }) => {
+                Some(LocalSlot::Struct {
+                    typ: _,
+                    fields: slots,
+                }) => {
                     // Struct arg type: accept regardless of name mismatch
                     // (Path vs PathBuf, etc. have same layout)
                     // If any field is non-scalar, pass by pointer instead of flattening
@@ -806,7 +796,7 @@ pub(crate) fn lower_struct_call_arg(
                 _ => {
                     // Unknown ident (enum variant, constant): emit 0 and treat as scalar
                     emitter.emit_insns(&aarch64::load_i64(reg, 0));
-                    return Ok(reg + 1);
+                    Ok(reg + 1)
                 }
             }
         }

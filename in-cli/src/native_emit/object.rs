@@ -11,9 +11,9 @@ use crate::native_emit::elf::{
     write_executable, write_i386_relocatable_object, write_x86_64_relocatable_object,
     x86_64_linux_exit_code, x86_64_return_i32_object_code,
 };
-use crate::native_emit::thumb_lower;
 use crate::native_emit::macho::{ExportSymbol, MachOImage, MachOLinkage, write_image};
 use crate::native_emit::target::AARCH64_NONE_TRIPLE;
+use crate::native_emit::thumb_lower;
 use crate::native_emit::wasm::{WASM32_UNKNOWN_TRIPLE, WasmModule, write_scalar_i32_module};
 use crate::native_emit::x86_64_lower::{X86_64_TRIPLE, lower_module, lower_module_with_bases};
 
@@ -69,10 +69,7 @@ pub fn emit_native_object(request: &NativeObjectRequest<'_>) -> Option<NativeObj
             Some(emit_aarch64_freestanding_object(request))
         }
         (THUMBV8M_MAIN_NONE_EABI_TRIPLE, NativeLinkage::StaticLib) => {
-            match emit_thumbv8m_freestanding_object(request) {
-                Ok(artifact) => Some(artifact),
-                Err(_) => None,
-            }
+            emit_thumbv8m_freestanding_object(request).ok()
         }
         _ => None,
     }
@@ -89,7 +86,6 @@ fn emit_thumbv8m_freestanding_object(
             .exports
             .into_iter()
             .filter(|(name, off)| name != request.entry || *off != 0)
-            .map(|(name, off)| (name, off))
             .collect(),
         undefs: result.externs,
     };
@@ -656,7 +652,10 @@ fn main() -> void { return }
             artifact.reason_code,
             "native-thumbv8m-main-none-eabi-freestanding"
         );
-        assert_eq!(artifact.backend_level, "owned-native-subset-freestanding-thumb");
+        assert_eq!(
+            artifact.backend_level,
+            "owned-native-subset-freestanding-thumb"
+        );
         assert_eq!(artifact.bytes[4], 1);
         assert_eq!(
             u16::from_le_bytes([artifact.bytes[18], artifact.bytes[19]]),
