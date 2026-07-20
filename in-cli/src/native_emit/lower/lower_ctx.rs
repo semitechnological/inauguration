@@ -240,7 +240,7 @@ pub(crate) fn alloc_nested_struct_slots(
     if slots.is_empty() {
         slots.insert("__base".to_string(), ctx.alloc_slot());
     }
-    return Ok(slots);
+    Ok(slots)
 }
 
 fn alloc_nested_struct_slots_inner(
@@ -249,7 +249,7 @@ fn alloc_nested_struct_slots_inner(
     fields: &[(String, Typ)],
     structs: &HashMap<String, Vec<(String, Typ)>>,
     abi_idx: &mut usize,
-    fn_name: &str,
+    _fn_name: &str,
     visited: &mut Vec<String>,
     slots: &mut HashMap<String, u32>,
 ) -> Result<(), String> {
@@ -289,7 +289,7 @@ fn alloc_nested_struct_slots_inner(
                     inner_fields,
                     structs,
                     abi_idx,
-                    fn_name,
+                    _fn_name,
                     visited,
                     &mut inner_slots,
                 )?;
@@ -316,7 +316,7 @@ pub(crate) fn alloc_local_struct_fields(
     fields: &[(String, Typ)],
     all_structs: &HashMap<String, Vec<(String, Typ)>>,
     ctx: &mut LowerCtx<'_>,
-    fn_name: &str,
+    _fn_name: &str,
 ) -> Result<(), String> {
     for (field, field_ty) in fields {
         match field_ty {
@@ -340,7 +340,7 @@ pub(crate) fn alloc_local_struct_fields(
                     inner_fields,
                     all_structs,
                     ctx,
-                    fn_name,
+                    _fn_name,
                 )?;
                 for (sub_field, sub_offset) in inner_slots {
                     slots.insert(format!("{field}.{sub_field}"), sub_offset);

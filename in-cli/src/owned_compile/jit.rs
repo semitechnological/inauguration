@@ -38,7 +38,11 @@ pub fn resolve_jit_entry(module: &UnifiedModule, entry: &str) -> String {
         return found.to_string();
     }
     // Entry not found — use first non-closure function so libs compile
-    func_names.iter().find(|n| !n.starts_with("__closure_")).map(|s| s.to_string()).unwrap_or_else(|| entry.to_string())
+    func_names
+        .iter()
+        .find(|n| !n.starts_with("__closure_"))
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| entry.to_string())
 }
 
 /// JIT compile: lower to native machine code, load into JitRuntime, invoke entry.

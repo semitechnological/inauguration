@@ -537,7 +537,9 @@ fn parse_lang(
     let extracted = extract(src.as_bytes(), root)?;
     let has_errors = root.has_error();
     if has_errors && extracted.is_empty() {
-        return Err("Tree-sitter parse tree contains syntax errors (zero functions extracted)".into());
+        return Err(
+            "Tree-sitter parse tree contains syntax errors (zero functions extracted)".into(),
+        );
     }
     let decls = dedup_fns(extracted);
     if decls.is_empty() {
