@@ -636,7 +636,39 @@ fn fetch_and_extract(
         }
     }
     let _ = fs::remove_file(&archive_path);
+    // Dependabot scans committed .in-packages; drop upstream noise we never run.
+    strip_registry_noise(package_ref, install_path);
     Ok(())
+}
+
+fn strip_registry_noise(package_ref: &PackageRef, install_path: &Path) {
+    match package_ref.ecosystem.as_str() {
+        "pypi" => {
+            let _ = fs::remove_file(install_path.join("uv.lock"));
+            let _ = fs::remove_dir_all(install_path.join("examples"));
+        }
+        "npm" => strip_npm_dev_dependencies(install_path),
+        _ => {}
+    }
+}
+
+fn strip_npm_dev_dependencies(install_path: &Path) {
+    let path = install_path.join("package.json");
+    let Ok(raw) = fs::read_to_string(&path) else {
+        return;
+    };
+    let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return;
+    };
+    let Some(obj) = value.as_object_mut() else {
+        return;
+    };
+    if obj.remove("devDependencies").is_none() {
+        return;
+    }
+    if let Ok(json) = serde_json::to_string_pretty(&value) {
+        let _ = fs::write(path, format!("{json}\n"));
+    }
 }
 
 fn hex_encode(bytes: &[u8]) -> String {
@@ -903,6 +935,46 @@ pub fn lock_dependencies(path: &Path) -> Result<(PathBuf, PackageLock), String> 
 mod tests {
     use super::*;
     use crate::package_manifest::parse_package_manifest_source;
+
+    #[test]
+    fn strip_registry_noise_drops_pypi_and_npm_scan_bait() {
+        let dir = tempfile_dir("strip-noise");
+        let pypi = dir.join("pypi");
+        fs::create_dir_all(pypi.join("examples/celery")).unwrap();
+        fs::write(pypi.join("uv.lock"), "lock").unwrap();
+        fs::write(pypi.join("examples/celery/requirements.txt"), "flask==1").unwrap();
+
+        let npm = dir.join("npm");
+        fs::create_dir_all(&npm).unwrap();
+        fs::write(
+            npm.join("package.json"),
+            r#"{"name":"hono","devDependencies":{"wrangler":"4.12.0"}}"#,
+        )
+        .unwrap();
+
+        strip_registry_noise(
+            &PackageRef {
+                ecosystem: "pypi".into(),
+                name: "flask".into(),
+            },
+            &pypi,
+        );
+        strip_registry_noise(
+            &PackageRef {
+                ecosystem: "npm".into(),
+                name: "hono".into(),
+            },
+            &npm,
+        );
+
+        assert!(!pypi.join("uv.lock").exists());
+        assert!(!pypi.join("examples").exists());
+        let npm_pkg: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(npm.join("package.json")).unwrap()).unwrap();
+        assert!(npm_pkg.get("devDependencies").is_none());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn default_packages_root_appends_correct_path() {
