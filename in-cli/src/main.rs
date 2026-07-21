@@ -66,6 +66,10 @@ enum EmitKindCli {
     Boot,
     /// Emit C source (Vlang-style C backend for optimization via zig cc).
     C,
+    /// Emit Go source from Core IR (lossy subset).
+    Go,
+    /// Emit Rust source from Core IR (lossy subset).
+    Rust,
     /// Emit a raw SCI component binary for a freestanding x86_64 target.
     Sci,
 }
