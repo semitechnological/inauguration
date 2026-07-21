@@ -382,6 +382,41 @@ fn hoists_capturing_closure_env() {
     }]);
     let c = emit_c_module(&module).expect("emit");
     assert!(c.contains("_env"), "env struct:\n{c}");
-    assert!(c.contains("env->y"), "env load:\n{c}");
-    assert!(c.contains(".y = y"), "env init:\n{c}");
+    assert!(c.contains("static struct"), "static env:\n{c}");
+    assert!(c.contains(".y = y") || c.contains("_env.y = y"), "env init:\n{c}");
+    assert!(c.contains("(uint64_t)("), "fn ptr value:\n{c}");
+}
+
+#[test]
+fn skips_invec_typedef_when_unused() {
+    let module = UnifiedModule::new(vec![Decl::Function {
+        name: "answer".into(),
+        params: vec![],
+        ret: Typ::Int,
+        body: vec![Stmt::Return(Some(Expr::IntLit(42)))],
+        type_params: vec![],
+    }]);
+    let c = emit_c_module(&module).expect("emit");
+    assert!(!c.contains("typedef struct InVec"), "no invec:\n{c}");
+}
+
+#[test]
+fn rejects_extreme_nesting() {
+    let mut body = Stmt::Return(Some(Expr::IntLit(1)));
+    for _ in 0..300 {
+        body = Stmt::If {
+            cond: Expr::BoolLit(true),
+            then_body: vec![body],
+            else_body: vec![],
+        };
+    }
+    let module = UnifiedModule::new(vec![Decl::Function {
+        name: "deep".into(),
+        params: vec![],
+        ret: Typ::Int,
+        body: vec![body],
+        type_params: vec![],
+    }]);
+    let err = emit_c_module(&module).expect_err("depth guard");
+    assert!(err.contains("nesting"), "err={err}");
 }
