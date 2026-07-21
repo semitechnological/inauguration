@@ -69,6 +69,9 @@ pub(crate) fn cmd_compile(
             metadata,
         );
     }
+    if matches!(emit, Some(EmitKindCli::C)) {
+        return cmd_emit_c(&source_path, &out_path, parser);
+    }
     let parsed_base = base.map(parse_base).transpose()?;
     let owned_emit = match emit {
         Some(EmitKindCli::Sci) => {
@@ -182,6 +185,47 @@ fn parse_base(value: &str) -> Result<u64> {
             .parse::<u64>()
             .map_err(|_| InError::Message(format!("invalid --base: {value}")))
     }
+}
+
+fn cmd_emit_c(source_path: &Path, out_path: &Path, parser: ParserCli) -> Result<()> {
+    use inauguration::parser_registry;
+
+    let resolved = parser_registry::resolve_parser_id(source_path, parser);
+    let module = match parser_registry::parse_with_resolved(resolved, source_path) {
+        Ok(Some(module)) => module,
+        Ok(None) => {
+            return Err(InError::Message(
+                "--emit c needs a Core IR front (all polyglot langs / .in / .icore)".into(),
+            ));
+        }
+        Err(err) => {
+            // Library .in without `fn main` still useful for C dump.
+            if source_path.extension().is_some_and(|e| e == "in") {
+                inauguration::in_lang_parse::parse_in_library_file(source_path).map_err(|e| {
+                    InError::Message(format!(
+                        "parse {}: {e} (also: {err})",
+                        source_path.display()
+                    ))
+                })?
+            } else {
+                return Err(InError::Message(format!(
+                    "parse {}: {err}",
+                    source_path.display()
+                )));
+            }
+        }
+    };
+    let c_source =
+        inauguration::native_emit::c_backend::emit_c_module(&module).map_err(InError::Message)?;
+    fs::write(out_path, &c_source)
+        .map_err(|e| InError::Message(format!("write {}: {e}", out_path.display())))?;
+    println!(
+        "c source: {} → {} ({} bytes)",
+        source_path.display(),
+        out_path.display(),
+        c_source.len()
+    );
+    Ok(())
 }
 
 fn cmd_emit_boot(
