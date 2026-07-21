@@ -9,7 +9,16 @@ pub enum SourceLang {
     Rust,
 }
 
+const MAX_EMIT_DEPTH: u32 = 256;
+const MAX_EMIT_NODES: usize = 100_000;
+
 pub fn emit_source_module(module: &UnifiedModule, lang: SourceLang) -> String {
+    // Soft DoS guard: truncate emission rather than hang (lossy printers).
+    if !module_within_limits(module) {
+        return format!(
+            "// emit aborted: Core IR exceeds size/depth limits\n// lang={lang:?}\n"
+        );
+    }
     let mut out = String::with_capacity(4096);
     match lang {
         SourceLang::Go => {
@@ -595,6 +604,115 @@ fn export_go(name: &str) -> String {
         None => "X".into(),
     }
 }
+
+fn module_within_limits(module: &UnifiedModule) -> bool {
+    let mut nodes = 0usize;
+    for d in &module.decls {
+        if !count_decl(d, 0, &mut nodes) {
+            return false;
+        }
+    }
+    true
+}
+
+fn count_decl(d: &Decl, depth: u32, nodes: &mut usize) -> bool {
+    if depth > MAX_EMIT_DEPTH {
+        return false;
+    }
+    *nodes += 1;
+    if *nodes > MAX_EMIT_NODES {
+        return false;
+    }
+    match d {
+        Decl::Function { body, .. } => count_stmts(body, depth + 1, nodes),
+        Decl::Class { methods, .. } => methods.iter().all(|m| count_decl(m, depth + 1, nodes)),
+        Decl::Global { init: Some(e), .. } => count_expr(e, depth + 1, nodes),
+        _ => true,
+    }
+}
+
+fn count_stmts(stmts: &[Stmt], depth: u32, nodes: &mut usize) -> bool {
+    stmts.iter().all(|s| count_stmt(s, depth, nodes))
+}
+
+fn count_stmt(s: &Stmt, depth: u32, nodes: &mut usize) -> bool {
+    if depth > MAX_EMIT_DEPTH {
+        return false;
+    }
+    *nodes += 1;
+    if *nodes > MAX_EMIT_NODES {
+        return false;
+    }
+    match s {
+        Stmt::Let(_, _, e) | Stmt::Assign(_, e) | Stmt::Throw(e) | Stmt::Expr(e) => {
+            count_expr(e, depth + 1, nodes)
+        }
+        Stmt::Return(Some(e)) => count_expr(e, depth + 1, nodes),
+        Stmt::Return(None) | Stmt::Propagate | Stmt::Break => true,
+        Stmt::IndexAssign { base, index, value } => {
+            count_expr(base, depth + 1, nodes)
+                && count_expr(index, depth + 1, nodes)
+                && count_expr(value, depth + 1, nodes)
+        }
+        Stmt::FieldAssign { base, value, .. } => {
+            count_expr(base, depth + 1, nodes) && count_expr(value, depth + 1, nodes)
+        }
+        Stmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            count_expr(cond, depth + 1, nodes)
+                && count_stmts(then_body, depth + 1, nodes)
+                && count_stmts(else_body, depth + 1, nodes)
+        }
+        Stmt::Loop { cond, body, .. } => {
+            cond.as_ref()
+                .map(|c| count_expr(c, depth + 1, nodes))
+                .unwrap_or(true)
+                && count_stmts(body, depth + 1, nodes)
+        }
+        Stmt::Match { scrutinee, arms } => {
+            count_expr(scrutinee, depth + 1, nodes)
+                && arms.iter().all(|a| count_stmts(&a.body, depth + 1, nodes))
+        }
+        Stmt::Try { body, catches } => {
+            count_stmts(body, depth + 1, nodes)
+                && catches.iter().all(|c| count_stmts(&c.body, depth + 1, nodes))
+        }
+    }
+}
+
+fn count_expr(e: &Expr, depth: u32, nodes: &mut usize) -> bool {
+    if depth > MAX_EMIT_DEPTH {
+        return false;
+    }
+    *nodes += 1;
+    if *nodes > MAX_EMIT_NODES {
+        return false;
+    }
+    match e {
+        Expr::Unary { expr, .. } => count_expr(expr, depth + 1, nodes),
+        Expr::Binary { lhs, rhs, .. } => {
+            count_expr(lhs, depth + 1, nodes) && count_expr(rhs, depth + 1, nodes)
+        }
+        Expr::StructInit { fields, .. } => {
+            fields.iter().all(|(_, fe)| count_expr(fe, depth + 1, nodes))
+        }
+        Expr::Field { base, .. } => count_expr(base, depth + 1, nodes),
+        Expr::ArrayLit(items) => items.iter().all(|it| count_expr(it, depth + 1, nodes)),
+        Expr::Index { base, index } => {
+            count_expr(base, depth + 1, nodes) && count_expr(index, depth + 1, nodes)
+        }
+        Expr::Call { callee, args } => {
+            count_expr(callee, depth + 1, nodes)
+                && args.iter().all(|a| count_expr(a, depth + 1, nodes))
+        }
+        Expr::Closure { body, .. } => count_stmts(body, depth + 1, nodes),
+        _ => true,
+    }
+}
+
 
 fn sanitize_line(s: &str) -> String {
     s.chars()
