@@ -229,6 +229,10 @@ struct Ctx {
     out: String,
     indent_lvl: u32,
     func_names: Vec<String>,
+    /// Hoisted zero-capture closures emitted before the current function.
+    hoisted: Vec<String>,
+    tmp: u32,
+    ret_is_void: bool,
 }
 
 impl Ctx {
@@ -237,7 +241,16 @@ impl Ctx {
             out: String::new(),
             indent_lvl: 0,
             func_names,
+            hoisted: Vec::new(),
+            tmp: 0,
+            ret_is_void: false,
         }
+    }
+
+    fn fresh(&mut self, prefix: &str) -> String {
+        let id = self.tmp;
+        self.tmp += 1;
+        format!("__{}_{}", prefix, id)
     }
 
     fn line(&mut self, s: &str) {
@@ -265,15 +278,19 @@ impl Ctx {
         self.func_names.iter().any(|n| n == name)
     }
 
-    fn expr_str(&self, expr: &Expr) -> String {
+    fn expr_str(&mut self, expr: &Expr) -> String {
         match expr {
             Expr::IntLit(n) => format!("INT64_C({})", n),
             Expr::FloatLit(f) => {
                 let bits = f.0;
                 if bits.is_finite() {
                     format!("{:?}", bits)
+                } else if bits.is_nan() {
+                    "(0.0/0.0)".into()
+                } else if bits.is_sign_negative() {
+                    "(-1.0/0.0)".into()
                 } else {
-                    "0.0".into()
+                    "(1.0/0.0)".into()
                 }
             }
             Expr::BoolLit(b) => {
@@ -323,16 +340,23 @@ impl Ctx {
                 match op.as_str() {
                     "neg" | "-" => format!("(-{})", e),
                     "not" | "!" => format!("(!{})", e),
+                    "bnot" | "~" => format!("(~{})", e),
                     _ => format!("(/*op:{}*/{})", op, e),
                 }
             }
             Expr::Call { callee, args } => {
+                // method call: recv.method(args) → method(recv, args…)
+                if let Expr::Field { base, name } = &**callee {
+                    let mut as_ = vec![self.expr_str(base)];
+                    as_.extend(args.iter().map(|a| self.expr_str(a)));
+                    return format!("{}({})", sanitize_ident(name), as_.join(", "));
+                }
                 if let Expr::Ident(name) = &**callee {
                     self.intrinsic_or_call(name, args)
                 } else {
                     let callee_s = self.expr_str(callee);
                     let as_: Vec<String> = args.iter().map(|a| self.expr_str(a)).collect();
-                    format!("({})({})", callee_s, as_.join(", "))
+                    format!("(({})({}))", callee_s, as_.join(", "))
                 }
             }
             Expr::Field { base, name } => {
@@ -360,18 +384,54 @@ impl Ctx {
                     }
                 )
             }
-            Expr::Closure { .. } => "/* closure */((uint64_t)0)".into(),
+            Expr::Closure {
+                params,
+                ret,
+                body,
+                captures,
+            } => {
+                if !captures.is_empty() {
+                    return "/* closure-with-captures */((uint64_t)0)".into();
+                }
+                let cname = self.fresh("closure");
+                // Build a tiny module fragment for the hoisted helper.
+                let mut helper = String::new();
+                let ps: Vec<String> = params
+                    .iter()
+                    .map(|(n, t)| format!("{} {}", ctype(t), sanitize_ident(n)))
+                    .collect();
+                helper.push_str(&format!(
+                    "static {} {}({}) {{\n",
+                    ctype(ret),
+                    cname,
+                    ps.join(", ")
+                ));
+                let mut nested = Ctx::new(self.func_names.clone());
+                nested.ret_is_void = matches!(ret.canonical(), Typ::Void);
+                nested.indent_lvl = 1;
+                let mut locals = Vec::new();
+                collect_locals(body, &mut locals);
+                for (n, ty) in &locals {
+                    nested.push(&format!("{} {};", ty, n));
+                }
+                for s in body {
+                    emit_stmt(&mut nested, s);
+                }
+                if nested.ret_is_void && !body.last().is_some_and(|s| matches!(s, Stmt::Return(_)))
+                {
+                    nested.push("return;");
+                }
+                helper.push_str(&nested.out);
+                helper.push_str("}\n");
+                self.hoisted.push(helper);
+                format!("(uint64_t)({})", cname)
+            }
         }
     }
 
-    fn intrinsic_or_call(&self, name: &str, args: &[Expr]) -> String {
-        let a = |i: usize| -> String {
-            if i < args.len() {
-                self.expr_str(&args[i])
-            } else {
-                "0".into()
-            }
-        };
+    fn intrinsic_or_call(&mut self, name: &str, args: &[Expr]) -> String {
+        let evaled: Vec<String> = args.iter().map(|e| self.expr_str(e)).collect();
+        let a = |i: usize| -> String { evaled.get(i).cloned().unwrap_or_else(|| "0".into()) };
         match name {
             "outb" => {
                 let p = a(0);
@@ -489,26 +549,39 @@ fn emit_fn_def(ctx: &mut Ctx, name: &str, params: &[(String, Typ)], ret: &Typ, b
         sanitize_ident(name),
         ps.join(", ")
     );
-    ctx.push(&format!("{} {{", sig));
-    ctx.indent();
+
+    // Build body into a nested buffer so hoisted closures land before the fn.
+    let mut body_ctx = Ctx::new(ctx.func_names.clone());
+    body_ctx.tmp = ctx.tmp;
+    body_ctx.ret_is_void = matches!(ret.canonical(), Typ::Void);
+    body_ctx.indent_lvl = 1;
 
     let mut locals: Vec<(String, String)> = Vec::new();
     collect_locals(body, &mut locals);
+    // iterator / match temps
+    collect_loop_bindings(body, &mut locals);
     for (n, ty) in &locals {
-        ctx.push(&format!("{} {};", ty, n));
+        body_ctx.push(&format!("{} {};", ty, n));
     }
+    // runtime error flag for throw/try/propagate (function-local, simple model)
+    body_ctx.push("int __in_err = 0;");
+    body_ctx.push("int64_t __in_err_val = 0;");
 
     for stmt in body {
-        emit_stmt(ctx, stmt);
+        emit_stmt(&mut body_ctx, stmt);
     }
-    if matches!(ret.canonical(), Typ::Void) {
-        // avoid fallthrough warnings when body already returns
-        if !body.last().is_some_and(|s| matches!(s, Stmt::Return(_))) {
-            ctx.push("return;");
-        }
+    if body_ctx.ret_is_void && !body.last().is_some_and(|s| matches!(s, Stmt::Return(_))) {
+        body_ctx.push("return;");
     }
 
-    ctx.dedent();
+    ctx.tmp = body_ctx.tmp;
+    for h in body_ctx.hoisted.drain(..) {
+        ctx.out.push_str(&h);
+        ctx.out.push('\n');
+    }
+
+    ctx.push(&format!("{} {{", sig));
+    ctx.out.push_str(&body_ctx.out);
     ctx.line("}");
     ctx.line("");
 }
@@ -516,37 +589,29 @@ fn emit_fn_def(ctx: &mut Ctx, name: &str, params: &[(String, Typ)], ret: &Typ, b
 fn emit_stmt(ctx: &mut Ctx, stmt: &Stmt) {
     match stmt {
         Stmt::Let(name, _, expr) => {
-            ctx.push(&format!(
-                "{} = {};",
-                sanitize_ident(name),
-                ctx.expr_str(expr)
-            ));
+            let rhs = ctx.expr_str(expr);
+            ctx.push(&format!("{} = {};", sanitize_ident(name), rhs));
         }
         Stmt::Assign(name, expr) => {
-            ctx.push(&format!(
-                "{} = {};",
-                sanitize_ident(name),
-                ctx.expr_str(expr)
-            ));
+            let rhs = ctx.expr_str(expr);
+            ctx.push(&format!("{} = {};", sanitize_ident(name), rhs));
         }
         Stmt::IndexAssign { base, index, value } => {
-            ctx.push(&format!(
-                "({})[{}] = {};",
-                ctx.expr_str(base),
-                ctx.expr_str(index),
-                ctx.expr_str(value)
-            ));
+            let b = ctx.expr_str(base);
+            let i = ctx.expr_str(index);
+            let v = ctx.expr_str(value);
+            ctx.push(&format!("({})[{}] = {};", b, i, v));
         }
         Stmt::FieldAssign { base, name, value } => {
-            ctx.push(&format!(
-                "({}).{} = {};",
-                ctx.expr_str(base),
-                sanitize_ident(name),
-                ctx.expr_str(value)
-            ));
+            let b = ctx.expr_str(base);
+            let v = ctx.expr_str(value);
+            ctx.push(&format!("({}).{} = {};", b, sanitize_ident(name), v));
         }
         Stmt::Return(e) => match e {
-            Some(x) => ctx.push(&format!("return {};", ctx.expr_str(x))),
+            Some(x) => {
+                let v = ctx.expr_str(x);
+                ctx.push(&format!("return {};", v));
+            }
             None => ctx.push("return;"),
         },
         Stmt::If {
@@ -554,7 +619,8 @@ fn emit_stmt(ctx: &mut Ctx, stmt: &Stmt) {
             then_body,
             else_body,
         } => {
-            ctx.push(&format!("if ({}) {{", ctx.expr_str(cond)));
+            let c = ctx.expr_str(cond);
+            ctx.push(&format!("if ({}) {{", c));
             ctx.indent();
             for s in then_body {
                 emit_stmt(ctx, s);
@@ -573,31 +639,64 @@ fn emit_stmt(ctx: &mut Ctx, stmt: &Stmt) {
         Stmt::Loop { kind, cond, body } => {
             match kind {
                 LoopKind::For { binding } => {
-                    // Core IR for-loops only carry binding + optional cond; emit while form.
-                    let _ = binding;
+                    // cond holds the iterable expression (Vec-like: .ptr/.len or raw pointer).
+                    let iter = cond
+                        .as_ref()
+                        .map(|c| ctx.expr_str(c))
+                        .unwrap_or_else(|| "NULL".into());
+                    let idx = ctx.fresh("i");
+                    let len = ctx.fresh("len");
+                    let ptr = ctx.fresh("ptr");
+                    let bind = sanitize_ident(binding.trim().trim_start_matches("& "));
+                    ctx.push(&format!("int64_t* {} = (int64_t*)({});", ptr, iter));
+                    // ponytail: no Vec layout in C sink — length defaults 0; fill {len} before use.
+                    ctx.push(&format!(
+                        "int64_t {} = 0; /* set element count for for-in */",
+                        len
+                    ));
+                    ctx.push(&format!(
+                        "/* for {} in {} — index walk; set {} to element count */",
+                        bind, iter, len
+                    ));
+                    ctx.push(&format!(
+                        "for (int64_t {} = 0; {} < {}; {}++) {{",
+                        idx, idx, len, idx
+                    ));
+                    ctx.indent();
+                    if bind != "_" && !bind.is_empty() {
+                        ctx.push(&format!("{} = {}[{}];", bind, ptr, idx));
+                    }
+                    for s in body {
+                        emit_stmt(ctx, s);
+                    }
+                    ctx.dedent();
+                    ctx.line("}");
+                }
+                LoopKind::While | LoopKind::Infinite => {
                     match cond {
-                        Some(c) => ctx.push(&format!("while ({}) {{", ctx.expr_str(c))),
+                        Some(c) => {
+                            let cstr = ctx.expr_str(c);
+                            ctx.push(&format!("while ({}) {{", cstr));
+                        }
                         None => ctx.line("while (1) {"),
                     }
+                    ctx.indent();
+                    for s in body {
+                        emit_stmt(ctx, s);
+                    }
+                    ctx.dedent();
+                    ctx.line("}");
                 }
-                LoopKind::While | LoopKind::Infinite => match cond {
-                    Some(c) => ctx.push(&format!("while ({}) {{", ctx.expr_str(c))),
-                    None => ctx.line("while (1) {"),
-                },
             }
-            ctx.indent();
-            for s in body {
-                emit_stmt(ctx, s);
-            }
-            ctx.dedent();
-            ctx.line("}");
         }
         Stmt::Match { scrutinee, arms } => {
             // Simple if/else chain; patterns are source text (Core IR stores pattern strings).
+            let scr_tmp = ctx.fresh("scr");
             let scr = ctx.expr_str(scrutinee);
+            ctx.push(&format!("int64_t {} = (int64_t)({});", scr_tmp, scr));
             let mut first = true;
             for arm in arms {
-                let cond = match_arm_cond(&scr, &arm.pattern);
+                let (cond, binds) = match_arm_cond_and_binds(&scr_tmp, &arm.pattern);
                 if first {
                     ctx.push(&format!("if ({}) {{", cond));
                     first = false;
@@ -605,6 +704,9 @@ fn emit_stmt(ctx: &mut Ctx, stmt: &Stmt) {
                     ctx.push(&format!("}} else if ({}) {{", cond));
                 }
                 ctx.indent();
+                for b in binds {
+                    ctx.push(&b);
+                }
                 for s in &arm.body {
                     emit_stmt(ctx, s);
                 }
@@ -615,28 +717,56 @@ fn emit_stmt(ctx: &mut Ctx, stmt: &Stmt) {
             }
         }
         Stmt::Throw(e) => {
-            ctx.push(&format!(
-                "/* throw */ (void)({}); return 0;",
-                ctx.expr_str(e)
-            ));
+            let val = ctx.expr_str(e);
+            ctx.push(&format!("__in_err = 1; __in_err_val = (int64_t)({});", val));
+            if ctx.ret_is_void {
+                ctx.push("return;");
+            } else {
+                ctx.push("return 0;");
+            }
         }
         Stmt::Try { body, catches } => {
-            ctx.line("/* try */ {");
+            ctx.line("{ /* try */");
             ctx.indent();
+            ctx.push("int __in_err_save = __in_err;");
+            ctx.push("__in_err = 0;");
             for s in body {
                 emit_stmt(ctx, s);
             }
+            if !catches.is_empty() {
+                ctx.push("if (__in_err) {");
+                ctx.indent();
+                // first catch only (lossy multi-catch)
+                let c = &catches[0];
+                let bind = c.pattern.trim();
+                if !bind.is_empty() && bind != "_" && is_simple_ident(bind) {
+                    ctx.push(&format!("int64_t {} = __in_err_val;", sanitize_ident(bind)));
+                }
+                for s in &c.body {
+                    emit_stmt(ctx, s);
+                }
+                ctx.push("__in_err = 0;");
+                ctx.dedent();
+                ctx.line("}");
+            }
+            ctx.push("if (!__in_err) { __in_err = __in_err_save; }");
             ctx.dedent();
             ctx.line("}");
-            for c in catches {
-                ctx.push(&format!("/* catch {} (not lowered) */", c.pattern));
-            }
         }
         Stmt::Propagate => {
-            ctx.line("/* propagate */");
+            ctx.push("if (__in_err) {");
+            ctx.indent();
+            if ctx.ret_is_void {
+                ctx.push("return;");
+            } else {
+                ctx.push("return __in_err_val;");
+            }
+            ctx.dedent();
+            ctx.line("}");
         }
         Stmt::Expr(e) => {
-            ctx.push(&format!("{};", ctx.expr_str(e)));
+            let v = ctx.expr_str(e);
+            ctx.push(&format!("{};", v));
         }
         Stmt::Break => {
             ctx.line("break;");
@@ -644,27 +774,87 @@ fn emit_stmt(ctx: &mut Ctx, stmt: &Stmt) {
     }
 }
 
-fn match_arm_cond(scrutinee: &str, pattern: &str) -> String {
+fn is_simple_ident(s: &str) -> bool {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+/// Returns (C condition, binding statements) for a match arm pattern string.
+fn match_arm_cond_and_binds(scrutinee: &str, pattern: &str) -> (String, Vec<String>) {
     let p = pattern.trim().trim_end_matches(':').trim();
     if p == "_" || p == "-" || p == "else" || p == "default" || p == ".." {
-        return "1".into();
+        return ("1".into(), vec![]);
     }
     if p == "true" {
-        return format!("({})", scrutinee);
+        return (format!("({})", scrutinee), vec![]);
     }
     if p == "false" {
-        return format!("(!({}))", scrutinee);
+        return (format!("(!({}))", scrutinee), vec![]);
     }
     if let Ok(n) = p.parse::<i64>() {
-        return format!("(({}) == INT64_C({}))", scrutinee, n);
+        return (format!("(({}) == INT64_C({}))", scrutinee, n), vec![]);
     }
     if p.len() >= 2 && p.starts_with('"') && p.ends_with('"') {
         let inner = &p[1..p.len() - 1];
         let escaped = inner.replace('\\', "\\\\").replace('"', "\\\"");
-        return format!("(({}) == (const char*)\"{}\")", scrutinee, escaped);
+        return (
+            format!("(({}) == (const char*)\"{}\")", scrutinee, escaped),
+            vec![],
+        );
     }
-    // Ident binding / struct patterns: always true (lossy).
-    "1".into()
+    // Ident binding: always matches, bind name = scrutinee.
+    if is_simple_ident(p) {
+        let name = sanitize_ident(p);
+        return (
+            "1".into(),
+            vec![format!("int64_t {} = {};", name, scrutinee)],
+        );
+    }
+    // Struct / other patterns: always true (lossy).
+    ("1".into(), vec![])
+}
+
+fn collect_loop_bindings(stmts: &[Stmt], locals: &mut Vec<(String, String)>) {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Loop {
+                kind: LoopKind::For { binding },
+                body,
+                ..
+            } => {
+                let bind = sanitize_ident(binding.trim().trim_start_matches("& "));
+                if bind != "_" && !bind.is_empty() && !locals.iter().any(|(n, _)| n == &bind) {
+                    locals.push((bind, "int64_t".into()));
+                }
+                collect_loop_bindings(body, locals);
+            }
+            Stmt::Loop { body, .. } => collect_loop_bindings(body, locals),
+            Stmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_loop_bindings(then_body, locals);
+                collect_loop_bindings(else_body, locals);
+            }
+            Stmt::Match { arms, .. } => {
+                for arm in arms {
+                    collect_loop_bindings(&arm.body, locals);
+                }
+            }
+            Stmt::Try { body, catches } => {
+                collect_loop_bindings(body, locals);
+                for c in catches {
+                    collect_loop_bindings(&c.body, locals);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 fn collect_locals(stmts: &[Stmt], locals: &mut Vec<(String, String)>) {
@@ -812,5 +1002,226 @@ mod tests {
         let c = emit_c_module(&module).expect("emit");
         assert!(c.contains("struct Point"), "struct:\n{c}");
         assert!(c.contains("(p).x ="), "field assign:\n{c}");
+    }
+
+    #[test]
+    fn emits_method_call_as_free_fn() {
+        let module = UnifiedModule::new(vec![Decl::Function {
+            name: "run".into(),
+            params: vec![("c".into(), Typ::Named("Calc".into()))],
+            ret: Typ::Int,
+            body: vec![Stmt::Return(Some(Expr::Call {
+                callee: Box::new(Expr::Field {
+                    base: Box::new(Expr::Ident("c".into())),
+                    name: "add".into(),
+                }),
+                args: vec![Expr::IntLit(3)],
+            }))],
+            type_params: vec![],
+        }]);
+        let c = emit_c_module(&module).expect("emit");
+        assert!(c.contains("add(c, INT64_C(3))"), "method call:\n{c}");
+    }
+
+    #[test]
+    fn emits_match_int_arms() {
+        use crate::core_ir::MatchArm;
+        let module = UnifiedModule::new(vec![Decl::Function {
+            name: "classify".into(),
+            params: vec![("x".into(), Typ::Int)],
+            ret: Typ::Int,
+            body: vec![Stmt::Match {
+                scrutinee: Expr::Ident("x".into()),
+                arms: vec![
+                    MatchArm {
+                        pattern: "0".into(),
+                        body: vec![Stmt::Return(Some(Expr::IntLit(1)))],
+                    },
+                    MatchArm {
+                        pattern: "_".into(),
+                        body: vec![Stmt::Return(Some(Expr::IntLit(2)))],
+                    },
+                ],
+            }],
+            type_params: vec![],
+        }]);
+        let c = emit_c_module(&module).expect("emit");
+        assert!(c.contains("== INT64_C(0)"), "match arm:\n{c}");
+        assert!(c.contains("else if"), "else if chain:\n{c}");
+    }
+
+    #[test]
+    fn emits_try_throw_propagate() {
+        use crate::core_ir::CatchArm;
+        let module = UnifiedModule::new(vec![Decl::Function {
+            name: "risky".into(),
+            params: vec![],
+            ret: Typ::Int,
+            body: vec![
+                Stmt::Try {
+                    body: vec![Stmt::Throw(Expr::IntLit(9))],
+                    catches: vec![CatchArm {
+                        pattern: "e".into(),
+                        body: vec![Stmt::Return(Some(Expr::Ident("e".into())))],
+                    }],
+                },
+                Stmt::Propagate,
+                Stmt::Return(Some(Expr::IntLit(0))),
+            ],
+            type_params: vec![],
+        }]);
+        let c = emit_c_module(&module).expect("emit");
+        assert!(c.contains("__in_err"), "err flag:\n{c}");
+        assert!(c.contains("/* try */"), "try block:\n{c}");
+        assert!(c.contains("return __in_err_val"), "propagate:\n{c}");
+    }
+
+    #[test]
+    fn emits_for_in_index_walk() {
+        let module = UnifiedModule::new(vec![Decl::Function {
+            name: "sum".into(),
+            params: vec![("xs".into(), Typ::Named("Vec".into()))],
+            ret: Typ::Int,
+            body: vec![
+                Stmt::Let("acc".into(), Some(Typ::Int), Expr::IntLit(0)),
+                Stmt::Loop {
+                    kind: LoopKind::For {
+                        binding: "v".into(),
+                    },
+                    cond: Some(Expr::Ident("xs".into())),
+                    body: vec![Stmt::Assign(
+                        "acc".into(),
+                        Expr::Binary {
+                            op: "add".into(),
+                            lhs: Box::new(Expr::Ident("acc".into())),
+                            rhs: Box::new(Expr::Ident("v".into())),
+                        },
+                    )],
+                },
+                Stmt::Return(Some(Expr::Ident("acc".into()))),
+            ],
+            type_params: vec![],
+        }]);
+        let c = emit_c_module(&module).expect("emit");
+        assert!(c.contains("for (int64_t"), "for loop:\n{c}");
+        assert!(c.contains("int64_t v;"), "binding local:\n{c}");
+    }
+
+    #[test]
+    fn hoists_zero_capture_closure() {
+        let module = UnifiedModule::new(vec![Decl::Function {
+            name: "main".into(),
+            params: vec![],
+            ret: Typ::Int,
+            body: vec![
+                Stmt::Let(
+                    "f".into(),
+                    None,
+                    Expr::Closure {
+                        params: vec![("x".into(), Typ::Int)],
+                        ret: Typ::Int,
+                        body: vec![Stmt::Return(Some(Expr::Ident("x".into())))],
+                        captures: vec![],
+                    },
+                ),
+                Stmt::Return(Some(Expr::Ident("f".into()))),
+            ],
+            type_params: vec![],
+        }]);
+        let c = emit_c_module(&module).expect("emit");
+        assert!(c.contains("static int64_t __closure_"), "hoisted:\n{c}");
+        assert!(c.contains("(uint64_t)(__closure_"), "fn ptr:\n{c}");
+    }
+
+    fn write_temp(name: &str, src: &str) -> std::path::PathBuf {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "inauguration-c-emit-{}-{}-{}",
+            std::process::id(),
+            unique,
+            name
+        ));
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let path = dir.join(name);
+        std::fs::write(&path, src).expect("write");
+        path
+    }
+
+    #[test]
+    fn polyglot_in_control_flow_emits_if_while() {
+        let path = write_temp(
+            "control_flow.in",
+            r#"fn helper(value: Int) -> Int { return value; }
+fn main() -> Int {
+  let value: Int = 1;
+  value = value + 2;
+  helper(value);
+  if value > 2 { value = value - 1; } else { value = 0; }
+  while value < 4 { value = value + 1; }
+  return value;
+}
+"#,
+        );
+        let module = crate::in_lang_parse::parse_in_file(&path).expect("parse .in");
+        let c = emit_c_module(&module).expect("emit");
+        assert!(c.contains("int64_t helper(int64_t value)"), "helper:\n{c}");
+        assert!(c.contains("while"), "while:\n{c}");
+        assert!(c.contains("if ("), "if:\n{c}");
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn polyglot_c_and_go_answer_main() {
+        use crate::parser_registry::ParserId;
+        let c_path = write_temp(
+            "sample.c",
+            "int answer(void) { return 42; }\nint main(void) { return 0; }\n",
+        );
+        let go_path = write_temp(
+            "sample.go",
+            "package main\nfunc answer() int { return 42 }\nfunc main() {}\n",
+        );
+        let c_mod = crate::compiler::tree_front::parse_polyglot_file(ParserId::C, &c_path)
+            .expect("parse c");
+        let go_mod = crate::compiler::tree_front::parse_polyglot_file(ParserId::Go, &go_path)
+            .expect("parse go");
+        let c_out = emit_c_module(&c_mod).expect("emit c");
+        let go_out = emit_c_module(&go_mod).expect("emit go");
+        assert!(c_out.contains("int64_t answer()"), "c answer:\n{c_out}");
+        assert!(c_out.contains("return INT64_C(42)"), "c lit:\n{c_out}");
+        assert!(go_out.contains("int64_t answer()"), "go answer:\n{go_out}");
+        assert!(go_out.contains("return INT64_C(42)"), "go lit:\n{go_out}");
+        let _ = std::fs::remove_dir_all(c_path.parent().unwrap());
+        let _ = std::fs::remove_dir_all(go_path.parent().unwrap());
+    }
+
+    #[test]
+    fn polyglot_icore_min_assigns_local() {
+        let path = write_temp(
+            "min.icore",
+            r#"{
+  "icoreVersion": 2,
+  "decls": [
+    {"kind": "function", "name": "helper", "params": [], "return": "Int",
+     "body": [{"kind": "return", "value": 7}]},
+    {"kind": "function", "name": "main", "params": [], "return": "Void",
+     "body": [
+       {"kind": "assign", "target": "value",
+        "value": {"kind": "call", "callee": "helper"}},
+       {"kind": "return"}
+     ]}
+  ]
+}
+"#,
+        );
+        let module = crate::compiler::icore::parse_icore_file(&path).expect("parse icore");
+        let c = emit_c_module(&module).expect("emit");
+        assert!(c.contains("int64_t value;"), "local:\n{c}");
+        assert!(c.contains("value = helper()"), "assign:\n{c}");
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 }
