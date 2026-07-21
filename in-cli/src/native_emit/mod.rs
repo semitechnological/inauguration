@@ -11,6 +11,7 @@ pub mod native_link;
 pub mod object;
 pub mod raw;
 pub mod sci;
+pub mod source_emit;
 pub mod target;
 pub mod thumb;
 pub mod thumb_lower;

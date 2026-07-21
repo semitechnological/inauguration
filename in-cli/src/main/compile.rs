@@ -69,8 +69,12 @@ pub(crate) fn cmd_compile(
             metadata,
         );
     }
-    if matches!(emit, Some(EmitKindCli::C)) {
-        return cmd_emit_c(&source_path, &out_path, parser);
+    if matches!(
+        emit,
+        Some(EmitKindCli::C) | Some(EmitKindCli::Go) | Some(EmitKindCli::Rust)
+    ) {
+        let kind = emit.expect("matched emit kind");
+        return cmd_emit_source(&source_path, &out_path, parser, kind);
     }
     let parsed_base = base.map(parse_base).transpose()?;
     let owned_emit = match emit {
@@ -187,7 +191,13 @@ fn parse_base(value: &str) -> Result<u64> {
     }
 }
 
-fn cmd_emit_c(source_path: &Path, out_path: &Path, parser: ParserCli) -> Result<()> {
+fn cmd_emit_source(
+    source_path: &Path,
+    out_path: &Path,
+    parser: ParserCli,
+    kind: EmitKindCli,
+) -> Result<()> {
+    use inauguration::native_emit::source_emit::{SourceLang, emit_source_module};
     use inauguration::parser_registry;
 
     let resolved = parser_registry::resolve_parser_id(source_path, parser);
@@ -195,11 +205,11 @@ fn cmd_emit_c(source_path: &Path, out_path: &Path, parser: ParserCli) -> Result<
         Ok(Some(module)) => module,
         Ok(None) => {
             return Err(InError::Message(
-                "--emit c needs a Core IR front (all polyglot langs / .in / .icore)".into(),
+                "--emit source needs a Core IR front (all polyglot langs / .in / .icore)".into(),
             ));
         }
         Err(err) => {
-            // Library .in without `fn main` still useful for C dump.
+            // Library .in without `fn main` still useful for source dump.
             if source_path.extension().is_some_and(|e| e == "in") {
                 inauguration::in_lang_parse::parse_in_library_file(source_path).map_err(|e| {
                     InError::Message(format!(
@@ -215,15 +225,33 @@ fn cmd_emit_c(source_path: &Path, out_path: &Path, parser: ParserCli) -> Result<
             }
         }
     };
-    let c_source =
-        inauguration::native_emit::c_backend::emit_c_module(&module).map_err(InError::Message)?;
-    fs::write(out_path, &c_source)
+    let (label, text) = match kind {
+        EmitKindCli::C => (
+            "c",
+            inauguration::native_emit::c_backend::emit_c_module(&module)
+                .map_err(InError::Message)?,
+        ),
+        EmitKindCli::Go => (
+            "go",
+            emit_source_module(&module, SourceLang::Go).map_err(InError::Message)?,
+        ),
+        EmitKindCli::Rust => (
+            "rust",
+            emit_source_module(&module, SourceLang::Rust).map_err(InError::Message)?,
+        ),
+        _ => {
+            return Err(InError::Message(format!(
+                "internal: cmd_emit_source got {kind:?}"
+            )));
+        }
+    };
+    fs::write(out_path, &text)
         .map_err(|e| InError::Message(format!("write {}: {e}", out_path.display())))?;
     println!(
-        "c source: {} → {} ({} bytes)",
+        "{label} source: {} → {} ({} bytes)",
         source_path.display(),
         out_path.display(),
-        c_source.len()
+        text.len()
     );
     Ok(())
 }
