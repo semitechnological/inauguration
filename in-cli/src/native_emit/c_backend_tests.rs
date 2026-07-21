@@ -1,0 +1,387 @@
+//! Unit tests for `c_backend` (split out so emitter stays under 1k).
+
+use super::*;
+use crate::core_ir::{
+    CatchArm, CoreModuleIdentity, Decl, Expr, LoopKind, Stmt, Typ, UnifiedModule,
+};
+
+#[test]
+fn emits_fib_style_function() {
+    let module = UnifiedModule::with_identity(
+        vec![Decl::Function {
+            name: "fib".into(),
+            params: vec![("n".into(), Typ::Int)],
+            ret: Typ::Int,
+            body: vec![
+                Stmt::If {
+                    cond: Expr::Binary {
+                        op: "le".into(),
+                        lhs: Box::new(Expr::Ident("n".into())),
+                        rhs: Box::new(Expr::IntLit(1)),
+                    },
+                    then_body: vec![Stmt::Return(Some(Expr::Ident("n".into())))],
+                    else_body: vec![],
+                },
+                Stmt::Let("a".into(), Some(Typ::Int), Expr::IntLit(0)),
+                Stmt::Let("b".into(), Some(Typ::Int), Expr::IntLit(1)),
+                Stmt::Let("i".into(), Some(Typ::Int), Expr::IntLit(2)),
+                Stmt::Loop {
+                    kind: LoopKind::While,
+                    cond: Some(Expr::Binary {
+                        op: "le".into(),
+                        lhs: Box::new(Expr::Ident("i".into())),
+                        rhs: Box::new(Expr::Ident("n".into())),
+                    }),
+                    body: vec![
+                        Stmt::Let(
+                            "t".into(),
+                            Some(Typ::Int),
+                            Expr::Binary {
+                                op: "add".into(),
+                                lhs: Box::new(Expr::Ident("a".into())),
+                                rhs: Box::new(Expr::Ident("b".into())),
+                            },
+                        ),
+                        Stmt::Assign("a".into(), Expr::Ident("b".into())),
+                        Stmt::Assign("b".into(), Expr::Ident("t".into())),
+                        Stmt::Assign(
+                            "i".into(),
+                            Expr::Binary {
+                                op: "add".into(),
+                                lhs: Box::new(Expr::Ident("i".into())),
+                                rhs: Box::new(Expr::IntLit(1)),
+                            },
+                        ),
+                    ],
+                },
+                Stmt::Return(Some(Expr::Ident("b".into()))),
+            ],
+            type_params: vec![],
+        }],
+        CoreModuleIdentity {
+            package: Some("fib".into()),
+            module: Some("fib.main".into()),
+        },
+    );
+    let c = emit_c_module(&module).expect("emit");
+    assert!(c.contains("int64_t fib(int64_t n)"), "sig missing:\n{c}");
+    assert!(c.contains("while"), "loop missing:\n{c}");
+    assert!(c.contains("package: fib"), "identity missing:\n{c}");
+    assert!(c.contains("__attribute__((used))"), "used attr:\n{c}");
+}
+
+#[test]
+fn emits_struct_and_field_assign() {
+    let module = UnifiedModule::new(vec![
+        Decl::Struct {
+            name: "Point".into(),
+            fields: vec![("x".into(), Typ::Int), ("y".into(), Typ::Int)],
+            type_params: vec![],
+        },
+        Decl::Function {
+            name: "bump".into(),
+            params: vec![("p".into(), Typ::Named("Point".into()))],
+            ret: Typ::Named("Point".into()),
+            body: vec![
+                Stmt::FieldAssign {
+                    base: Expr::Ident("p".into()),
+                    name: "x".into(),
+                    value: Expr::Binary {
+                        op: "add".into(),
+                        lhs: Box::new(Expr::Field {
+                            base: Box::new(Expr::Ident("p".into())),
+                            name: "x".into(),
+                        }),
+                        rhs: Box::new(Expr::IntLit(1)),
+                    },
+                },
+                Stmt::Return(Some(Expr::Ident("p".into()))),
+            ],
+            type_params: vec![],
+        },
+    ]);
+    let c = emit_c_module(&module).expect("emit");
+    assert!(c.contains("struct Point"), "struct:\n{c}");
+    assert!(c.contains("(p).x ="), "field assign:\n{c}");
+}
+
+#[test]
+fn emits_method_call_as_free_fn() {
+    let module = UnifiedModule::new(vec![Decl::Function {
+        name: "run".into(),
+        params: vec![("c".into(), Typ::Named("Calc".into()))],
+        ret: Typ::Int,
+        body: vec![Stmt::Return(Some(Expr::Call {
+            callee: Box::new(Expr::Field {
+                base: Box::new(Expr::Ident("c".into())),
+                name: "add".into(),
+            }),
+            args: vec![Expr::IntLit(3)],
+        }))],
+        type_params: vec![],
+    }]);
+    let c = emit_c_module(&module).expect("emit");
+    assert!(c.contains("add(c, INT64_C(3))"), "method call:\n{c}");
+}
+
+#[test]
+fn emits_match_int_arms() {
+    use crate::core_ir::MatchArm;
+    let module = UnifiedModule::new(vec![Decl::Function {
+        name: "classify".into(),
+        params: vec![("x".into(), Typ::Int)],
+        ret: Typ::Int,
+        body: vec![Stmt::Match {
+            scrutinee: Expr::Ident("x".into()),
+            arms: vec![
+                MatchArm {
+                    pattern: "0".into(),
+                    body: vec![Stmt::Return(Some(Expr::IntLit(1)))],
+                },
+                MatchArm {
+                    pattern: "_".into(),
+                    body: vec![Stmt::Return(Some(Expr::IntLit(2)))],
+                },
+            ],
+        }],
+        type_params: vec![],
+    }]);
+    let c = emit_c_module(&module).expect("emit");
+    assert!(c.contains("== INT64_C(0)"), "match arm:\n{c}");
+    assert!(c.contains("else if"), "else if chain:\n{c}");
+}
+
+#[test]
+fn emits_try_throw_propagate() {
+    let module = UnifiedModule::new(vec![Decl::Function {
+        name: "risky".into(),
+        params: vec![],
+        ret: Typ::Int,
+        body: vec![
+            Stmt::Try {
+                body: vec![Stmt::Throw(Expr::IntLit(9))],
+                catches: vec![CatchArm {
+                    pattern: "e".into(),
+                    body: vec![Stmt::Return(Some(Expr::Ident("e".into())))],
+                }],
+            },
+            Stmt::Propagate,
+            Stmt::Return(Some(Expr::IntLit(0))),
+        ],
+        type_params: vec![],
+    }]);
+    let c = emit_c_module(&module).expect("emit");
+    assert!(c.contains("__in_err"), "err flag:\n{c}");
+    assert!(c.contains("/* try */"), "try block:\n{c}");
+    assert!(c.contains("return __in_err_val"), "propagate:\n{c}");
+}
+
+#[test]
+fn emits_for_in_index_walk() {
+    let module = UnifiedModule::new(vec![Decl::Function {
+        name: "sum".into(),
+        params: vec![("xs".into(), Typ::Named("Vec".into()))],
+        ret: Typ::Int,
+        body: vec![
+            Stmt::Let("acc".into(), Some(Typ::Int), Expr::IntLit(0)),
+            Stmt::Loop {
+                kind: LoopKind::For {
+                    binding: "v".into(),
+                },
+                cond: Some(Expr::Ident("xs".into())),
+                body: vec![Stmt::Assign(
+                    "acc".into(),
+                    Expr::Binary {
+                        op: "add".into(),
+                        lhs: Box::new(Expr::Ident("acc".into())),
+                        rhs: Box::new(Expr::Ident("v".into())),
+                    },
+                )],
+            },
+            Stmt::Return(Some(Expr::Ident("acc".into()))),
+        ],
+        type_params: vec![],
+    }]);
+    let c = emit_c_module(&module).expect("emit");
+    assert!(c.contains("struct InVec"), "InVec typedef/use:\n{c}");
+    assert!(c.contains(".ptr"), "vec.ptr:\n{c}");
+    assert!(c.contains(".len"), "vec.len:\n{c}");
+    assert!(c.contains("for (int64_t"), "for loop:\n{c}");
+    assert!(c.contains("int64_t v;"), "binding local:\n{c}");
+}
+
+#[test]
+fn hoists_zero_capture_closure() {
+    let module = UnifiedModule::new(vec![Decl::Function {
+        name: "main".into(),
+        params: vec![],
+        ret: Typ::Int,
+        body: vec![
+            Stmt::Let(
+                "f".into(),
+                None,
+                Expr::Closure {
+                    params: vec![("x".into(), Typ::Int)],
+                    ret: Typ::Int,
+                    body: vec![Stmt::Return(Some(Expr::Ident("x".into())))],
+                    captures: vec![],
+                },
+            ),
+            Stmt::Return(Some(Expr::Ident("f".into()))),
+        ],
+        type_params: vec![],
+    }]);
+    let c = emit_c_module(&module).expect("emit");
+    assert!(c.contains("static int64_t __closure_"), "hoisted:\n{c}");
+    assert!(c.contains("(uint64_t)(__closure_"), "fn ptr:\n{c}");
+}
+
+fn write_temp(name: &str, src: &str) -> std::path::PathBuf {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!(
+        "inauguration-c-emit-{}-{}-{}",
+        std::process::id(),
+        unique,
+        name
+    ));
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    let path = dir.join(name);
+    std::fs::write(&path, src).expect("write");
+    path
+}
+
+#[test]
+fn polyglot_in_control_flow_emits_if_while() {
+    let path = write_temp(
+        "control_flow.in",
+        r#"fn helper(value: Int) -> Int { return value; }
+fn main() -> Int {
+  let value: Int = 1;
+  value = value + 2;
+  helper(value);
+  if value > 2 { value = value - 1; } else { value = 0; }
+  while value < 4 { value = value + 1; }
+  return value;
+}
+"#,
+    );
+    let module = crate::in_lang_parse::parse_in_file(&path).expect("parse .in");
+    let c = emit_c_module(&module).expect("emit");
+    assert!(c.contains("int64_t helper(int64_t value)"), "helper:\n{c}");
+    assert!(c.contains("while"), "while:\n{c}");
+    assert!(c.contains("if ("), "if:\n{c}");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn polyglot_c_and_go_answer_main() {
+    use crate::parser_registry::ParserId;
+    let c_path = write_temp(
+        "sample.c",
+        "int answer(void) { return 42; }\nint main(void) { return 0; }\n",
+    );
+    let go_path = write_temp(
+        "sample.go",
+        "package main\nfunc answer() int { return 42 }\nfunc main() {}\n",
+    );
+    let c_mod =
+        crate::compiler::tree_front::parse_polyglot_file(ParserId::C, &c_path).expect("parse c");
+    let go_mod =
+        crate::compiler::tree_front::parse_polyglot_file(ParserId::Go, &go_path).expect("parse go");
+    let c_out = emit_c_module(&c_mod).expect("emit c");
+    let go_out = emit_c_module(&go_mod).expect("emit go");
+    assert!(c_out.contains("int64_t answer()"), "c answer:\n{c_out}");
+    assert!(c_out.contains("return INT64_C(42)"), "c lit:\n{c_out}");
+    assert!(go_out.contains("int64_t answer()"), "go answer:\n{go_out}");
+    assert!(go_out.contains("return INT64_C(42)"), "go lit:\n{go_out}");
+    let _ = std::fs::remove_dir_all(c_path.parent().unwrap());
+    let _ = std::fs::remove_dir_all(go_path.parent().unwrap());
+}
+
+#[test]
+fn polyglot_icore_min_assigns_local() {
+    let path = write_temp(
+        "min.icore",
+        r#"{
+  "icoreVersion": 2,
+  "decls": [
+{"kind": "function", "name": "helper", "params": [], "return": "Int",
+ "body": [{"kind": "return", "value": 7}]},
+{"kind": "function", "name": "main", "params": [], "return": "Void",
+ "body": [
+   {"kind": "assign", "target": "value",
+    "value": {"kind": "call", "callee": "helper"}},
+   {"kind": "return"}
+ ]}
+  ]
+}
+"#,
+    );
+    let module = crate::compiler::icore::parse_icore_file(&path).expect("parse icore");
+    let c = emit_c_module(&module).expect("emit");
+    assert!(c.contains("int64_t value;"), "local:\n{c}");
+    assert!(c.contains("value = helper()"), "assign:\n{c}");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn emits_multi_catch_chain() {
+    let module = UnifiedModule::new(vec![Decl::Function {
+        name: "risky".into(),
+        params: vec![],
+        ret: Typ::Int,
+        body: vec![Stmt::Try {
+            body: vec![Stmt::Throw(Expr::IntLit(1))],
+            catches: vec![
+                CatchArm {
+                    pattern: "0".into(),
+                    body: vec![Stmt::Return(Some(Expr::IntLit(10)))],
+                },
+                CatchArm {
+                    pattern: "e".into(),
+                    body: vec![Stmt::Return(Some(Expr::Ident("e".into())))],
+                },
+            ],
+        }],
+        type_params: vec![],
+    }]);
+    let c = emit_c_module(&module).expect("emit");
+    assert!(c.contains("else if"), "multi-catch:\n{c}");
+    assert!(c.contains("== INT64_C(0)"), "int catch:\n{c}");
+}
+
+#[test]
+fn hoists_capturing_closure_env() {
+    let module = UnifiedModule::new(vec![Decl::Function {
+        name: "main".into(),
+        params: vec![],
+        ret: Typ::Int,
+        body: vec![
+            Stmt::Let("y".into(), Some(Typ::Int), Expr::IntLit(7)),
+            Stmt::Let(
+                "f".into(),
+                None,
+                Expr::Closure {
+                    params: vec![("x".into(), Typ::Int)],
+                    ret: Typ::Int,
+                    body: vec![Stmt::Return(Some(Expr::Binary {
+                        op: "add".into(),
+                        lhs: Box::new(Expr::Ident("x".into())),
+                        rhs: Box::new(Expr::Ident("y".into())),
+                    }))],
+                    captures: vec!["y".into()],
+                },
+            ),
+            Stmt::Return(Some(Expr::Ident("f".into()))),
+        ],
+        type_params: vec![],
+    }]);
+    let c = emit_c_module(&module).expect("emit");
+    assert!(c.contains("_env"), "env struct:\n{c}");
+    assert!(c.contains("env->y"), "env load:\n{c}");
+    assert!(c.contains(".y = y"), "env init:\n{c}");
+}
