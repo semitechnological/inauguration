@@ -331,6 +331,7 @@ fn prefix_call_expr(expr: &mut Expr, crate_name: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core_ir::{CoreModuleIdentity, Decl, Expr, Stmt, Typ};
     use std::fs;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -367,9 +368,103 @@ mod tests {
     #[test]
     fn test_find_crate_root_missing_cargo_toml() {
         let temp = TempDirGuard::new();
-        // Since we don't create a Cargo.toml, it should fail
         let result = find_crate_root(&temp.path);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), "no crate root found");
+    }
+
+    #[test]
+    fn test_merge_dependency_modules() {
+        let mut main_mod = UnifiedModule {
+            identity: CoreModuleIdentity::default(),
+            decls: vec![],
+        };
+
+        let dep_mod = UnifiedModule {
+            identity: CoreModuleIdentity::default(),
+            decls: vec![
+                Decl::Function {
+                    name: "do_something".to_string(),
+                    params: vec![],
+                    ret: Typ::Void,
+                    body: vec![
+                        Stmt::Expr(Expr::Call {
+                            callee: Box::new(Expr::Ident("helper".to_string())),
+                            args: vec![],
+                        })
+                    ],
+                    type_params: vec![],
+                }
+            ],
+        };
+
+        let deps = vec![("my_crate".to_string(), dep_mod)];
+        merge_dependency_modules(&mut main_mod, deps);
+
+        assert_eq!(main_mod.decls.len(), 1);
+
+        if let Decl::Function { name, body, .. } = &main_mod.decls[0] {
+            assert_eq!(name, "my_crate::do_something");
+
+            if let Stmt::Expr(Expr::Call { callee, .. }) = &body[0] {
+                if let Expr::Ident(callee_name) = &**callee {
+                    assert_eq!(callee_name, "my_crate::helper");
+                } else {
+                    panic!("Expected Expr::Ident");
+                }
+            } else {
+                panic!("Expected Stmt::Expr with Expr::Call");
+            }
+        } else {
+            panic!("Expected Decl::Function");
+        }
+    }
+
+    #[test]
+    fn test_merge_dependency_modules_in_prefix() {
+        let mut main_mod = UnifiedModule {
+            identity: CoreModuleIdentity::default(),
+            decls: vec![],
+        };
+
+        let dep_mod = UnifiedModule {
+            identity: CoreModuleIdentity::default(),
+            decls: vec![
+                Decl::Function {
+                    name: "do_something".to_string(),
+                    params: vec![],
+                    ret: Typ::Void,
+                    body: vec![
+                        Stmt::Expr(Expr::Call {
+                            callee: Box::new(Expr::Ident("helper".to_string())),
+                            args: vec![],
+                        })
+                    ],
+                    type_params: vec![],
+                }
+            ],
+        };
+
+        // If the crate name starts with "in-", names should NOT be prefixed
+        let deps = vec![("in-core".to_string(), dep_mod)];
+        merge_dependency_modules(&mut main_mod, deps);
+
+        assert_eq!(main_mod.decls.len(), 1);
+
+        if let Decl::Function { name, body, .. } = &main_mod.decls[0] {
+            assert_eq!(name, "do_something");
+
+            if let Stmt::Expr(Expr::Call { callee, .. }) = &body[0] {
+                if let Expr::Ident(callee_name) = &**callee {
+                    assert_eq!(callee_name, "in-core::helper");
+                } else {
+                    panic!("Expected Expr::Ident");
+                }
+            } else {
+                panic!("Expected Stmt::Expr with Expr::Call");
+            }
+        } else {
+            panic!("Expected Decl::Function");
+        }
     }
 }
