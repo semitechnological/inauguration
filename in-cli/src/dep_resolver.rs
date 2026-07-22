@@ -158,7 +158,8 @@ mod tests {
     #[test]
     fn test_resolve_deps_complex() {
         let id = COUNTER.fetch_add(1, Ordering::SeqCst);
-        let temp_dir = std::env::temp_dir().join(format!("test_resolve_deps_{}_{}", std::process::id(), id));
+        let temp_dir =
+            std::env::temp_dir().join(format!("test_resolve_deps_{}_{}", std::process::id(), id));
         let src_dir = temp_dir.join("dummy_crate/src/dummy_crate");
         fs::create_dir_all(&src_dir).unwrap();
         let mod_rs = src_dir.join("foo.rs");
@@ -168,34 +169,30 @@ mod tests {
         db.search_roots.push(temp_dir.clone());
         db.register_crate("dummy_crate", temp_dir.join("dummy_crate"));
 
-        let module = UnifiedModule::new(vec![
-            Decl::Function {
-                name: "main".to_string(),
-                params: vec![],
-                ret: Typ::Void,
-                body: vec![
-                    Stmt::Expr(Expr::Call {
-                        callee: Box::new(Expr::Ident("dummy_crate::foo::bar".to_string())),
-                        args: vec![],
-                    }),
-                    Stmt::If {
-                        cond: Expr::BoolLit(true),
-                        then_body: vec![
-                            Stmt::Let(
-                                "x".to_string(),
-                                None,
-                                Expr::Call {
-                                    callee: Box::new(Expr::Ident("dummy_crate::foo::baz".to_string())),
-                                    args: vec![]
-                                }
-                            )
-                        ],
-                        else_body: vec![],
-                    }
-                ],
-                type_params: vec![],
-            }
-        ]);
+        let module = UnifiedModule::new(vec![Decl::Function {
+            name: "main".to_string(),
+            params: vec![],
+            ret: Typ::Void,
+            body: vec![
+                Stmt::Expr(Expr::Call {
+                    callee: Box::new(Expr::Ident("dummy_crate::foo::bar".to_string())),
+                    args: vec![],
+                }),
+                Stmt::If {
+                    cond: Expr::BoolLit(true),
+                    then_body: vec![Stmt::Let(
+                        "x".to_string(),
+                        None,
+                        Expr::Call {
+                            callee: Box::new(Expr::Ident("dummy_crate::foo::baz".to_string())),
+                            args: vec![],
+                        },
+                    )],
+                    else_body: vec![],
+                },
+            ],
+            type_params: vec![],
+        }]);
 
         let res = resolve_deps(&module, &db);
         assert!(res.files_parsed > 0);
@@ -216,7 +213,8 @@ mod tests {
     #[test]
     fn test_resolve_deps_loop_and_match() {
         let id = COUNTER.fetch_add(1, Ordering::SeqCst);
-        let temp_dir = std::env::temp_dir().join(format!("test_resolve_deps_2_{}_{}", std::process::id(), id));
+        let temp_dir =
+            std::env::temp_dir().join(format!("test_resolve_deps_2_{}_{}", std::process::id(), id));
         let src_dir = temp_dir.join("dummy_crate/src/dummy_crate");
         fs::create_dir_all(&src_dir).unwrap();
         fs::write(&src_dir.join("func1.rs"), "pub fn func1() {}").unwrap();
@@ -227,43 +225,35 @@ mod tests {
         db.search_roots.push(temp_dir.clone());
         db.register_crate("dummy_crate", temp_dir.join("dummy_crate"));
 
-        let module = UnifiedModule::new(vec![
-            Decl::Function {
-                name: "main".to_string(),
-                params: vec![],
-                ret: Typ::Void,
-                body: vec![
-                    Stmt::Loop {
-                        kind: crate::core_ir::LoopKind::While,
-                        cond: Some(Expr::Call {
-                            callee: Box::new(Expr::Ident("dummy_crate::func1::func1".to_string())),
+        let module = UnifiedModule::new(vec![Decl::Function {
+            name: "main".to_string(),
+            params: vec![],
+            ret: Typ::Void,
+            body: vec![
+                Stmt::Loop {
+                    kind: crate::core_ir::LoopKind::While,
+                    cond: Some(Expr::Call {
+                        callee: Box::new(Expr::Ident("dummy_crate::func1::func1".to_string())),
+                        args: vec![],
+                    }),
+                    body: vec![Stmt::Expr(Expr::Call {
+                        callee: Box::new(Expr::Ident("dummy_crate::func2::func2".to_string())),
+                        args: vec![],
+                    })],
+                },
+                Stmt::Match {
+                    scrutinee: Expr::Ident("x".to_string()),
+                    arms: vec![crate::core_ir::MatchArm {
+                        pattern: "1".to_string(),
+                        body: vec![Stmt::Expr(Expr::Call {
+                            callee: Box::new(Expr::Ident("dummy_crate::func3::func3".to_string())),
                             args: vec![],
-                        }),
-                        body: vec![
-                            Stmt::Expr(Expr::Call {
-                                callee: Box::new(Expr::Ident("dummy_crate::func2::func2".to_string())),
-                                args: vec![],
-                            })
-                        ]
-                    },
-                    Stmt::Match {
-                        scrutinee: Expr::Ident("x".to_string()),
-                        arms: vec![
-                            crate::core_ir::MatchArm {
-                                pattern: "1".to_string(),
-                                body: vec![
-                                    Stmt::Expr(Expr::Call {
-                                        callee: Box::new(Expr::Ident("dummy_crate::func3::func3".to_string())),
-                                        args: vec![],
-                                    })
-                                ]
-                            }
-                        ]
-                    }
-                ],
-                type_params: vec![],
-            }
-        ]);
+                        })],
+                    }],
+                },
+            ],
+            type_params: vec![],
+        }]);
 
         let res = resolve_deps(&module, &db);
         assert_eq!(res.functions_added, 3);
