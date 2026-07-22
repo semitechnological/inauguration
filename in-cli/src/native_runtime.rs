@@ -494,3 +494,20 @@ fn value_to_string(v: &Value) -> String {
         ),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_native_runtime_new() {
+        let runtime = NativeRuntime::new();
+        assert!(runtime.fns.is_empty(), "fns should be empty on creation");
+    }
+
+    #[test]
+    fn test_native_runtime_default() {
+        let runtime = NativeRuntime::default();
+        assert!(runtime.fns.is_empty(), "fns should be empty on default creation");
+    }
+}
