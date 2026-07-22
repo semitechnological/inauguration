@@ -490,11 +490,7 @@ impl Ctx {
                             format!("{}.{} = {}", env_name, n, n)
                         })
                         .collect();
-                    format!(
-                        "({{ {}; (uint64_t)({}); }})",
-                        fills.join("; "),
-                        cname
-                    )
+                    format!("({{ {}; (uint64_t)({}); }})", fills.join("; "), cname)
                 }
             }
         }
@@ -975,7 +971,6 @@ fn collect_locals(stmts: &[Stmt], locals: &mut Vec<(String, String)>) {
         }
     }
 }
-
 
 #[cfg(test)]
 #[path = "c_backend_tests.rs"]
