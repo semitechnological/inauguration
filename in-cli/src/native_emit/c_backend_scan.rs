@@ -48,7 +48,11 @@ fn stmts_need_invec(stmts: &[Stmt]) -> bool {
 fn stmt_needs_invec(s: &Stmt) -> bool {
     match s {
         Stmt::Let(_, ty, e) => {
+<<<<<<< HEAD
             ty.as_ref().is_some_and(typ_needs_invec) || expr_needs_invec(e)
+
+            ty.as_ref().is_some_and(|t| typ_needs_invec(t)) || expr_needs_invec(e)
+>>>>>>> 80676b7 (Fix formatting in native_emit)
         }
         Stmt::Assign(_, e) | Stmt::Return(Some(e)) | Stmt::Throw(e) | Stmt::Expr(e) => {
             expr_needs_invec(e)
