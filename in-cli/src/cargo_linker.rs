@@ -382,20 +382,16 @@ mod tests {
 
         let dep_mod = UnifiedModule {
             identity: CoreModuleIdentity::default(),
-            decls: vec![
-                Decl::Function {
-                    name: "do_something".to_string(),
-                    params: vec![],
-                    ret: Typ::Void,
-                    body: vec![
-                        Stmt::Expr(Expr::Call {
-                            callee: Box::new(Expr::Ident("helper".to_string())),
-                            args: vec![],
-                        })
-                    ],
-                    type_params: vec![],
-                }
-            ],
+            decls: vec![Decl::Function {
+                name: "do_something".to_string(),
+                params: vec![],
+                ret: Typ::Void,
+                body: vec![Stmt::Expr(Expr::Call {
+                    callee: Box::new(Expr::Ident("helper".to_string())),
+                    args: vec![],
+                })],
+                type_params: vec![],
+            }],
         };
 
         let deps = vec![("my_crate".to_string(), dep_mod)];
@@ -429,20 +425,16 @@ mod tests {
 
         let dep_mod = UnifiedModule {
             identity: CoreModuleIdentity::default(),
-            decls: vec![
-                Decl::Function {
-                    name: "do_something".to_string(),
-                    params: vec![],
-                    ret: Typ::Void,
-                    body: vec![
-                        Stmt::Expr(Expr::Call {
-                            callee: Box::new(Expr::Ident("helper".to_string())),
-                            args: vec![],
-                        })
-                    ],
-                    type_params: vec![],
-                }
-            ],
+            decls: vec![Decl::Function {
+                name: "do_something".to_string(),
+                params: vec![],
+                ret: Typ::Void,
+                body: vec![Stmt::Expr(Expr::Call {
+                    callee: Box::new(Expr::Ident("helper".to_string())),
+                    args: vec![],
+                })],
+                type_params: vec![],
+            }],
         };
 
         // If the crate name starts with "in-", names should NOT be prefixed
