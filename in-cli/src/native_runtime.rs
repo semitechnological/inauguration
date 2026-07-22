@@ -494,3 +494,51 @@ fn value_to_string(v: &Value) -> String {
         ),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_standard_runtime_initialization() {
+        let rt = NativeRuntime::standard();
+
+        // Assert known functions exist
+        assert!(rt.fns.contains_key("cwd"));
+        assert!(rt.fns.contains_key("std :: env :: temp_dir"));
+        assert!(rt.fns.contains_key("std :: env :: var"));
+        assert!(rt.fns.contains_key("display"));
+        assert!(rt.fns.contains_key("Cli :: parse"));
+        assert!(rt.fns.contains_key("std :: fs :: read_to_string"));
+        assert!(rt.fns.contains_key("Command :: new"));
+    }
+
+    #[test]
+    fn test_call_missing_function() {
+        let rt = NativeRuntime::standard();
+        let result = rt.call("nonexistent_function", &[]);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_call_existing_function_no_args() {
+        let rt = NativeRuntime::standard();
+        let result = rt.call("std :: env :: temp_dir", &[]);
+        assert!(result.is_some());
+        let value = result.unwrap().unwrap();
+        if let Value::String(s) = value {
+            assert!(!s.is_empty());
+        } else {
+            panic!("Expected string value from temp_dir");
+        }
+    }
+
+    #[test]
+    fn test_call_existing_function_with_args() {
+        let rt = NativeRuntime::standard();
+        // Calling `std :: env :: var` with an existing environment variable (e.g. PATH or similar if guaranteed, but we can test if it returns Nil for non-existent)
+        let result = rt.call("std :: env :: var", &[Value::String("NON_EXISTENT_VAR_12345".to_string())]);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().unwrap(), Value::Nil);
+    }
+}
