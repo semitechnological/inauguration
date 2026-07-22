@@ -225,8 +225,14 @@ mod tests {
     #[test]
     fn test_cratedb_new_initialization() {
         let db = CrateDb::new();
-        assert!(db.crates.read().unwrap().is_empty(), "Crates should be empty");
-        assert!(db.symbol_index.read().unwrap().is_empty(), "Symbol index should be empty");
+        assert!(
+            db.crates.read().unwrap().is_empty(),
+            "Crates should be empty"
+        );
+        assert!(
+            db.symbol_index.read().unwrap().is_empty(),
+            "Symbol index should be empty"
+        );
     }
 
     #[test]
@@ -236,7 +242,11 @@ mod tests {
         // Even if `rustc` is not available, we should at least not panic
         // and `search_roots` must not contain garbage paths.
         for path in &db.search_roots {
-            assert!(path.exists(), "Every search root must be an existing directory: {:?}", path);
+            assert!(
+                path.exists(),
+                "Every search root must be an existing directory: {:?}",
+                path
+            );
             assert!(path.is_dir(), "Search root must be a directory: {:?}", path);
         }
     }
