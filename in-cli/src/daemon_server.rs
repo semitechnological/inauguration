@@ -306,6 +306,12 @@ mod tests {
     use std::io::{Read, Write};
 
     #[test]
+    fn test_default_socket_path() {
+        let path = default_socket_path();
+        assert!(path.ends_with(DEFAULT_SOCKET_NAME));
+    }
+
+    #[test]
     fn parses_daemon_defaults() {
         assert_eq!(parser_from_cli(None), ParserCli::Auto);
         assert_eq!(parser_from_cli(Some("in")), ParserCli::In);
