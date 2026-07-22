@@ -477,7 +477,7 @@ func splitNonEscaped(s, sep string) []string {
 // getMatch parses the passed url and tries to match it against the route segments and determine the parameter positions
 func (routeParser *routeParser) getMatch(detectionPath, path string, params *[maxParams]string, partialCheck bool) bool { //nolint: revive // Accepting a bool param is fine here
 	var i, paramsIterator, partLen int
-	for _, segment := range routeParser.segs {
+	for segIdx, segment := range routeParser.segs {
 		partLen = len(detectionPath)
 		// check const segment
 		if !segment.IsParam {
@@ -495,6 +495,39 @@ func (routeParser *routeParser) getMatch(detectionPath, path string, params *[ma
 			if !segment.IsOptional && i == 0 {
 				return false
 			}
+
+			// Optional parameter check hack
+			if segment.IsOptional && i > 0 {
+				minRequired := 0
+				for j := segIdx + 1; j < len(routeParser.segs); j++ {
+					nextSeg := routeParser.segs[j]
+					if nextSeg.IsParam {
+						if !nextSeg.IsOptional {
+							if nextSeg.IsLast {
+								minRequired += 1
+							} else if nextSeg.Length > 0 {
+								minRequired += nextSeg.Length
+							} else if !nextSeg.IsGreedy {
+								minRequired += 1
+							}
+						}
+					} else if !nextSeg.IsParam {
+						if nextSeg.HasOptionalSlash {
+							minRequired += len(nextSeg.Const) - 1
+						} else {
+							minRequired += len(nextSeg.Const)
+						}
+					}
+				}
+
+				if len(detectionPath) - i < minRequired {
+					i = len(detectionPath) - minRequired
+					if i < 0 {
+						i = 0
+					}
+				}
+			}
+
 			// take over the params positions
 			params[paramsIterator] = path[:i]
 
