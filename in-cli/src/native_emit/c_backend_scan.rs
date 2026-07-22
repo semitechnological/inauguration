@@ -32,7 +32,9 @@ fn decl_needs_invec(d: &Decl) -> bool {
                 || stmts_need_invec(body)
         }
         Decl::Global { typ, init, .. } => {
-            typ_needs_invec(typ) || init.as_ref().is_some_and(|e| expr_needs_invec(e))
+            #[allow(clippy::redundant_closure)]
+            let needs_init = init.as_ref().is_some_and(|e| expr_needs_invec(e));
+            typ_needs_invec(typ) || needs_init
         }
         Decl::Interface { methods, .. } => methods
             .iter()
@@ -48,7 +50,9 @@ fn stmts_need_invec(stmts: &[Stmt]) -> bool {
 fn stmt_needs_invec(s: &Stmt) -> bool {
     match s {
         Stmt::Let(_, ty, e) => {
-            ty.as_ref().is_some_and(|t| typ_needs_invec(t)) || expr_needs_invec(e)
+            #[allow(clippy::redundant_closure)]
+            let ty_needs = ty.as_ref().is_some_and(|t| typ_needs_invec(t));
+            ty_needs || expr_needs_invec(e)
         }
         Stmt::Assign(_, e) | Stmt::Return(Some(e)) | Stmt::Throw(e) | Stmt::Expr(e) => {
             expr_needs_invec(e)
@@ -63,9 +67,9 @@ fn stmt_needs_invec(s: &Stmt) -> bool {
             else_body,
         } => expr_needs_invec(cond) || stmts_need_invec(then_body) || stmts_need_invec(else_body),
         Stmt::Loop { kind, cond, body } => {
-            matches!(kind, LoopKind::For { .. })
-                || cond.as_ref().is_some_and(|e| expr_needs_invec(e))
-                || stmts_need_invec(body)
+            #[allow(clippy::redundant_closure)]
+            let cond_needs = cond.as_ref().is_some_and(|e| expr_needs_invec(e));
+            matches!(kind, LoopKind::For { .. }) || cond_needs || stmts_need_invec(body)
         }
         Stmt::Match { scrutinee, arms } => {
             expr_needs_invec(scrutinee) || arms.iter().any(|a| stmts_need_invec(&a.body))
