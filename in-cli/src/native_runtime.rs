@@ -537,7 +537,10 @@ mod tests {
     fn test_call_existing_function_with_args() {
         let rt = NativeRuntime::standard();
         // Calling `std :: env :: var` with an existing environment variable (e.g. PATH or similar if guaranteed, but we can test if it returns Nil for non-existent)
-        let result = rt.call("std :: env :: var", &[Value::String("NON_EXISTENT_VAR_12345".to_string())]);
+        let result = rt.call(
+            "std :: env :: var",
+            &[Value::String("NON_EXISTENT_VAR_12345".to_string())],
+        );
         assert!(result.is_some());
         assert_eq!(result.unwrap().unwrap(), Value::Nil);
     }

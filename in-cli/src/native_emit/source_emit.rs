@@ -15,9 +15,7 @@ const MAX_EMIT_NODES: usize = 100_000;
 pub fn emit_source_module(module: &UnifiedModule, lang: SourceLang) -> String {
     // Soft DoS guard: truncate emission rather than hang (lossy printers).
     if !module_within_limits(module) {
-        return format!(
-            "// emit aborted: Core IR exceeds size/depth limits\n// lang={lang:?}\n"
-        );
+        return format!("// emit aborted: Core IR exceeds size/depth limits\n// lang={lang:?}\n");
     }
     let mut out = String::with_capacity(4096);
     match lang {
@@ -678,7 +676,9 @@ fn count_stmt(s: &Stmt, depth: u32, nodes: &mut usize) -> bool {
         }
         Stmt::Try { body, catches } => {
             count_stmts(body, depth + 1, nodes)
-                && catches.iter().all(|c| count_stmts(&c.body, depth + 1, nodes))
+                && catches
+                    .iter()
+                    .all(|c| count_stmts(&c.body, depth + 1, nodes))
         }
     }
 }
@@ -696,9 +696,9 @@ fn count_expr(e: &Expr, depth: u32, nodes: &mut usize) -> bool {
         Expr::Binary { lhs, rhs, .. } => {
             count_expr(lhs, depth + 1, nodes) && count_expr(rhs, depth + 1, nodes)
         }
-        Expr::StructInit { fields, .. } => {
-            fields.iter().all(|(_, fe)| count_expr(fe, depth + 1, nodes))
-        }
+        Expr::StructInit { fields, .. } => fields
+            .iter()
+            .all(|(_, fe)| count_expr(fe, depth + 1, nodes)),
         Expr::Field { base, .. } => count_expr(base, depth + 1, nodes),
         Expr::ArrayLit(items) => items.iter().all(|it| count_expr(it, depth + 1, nodes)),
         Expr::Index { base, index } => {
@@ -712,7 +712,6 @@ fn count_expr(e: &Expr, depth: u32, nodes: &mut usize) -> bool {
         _ => true,
     }
 }
-
 
 fn sanitize_line(s: &str) -> String {
     s.chars()
