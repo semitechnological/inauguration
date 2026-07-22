@@ -24,10 +24,7 @@ fn decl_needs_invec(d: &Decl) -> bool {
         Decl::Struct { fields, .. } => fields.iter().any(|(_, t)| typ_needs_invec(t)),
         Decl::Class {
             fields, methods, ..
-        } => {
-            fields.iter().any(|(_, t)| typ_needs_invec(t))
-                || methods.iter().any(decl_needs_invec)
-        }
+        } => fields.iter().any(|(_, t)| typ_needs_invec(t)) || methods.iter().any(decl_needs_invec),
         Decl::Function {
             params, ret, body, ..
         } => {
@@ -38,9 +35,9 @@ fn decl_needs_invec(d: &Decl) -> bool {
         Decl::Global { typ, init, .. } => {
             typ_needs_invec(typ) || init.as_ref().is_some_and(|e| expr_needs_invec(e))
         }
-        Decl::Interface { methods, .. } => methods.iter().any(|m| {
-            m.params.iter().any(|(_, t)| typ_needs_invec(t)) || typ_needs_invec(&m.ret)
-        }),
+        Decl::Interface { methods, .. } => methods
+            .iter()
+            .any(|m| m.params.iter().any(|(_, t)| typ_needs_invec(t)) || typ_needs_invec(&m.ret)),
         Decl::Component { .. } => false,
     }
 }
