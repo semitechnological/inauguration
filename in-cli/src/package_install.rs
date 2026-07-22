@@ -1077,6 +1077,21 @@ mod tests {
     }
 
     #[test]
+    fn extract_zip_handles_invalid_zip_gracefully() {
+        let dir = tempfile_dir("extract-zip");
+        let invalid_zip = dir.join("invalid.zip");
+        fs::write(&invalid_zip, b"not a valid zip archive").unwrap();
+
+        let install_path = dir.join("extracted");
+
+        let result = extract_zip(&invalid_zip, &install_path);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unzip extract failed"));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn add_packages_writes_manifest_entries() {
         let temp = tempfile_dir("package-add");
         let (_, added) = add_packages(&temp, &["pip:flask".to_string()], "latest").expect("add");
