@@ -179,3 +179,26 @@ def test_appcontext_tearing_down_signal(app, client):
         assert isinstance(recorded[0], ZeroDivisionError)
     finally:
         flask.appcontext_tearing_down.disconnect(record_teardown, app)
+
+
+def test_blinker_receivers_for_any():
+    from blinker.base import Signal, ANY
+    sig = Signal()
+
+    def any_receiver(sender):
+        pass
+
+    def specific_receiver(sender):
+        pass
+
+    sig.connect(any_receiver, sender=ANY)
+    sig.connect(specific_receiver, sender="specific")
+
+    receivers = list(sig.receivers_for(ANY))
+    assert len(receivers) == 1
+    assert receivers[0] == any_receiver
+
+    receivers_specific = list(sig.receivers_for("specific"))
+    assert len(receivers_specific) == 2
+    assert any_receiver in receivers_specific
+    assert specific_receiver in receivers_specific
