@@ -1283,13 +1283,6 @@ fn helper_stub(ssa: &mut usize) -> String {
     format!("%{v} = integer_literal $Builtin.Int64, 0\nbb1:\nreturn %{v} : $Builtin.Int64\n")
 }
 
-fn find_fn<'a>(module: &'a UnifiedModule, name: &str) -> Option<&'a Decl> {
-    module
-        .decls
-        .iter()
-        .find(|d| matches!(d, Decl::Function { name: n, .. } if n == name))
-}
-
 /// Emit textual SIL: helper functions first (sorted), then `@main` with `function_ref` callees and a
 /// unique SSA id space.
 pub fn lower_to_textual_sil(module: UnifiedModule, _module_id: &str) -> String {
@@ -1299,22 +1292,24 @@ pub fn lower_to_textual_sil(module: UnifiedModule, _module_id: &str) -> String {
 fn lower_to_textual_sil_inner(module: UnifiedModule) -> String {
     let mut module = module;
     desugar_module(&mut module);
-    let mut fn_names: Vec<String> = module
-        .decls
-        .iter()
-        .filter_map(|d| match d {
-            Decl::Function { name, .. } => Some(name.clone()),
-            _ => None,
-        })
-        .collect();
+
+    let mut fn_map = std::collections::HashMap::new();
+    let mut fn_names = Vec::new();
+    for d in &module.decls {
+        if let Decl::Function { name, .. } = d {
+            fn_map.insert(name.as_str(), d);
+            fn_names.push(name.clone());
+        }
+    }
     fn_names.sort();
+
     let mut sil = String::from("// inauguration core → textual SIL (multi-front v0)\n");
     let mut ssa = 0usize;
     for name in &fn_names {
-        if *name == "main" {
+        if name == "main" {
             continue;
         }
-        let Some(Decl::Function { params, body, .. }) = find_fn(&module, name) else {
+        let Some(Decl::Function { params, body, .. }) = fn_map.get(name.as_str()).copied() else {
             continue;
         };
         sil.push_str(&format!("sil @{name}\nbb0:\n"));
@@ -1326,7 +1321,7 @@ fn lower_to_textual_sil_inner(module: UnifiedModule) -> String {
     }
 
     sil.push_str("sil @main\nbb0:\n");
-    if let Some(Decl::Function { params, body, .. }) = find_fn(&module, "main") {
+    if let Some(Decl::Function { params, body, .. }) = fn_map.get("main").copied() {
         if body.is_empty() {
             let ret = ssa;
             sil.push_str(&format!("%{ret} = integer_literal $Builtin.Int64, 0\n"));
