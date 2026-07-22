@@ -15,13 +15,10 @@ use super::{CompileTarget, OwnedCompileRequest};
 /// Tries: exact match, namespaced (`.<entry>`), suffix match, then falls
 /// back to the first function so library crates without main can compile.
 pub fn resolve_jit_entry(module: &UnifiedModule, entry: &str) -> String {
-    let mut func_names = module
-        .decls
-        .iter()
-        .filter_map(|d| match d {
-            Decl::Function { name, .. } => Some(name.as_str()),
-            _ => None,
-        });
+    let mut func_names = module.decls.iter().filter_map(|d| match d {
+        Decl::Function { name, .. } => Some(name.as_str()),
+        _ => None,
+    });
 
     if func_names.clone().any(|n| n == entry) {
         return entry.to_string();
