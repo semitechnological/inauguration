@@ -383,7 +383,10 @@ fn hoists_capturing_closure_env() {
     let c = emit_c_module(&module).expect("emit");
     assert!(c.contains("_env"), "env struct:\n{c}");
     assert!(c.contains("static struct"), "static env:\n{c}");
-    assert!(c.contains(".y = y") || c.contains("_env.y = y"), "env init:\n{c}");
+    assert!(
+        c.contains(".y = y") || c.contains("_env.y = y"),
+        "env init:\n{c}"
+    );
     assert!(c.contains("(uint64_t)("), "fn ptr value:\n{c}");
 }
 
