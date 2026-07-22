@@ -217,3 +217,27 @@ impl Default for CrateDb {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_register_crate() {
+        let db = CrateDb::new();
+        let crate_name = "test_crate";
+        let mock_path = PathBuf::from("/mock/root/path");
+
+        db.register_crate(crate_name, mock_path.clone());
+
+        let crates = db.crates.read().unwrap();
+        assert!(
+            crates.contains_key(crate_name),
+            "Crate should be registered"
+        );
+
+        let registered = crates.get(crate_name).unwrap();
+        assert_eq!(registered.name, crate_name);
+        assert_eq!(registered.root, mock_path);
+    }
+}
