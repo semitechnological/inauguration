@@ -389,30 +389,41 @@ func getBytesImmutable(s string) []byte {
 	return []byte(s)
 }
 
+const (
+	intMethodGet = iota
+	intMethodHead
+	intMethodPost
+	intMethodPut
+	intMethodDelete
+	intMethodConnect
+	intMethodOptions
+	intMethodTrace
+	intMethodPatch
+)
+
 // HTTP methods and their unique INTs
 func (app *App) methodInt(s string) int {
 	// For better performance
 	if len(app.configured.RequestMethods) == 0 {
-		// TODO: Use iota instead
 		switch s {
 		case MethodGet:
-			return 0
+			return intMethodGet
 		case MethodHead:
-			return 1
+			return intMethodHead
 		case MethodPost:
-			return 2
+			return intMethodPost
 		case MethodPut:
-			return 3
+			return intMethodPut
 		case MethodDelete:
-			return 4
+			return intMethodDelete
 		case MethodConnect:
-			return 5
+			return intMethodConnect
 		case MethodOptions:
-			return 6
+			return intMethodOptions
 		case MethodTrace:
-			return 7
+			return intMethodTrace
 		case MethodPatch:
-			return 8
+			return intMethodPatch
 		default:
 			return -1
 		}
