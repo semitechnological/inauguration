@@ -1096,4 +1096,15 @@ mod tests {
         assert!(manifest.dependencies.contains_key("cargo:crepuscularity"));
         assert!(manifest.dependencies.contains_key("npm:hono"));
     }
+
+    #[test]
+    fn verify_hex_digest_checks_case_insensitive_match() {
+        let path = Path::new("/tmp/test");
+        assert!(verify_hex_digest("abcdef", "abcdef", path, "SHA256").is_ok());
+        assert!(verify_hex_digest("ABCDEF", "abcdef", path, "SHA256").is_ok());
+        assert_eq!(
+            verify_hex_digest("123456", "abcdef", path, "SHA256"),
+            Err("SHA256 mismatch for /tmp/test".to_string())
+        );
+    }
 }
