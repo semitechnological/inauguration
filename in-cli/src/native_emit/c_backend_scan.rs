@@ -24,7 +24,10 @@ fn decl_needs_invec(d: &Decl) -> bool {
         Decl::Struct { fields, .. } => fields.iter().any(|(_, t)| typ_needs_invec(t)),
         Decl::Class {
             fields, methods, ..
-        } => fields.iter().any(|(_, t)| typ_needs_invec(t)) || methods.iter().any(decl_needs_invec),
+        } => {
+            fields.iter().any(|(_, t)| typ_needs_invec(t))
+                || methods.iter().any(decl_needs_invec)
+        }
         Decl::Function {
             params, ret, body, ..
         } => {
@@ -35,9 +38,9 @@ fn decl_needs_invec(d: &Decl) -> bool {
         Decl::Global { typ, init, .. } => {
             typ_needs_invec(typ) || init.as_ref().is_some_and(|e| expr_needs_invec(e))
         }
-        Decl::Interface { methods, .. } => methods
-            .iter()
-            .any(|m| m.params.iter().any(|(_, t)| typ_needs_invec(t)) || typ_needs_invec(&m.ret)),
+        Decl::Interface { methods, .. } => methods.iter().any(|m| {
+            m.params.iter().any(|(_, t)| typ_needs_invec(t)) || typ_needs_invec(&m.ret)
+        }),
         Decl::Component { .. } => false,
     }
 }
@@ -48,9 +51,7 @@ fn stmts_need_invec(stmts: &[Stmt]) -> bool {
 
 fn stmt_needs_invec(s: &Stmt) -> bool {
     match s {
-        Stmt::Let(_, ty, e) => {
-            ty.as_ref().is_some_and(|t| typ_needs_invec(t)) || expr_needs_invec(e)
-        }
+        Stmt::Let(_, ty, e) => ty.as_ref().map_or(false, typ_needs_invec) || expr_needs_invec(e),
         Stmt::Assign(_, e) | Stmt::Return(Some(e)) | Stmt::Throw(e) | Stmt::Expr(e) => {
             expr_needs_invec(e)
         }
@@ -65,7 +66,7 @@ fn stmt_needs_invec(s: &Stmt) -> bool {
         } => expr_needs_invec(cond) || stmts_need_invec(then_body) || stmts_need_invec(else_body),
         Stmt::Loop { kind, cond, body } => {
             matches!(kind, LoopKind::For { .. })
-                || cond.as_ref().is_some_and(|e| expr_needs_invec(e))
+                || cond.as_ref().map_or(false, expr_needs_invec)
                 || stmts_need_invec(body)
         }
         Stmt::Match { scrutinee, arms } => {
