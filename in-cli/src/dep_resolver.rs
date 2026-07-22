@@ -114,23 +114,27 @@ pub fn resolve_deps(module: &UnifiedModule, crate_db: &CrateDb) -> ResolveResult
             seen.insert((*target).clone());
         }
 
+        let mut resolved_modules = Vec::new();
         for target in &new {
-            match crate_db.resolve(target) {
-                Ok((_cname, _mpath, dep_mod)) => {
-                    for decl in &dep_mod.decls {
-                        if let Decl::Function { name, .. } = decl {
-                            if !seen.contains(name) {
-                                expanded.decls.push(decl.clone());
-                                seen.insert(name.clone());
-                                functions_added += 1;
-                            }
+            if let Ok((_cname, _mpath, dep_mod)) = crate_db.resolve(target) {
+                resolved_modules.push(dep_mod);
+            }
+        }
+
+        let mut processed_modules = std::collections::HashSet::new();
+        for dep_mod in resolved_modules {
+            let mod_ptr = std::sync::Arc::as_ptr(&dep_mod) as usize;
+            if processed_modules.insert(mod_ptr) {
+                for decl in &dep_mod.decls {
+                    if let Decl::Function { name, .. } = decl {
+                        if !seen.contains(name) {
+                            expanded.decls.push(decl.clone());
+                            seen.insert(name.clone());
+                            functions_added += 1;
                         }
                     }
-                    files_parsed += 1;
                 }
-                Err(_) => {
-                    // ponytail: can't resolve — lowerer will stub
-                }
+                files_parsed += 1;
             }
         }
     }
