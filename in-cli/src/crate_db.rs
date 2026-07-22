@@ -217,3 +217,19 @@ impl Default for CrateDb {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resolve_missing_crate() {
+        let db = CrateDb::new();
+        let result = db.resolve("missing_crate::module::func");
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            "no source for `missing_crate::module::func` (crate=missing_crate, path=missing_crate/module)"
+        );
+    }
+}
