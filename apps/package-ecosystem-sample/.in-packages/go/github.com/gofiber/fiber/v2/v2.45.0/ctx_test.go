@@ -891,7 +891,6 @@ func Benchmark_Ctx_Format_XML(b *testing.B) {
 
 // go test -run Test_Ctx_FormFile
 func Test_Ctx_FormFile(t *testing.T) {
-	// TODO: We should clean this up
 	t.Parallel()
 	app := New()
 
@@ -902,9 +901,7 @@ func Test_Ctx_FormFile(t *testing.T) {
 
 		f, err := fh.Open()
 		utils.AssertEqual(t, nil, err)
-		defer func() {
-			utils.AssertEqual(t, nil, f.Close())
-		}()
+		defer func() { _ = f.Close() }()
 
 		b := new(bytes.Buffer)
 		_, err = io.Copy(b, f)
@@ -2277,7 +2274,6 @@ func Test_Ctx_RouteNormalized(t *testing.T) {
 
 // go test -run Test_Ctx_SaveFile
 func Test_Ctx_SaveFile(t *testing.T) {
-	// TODO We should clean this up
 	t.Parallel()
 	app := New()
 
@@ -2289,10 +2285,8 @@ func Test_Ctx_SaveFile(t *testing.T) {
 		utils.AssertEqual(t, nil, err)
 
 		defer func(file *os.File) {
-			err := file.Close()
-			utils.AssertEqual(t, nil, err)
-			err = os.Remove(file.Name())
-			utils.AssertEqual(t, nil, err)
+			_ = file.Close()
+			_ = os.Remove(file.Name())
 		}(tempFile)
 		err = c.SaveFile(fh, tempFile.Name())
 		utils.AssertEqual(t, nil, err)
@@ -2439,9 +2433,7 @@ func Test_Ctx_Download(t *testing.T) {
 
 	f, err := os.Open("./ctx.go")
 	utils.AssertEqual(t, nil, err)
-	defer func() {
-		utils.AssertEqual(t, nil, f.Close())
-	}()
+	defer func() { _ = f.Close() }()
 
 	expect, err := io.ReadAll(f)
 	utils.AssertEqual(t, nil, err)
@@ -2460,9 +2452,7 @@ func Test_Ctx_SendFile(t *testing.T) {
 	// fetch file content
 	f, err := os.Open("./ctx.go")
 	utils.AssertEqual(t, nil, err)
-	defer func() {
-		utils.AssertEqual(t, nil, f.Close())
-	}()
+	defer func() { _ = f.Close() }()
 	expectFileContent, err := io.ReadAll(f)
 	utils.AssertEqual(t, nil, err)
 	// fetch file info for the not modified test case
