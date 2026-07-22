@@ -977,6 +977,20 @@ mod tests {
     }
 
     #[test]
+    fn remove_dir_if_empty_retains_populated_dir() {
+        let temp = tempfile_dir("populated-dir");
+        let file_path = temp.join("dummy.txt");
+        fs::write(&file_path, "dummy content").expect("failed to write dummy file");
+
+        remove_dir_if_empty(&temp).expect("remove_dir_if_empty should not error");
+
+        assert!(temp.is_dir(), "Directory should still exist because it was populated");
+
+        // Clean up
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
     fn default_packages_root_appends_correct_path() {
         let empty_path = Path::new("");
         assert_eq!(
