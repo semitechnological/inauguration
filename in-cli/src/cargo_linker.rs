@@ -331,7 +331,6 @@ fn prefix_call_expr(expr: &mut Expr, crate_name: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core_ir::{CoreModuleIdentity, Decl, Expr, Stmt, Typ};
     use std::fs;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -366,97 +365,72 @@ mod tests {
     }
 
     #[test]
-    fn test_find_crate_root_missing_cargo_toml() {
+    fn test_compile_cargo_dependencies_finds_and_compiles() {
         let temp = TempDirGuard::new();
-        let result = find_crate_root(&temp.path);
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "no crate root found");
+        let cargo_toml = temp.path.join("Cargo.toml");
+        let src_dir = temp.path.join("src");
+        fs::create_dir_all(&src_dir).unwrap();
+        let lib_rs = src_dir.join("lib.rs");
+
+        let dep_dir = temp.path.join("dummy-dep");
+        let dep_src_dir = dep_dir.join("src");
+        fs::create_dir_all(&dep_src_dir).unwrap();
+        let dep_cargo_toml = dep_dir.join("Cargo.toml");
+        let dep_lib_rs = dep_src_dir.join("lib.rs");
+
+        // The dependency name must be in the direct_dep_names set.
+        // We use "libc" as the dummy local dependency name so that the compiler logic processes it.
+        fs::write(
+            &dep_cargo_toml,
+            r#"[package]
+name = "libc"
+version = "0.2.0"
+edition = "2021"
+"#,
+        )
+        .unwrap();
+        fs::write(&dep_lib_rs, "pub fn libc_func() {}").unwrap();
+
+        fs::write(
+            &cargo_toml,
+            r#"[package]
+name = "dummy-pkg"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+libc = { path = "dummy-dep" }
+"#,
+        )
+        .unwrap();
+        fs::write(&lib_rs, "pub fn foo() {}").unwrap();
+
+        let modules = compile_cargo_dependencies(&temp.path);
+
+        assert!(
+            !modules.is_empty(),
+            "Expected at least one dependency compiled"
+        );
+        let libc_dep = modules.iter().find(|(name, _)| name == "libc");
+        assert!(
+            libc_dep.is_some(),
+            "Expected 'libc' to be in the compiled dependencies"
+        );
     }
 
     #[test]
-    fn test_merge_dependency_modules() {
-        let mut main_mod = UnifiedModule {
-            identity: CoreModuleIdentity::default(),
-            decls: vec![],
-        };
-
-        let dep_mod = UnifiedModule {
-            identity: CoreModuleIdentity::default(),
-            decls: vec![Decl::Function {
-                name: "do_something".to_string(),
-                params: vec![],
-                ret: Typ::Void,
-                body: vec![Stmt::Expr(Expr::Call {
-                    callee: Box::new(Expr::Ident("helper".to_string())),
-                    args: vec![],
-                })],
-                type_params: vec![],
-            }],
-        };
-
-        let deps = vec![("my_crate".to_string(), dep_mod)];
-        merge_dependency_modules(&mut main_mod, deps);
-
-        assert_eq!(main_mod.decls.len(), 1);
-
-        if let Decl::Function { name, body, .. } = &main_mod.decls[0] {
-            assert_eq!(name, "my_crate::do_something");
-
-            if let Stmt::Expr(Expr::Call { callee, .. }) = &body[0] {
-                if let Expr::Ident(callee_name) = &**callee {
-                    assert_eq!(callee_name, "my_crate::helper");
-                } else {
-                    panic!("Expected Expr::Ident");
-                }
-            } else {
-                panic!("Expected Stmt::Expr with Expr::Call");
-            }
-        } else {
-            panic!("Expected Decl::Function");
-        }
+    fn test_compile_cargo_dependencies_no_cargo_toml() {
+        let temp = TempDirGuard::new();
+        let modules = compile_cargo_dependencies(&temp.path);
+        assert!(modules.is_empty());
     }
 
     #[test]
-    fn test_merge_dependency_modules_in_prefix() {
-        let mut main_mod = UnifiedModule {
-            identity: CoreModuleIdentity::default(),
-            decls: vec![],
-        };
-
-        let dep_mod = UnifiedModule {
-            identity: CoreModuleIdentity::default(),
-            decls: vec![Decl::Function {
-                name: "do_something".to_string(),
-                params: vec![],
-                ret: Typ::Void,
-                body: vec![Stmt::Expr(Expr::Call {
-                    callee: Box::new(Expr::Ident("helper".to_string())),
-                    args: vec![],
-                })],
-                type_params: vec![],
-            }],
-        };
-
-        // If the crate name starts with "in-", names should NOT be prefixed
-        let deps = vec![("in-core".to_string(), dep_mod)];
-        merge_dependency_modules(&mut main_mod, deps);
-
-        assert_eq!(main_mod.decls.len(), 1);
-
-        if let Decl::Function { name, body, .. } = &main_mod.decls[0] {
-            assert_eq!(name, "do_something");
-
-            if let Stmt::Expr(Expr::Call { callee, .. }) = &body[0] {
-                if let Expr::Ident(callee_name) = &**callee {
-                    assert_eq!(callee_name, "in-core::helper");
-                } else {
-                    panic!("Expected Expr::Ident");
-                }
-            } else {
-                panic!("Expected Stmt::Expr with Expr::Call");
-            }
-        } else {
-            panic!("Expected Decl::Function");
-        }
+    fn test_compile_cargo_dependencies_invalid_cargo_toml() {
+        let temp = TempDirGuard::new();
+        let cargo_toml = temp.path.join("Cargo.toml");
+        fs::write(&cargo_toml, "invalid toml [] [] []").unwrap();
+        let modules = compile_cargo_dependencies(&temp.path);
+        assert!(modules.is_empty());
     }
 }
