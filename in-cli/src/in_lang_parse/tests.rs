@@ -858,6 +858,30 @@ fn fn_body_parses_index_assignment() {
 }
 
 #[test]
+fn fn_body_parses_nested_index() {
+    use crate::core_ir::Expr;
+    let src = "fn f() -> Int { let xs: [Int] = [1, 2]; let ys: [Int] = [0, 1]; return xs[ys[1]]; }\nfn main() -> void\n";
+    let m = parse_in_source(src).expect("ok");
+    let body = match m
+        .decls
+        .iter()
+        .find(|d| matches!(d, Decl::Function { name, .. } if name == "f"))
+    {
+        Some(Decl::Function { body, .. }) => body,
+        _ => panic!("f"),
+    };
+    assert!(matches!(
+        &body[2],
+        Stmt::Return(Some(Expr::Index { base, index }))
+            if matches!(base.as_ref(), Expr::Ident(name) if name == "xs")
+            && matches!(index.as_ref(), Expr::Index { base: inner, index: inner_idx }
+                if matches!(inner.as_ref(), Expr::Ident(name) if name == "ys")
+                && matches!(inner_idx.as_ref(), Expr::IntLit(1))
+            )
+    ));
+}
+
+#[test]
 fn parse_expr_prefers_longest_comparison_operator() {
     use crate::core_ir::Expr;
     let parsed = parse_expr("n <= 1");

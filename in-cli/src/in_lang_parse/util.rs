@@ -363,8 +363,12 @@ pub(crate) fn find_top_level_index_open(s: &str) -> Option<usize> {
             '"' => in_string = true,
             '(' | '{' => depth += 1,
             ')' | '}' => depth -= 1,
-            '[' if depth == 0 => found = Some(i),
-            '[' => depth += 1,
+            '[' => {
+                if depth == 0 && found.is_none() {
+                    found = Some(i);
+                }
+                depth += 1;
+            }
             ']' => depth -= 1,
             _ => {}
         }
