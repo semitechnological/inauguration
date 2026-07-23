@@ -342,7 +342,7 @@ func Test_Path_matchParams(t *testing.T) {
 		{url: "/api/1-", params: nil, match: false},
 		{url: "/api/1--", params: []string{"1", "", ""}, match: true},
 		{url: "/api/1-/", params: nil, match: false},
-		// {url: "/api/1-/-", params: nil, match: false}, // TODO: fix this part
+		{url: "/api/1-/-", params: nil, match: false},
 		{url: "/api/1-2", params: nil, match: false},
 		{url: "/api/1-2-", params: []string{"1", "2", ""}, match: true},
 		{url: "/api/1-2-3", params: []string{"1", "2", "3"}, match: true},
@@ -813,7 +813,7 @@ func Test_RoutePatternMatch(t *testing.T) {
 		{url: "/api/1-", match: false},
 		{url: "/api/1--", match: true},
 		{url: "/api/1-/", match: false},
-		// {url: "/api/1-/-", params: nil, match: false}, // TODO: fix this part
+		{url: "/api/1-/-", match: false},
 		{url: "/api/1-2", match: false},
 		{url: "/api/1-2-", match: true},
 		{url: "/api/1-2-3", match: true},
