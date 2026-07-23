@@ -27,6 +27,8 @@ pub struct ThumbCompileResult {
     pub entry_offset: u32,
     pub exports: Vec<(String, u32)>,
     pub externs: Vec<String>,
+    /// Call sites that need linker relocation: (BL offset, symbol name).
+    pub relocations: Vec<(u32, String)>,
 }
 
 #[derive(Debug, Clone)]
@@ -54,6 +56,7 @@ struct PendingCall {
     /// offset of the first halfword of the 32-bit BL encoding
     site: u32,
     target: String,
+    is_extern: bool,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -121,6 +124,11 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<ThumbCompileR
 
     for name in &names {
         let func = functions.get(name).expect("name in map");
+        // Extern declarations have no body and are not emitted here; they resolve
+        // at link time via relocations.
+        if func.body.is_empty() {
+            continue;
+        }
         let start = emitter.len();
         offsets.insert(name.clone(), start);
         exports.push((name.clone(), start));
@@ -128,21 +136,21 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<ThumbCompileR
         // ensure 2-byte alignment (always true for Thumb)
     }
 
-    // Patch BL sites
+    // Patch internal BL sites; collect extern calls for relocation.
     let mut externs = Vec::new();
+    let mut relocations = Vec::new();
     for call in &all_pending {
-        let Some(&target_off) = offsets.get(&call.target) else {
+        if call.is_extern {
             if !externs.contains(&call.target) {
                 externs.push(call.target.clone());
             }
-            return Err(format!(
-                "thumb-lower: unresolved call `{}` (externs not yet linked)",
-                call.target
-            ));
+            relocations.push((call.site, call.target.clone()));
+            continue;
+        }
+        let Some(&target_off) = offsets.get(&call.target) else {
+            return Err(format!("thumb-lower: unresolved call `{}`", call.target));
         };
-        // BL is 4 bytes; PC for offset calc is address of next insn after BL = site + 4
-        // ARM: offset = target - (PC+4) where PC is address of current insn... actually for BL,
-        // the PC value used is address of the BL + 4.
+        // BL is 4 bytes; PC for offset calc is address of next insn after BL = site + 4.
         let site = call.site as i32;
         let next = site + 4;
         let rel_bytes = target_off as i32 - next;
@@ -163,6 +171,7 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<ThumbCompileR
         entry_offset,
         exports,
         externs,
+        relocations,
     })
 }
 
@@ -589,13 +598,21 @@ fn lower_expr_into(
             for i in (0..args.len()).rev() {
                 emitter.emit_u16(thumb::pop(1 << arg_regs[i], false));
             }
-            // BL placeholder
+            // BL placeholder; extern functions resolve at link time. The
+            // linker expects a Thumb BL placeholder with addend -4 (bl_rel -2).
+            let is_extern = ctx
+                .functions
+                .get(name)
+                .map(|f| f.body.is_empty())
+                .unwrap_or(false);
             let site = emitter.len();
-            let enc = thumb::bl_rel(0)?;
+            let bl_rel = if is_extern { -2 } else { 0 };
+            let enc = thumb::bl_rel(bl_rel)?;
             emitter.emit_u32_thumb(enc);
             pending.push(PendingCall {
                 site,
                 target: name.clone(),
+                is_extern,
             });
             if dest != REG_RET {
                 emitter.emit_u16(thumb::mov_low(dest, REG_RET));
@@ -1030,6 +1047,38 @@ fn main() -> void { return }
         );
         let result = lower_module(&module, "sum_until").expect("lower break");
         assert!(!result.code.is_empty());
+    }
+
+    #[test]
+    fn lower_extern_call() {
+        let module = parse(
+            r#"
+extern zig fn helper(x: Int) -> Int
+fn main() -> Int {
+  return helper(7)
+}
+"#,
+        );
+        let result = lower_module(&module, "main").expect("lower extern");
+        assert!(!result.code.is_empty());
+        assert!(result.relocations.iter().any(|(_, s)| s == "helper"));
+    }
+
+    #[test]
+    fn lower_extern_any_language_tag() {
+        let module = parse(
+            r#"
+extern c fn c_helper() -> Int
+extern rust fn rust_helper() -> Int
+extern go fn go_helper() -> Int
+extern v fn v_helper() -> Int
+fn main() -> Int {
+  return c_helper() + rust_helper() + go_helper() + v_helper()
+}
+"#,
+        );
+        let result = lower_module(&module, "main").expect("lower extern tags");
+        assert_eq!(result.relocations.len(), 4);
     }
 
     #[test]

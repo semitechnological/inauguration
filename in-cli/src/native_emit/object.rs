@@ -88,6 +88,7 @@ fn emit_thumbv8m_freestanding_object(
             .filter(|(name, off)| name != request.entry || *off != 0)
             .collect(),
         undefs: result.externs,
+        thumb_calls: result.relocations,
     };
     let mut bytes = Vec::new();
     write_arm32_relocatable_object(&object, &mut bytes);
@@ -122,6 +123,7 @@ fn emit_x86_64_elf_object(request: &NativeObjectRequest<'_>) -> NativeObjectArti
         export_name: request.entry.to_string(),
         exports: vec![],
         undefs: vec![],
+        thumb_calls: vec![],
     };
     let mut bytes = Vec::new();
     write_x86_64_relocatable_object(&object, &mut bytes);
@@ -142,6 +144,7 @@ fn emit_aarch64_elf_object(request: &NativeObjectRequest<'_>) -> NativeObjectArt
         export_name: request.entry.to_string(),
         exports: vec![],
         undefs: vec![],
+        thumb_calls: vec![],
     };
     let mut bytes = Vec::new();
     write_aarch64_relocatable_object(&object, &mut bytes);
@@ -180,6 +183,7 @@ fn emit_arm32_elf_object(request: &NativeObjectRequest<'_>) -> NativeObjectArtif
         export_name: request.entry.to_string(),
         exports: vec![],
         undefs: vec![],
+        thumb_calls: vec![],
     };
     let mut bytes = Vec::new();
     write_arm32_relocatable_object(&object, &mut bytes);
@@ -267,6 +271,7 @@ fn emit_aarch64_freestanding_object(request: &NativeObjectRequest<'_>) -> Native
                 export_name: request.entry.to_string(),
                 exports: vec![],
                 undefs: vec![],
+                thumb_calls: vec![],
             };
             write_aarch64_relocatable_object(&object, &mut bytes);
             NativeObjectArtifact {
@@ -286,6 +291,7 @@ fn emit_aarch64_freestanding_object(request: &NativeObjectRequest<'_>) -> Native
                 export_name: request.entry.to_string(),
                 exports: vec![],
                 undefs: vec![],
+                thumb_calls: vec![],
             };
             let mut bytes = Vec::new();
             write_aarch64_relocatable_object(&object, &mut bytes);
@@ -331,6 +337,7 @@ fn emit_x86_64_freestanding_object(request: &NativeObjectRequest<'_>) -> NativeO
                 export_name: request.entry.to_string(),
                 exports: result.exports.clone(),
                 undefs: result.externs.clone(),
+                thumb_calls: vec![],
             };
             if is_i386 {
                 write_i386_relocatable_object(&object, &mut bytes);
@@ -362,6 +369,7 @@ fn emit_x86_64_freestanding_object(request: &NativeObjectRequest<'_>) -> NativeO
                 export_name: request.entry.to_string(),
                 exports: vec![],
                 undefs: vec![],
+                thumb_calls: vec![],
             };
             let mut bytes = Vec::new();
             if is_i386 {
