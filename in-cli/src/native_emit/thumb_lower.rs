@@ -58,6 +58,10 @@ struct LowerCtx<'a> {
     structs: &'a HashMap<String, Vec<(String, Typ)>>,
     fn_name: String,
     ret_typ: Typ,
+    /// SP offsets for call-argument temps. Indexed by [depth * chunk + i].
+    call_arg_temps: Vec<u32>,
+    call_arg_depth: usize,
+    call_arg_chunk: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -84,6 +88,9 @@ impl<'a> LowerCtx<'a> {
             structs,
             fn_name: fn_name.to_string(),
             ret_typ: Typ::Int,
+            call_arg_temps: Vec::new(),
+            call_arg_depth: 0,
+            call_arg_chunk: 4,
         };
         for (name, typ) in params {
             match typ.canonical() {
@@ -113,6 +120,22 @@ impl<'a> LowerCtx<'a> {
         let layout = build_struct_layout(self.structs, name, base, &mut Vec::new())?;
         self.frame_size += layout.size;
         Ok((base, layout.fields))
+    }
+
+    fn acquire_call_arg_temps(&mut self, n: usize) -> Result<usize, String> {
+        let base = self.call_arg_depth * self.call_arg_chunk;
+        if base + n > self.call_arg_temps.len() {
+            return Err(format!(
+                "thumb-lower: call arg temp pool exhausted in `{}`",
+                self.fn_name
+            ));
+        }
+        self.call_arg_depth += 1;
+        Ok(base)
+    }
+
+    fn release_call_arg_temps(&mut self) {
+        self.call_arg_depth = self.call_arg_depth.saturating_sub(1);
     }
 
     fn frame_reserve(&self) -> u32 {
@@ -332,6 +355,15 @@ fn lower_function(
     let _scratch1 = ctx.alloc_slot();
     let _ = (_scratch0, _scratch1);
 
+    // Call-argument temp pool: chunk = max arity, depth = 8 nested calls.
+    let max_arity = max_call_arity(&func.body);
+    ctx.call_arg_chunk = max_arity.max(4);
+    let slots_needed = ctx.call_arg_chunk * 8;
+    for _ in 0..slots_needed {
+        let off = ctx.alloc_slot();
+        ctx.call_arg_temps.push(off);
+    }
+
     thumb::emit_prologue(emitter);
     let frame = ctx.frame_reserve();
     if frame > 0x1FC {
@@ -342,17 +374,19 @@ fn lower_function(
     }
     thumb::emit_frame(emitter, frame)?;
 
-    // Store AAPCS params r0-r3 into their slots (offsets from SP after frame)
+    // Store AAPCS params into their local slots. r0-r3 are live; extras are
+    // on the caller's stack above the saved r4-r7/lr.
     let param_regs = [R0, R1, R2, R3];
     for (i, (name, _)) in func.params.iter().enumerate() {
-        if i >= 4 {
-            return Err(format!(
-                "thumb-lower: more than 4 params not supported in `{}`",
-                func.name
-            ));
-        }
-        if let Some(LocalSlot::Scalar(off)) = ctx.locals.get(name) {
+        let Some(LocalSlot::Scalar(off)) = ctx.locals.get(name) else {
+            continue;
+        };
+        if i < 4 {
             emitter.emit_u16(thumb::str_sp(param_regs[i], *off)?);
+        } else {
+            let caller_off = frame + 20 + ((i - 4) as u32) * 4;
+            emitter.emit_u16(thumb::ldr_sp(R4, caller_off)?);
+            emitter.emit_u16(thumb::str_sp(R4, *off)?);
         }
     }
 
@@ -408,6 +442,56 @@ fn alloc_declared_locals(ctx: &mut LowerCtx<'_>, body: &[Stmt]) -> Result<(), St
         }
     }
     Ok(())
+}
+
+fn max_call_arity(body: &[Stmt]) -> usize {
+    body.iter().map(max_call_arity_stmt).max().unwrap_or(0)
+}
+
+fn max_call_arity_stmt(s: &Stmt) -> usize {
+    match s {
+        Stmt::Let(_, _, e)
+        | Stmt::Assign(_, e)
+        | Stmt::Expr(e)
+        | Stmt::Return(Some(e))
+        | Stmt::FieldAssign { value: e, .. } => max_call_arity_expr(e),
+        Stmt::Return(None) => 0,
+        Stmt::If {
+            cond,
+            then_body,
+            else_body,
+            ..
+        } => max_call_arity_expr(cond)
+            .max(max_call_arity(then_body))
+            .max(max_call_arity(else_body)),
+        Stmt::Loop { cond, body, .. } => cond
+            .as_ref()
+            .map(max_call_arity_expr)
+            .unwrap_or(0)
+            .max(max_call_arity(body)),
+        _ => 0,
+    }
+}
+
+fn max_call_arity_expr(e: &Expr) -> usize {
+    match e {
+        Expr::Call { args, .. } => {
+            let here = args.len();
+            args.iter()
+                .map(max_call_arity_expr)
+                .max()
+                .unwrap_or(0)
+                .max(here)
+        }
+        Expr::Unary { expr, .. } => max_call_arity_expr(expr),
+        Expr::Binary { lhs, rhs, .. } => max_call_arity_expr(lhs).max(max_call_arity_expr(rhs)),
+        Expr::StructInit { fields, .. } => fields
+            .iter()
+            .map(|(_, e)| max_call_arity_expr(e))
+            .max()
+            .unwrap_or(0),
+        _ => 0,
+    }
 }
 
 fn lower_stmt(
@@ -668,50 +752,7 @@ fn lower_expr_into(
             if try_lower_mmio(emitter, ctx, name, args, dest, pending)? {
                 return Ok(());
             }
-            if args.len() > 4 {
-                return Err(format!(
-                    "thumb-lower: >4 args in call `{name}` in `{}`",
-                    ctx.fn_name
-                ));
-            }
-            // evaluate args right-to-left into stack temps then load r0-r3
-            // use frame slots from end: we require args fit in r0-r3 only
-            let arg_regs = [R0, R1, R2, R3];
-            // First evaluate all into stack slots starting at 0 temps - use r4 as scratch save
-            // Save r4 if needed - prologue already saved r4-r7
-            for (i, arg) in args.iter().enumerate() {
-                lower_expr_into(emitter, ctx, arg, R0, pending)?;
-                // push arg onto a spill using str to a dedicated spill region:
-                // store into [sp, #frame + i*4] is invalid. Use r4+i stack via push.
-                // Simpler: after each arg, push r0 (except last which can stay)
-                // Actually evaluate in reverse and push, then pop into regs.
-                let _ = i;
-                emitter.emit_u16(thumb::push(1 << 0, false)); // push {r0}
-            }
-            // now stack has args in reverse order; pop into regs high-to-low
-            for i in (0..args.len()).rev() {
-                emitter.emit_u16(thumb::pop(1 << arg_regs[i], false));
-            }
-            // BL placeholder; extern functions resolve at link time. The
-            // linker expects a Thumb BL placeholder with addend -4 (bl_rel -2).
-            let is_extern = ctx
-                .functions
-                .get(name)
-                .map(|f| f.body.is_empty())
-                .unwrap_or(false);
-            let site = emitter.len();
-            let bl_rel = if is_extern { -2 } else { 0 };
-            let enc = thumb::bl_rel(bl_rel)?;
-            emitter.emit_u32_thumb(enc);
-            pending.push(PendingCall {
-                site,
-                target: name.clone(),
-                is_extern,
-            });
-            if dest != REG_RET {
-                emitter.emit_u16(thumb::mov_low(dest, REG_RET));
-            }
-            Ok(())
+            lower_call_args(emitter, ctx, name, args, dest, pending)
         }
         Expr::FloatLit(_) => Err("thumb-lower: float not supported".into()),
         Expr::StringLit(_) => Err("thumb-lower: string not supported".into()),
@@ -722,6 +763,67 @@ fn lower_expr_into(
         Expr::ArrayLit(_) | Expr::Index { .. } => Err("thumb-lower: arrays not supported".into()),
         Expr::Closure { .. } => Err("thumb-lower: closures not supported".into()),
     }
+}
+
+fn lower_call_args(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    name: &str,
+    args: &[Expr],
+    dest: u8,
+    pending: &mut Vec<PendingCall>,
+) -> Result<(), String> {
+    let n = args.len();
+    let arg_regs = [R0, R1, R2, R3];
+    let base = ctx.acquire_call_arg_temps(n)?;
+
+    // 1. Evaluate args left-to-right into temp frame slots (SP stays fixed).
+    for i in 0..n {
+        lower_expr_into(emitter, ctx, &args[i], R0, pending)?;
+        emitter.emit_u16(thumb::str_sp(R0, ctx.call_arg_temps[base + i])?);
+    }
+
+    // 2. Load first four args into r0-r3.
+    for i in 0..n.min(4) {
+        emitter.emit_u16(thumb::ldr_sp(arg_regs[i], ctx.call_arg_temps[base + i])?);
+    }
+
+    // 3. Push extra args right-to-left using r4 so arg 4 ends up at [sp].
+    if n > 4 {
+        for i in (4..n).rev() {
+            emitter.emit_u16(thumb::ldr_sp(R4, ctx.call_arg_temps[base + i])?);
+            emitter.emit_u16(thumb::push(1 << 4, false));
+        }
+    }
+
+    // 4. BL (internal or external).
+    let is_extern = ctx
+        .functions
+        .get(name)
+        .map(|f| f.body.is_empty())
+        .unwrap_or(false);
+    let site = emitter.len();
+    let bl_rel = if is_extern { -2 } else { 0 };
+    let enc = thumb::bl_rel(bl_rel)?;
+    emitter.emit_u32_thumb(enc);
+    pending.push(PendingCall {
+        site,
+        target: name.to_string(),
+        is_extern,
+    });
+
+    // 5. Caller cleans up stack arguments.
+    if n > 4 {
+        let extra = ((n - 4) * 4) as u32;
+        emitter.emit_u16(thumb::add_sp_imm(extra)?);
+    }
+
+    ctx.release_call_arg_temps();
+
+    if dest != REG_RET {
+        emitter.emit_u16(thumb::mov_low(dest, REG_RET));
+    }
+    Ok(())
 }
 
 fn lower_store_local(
@@ -1136,6 +1238,22 @@ fn main() -> void { return }
         assert!(result.code.windows(2).any(|w| w == [0x2A, 0x20]));
         // pop {r4-r7, pc} ends with 0xBDF0
         assert!(result.code.windows(2).any(|w| w == [0xF0, 0xBD]));
+    }
+
+    #[test]
+    fn lower_more_than_four_params() {
+        let module = parse(
+            r#"
+fn sum7(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int) -> Int {
+  return a + b + c + d + e + f + g
+}
+fn main() -> Int {
+  return sum7(1, 2, 3, 4, 5, 6, 7)
+}
+"#,
+        );
+        let result = lower_module(&module, "main").expect("lower >4 params");
+        assert!(!result.code.is_empty());
     }
 
     #[test]
