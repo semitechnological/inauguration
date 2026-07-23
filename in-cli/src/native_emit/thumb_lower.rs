@@ -42,6 +42,8 @@ struct LowerCtx<'a> {
     locals: HashMap<String, u32>,
     frame_size: u32,
     emitted_return: bool,
+    /// stack of break-site lists, one per enclosing loop
+    break_sites: Vec<Vec<u32>>,
     functions: &'a HashMap<String, FunctionInfo>,
     fn_name: String,
     ret_typ: Typ,
@@ -64,6 +66,7 @@ impl<'a> LowerCtx<'a> {
             locals: HashMap::new(),
             frame_size: 0,
             emitted_return: false,
+            break_sites: Vec::new(),
             functions,
             fn_name: fn_name.to_string(),
             ret_typ: Typ::Int,
@@ -354,10 +357,18 @@ fn lower_stmt(
             "thumb-lower: unsupported loop {:?} in `{}`",
             kind, ctx.fn_name
         )),
-        Stmt::Break => Err(format!(
-            "thumb-lower: break not supported in `{}`",
-            ctx.fn_name
-        )),
+        Stmt::Break => {
+            let Some(sites) = ctx.break_sites.last_mut() else {
+                return Err(format!(
+                    "thumb-lower: break outside loop in `{}`",
+                    ctx.fn_name
+                ));
+            };
+            let site = emitter.len();
+            emitter.emit_u16(thumb::b_rel8(0));
+            sites.push(site);
+            Ok(())
+        }
         other => Err(format!(
             "thumb-lower: unsupported stmt {:?} in `{}`",
             std::mem::discriminant(other),
@@ -434,6 +445,7 @@ fn lower_while(
     let beq_site = emitter.len();
     emitter.emit_u16(thumb::b_cond_rel8(COND_EQ, 0));
 
+    ctx.break_sites.push(Vec::new());
     for stmt in body {
         lower_stmt(emitter, ctx, stmt, pending, frame)?;
         ctx.emitted_return = false; // returns inside loop don't end the function for us
@@ -445,6 +457,11 @@ fn lower_while(
 
     let end = emitter.len();
     patch_b_cond(emitter, beq_site, end)?;
+
+    let breaks = ctx.break_sites.pop().expect("break site stack");
+    for site in breaks {
+        patch_b(emitter, site, end)?;
+    }
     Ok(())
 }
 
@@ -727,6 +744,10 @@ fn lower_binary(
     dest: u8,
     pending: &mut Vec<PendingCall>,
 ) -> Result<(), String> {
+    if op == "&&" || op == "||" {
+        return lower_short_circuit(emitter, ctx, op, lhs, rhs, dest, pending);
+    }
+
     // lhs → r1, rhs → r2, result r0
     lower_expr_into(emitter, ctx, lhs, R1, pending)?;
     emitter.emit_u16(thumb::push(1 << 1, false)); // push r1
@@ -780,12 +801,6 @@ fn lower_binary(
             let end = emitter.len();
             patch_b(emitter, b_end, end)?;
         }
-        "&&" | "||" => {
-            return Err(format!(
-                "thumb-lower: short-circuit `{op}` not supported yet in `{}`",
-                ctx.fn_name
-            ));
-        }
         other => {
             return Err(format!(
                 "thumb-lower: unsupported binary `{other}` in `{}`",
@@ -793,6 +808,50 @@ fn lower_binary(
             ));
         }
     }
+    if dest != R0 {
+        emitter.emit_u16(thumb::mov_low(dest, R0));
+    }
+    Ok(())
+}
+
+fn lower_short_circuit(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    op: &str,
+    lhs: &Expr,
+    rhs: &Expr,
+    dest: u8,
+    pending: &mut Vec<PendingCall>,
+) -> Result<(), String> {
+    // lhs truth value in r1; if it decides the result, skip rhs evaluation.
+    lower_expr_into(emitter, ctx, lhs, R1, pending)?;
+    emitter.emit_u16(thumb::cmp_imm8(R1, 0));
+    let deciding_cond = if op == "&&" { COND_EQ } else { COND_NE };
+    let branch = emitter.len();
+    emitter.emit_u16(thumb::b_cond_rel8(deciding_cond, 0));
+
+    lower_expr_into(emitter, ctx, rhs, R1, pending)?;
+    emitter.emit_u16(thumb::cmp_imm8(R1, 0));
+    let branch2 = emitter.len();
+    emitter.emit_u16(thumb::b_cond_rel8(deciding_cond, 0));
+
+    // both operands evaluated: && is true, || is false
+    let both_val = if op == "&&" { 1 } else { 0 };
+    // short-circuit decided value: && is false, || is true
+    let decided_val = if op == "&&" { 0 } else { 1 };
+
+    thumb::load_i32(emitter, R0, both_val);
+    let b_end = emitter.len();
+    emitter.emit_u16(thumb::b_rel8(0));
+
+    let decided = emitter.len();
+    patch_b_cond(emitter, branch, decided)?;
+    patch_b_cond(emitter, branch2, decided)?;
+    thumb::load_i32(emitter, R0, decided_val);
+
+    let end = emitter.len();
+    patch_b(emitter, b_end, end)?;
+
     if dest != R0 {
         emitter.emit_u16(thumb::mov_low(dest, R0));
     }
@@ -923,6 +982,54 @@ fn main() -> void { return }
         );
         let result = lower_module(&module, "uart_put").expect("lower");
         assert!(result.code.windows(2).any(|w| w == [0x20, 0x60]));
+    }
+
+    #[test]
+    fn lower_short_circuit_and_or() {
+        let module = parse(
+            r#"
+fn both(a: Int, b: Int) -> Int {
+  if a > 0 && b > 0 {
+    return 1
+  }
+  return 0
+}
+fn either(a: Int, b: Int) -> Int {
+  if a > 0 || b > 0 {
+    return 1
+  }
+  return 0
+}
+fn main() -> void { return }
+"#,
+        );
+        let and_fn = lower_module(&module, "both").expect("lower &&");
+        assert!(!and_fn.code.is_empty());
+        let or_fn = lower_module(&module, "either").expect("lower ||");
+        assert!(!or_fn.code.is_empty());
+    }
+
+    #[test]
+    fn lower_break() {
+        let module = parse(
+            r#"
+fn sum_until(max: Int) -> Int {
+  let i = 0
+  let acc = 0
+  while i < max {
+    if i == 5 {
+      break
+    }
+    acc = acc + i
+    i = i + 1
+  }
+  return acc
+}
+fn main() -> void { return }
+"#,
+        );
+        let result = lower_module(&module, "sum_until").expect("lower break");
+        assert!(!result.code.is_empty());
     }
 
     #[test]
