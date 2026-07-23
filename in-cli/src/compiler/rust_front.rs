@@ -12,7 +12,7 @@ use crate::core_ir::{Decl, UnifiedModule};
 use quote::ToTokens;
 use std::collections::HashMap;
 use std::hash::Hasher;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use syn::parse::Parser;
 
 type RustLayoutSpecs = HashMap<String, (BoundaryRepr, Vec<(String, syn::Type)>)>;
@@ -62,7 +62,7 @@ pub fn parse_rust_artifact_source_with_dir(
 
 fn lower_file_items_at(file: &syn::File, base_dir: &Path) -> Result<UnifiedModule, String> {
     let mut decls = Vec::new();
-    let mut external_modules: Vec<(String, PathBuf)> = Vec::new();
+    let mut external_modules: Vec<String> = Vec::new();
 
     for item in &file.items {
         match item {
@@ -101,14 +101,7 @@ fn lower_file_items_at(file: &syn::File, base_dir: &Path) -> Result<UnifiedModul
                     }
                 } else {
                     // External module: record candidate path for parallel parsing
-                    let mod_name = m.ident.to_string();
-                    let candidate_rs = base_dir.join(format!("{mod_name}.rs"));
-                    let candidate_mod = base_dir.join(format!("{mod_name}/mod.rs"));
-                    if candidate_rs.exists() {
-                        external_modules.push((mod_name, candidate_rs));
-                    } else if candidate_mod.exists() {
-                        external_modules.push((mod_name, candidate_mod));
-                    }
+                    external_modules.push(m.ident.to_string());
                 }
             }
             _ => {}
@@ -119,9 +112,20 @@ fn lower_file_items_at(file: &syn::File, base_dir: &Path) -> Result<UnifiedModul
     if external_modules.len() > 1 {
         std::thread::scope(|s| {
             let mut handles = Vec::with_capacity(external_modules.len());
-            for (_name, candidate) in external_modules {
+            for mod_name in external_modules {
                 let base = base_dir.to_path_buf();
                 handles.push(s.spawn(move || {
+                    let candidate_rs = base.join(format!("{mod_name}.rs"));
+                    let candidate_mod = base.join(format!("{mod_name}/mod.rs"));
+
+                    let candidate = if candidate_rs.exists() {
+                        candidate_rs
+                    } else if candidate_mod.exists() {
+                        candidate_mod
+                    } else {
+                        return None;
+                    };
+
                     std::fs::read_to_string(&candidate)
                         .ok()
                         .and_then(|src| syn::parse_file(&src).ok())
@@ -137,12 +141,25 @@ fn lower_file_items_at(file: &syn::File, base_dir: &Path) -> Result<UnifiedModul
                 }
             }
         });
-    } else if let Some((_name, candidate)) = external_modules.first() {
-        if let Ok(src) = std::fs::read_to_string(candidate) {
-            if let Ok(sub_file) = syn::parse_file(&src) {
-                let sub_dir = candidate.parent().unwrap_or(base_dir);
-                if let Ok(inner) = lower_file_items_at(&sub_file, sub_dir) {
-                    decls.extend(inner.decls);
+    } else if let Some(mod_name) = external_modules.first() {
+        let candidate_rs = base_dir.join(format!("{mod_name}.rs"));
+        let candidate_mod = base_dir.join(format!("{mod_name}/mod.rs"));
+
+        let candidate = if candidate_rs.exists() {
+            Some(candidate_rs)
+        } else if candidate_mod.exists() {
+            Some(candidate_mod)
+        } else {
+            None
+        };
+
+        if let Some(candidate) = candidate {
+            if let Ok(src) = std::fs::read_to_string(&candidate) {
+                if let Ok(sub_file) = syn::parse_file(&src) {
+                    let sub_dir = candidate.parent().unwrap_or(base_dir);
+                    if let Ok(inner) = lower_file_items_at(&sub_file, sub_dir) {
+                        decls.extend(inner.decls);
+                    }
                 }
             }
         }
