@@ -25,10 +25,12 @@ Generic Cortex-M33 freestanding target support in Inauguration.
 - arithmetic `+ - * & | ^`, unary `-` / `!`
 - compares `== != < <= > >=`
 - direct same-module calls (`bl`)
+- `extern <lang> fn` bindings (`extern zig fn ...` etc.) emitting `R_ARM_THM_CALL` relocations for static-linking against C/Rust/Zig/Go/V objects
 - MMIO memory ops: `load8` / `load16` / `load32` / `load64`, `store8` / `store16` / `store32` / `store64`
   (plain `ldrb`/`ldrh`/`ldr`/`strb`/`strh`/`str`; treated as volatile at the IR call boundary)
 
-Rejected for now: strings, floats, structs/arrays, closures, >4 params, short-circuit `&&`/`||`, heap.
+Supported: structs, fixed-size array locals with index/load/store, >4 params (AAPCS stack args), short-circuit `&&`/`||`, `break`.
+Rejected for now: strings, floats, closures, heap, array type annotations with explicit length.
 `load64` / `store64` touch the low 32-bit word only (freestanding `Int` is machine word).
 
 ## ABI contract (MVP)
