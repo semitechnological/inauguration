@@ -94,3 +94,42 @@ pub fn daemon_eval_code(
     };
     send_request(&request)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_daemon_is_running_when_socket_missing() {
+        struct SocketGuard {
+            path: PathBuf,
+            backup: PathBuf,
+            existed: bool,
+        }
+        impl Drop for SocketGuard {
+            fn drop(&mut self) {
+                if self.existed {
+                    let _ = std::fs::rename(&self.backup, &self.path);
+                }
+            }
+        }
+
+        let socket = default_socket_path();
+        let backup_path = socket.with_extension("sock.bak");
+        let mut existed = false;
+
+        // Temporarily remove socket if it exists
+        if socket.exists() {
+            existed = true;
+            let _ = std::fs::rename(&socket, &backup_path);
+        }
+
+        let _guard = SocketGuard {
+            path: socket,
+            backup: backup_path,
+            existed,
+        };
+
+        assert!(!daemon_is_running());
+    }
+}
