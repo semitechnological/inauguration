@@ -332,9 +332,9 @@ See [orchestration-compiler.md](orchestration-compiler.md).
 
 ## Types and bodies
 
-- Types: `Int`, `String`, `Bool`, `void` / `Void`, named structs.
+- Types: `Int`, `String`, `Bool`, `void` / `Void`, named structs, fixed-size array types (`[Type]`).
 - Params: `name: Type`.
-- Bodies: `let`, assign, `return`, `if` / `else`, `while`, calls, literals (bounded subset).
+- Bodies: `let`, assign, `return`, `if` / `else`, `while`, calls, literals, array indexing, field access and assignment (bounded subset).
 
 ## Runtime boundaries
 
