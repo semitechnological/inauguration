@@ -223,6 +223,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_resolve_missing_crate() {
+        let db = CrateDb::new();
+        let result = db.resolve("missing_crate::module::func");
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            "no source for `missing_crate::module::func` (crate=missing_crate, path=missing_crate/module)"
+        );
+    }
+
+    #[test]
     fn test_register_crate() {
         let db = CrateDb::new();
         let crate_name = "test_crate";
