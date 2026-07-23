@@ -495,6 +495,7 @@ fn value_to_string(v: &Value) -> String {
     }
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -511,5 +512,11 @@ mod tests {
         assert_eq!(result, Value::Int(42));
 
         Ok(())
+    }
+
+    #[test]
+    fn test_invalid_native_function_call() {
+        let rt = NativeRuntime::new();
+        assert_eq!(rt.call("non_existent_function", &[]), None);
     }
 }
