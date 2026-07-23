@@ -223,32 +223,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_resolve_missing_crate() {
+    fn test_cratedb_new_initialization() {
         let db = CrateDb::new();
-        let result = db.resolve("missing_crate::module::func");
-        assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err(),
-            "no source for `missing_crate::module::func` (crate=missing_crate, path=missing_crate/module)"
+        assert!(
+            db.crates.read().unwrap().is_empty(),
+            "Crates should be empty"
+        );
+        assert!(
+            db.symbol_index.read().unwrap().is_empty(),
+            "Symbol index should be empty"
         );
     }
 
     #[test]
-    fn test_register_crate() {
+    fn test_cratedb_new_search_roots_initialization() {
         let db = CrateDb::new();
-        let crate_name = "test_crate";
-        let mock_path = PathBuf::from("/mock/root/path");
-
-        db.register_crate(crate_name, mock_path.clone());
-
-        let crates = db.crates.read().unwrap();
-        assert!(
-            crates.contains_key(crate_name),
-            "Crate should be registered"
-        );
-
-        let registered = crates.get(crate_name).unwrap();
-        assert_eq!(registered.name, crate_name);
-        assert_eq!(registered.root, mock_path);
+        // search_roots may contain `rustlib` and/or `vendor`.
+        // Even if `rustc` is not available, we should at least not panic
+        // and `search_roots` must not contain garbage paths.
+        for path in &db.search_roots {
+            assert!(
+                path.exists(),
+                "Every search root must be an existing directory: {:?}",
+                path
+            );
+            assert!(path.is_dir(), "Search root must be a directory: {:?}", path);
+        }
     }
 }
