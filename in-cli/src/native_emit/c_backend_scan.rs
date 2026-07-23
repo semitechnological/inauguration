@@ -47,7 +47,8 @@ fn stmts_need_invec(stmts: &[Stmt]) -> bool {
 
 fn stmt_needs_invec(s: &Stmt) -> bool {
     match s {
-        Stmt::Let(_, ty, e) => ty.as_ref().is_some_and(typ_needs_invec) || expr_needs_invec(e),
+<<<<<<< HEAD
+>>>>>>> origin/master
         Stmt::Assign(_, e) | Stmt::Return(Some(e)) | Stmt::Throw(e) | Stmt::Expr(e) => {
             expr_needs_invec(e)
         }
