@@ -341,13 +341,10 @@ pub fn bx_lr() -> u16 {
 pub fn emit_prologue(emitter: &mut CodeEmitter) {
     // push {r4, r5, r6, r7, lr}
     emitter.emit_u16(push(0b1111_0000, true)); // r4-r7 + lr → mask r4-r7 = 0xF0
-    // mov r7, sp  (high-reg form: 01000110 1011 1111 → mov r7, sp)
-    // Encoding: 0b01000110 | (H1<<7) ... use special: movs not valid for sp.
-    // T1 MOV (register high): 01000110 D:Rm where D is bit7 of rd, Rm includes high.
-    // mov r7, sp: opcode 0x46, (rd=7, rm=13) => 0x467F? Let's compute:
-    // 15:8 = 01000110, 7 = D (msb of rd), 6:3 = rm, 2:0 = rd[2:0]
-    // rd=7 => D=0, rd[2:0]=111; rm=13=1101 => 01000110 0 1101 111 = 0x46BF
-    emitter.emit_u16(0x46BF);
+    // mov r7, sp — T1 MOV (register): 01000110 D Rm rd[2:0]
+    // rd=7 => D=0, rd[2:0]=111; rm=sp=13=1101 => 01000110 0 1101 111 = 0x466F
+    // (0x46BF is mov pc, r7 and must not be used.)
+    emitter.emit_u16(0x466F);
 }
 
 /// Epilogue restoring r4-r7 and returning via pop {r4-r7, pc}
@@ -409,5 +406,13 @@ mod tests {
         assert_eq!(strb_imm(0, 1, 0).unwrap(), 0x7008);
         assert_eq!(ldrh_imm(0, 1, 0).unwrap(), 0x8808);
         assert_eq!(strh_imm(0, 1, 0).unwrap(), 0x8008);
+    }
+
+    #[test]
+    fn prologue_is_mov_r7_sp_not_mov_pc() {
+        let mut e = CodeEmitter::new();
+        emit_prologue(&mut e);
+        // push {r4-r7,lr} = 0xB5F0, mov r7,sp = 0x466F
+        assert_eq!(e.bytes, [0xF0, 0xB5, 0x6F, 0x46]);
     }
 }
