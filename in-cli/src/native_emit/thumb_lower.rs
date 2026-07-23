@@ -449,15 +449,15 @@ fn lower_while(
 }
 
 fn patch_b(emitter: &mut CodeEmitter, site: u32, target: u32) -> Result<(), String> {
-    // unconditional B T2: next = site+2; rel_half = (target - next) / 2; imm11 signed
-    let next = site as i32 + 2;
+    // Thumb branch target is relative to PC of this insn + 4 (next + 2).
+    let next = site as i32 + 4;
     let rel = (target as i32 - next) / 2;
     emitter.patch_u16(site, thumb::b_rel11(rel)?);
     Ok(())
 }
 
 fn patch_b_cond(emitter: &mut CodeEmitter, site: u32, target: u32) -> Result<(), String> {
-    let next = site as i32 + 2;
+    let next = site as i32 + 4;
     let rel = (target as i32 - next) / 2;
     if !(-128..=127).contains(&rel) {
         return Err(format!("thumb-lower: bcond range {rel}"));
@@ -897,6 +897,32 @@ fn main() -> void { return }
             (insn & 0xF800) == 0xE000 && (insn & 0x400) != 0
         });
         assert!(has_backward_b, "while back-edge missing signed imm11 b");
+    }
+
+    #[test]
+    fn lower_nested_while_if_return() {
+        let module = parse(
+            r#"
+fn uart_put(ch: Int) -> void {
+  let state = 1075838980
+  let data = 1075838976
+  let spins = 0
+  while spins < 1000 {
+    let s = load32(state)
+    if (s & 1) == 0 {
+      store32(data, ch)
+      return
+    }
+    spins = spins + 1
+  }
+  store32(data, ch)
+  return
+}
+fn main() -> void { return }
+"#,
+        );
+        let result = lower_module(&module, "uart_put").expect("lower");
+        assert!(result.code.windows(2).any(|w| w == [0x20, 0x60]));
     }
 
     #[test]
