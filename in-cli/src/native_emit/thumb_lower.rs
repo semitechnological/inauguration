@@ -370,7 +370,7 @@ fn lower_function(
 
     // Call-argument temp pool: chunk = max arity, depth = 8 nested calls.
     let max_arity = max_call_arity(&func.body);
-    ctx.call_arg_chunk = max_arity.max(4);
+    ctx.call_arg_chunk = max_arity;
     let slots_needed = ctx.call_arg_chunk * 8;
     for _ in 0..slots_needed {
         let off = ctx.alloc_slot();
@@ -520,6 +520,13 @@ fn max_call_arity_expr(e: &Expr) -> usize {
             .map(|(_, e)| max_call_arity_expr(e))
             .max()
             .unwrap_or(0),
+        Expr::ArrayLit(items) => items
+            .iter()
+            .map(max_call_arity_expr)
+            .max()
+            .unwrap_or(0),
+        Expr::Index { index, .. } => max_call_arity_expr(index),
+        Expr::Field { base, .. } => max_call_arity_expr(base),
         _ => 0,
     }
 }
@@ -1014,32 +1021,18 @@ fn lower_field_assign(
     Ok(())
 }
 
-fn lower_index_load(
+fn emit_array_index_address(
     emitter: &mut CodeEmitter,
     ctx: &mut LowerCtx<'_>,
-    base: &Expr,
+    base: u32,
+    elem_size: u32,
+    len: usize,
     index: &Expr,
-    dest: u8,
     pending: &mut Vec<PendingCall>,
-) -> Result<(), String> {
-    let Expr::Ident(name) = base else {
-        return Err("thumb-lower: array index base must be a local".into());
-    };
-    let Some(LocalSlot::Array {
-        base,
-        elem_size,
-        len,
-    }) = ctx.locals.get(name).cloned()
-    else {
-        return Err(format!(
-            "thumb-lower: `{name}` is not an array in `{}`",
-            ctx.fn_name
-        ));
-    };
-
+) -> Result<(u32, u32), String> {
     lower_expr_into(emitter, ctx, index, R2, pending)?;
 
-    // Bounds: index < 0 or index >= len -> load 0
+    // Bounds: index < 0 or index >= len
     let neg = emitter.len();
     emitter.emit_u16(thumb::b_cond_rel8(COND_LT, 0));
     thumb::load_i32(emitter, R3, len as i32);
@@ -1055,13 +1048,45 @@ fn lower_index_load(
     emitter.emit_u16(thumb::muls(R2, R3));
     emitter.emit_u16(thumb::adds_reg(R1, R1, R2));
 
+    Ok((neg, oob))
+}
+
+fn resolve_array_slot(
+    ctx: &LowerCtx<'_>,
+    base: &Expr,
+) -> Result<(u32, u32, usize), String> {
+    let Expr::Ident(name) = base else {
+        return Err("thumb-lower: array index base must be a local".into());
+    };
+    let Some(LocalSlot::Array { base, elem_size, len }) = ctx.locals.get(name).cloned() else {
+        return Err(format!(
+            "thumb-lower: `{name}` is not an array in `{}`",
+            ctx.fn_name
+        ));
+    };
+    Ok((base, elem_size, len))
+}
+
+fn lower_index_load(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    base: &Expr,
+    index: &Expr,
+    dest: u8,
+    pending: &mut Vec<PendingCall>,
+) -> Result<(), String> {
+    let (base, elem_size, len) = resolve_array_slot(ctx, base)?;
+    let (neg, oob) =
+        emit_array_index_address(emitter, ctx, base, elem_size, len, index, pending)?;
+
     emitter.emit_u16(thumb::ldr_imm(R0, R1, 0)?);
 
     let b_end = emitter.len();
     emitter.emit_u16(thumb::b_rel8(0));
     let fail = emitter.len();
     thumb::load_i32(emitter, R0, 0);
-    patch_b(emitter, b_end, emitter.len())?;
+    let end = emitter.len();
+    patch_b(emitter, b_end, end)?;
     patch_b_cond(emitter, neg, fail)?;
     patch_b_cond(emitter, oob, fail)?;
 
@@ -1079,40 +1104,11 @@ fn lower_index_assign(
     value: &Expr,
     pending: &mut Vec<PendingCall>,
 ) -> Result<(), String> {
-    let Expr::Ident(name) = base else {
-        return Err("thumb-lower: array index base must be a local".into());
-    };
-    let Some(LocalSlot::Array {
-        base,
-        elem_size,
-        len,
-    }) = ctx.locals.get(name).cloned()
-    else {
-        return Err(format!(
-            "thumb-lower: `{name}` is not an array in `{}`",
-            ctx.fn_name
-        ));
-    };
-
+    let (base, elem_size, len) = resolve_array_slot(ctx, base)?;
     lower_expr_into(emitter, ctx, value, R0, pending)?;
     emitter.emit_u16(thumb::mov_low(R4, R0));
-    lower_expr_into(emitter, ctx, index, R2, pending)?;
-
-    // Bounds: negative or >= len -> skip store
-    let neg = emitter.len();
-    emitter.emit_u16(thumb::b_cond_rel8(COND_LT, 0));
-    thumb::load_i32(emitter, R3, len as i32);
-    emitter.emit_u16(thumb::cmp_reg(R2, R3));
-    let oob = emitter.len();
-    emitter.emit_u16(thumb::b_cond_rel8(COND_GE, 0));
-
-    // Address = sp + base + index * elem_size
-    emitter.emit_u16(thumb::mov_sp(R1));
-    thumb::load_i32(emitter, R3, base as i32);
-    emitter.emit_u16(thumb::adds_reg(R1, R1, R3));
-    thumb::load_i32(emitter, R3, elem_size as i32);
-    emitter.emit_u16(thumb::muls(R2, R3));
-    emitter.emit_u16(thumb::adds_reg(R1, R1, R2));
+    let (neg, oob) =
+        emit_array_index_address(emitter, ctx, base, elem_size, len, index, pending)?;
 
     emitter.emit_u16(thumb::str_imm(R4, R1, 0)?);
 
@@ -1582,6 +1578,23 @@ fn main() -> void { return }
 "#,
         );
         let result = lower_module(&module, "sum").expect("lower array");
+        assert!(!result.code.is_empty());
+    }
+
+    #[test]
+    fn lower_array_with_call_item_and_index_call() {
+        let module = parse(
+            r#"
+extern zig fn helper(x: Int) -> Int
+fn sum() -> Int {
+  let a: [Int] = [helper(1), helper(2), helper(3)]
+  let i: Int = 1
+  return a[helper(i)]
+}
+fn main() -> void { return }
+"#,
+        );
+        let result = lower_module(&module, "sum").expect("lower array with calls");
         assert!(!result.code.is_empty());
     }
 
