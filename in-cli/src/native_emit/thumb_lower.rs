@@ -799,18 +799,6 @@ fn lower_binary(
     Ok(())
 }
 
-fn invert_cond(cond: u8) -> u8 {
-    match cond {
-        COND_EQ => COND_NE,
-        COND_NE => COND_EQ,
-        COND_LT => COND_GE,
-        COND_GE => COND_LT,
-        COND_GT => COND_LE,
-        COND_LE => COND_GT,
-        c => c ^ 1,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
