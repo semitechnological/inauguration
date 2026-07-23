@@ -934,6 +934,28 @@ pub fn lock_dependencies(path: &Path) -> Result<(PathBuf, PackageLock), String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn verify_archive_checksum_error_paths() {
+        let dir = tempfile_dir("verify-checksum-err");
+        let path = dir.join("dummy.zip");
+        fs::write(&path, b"hello world").unwrap();
+
+        let sha1 = ArtifactChecksum::Sha1Hex("badsha1".to_string());
+        assert!(verify_archive_checksum(&path, &sha1).is_err());
+
+        let sha256 = ArtifactChecksum::Sha256Hex("badsha256".to_string());
+        assert!(verify_archive_checksum(&path, &sha256).is_err());
+
+        let sha512 = ArtifactChecksum::Sha512Base64("badsha512".to_string());
+        assert!(verify_archive_checksum(&path, &sha512).is_err());
+
+        let go = ArtifactChecksum::GoModuleSum("badgo".to_string());
+        assert!(verify_archive_checksum(&path, &go).is_err());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     use crate::package_manifest::parse_package_manifest_source;
 
     #[test]
