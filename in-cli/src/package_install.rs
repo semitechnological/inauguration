@@ -1006,7 +1006,10 @@ mod tests {
 
         remove_dir_if_empty(&temp).expect("remove_dir_if_empty should not error");
 
-        assert!(temp.is_dir(), "Directory should still exist because it was populated");
+        assert!(
+            temp.is_dir(),
+            "Directory should still exist because it was populated"
+        );
 
         // Clean up
         let _ = fs::remove_dir_all(&temp);
