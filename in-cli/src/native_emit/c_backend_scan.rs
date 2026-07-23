@@ -1,3 +1,4 @@
+#![allow(clippy::redundant_closure)]
 //! AST scans for C backend: InVec need + emit size/depth DoS guards.
 
 use crate::core_ir::{Decl, Expr, LoopKind, Stmt, Typ, UnifiedModule};
@@ -47,7 +48,9 @@ fn stmts_need_invec(stmts: &[Stmt]) -> bool {
 
 fn stmt_needs_invec(s: &Stmt) -> bool {
     match s {
-        Stmt::Let(_, ty, e) => ty.as_ref().is_some_and(typ_needs_invec) || expr_needs_invec(e),
+        Stmt::Let(_, ty, e) => {
+            ty.as_ref().is_some_and(|t| typ_needs_invec(t)) || expr_needs_invec(e)
+        }
         Stmt::Assign(_, e) | Stmt::Return(Some(e)) | Stmt::Throw(e) | Stmt::Expr(e) => {
             expr_needs_invec(e)
         }
@@ -62,7 +65,7 @@ fn stmt_needs_invec(s: &Stmt) -> bool {
         } => expr_needs_invec(cond) || stmts_need_invec(then_body) || stmts_need_invec(else_body),
         Stmt::Loop { kind, cond, body } => {
             matches!(kind, LoopKind::For { .. })
-                || cond.as_ref().is_some_and(expr_needs_invec)
+                || cond.as_ref().is_some_and(|e| expr_needs_invec(e))
                 || stmts_need_invec(body)
         }
         Stmt::Match { scrutinee, arms } => {
