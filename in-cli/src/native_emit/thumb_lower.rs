@@ -8,6 +8,7 @@
 //! - arithmetic: + - * & | ^ unary-
 //! - compares: == != < <= > >=
 //! - direct function calls (same module)
+//! - MMIO memory ops: load8/16/32/64, store8/16/32/64 (volatile via plain ldr/str)
 //!
 //! No heap, no strings, no floats, no interrupts in this pass.
 
@@ -547,6 +548,9 @@ fn lower_expr_into(
                     ctx.fn_name
                 ));
             };
+            if try_lower_mmio(emitter, ctx, name, args, dest, pending)? {
+                return Ok(());
+            }
             if args.len() > 4 {
                 return Err(format!(
                     "thumb-lower: >4 args in call `{name}` in `{}`",
@@ -591,6 +595,132 @@ fn lower_expr_into(
         }
         Expr::ArrayLit(_) | Expr::Index { .. } => Err("thumb-lower: arrays not supported".into()),
         Expr::Closure { .. } => Err("thumb-lower: closures not supported".into()),
+    }
+}
+
+fn try_lower_mmio(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    name: &str,
+    args: &[Expr],
+    dest: u8,
+    pending: &mut Vec<PendingCall>,
+) -> Result<bool, String> {
+    match name {
+        "load8" => {
+            if args.len() != 1 {
+                return Err(format!(
+                    "thumb-lower: `load8` requires 1 argument in `{}`",
+                    ctx.fn_name
+                ));
+            }
+            lower_expr_into(emitter, ctx, &args[0], R1, pending)?;
+            emitter.emit_u16(thumb::ldrb_imm(R0, R1, 0)?);
+            if dest != R0 {
+                emitter.emit_u16(thumb::mov_low(dest, R0));
+            }
+            Ok(true)
+        }
+        "load16" => {
+            if args.len() != 1 {
+                return Err(format!(
+                    "thumb-lower: `load16` requires 1 argument in `{}`",
+                    ctx.fn_name
+                ));
+            }
+            lower_expr_into(emitter, ctx, &args[0], R1, pending)?;
+            emitter.emit_u16(thumb::ldrh_imm(R0, R1, 0)?);
+            if dest != R0 {
+                emitter.emit_u16(thumb::mov_low(dest, R0));
+            }
+            Ok(true)
+        }
+        "load32" => {
+            if args.len() != 1 {
+                return Err(format!(
+                    "thumb-lower: `load32` requires 1 argument in `{}`",
+                    ctx.fn_name
+                ));
+            }
+            lower_expr_into(emitter, ctx, &args[0], R1, pending)?;
+            emitter.emit_u16(thumb::ldr_imm(R0, R1, 0)?);
+            if dest != R0 {
+                emitter.emit_u16(thumb::mov_low(dest, R0));
+            }
+            Ok(true)
+        }
+        "load64" => {
+            if args.len() != 1 {
+                return Err(format!(
+                    "thumb-lower: `load64` requires 1 argument in `{}`",
+                    ctx.fn_name
+                ));
+            }
+            // Cortex-M is 32-bit; expose low word only (matches freestanding Int).
+            lower_expr_into(emitter, ctx, &args[0], R1, pending)?;
+            emitter.emit_u16(thumb::ldr_imm(R0, R1, 0)?);
+            if dest != R0 {
+                emitter.emit_u16(thumb::mov_low(dest, R0));
+            }
+            Ok(true)
+        }
+        "store8" => {
+            if args.len() != 2 {
+                return Err(format!(
+                    "thumb-lower: `store8` requires 2 arguments in `{}`",
+                    ctx.fn_name
+                ));
+            }
+            lower_expr_into(emitter, ctx, &args[0], R1, pending)?;
+            emitter.emit_u16(thumb::push(1 << 1, false));
+            lower_expr_into(emitter, ctx, &args[1], R0, pending)?;
+            emitter.emit_u16(thumb::pop(1 << 1, false));
+            emitter.emit_u16(thumb::strb_imm(R0, R1, 0)?);
+            Ok(true)
+        }
+        "store16" => {
+            if args.len() != 2 {
+                return Err(format!(
+                    "thumb-lower: `store16` requires 2 arguments in `{}`",
+                    ctx.fn_name
+                ));
+            }
+            lower_expr_into(emitter, ctx, &args[0], R1, pending)?;
+            emitter.emit_u16(thumb::push(1 << 1, false));
+            lower_expr_into(emitter, ctx, &args[1], R0, pending)?;
+            emitter.emit_u16(thumb::pop(1 << 1, false));
+            emitter.emit_u16(thumb::strh_imm(R0, R1, 0)?);
+            Ok(true)
+        }
+        "store32" => {
+            if args.len() != 2 {
+                return Err(format!(
+                    "thumb-lower: `store32` requires 2 arguments in `{}`",
+                    ctx.fn_name
+                ));
+            }
+            lower_expr_into(emitter, ctx, &args[0], R1, pending)?;
+            emitter.emit_u16(thumb::push(1 << 1, false));
+            lower_expr_into(emitter, ctx, &args[1], R0, pending)?;
+            emitter.emit_u16(thumb::pop(1 << 1, false));
+            emitter.emit_u16(thumb::str_imm(R0, R1, 0)?);
+            Ok(true)
+        }
+        "store64" => {
+            if args.len() != 2 {
+                return Err(format!(
+                    "thumb-lower: `store64` requires 2 arguments in `{}`",
+                    ctx.fn_name
+                ));
+            }
+            lower_expr_into(emitter, ctx, &args[0], R1, pending)?;
+            emitter.emit_u16(thumb::push(1 << 1, false));
+            lower_expr_into(emitter, ctx, &args[1], R0, pending)?;
+            emitter.emit_u16(thumb::pop(1 << 1, false));
+            emitter.emit_u16(thumb::str_imm(R0, R1, 0)?);
+            Ok(true)
+        }
+        _ => Ok(false),
     }
 }
 
@@ -793,6 +923,63 @@ fn main() -> void { return }
         );
         let err = lower_module(&module, "f").expect_err("string");
         assert!(err.contains("string") || err.contains("unsupported"));
+    }
+
+    #[test]
+    fn lower_load32_store32() {
+        let module = parse(
+            r#"
+fn peek(addr: Int) -> Int { return load32(addr) }
+fn poke(addr: Int, val: Int) -> void { store32(addr, val); return }
+fn main() -> void { return }
+"#,
+        );
+        let load = lower_module(&module, "peek").expect("load32");
+        assert!(load.code.windows(2).any(|w| w == [0x08, 0x68]));
+        let store = lower_module(&module, "poke").expect("store32");
+        assert!(store.code.windows(2).any(|w| w == [0x08, 0x60]));
+    }
+
+    #[test]
+    fn lower_load8_store8() {
+        let module = parse(
+            r#"
+fn peek8(addr: Int) -> Int { return load8(addr) }
+fn poke8(addr: Int, val: Int) -> void { store8(addr, val); return }
+fn main() -> void { return }
+"#,
+        );
+        let load = lower_module(&module, "peek8").expect("load8");
+        assert!(load.code.windows(2).any(|w| w == [0x08, 0x78]));
+        let store = lower_module(&module, "poke8").expect("store8");
+        assert!(store.code.windows(2).any(|w| w == [0x08, 0x70]));
+    }
+
+    #[test]
+    fn lower_load16_store16() {
+        let module = parse(
+            r#"
+fn peek16(addr: Int) -> Int { return load16(addr) }
+fn poke16(addr: Int, val: Int) -> void { store16(addr, val); return }
+fn main() -> void { return }
+"#,
+        );
+        let load = lower_module(&module, "peek16").expect("load16");
+        assert!(load.code.windows(2).any(|w| w == [0x08, 0x88]));
+        let store = lower_module(&module, "poke16").expect("store16");
+        assert!(store.code.windows(2).any(|w| w == [0x08, 0x80]));
+    }
+
+    #[test]
+    fn mmio_arg_count_errors() {
+        let module = parse(
+            r#"
+fn bad() -> Int { return load32() }
+fn main() -> void { return }
+"#,
+        );
+        let err = lower_module(&module, "bad").expect_err("arity");
+        assert!(err.contains("load32"));
     }
 
     #[test]

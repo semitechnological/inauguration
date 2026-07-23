@@ -245,6 +245,38 @@ pub fn ldr_imm(rt: u8, rn: u8, imm: u32) -> Result<u16, String> {
     Ok(0x6800 | (((imm / 4) as u16) << 6) | ((rn as u16) << 3) | rt as u16)
 }
 
+/// `ldrb rt, [rn, #imm]` imm 0..31
+pub fn ldrb_imm(rt: u8, rn: u8, imm: u32) -> Result<u16, String> {
+    if rt >= 8 || rn >= 8 || imm > 0x1F {
+        return Err(format!("thumb: ldrb_imm invalid rt={rt} rn={rn} imm={imm}"));
+    }
+    Ok(0x7800 | ((imm as u16) << 6) | ((rn as u16) << 3) | rt as u16)
+}
+
+/// `strb rt, [rn, #imm]` imm 0..31
+pub fn strb_imm(rt: u8, rn: u8, imm: u32) -> Result<u16, String> {
+    if rt >= 8 || rn >= 8 || imm > 0x1F {
+        return Err(format!("thumb: strb_imm invalid rt={rt} rn={rn} imm={imm}"));
+    }
+    Ok(0x7000 | ((imm as u16) << 6) | ((rn as u16) << 3) | rt as u16)
+}
+
+/// `ldrh rt, [rn, #imm]` imm even, 0..62
+pub fn ldrh_imm(rt: u8, rn: u8, imm: u32) -> Result<u16, String> {
+    if rt >= 8 || rn >= 8 || !imm.is_multiple_of(2) || imm / 2 > 0x1F {
+        return Err(format!("thumb: ldrh_imm invalid rt={rt} rn={rn} imm={imm}"));
+    }
+    Ok(0x8800 | (((imm / 2) as u16) << 6) | ((rn as u16) << 3) | rt as u16)
+}
+
+/// `strh rt, [rn, #imm]` imm even, 0..62
+pub fn strh_imm(rt: u8, rn: u8, imm: u32) -> Result<u16, String> {
+    if rt >= 8 || rn >= 8 || !imm.is_multiple_of(2) || imm / 2 > 0x1F {
+        return Err(format!("thumb: strh_imm invalid rt={rt} rn={rn} imm={imm}"));
+    }
+    Ok(0x8000 | (((imm / 2) as u16) << 6) | ((rn as u16) << 3) | rt as u16)
+}
+
 /// `str rt, [sp, #imm]` imm multiple of 4, 0..1020
 pub fn str_sp(rt: u8, imm: u32) -> Result<u16, String> {
     if rt >= 8 || !imm.is_multiple_of(4) || imm / 4 > 0xFF {
@@ -367,5 +399,15 @@ mod tests {
         // high halfword first in stream via emit_u32_thumb
         assert_eq!((enc >> 16) & 0xF800, 0xF000);
         assert_eq!(enc & 0xD000, 0xD000);
+    }
+
+    #[test]
+    fn encodes_mmio_load_store() {
+        assert_eq!(ldr_imm(0, 1, 0).unwrap(), 0x6808);
+        assert_eq!(str_imm(0, 1, 0).unwrap(), 0x6008);
+        assert_eq!(ldrb_imm(0, 1, 0).unwrap(), 0x7808);
+        assert_eq!(strb_imm(0, 1, 0).unwrap(), 0x7008);
+        assert_eq!(ldrh_imm(0, 1, 0).unwrap(), 0x8808);
+        assert_eq!(strh_imm(0, 1, 0).unwrap(), 0x8008);
     }
 }
