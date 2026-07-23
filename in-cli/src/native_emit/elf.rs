@@ -234,9 +234,38 @@ fn write_elf64_relocatable_object(object: &ElfObject, machine: u16, out: &mut Ve
 }
 
 pub fn write_arm32_relocatable_object(object: &ElfObject, out: &mut Vec<u8>) {
+    // EF_ARM_EABI_VER5 — Thumb freestanding objects need EABI flags so linkers
+    // treat the stream as Thumb-capable rather than pure ARM.
+    const EF_ARM_EABI_VER5: u32 = 0x0500_0000;
     let shstrtab = b"\0.text\0.symtab\0.strtab\0.shstrtab\0";
-    let strtab = format!("\0{}\0", object.export_name).into_bytes();
-    let symtab_size = 32u32;
+    let mut all_exports: Vec<(&str, u32)> = Vec::new();
+    all_exports.push((&object.export_name, 0));
+    for (name, offset) in &object.exports {
+        if name == &object.export_name && *offset == 0 {
+            continue;
+        }
+        all_exports.push((name, *offset));
+    }
+    all_exports.sort_by_key(|a| a.1);
+
+    let mut strtab: Vec<u8> = vec![0u8];
+    let mut name_indices: Vec<u32> = Vec::new();
+    for (name, _) in &all_exports {
+        name_indices.push(strtab.len() as u32);
+        strtab.extend_from_slice(name.as_bytes());
+        strtab.push(0);
+    }
+    for name in &object.undefs {
+        name_indices.push(strtab.len() as u32);
+        strtab.extend_from_slice(name.as_bytes());
+        strtab.push(0);
+    }
+
+    let n_local = 1u32; // null symbol only
+    let n_exports = all_exports.len() as u32;
+    let n_undefs = object.undefs.len() as u32;
+    let sym_count = 1 + n_exports + n_undefs;
+    let symtab_size = sym_count * 16;
     let text_name = 1u32;
     let symtab_name = 7u32;
     let strtab_name = 15u32;
@@ -259,7 +288,7 @@ pub fn write_arm32_relocatable_object(object: &ElfObject, out: &mut Vec<u8>) {
     out.extend_from_slice(&0u32.to_le_bytes());
     out.extend_from_slice(&0u32.to_le_bytes());
     out.extend_from_slice(&shoff.to_le_bytes());
-    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&EF_ARM_EABI_VER5.to_le_bytes());
     out.extend_from_slice(&(EHDR32_SIZE as u16).to_le_bytes());
     out.extend_from_slice(&0u16.to_le_bytes());
     out.extend_from_slice(&0u16.to_le_bytes());
@@ -269,7 +298,20 @@ pub fn write_arm32_relocatable_object(object: &ElfObject, out: &mut Vec<u8>) {
 
     out.extend_from_slice(&object.code);
     write_symbol32(out, 0, 0, 0, 0, 0, 0);
-    write_symbol32(out, 1, 0, object.code.len() as u32, 0x12, 0, 1);
+    for (i, (_, offset)) in all_exports.iter().enumerate() {
+        // Thumb function symbols carry the low address bit set (st_value | 1).
+        let value = offset | 1;
+        let next_off = all_exports
+            .get(i + 1)
+            .map(|e| e.1)
+            .unwrap_or(object.code.len() as u32);
+        let size = next_off.saturating_sub(*offset);
+        write_symbol32(out, name_indices[i], value, size, 0x12, 0, 1);
+    }
+    for i in 0..object.undefs.len() {
+        let idx = name_indices[n_exports as usize + i];
+        write_symbol32(out, idx, 0, 0, 0x10, 0, 0);
+    }
     out.extend_from_slice(&strtab);
     out.extend_from_slice(shstrtab);
 
@@ -296,7 +338,7 @@ pub fn write_arm32_relocatable_object(object: &ElfObject, out: &mut Vec<u8>) {
         symtab_offset,
         symtab_size,
         3,
-        1,
+        n_local,
         4,
         16,
     );
@@ -685,6 +727,10 @@ mod tests {
         assert_eq!(out[4], ELFCLASS32);
         assert_eq!(u16::from_le_bytes([out[16], out[17]]), ET_REL);
         assert_eq!(u16::from_le_bytes([out[18], out[19]]), EM_ARM);
+        assert_eq!(
+            u32::from_le_bytes([out[36], out[37], out[38], out[39]]),
+            0x0500_0000
+        );
         assert!(out.windows(5).any(|window| window == b".text"));
         assert!(out.windows(7).any(|window| window == b".symtab"));
         assert!(out.windows(7).any(|window| window == b".strtab"));
@@ -694,6 +740,12 @@ mod tests {
             out.windows(8)
                 .any(|window| window == [0x2A, 0x00, 0xA0, 0xE3, 0x1E, 0xFF, 0x2F, 0xE1])
         );
+        // Thumb function symbol st_value has low bit set (value starts at 1 for offset 0).
+        let text_off = EHDR32_SIZE as usize;
+        let sym_off = text_off + object.code.len();
+        let answer_sym = &out[sym_off + 16..sym_off + 32];
+        let st_value = u32::from_le_bytes(answer_sym[4..8].try_into().unwrap());
+        assert_eq!(st_value & 1, 1);
     }
 
     #[test]
