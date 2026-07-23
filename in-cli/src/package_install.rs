@@ -977,6 +977,20 @@ mod tests {
     }
 
     #[test]
+    fn remove_dir_if_empty_retains_populated_dir() {
+        let temp = tempfile_dir("populated-dir");
+        let file_path = temp.join("dummy.txt");
+        fs::write(&file_path, "dummy content").expect("failed to write dummy file");
+
+        remove_dir_if_empty(&temp).expect("remove_dir_if_empty should not error");
+
+        assert!(temp.is_dir(), "Directory should still exist because it was populated");
+
+        // Clean up
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
     fn default_packages_root_appends_correct_path() {
         let empty_path = Path::new("");
         assert_eq!(
@@ -1088,6 +1102,21 @@ mod tests {
         assert_eq!(base64_encode(b"f"), "Zg==");
         assert_eq!(base64_encode(b"fo"), "Zm8=");
         assert_eq!(base64_encode(b"foo"), "Zm9v");
+    }
+
+    #[test]
+    fn extract_zip_handles_invalid_zip_gracefully() {
+        let dir = tempfile_dir("extract-zip");
+        let invalid_zip = dir.join("invalid.zip");
+        fs::write(&invalid_zip, b"not a valid zip archive").unwrap();
+
+        let install_path = dir.join("extracted");
+
+        let result = extract_zip(&invalid_zip, &install_path);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unzip extract failed"));
+
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
