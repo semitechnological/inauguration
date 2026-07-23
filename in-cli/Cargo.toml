@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "inauguration"
-version = "0.9.2"
+version = "0.9.3"
 edition = "2024"
 license = "MPL-2.0"
 description = "Rust CLI for the inauguration Swift toolchain experiments: embedded hybrid pipeline (AST refresh → frontend → SIL analysis wave), hotreload daemon (Unix sockets), SwiftPM staging under .build/bin and .build/artifacts, plugins, and workspace-only integration commands (in test)."
@@ -35,7 +35,7 @@ sha2 = "0.11"
 syn = { version = "2", features = ["full"] }
 thiserror = "2"
 tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
-tree-sitter = "0.26.10"
+tree-sitter = "0.26.11"
 # Tree-sitter parsers (all included by default for polyglot eval/build)
 tree-sitter-c = "0.24.2"
 tree-sitter-cpp = "0.23.4"
@@ -51,7 +51,7 @@ tree-sitter-zig = "1.1.2"
 tree-sitter-lua = "0.5.0"
 tree-sitter-perl = "1.1.2"
 # HolyC and Ruby have extraction logic, keep as active
-tree-sitter-holyc = "0.1.1"
+tree-sitter-holyc = "0.1.2"
 tree-sitter-ruby = "0.23.1"
 # Speculative parsers — gated behind parse-extended feature
 tree-sitter-c-sharp = { version = "0.23.5", optional = true }
