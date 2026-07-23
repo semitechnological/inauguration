@@ -174,12 +174,20 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
             && emit_label(request.emit.as_ref()) == emit_label(None)
             && requested_out == cached_out
         {
-            cached.cache_hit = true;
-            cached.jobs = jobs;
-            cached.timing_micros = started.elapsed().as_micros();
-            cached.timing_waves_us = Some(timing_waves_for_jobs(jobs, cached.timing_micros));
-            cached.frontend_hash = Some(frontend_hash);
-            return cached;
+            // Report-only cache must still materialize artifacts; missing out files
+            // force a full rebuild so product link steps don't see a green phantom.
+            let artifact_present = requested_out
+                .as_ref()
+                .map(|p| std::path::Path::new(p).is_file())
+                .unwrap_or(true);
+            if artifact_present {
+                cached.cache_hit = true;
+                cached.jobs = jobs;
+                cached.timing_micros = started.elapsed().as_micros();
+                cached.timing_waves_us = Some(timing_waves_for_jobs(jobs, cached.timing_micros));
+                cached.frontend_hash = Some(frontend_hash);
+                return cached;
+            }
         }
     }
 
