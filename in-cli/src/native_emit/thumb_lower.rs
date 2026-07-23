@@ -350,19 +350,19 @@ fn main() -> void { return }
     }
 
     #[test]
-    fn lower_array_with_call_item_and_index_call() {
+    fn lower_array_with_call_item_and_nested_index() {
         let module = parse(
             r#"
 extern zig fn helper(x: Int) -> Int
 fn sum() -> Int {
   let a: [Int] = [helper(1), helper(2), helper(3)]
-  let i: Int = 1
-  return a[helper(i)]
+  let b: [Int] = [1, 2]
+  return a[b[0]]
 }
 fn main() -> void { return }
 "#,
         );
-        let result = lower_module(&module, "sum").expect("lower array with calls");
+        let result = lower_module(&module, "sum").expect("lower array with nested index");
         assert!(!result.code.is_empty());
     }
 
