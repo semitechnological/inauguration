@@ -99,3 +99,15 @@ pub fn load_dynamic_module(path: &Path) -> Result<Box<dyn DynamicModule>, Dynami
         }))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_load_dynamic_module_invalid_library() {
+        let path = Path::new("/path/to/nonexistent_library.so");
+        let result = load_dynamic_module(path);
+        assert!(matches!(result, Err(DynamicModuleError::LoadFailed { .. })));
+    }
+}
