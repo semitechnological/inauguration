@@ -61,6 +61,11 @@ pub(crate) fn parse_assign_stmt(s: &str) -> Option<Stmt> {
             index: *index,
             value,
         }),
+        Expr::Field { base, name: field } => Some(Stmt::FieldAssign {
+            base: *base,
+            name: field,
+            value,
+        }),
         _ => Some(Stmt::Assign(name.to_string(), value)),
     }
 }

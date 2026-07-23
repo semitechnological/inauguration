@@ -39,14 +39,23 @@ struct FunctionInfo {
     body: Vec<Stmt>,
 }
 
+#[derive(Debug, Clone)]
+enum LocalSlot {
+    /// Scalar local: SP offset of the 4-byte slot.
+    Scalar(u32),
+    /// Struct local: flattened field name → SP offset.
+    Struct { fields: HashMap<String, u32> },
+}
+
 struct LowerCtx<'a> {
-    /// local name → stack offset from SP after frame alloc (0 = [sp,#0])
-    locals: HashMap<String, u32>,
+    /// local name → slot descriptor
+    locals: HashMap<String, LocalSlot>,
     frame_size: u32,
     emitted_return: bool,
     /// stack of break-site lists, one per enclosing loop
     break_sites: Vec<Vec<u32>>,
     functions: &'a HashMap<String, FunctionInfo>,
+    structs: &'a HashMap<String, Vec<(String, Typ)>>,
     fn_name: String,
     ret_typ: Typ,
 }
@@ -64,6 +73,7 @@ impl<'a> LowerCtx<'a> {
         fn_name: &str,
         params: &[(String, Typ)],
         functions: &'a HashMap<String, FunctionInfo>,
+        structs: &'a HashMap<String, Vec<(String, Typ)>>,
     ) -> Self {
         let mut ctx = Self {
             locals: HashMap::new(),
@@ -71,6 +81,7 @@ impl<'a> LowerCtx<'a> {
             emitted_return: false,
             break_sites: Vec::new(),
             functions,
+            structs,
             fn_name: fn_name.to_string(),
             ret_typ: Typ::Int,
         };
@@ -78,13 +89,13 @@ impl<'a> LowerCtx<'a> {
             match typ.canonical() {
                 Typ::Int | Typ::Bool => {
                     let off = ctx.alloc_slot();
-                    ctx.locals.insert(name.clone(), off);
+                    ctx.locals.insert(name.clone(), LocalSlot::Scalar(off));
                 }
                 other => {
                     // validated later
                     let _ = other;
                     let off = ctx.alloc_slot();
-                    ctx.locals.insert(name.clone(), off);
+                    ctx.locals.insert(name.clone(), LocalSlot::Scalar(off));
                 }
             }
         }
@@ -97,6 +108,13 @@ impl<'a> LowerCtx<'a> {
         off
     }
 
+    fn alloc_struct(&mut self, name: &str) -> Result<(u32, HashMap<String, u32>), String> {
+        let base = self.frame_size;
+        let layout = build_struct_layout(self.structs, name, base, &mut Vec::new())?;
+        self.frame_size += layout.size;
+        Ok((base, layout.fields))
+    }
+
     fn frame_reserve(&self) -> u32 {
         // keep 8-byte alignment for AAPCS
         (self.frame_size + 7) & !7
@@ -105,6 +123,7 @@ impl<'a> LowerCtx<'a> {
 
 pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<ThumbCompileResult, String> {
     let functions = collect_functions(module)?;
+    let structs = collect_structs(module);
     if !functions.contains_key(entry) {
         return Err(format!("thumb-lower: entry `{entry}` not found"));
     }
@@ -132,7 +151,7 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<ThumbCompileR
         let start = emitter.len();
         offsets.insert(name.clone(), start);
         exports.push((name.clone(), start));
-        lower_function(&mut emitter, func, &functions, &mut all_pending)?;
+        lower_function(&mut emitter, func, &functions, &structs, &mut all_pending)?;
         // ensure 2-byte alignment (always true for Thumb)
     }
 
@@ -203,10 +222,84 @@ fn collect_functions(module: &UnifiedModule) -> Result<HashMap<String, FunctionI
     Ok(out)
 }
 
+fn collect_structs(module: &UnifiedModule) -> HashMap<String, Vec<(String, Typ)>> {
+    let mut out = HashMap::new();
+    for decl in &module.decls {
+        if let Decl::Struct { name, fields, .. } = decl {
+            out.insert(name.clone(), fields.clone());
+        }
+    }
+    out
+}
+
+#[derive(Debug, Clone)]
+struct StructLayout {
+    size: u32,
+    align: u32,
+    fields: HashMap<String, u32>, // dotted field name -> byte offset
+}
+
+fn align_up(off: u32, align: u32) -> u32 {
+    (off + align - 1) & !(align - 1)
+}
+
+fn scalar_size_align(t: &Typ) -> (u32, u32) {
+    match t.canonical() {
+        Typ::Int | Typ::Float => (4, 4),
+        Typ::Bool => (4, 4),
+        _ => (4, 4),
+    }
+}
+
+/// Flatten a struct (including nested structs) into dotted field names with
+/// absolute byte offsets. Also returns the total aligned size.
+fn build_struct_layout(
+    structs: &HashMap<String, Vec<(String, Typ)>>,
+    name: &str,
+    base: u32,
+    visited: &mut Vec<String>,
+) -> Result<StructLayout, String> {
+    let fields = structs
+        .get(name)
+        .ok_or_else(|| format!("thumb-lower: unknown struct `{name}`"))?;
+    if visited.contains(&name.to_string()) {
+        return Err(format!("thumb-lower: recursive struct `{name}`"));
+    }
+    visited.push(name.to_string());
+    let mut layout = StructLayout {
+        size: 0,
+        align: 1,
+        fields: HashMap::new(),
+    };
+    for (field, ty) in fields {
+        let (size, falign) = match ty.canonical() {
+            Typ::Named(inner) if structs.contains_key(&inner) => {
+                let inner =
+                    build_struct_layout(structs, &inner, base + align_up(layout.size, 4), visited)?;
+                for (k, off) in inner.fields {
+                    layout.fields.insert(format!("{field}.{k}"), off);
+                }
+                (inner.size, inner.align)
+            }
+            _ => scalar_size_align(ty),
+        };
+        let off = align_up(layout.size, falign);
+        if !matches!(ty.canonical(), Typ::Named(inner) if structs.contains_key(&inner)) {
+            layout.fields.insert(field.clone(), base + off);
+        }
+        layout.size = off + size;
+        layout.align = layout.align.max(falign);
+    }
+    layout.size = align_up(layout.size, layout.align);
+    visited.pop();
+    Ok(layout)
+}
+
 fn lower_function(
     emitter: &mut CodeEmitter,
     func: &FunctionInfo,
     functions: &HashMap<String, FunctionInfo>,
+    structs: &HashMap<String, Vec<(String, Typ)>>,
     pending: &mut Vec<PendingCall>,
 ) -> Result<(), String> {
     match func.ret.canonical() {
@@ -230,7 +323,7 @@ fn lower_function(
         }
     }
 
-    let mut ctx = LowerCtx::new(&func.name, &func.params, functions);
+    let mut ctx = LowerCtx::new(&func.name, &func.params, functions, structs);
     ctx.ret_typ = func.ret.canonical();
     alloc_declared_locals(&mut ctx, &func.body)?;
 
@@ -258,8 +351,8 @@ fn lower_function(
                 func.name
             ));
         }
-        if let Some(&off) = ctx.locals.get(name) {
-            emitter.emit_u16(thumb::str_sp(param_regs[i], off)?);
+        if let Some(LocalSlot::Scalar(off)) = ctx.locals.get(name) {
+            emitter.emit_u16(thumb::str_sp(param_regs[i], *off)?);
         }
     }
 
@@ -280,13 +373,19 @@ fn alloc_declared_locals(ctx: &mut LowerCtx<'_>, body: &[Stmt]) -> Result<(), St
     for stmt in body {
         match stmt {
             Stmt::Let(name, typ, _) => {
+                if ctx.locals.contains_key(name) {
+                    continue;
+                }
                 let t = typ.as_ref().map(Typ::canonical).unwrap_or(Typ::Int);
                 match t {
                     Typ::Int | Typ::Bool => {
-                        if !ctx.locals.contains_key(name) {
-                            let off = ctx.alloc_slot();
-                            ctx.locals.insert(name.clone(), off);
-                        }
+                        let off = ctx.alloc_slot();
+                        ctx.locals.insert(name.clone(), LocalSlot::Scalar(off));
+                    }
+                    Typ::Named(s) if ctx.structs.contains_key(&s) => {
+                        let (_, fields) = ctx.alloc_struct(&s)?;
+                        ctx.locals
+                            .insert(name.clone(), LocalSlot::Struct { fields });
                     }
                     other => {
                         return Err(format!(
@@ -329,24 +428,10 @@ fn lower_stmt(
             ctx.emitted_return = true;
             Ok(())
         }
-        Stmt::Let(name, _, expr) => {
-            lower_expr_into(emitter, ctx, expr, R0, pending)?;
-            let off = *ctx.locals.get(name).ok_or_else(|| {
-                format!(
-                    "thumb-lower: missing slot for `{name}` in `{}`",
-                    ctx.fn_name
-                )
-            })?;
-            emitter.emit_u16(thumb::str_sp(R0, off)?);
-            Ok(())
-        }
-        Stmt::Assign(name, expr) => {
-            lower_expr_into(emitter, ctx, expr, R0, pending)?;
-            let off = *ctx.locals.get(name).ok_or_else(|| {
-                format!("thumb-lower: unknown local `{name}` in `{}`", ctx.fn_name)
-            })?;
-            emitter.emit_u16(thumb::str_sp(R0, off)?);
-            Ok(())
+        Stmt::Let(name, _, expr) => lower_store_local(emitter, ctx, name, expr, pending),
+        Stmt::Assign(name, expr) => lower_store_local(emitter, ctx, name, expr, pending),
+        Stmt::FieldAssign { base, name, value } => {
+            lower_field_assign(emitter, ctx, base, name, value, pending)
         }
         Stmt::Expr(expr) => {
             lower_expr_into(emitter, ctx, expr, R0, pending)?;
@@ -518,22 +603,31 @@ fn lower_expr_into(
             Ok(())
         }
         Expr::Ident(name) => {
-            if let Some(&off) = ctx.locals.get(name) {
-                // load to r0 then move if needed
-                emitter.emit_u16(thumb::ldr_sp(R0, off)?);
-                if dest != R0 {
-                    emitter.emit_u16(thumb::mov_low(dest, R0));
+            match ctx.locals.get(name) {
+                Some(LocalSlot::Scalar(off)) => {
+                    // load to r0 then move if needed
+                    emitter.emit_u16(thumb::ldr_sp(R0, *off)?);
+                    if dest != R0 {
+                        emitter.emit_u16(thumb::mov_low(dest, R0));
+                    }
+                    Ok(())
                 }
-                Ok(())
-            } else if ctx.functions.contains_key(name) {
-                Err(format!(
-                    "thumb-lower: bare function ref `{name}` not supported; call it"
-                ))
-            } else {
-                Err(format!(
-                    "thumb-lower: unknown ident `{name}` in `{}`",
+                Some(LocalSlot::Struct { .. }) => Err(format!(
+                    "thumb-lower: struct `{name}` used as scalar in `{}`",
                     ctx.fn_name
-                ))
+                )),
+                None => {
+                    if ctx.functions.contains_key(name) {
+                        Err(format!(
+                            "thumb-lower: bare function ref `{name}` not supported; call it"
+                        ))
+                    } else {
+                        Err(format!(
+                            "thumb-lower: unknown ident `{name}` in `{}`",
+                            ctx.fn_name
+                        ))
+                    }
+                }
             }
         }
         Expr::Unary { op, expr } => {
@@ -621,12 +715,157 @@ fn lower_expr_into(
         }
         Expr::FloatLit(_) => Err("thumb-lower: float not supported".into()),
         Expr::StringLit(_) => Err("thumb-lower: string not supported".into()),
-        Expr::StructInit { .. } | Expr::Field { .. } => {
-            Err("thumb-lower: structs not supported yet".into())
+        Expr::StructInit { name, fields } => {
+            lower_struct_init(emitter, ctx, name, fields, dest, pending)
         }
+        Expr::Field { base, name } => lower_field_load(emitter, ctx, base, name, dest, pending),
         Expr::ArrayLit(_) | Expr::Index { .. } => Err("thumb-lower: arrays not supported".into()),
         Expr::Closure { .. } => Err("thumb-lower: closures not supported".into()),
     }
+}
+
+fn lower_store_local(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    name: &str,
+    expr: &Expr,
+    pending: &mut Vec<PendingCall>,
+) -> Result<(), String> {
+    match ctx.locals.get(name).cloned() {
+        Some(LocalSlot::Scalar(off)) => {
+            lower_expr_into(emitter, ctx, expr, R0, pending)?;
+            emitter.emit_u16(thumb::str_sp(R0, off)?);
+            Ok(())
+        }
+        Some(LocalSlot::Struct { fields }) => {
+            lower_struct_init_into(emitter, ctx, expr, &fields, pending)
+        }
+        None => Err(format!(
+            "thumb-lower: unknown local `{name}` in `{}`",
+            ctx.fn_name
+        )),
+    }
+}
+
+fn lower_struct_init_into(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    expr: &Expr,
+    fields: &HashMap<String, u32>,
+    pending: &mut Vec<PendingCall>,
+) -> Result<(), String> {
+    let Expr::StructInit { name, fields: init } = expr else {
+        return Err(format!("thumb-lower: expected struct initializer"));
+    };
+    let expected = ctx
+        .structs
+        .get(name)
+        .ok_or_else(|| format!("thumb-lower: unknown struct `{name}`"))?;
+    for (field, ty) in expected {
+        let value = init
+            .iter()
+            .find(|(n, _)| n == field)
+            .map(|(_, e)| e)
+            .ok_or_else(|| format!("thumb-lower: missing field `{field}` for `{name}`"))?;
+        let field_off = *fields
+            .get(field)
+            .ok_or_else(|| format!("thumb-lower: field `{field}` not in layout"))?;
+        match (ty.canonical(), value) {
+            (Typ::Named(inner), Expr::StructInit { .. }) if ctx.structs.contains_key(&inner) => {
+                let prefix = format!("{field}.");
+                let mut sub = HashMap::new();
+                for (k, off) in fields.iter() {
+                    if let Some(rest) = k.strip_prefix(&prefix) {
+                        sub.insert(rest.to_string(), *off);
+                    }
+                }
+                lower_struct_init_into(emitter, ctx, value, &sub, pending)?;
+            }
+            (Typ::Named(inner), _) if ctx.structs.contains_key(&inner) => {
+                return Err(format!(
+                    "thumb-lower: expected struct initializer for `{field}` (`{inner}`)"
+                ));
+            }
+            _ => {
+                lower_expr_into(emitter, ctx, value, R0, pending)?;
+                emitter.emit_u16(thumb::str_sp(R0, field_off)?);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn flatten_field_chain(base: &Expr, suffix: &str) -> Result<(String, String), String> {
+    let mut parts = vec![suffix.to_string()];
+    let mut cur = base;
+    loop {
+        match cur {
+            Expr::Ident(local) => {
+                parts.reverse();
+                return Ok((local.clone(), parts.join(".")));
+            }
+            Expr::Field { base: inner, name } => {
+                parts.push(name.clone());
+                cur = inner;
+            }
+            _ => return Err("thumb-lower: unsupported field base".into()),
+        }
+    }
+}
+
+fn resolve_field_offset(ctx: &LowerCtx<'_>, base: &Expr, suffix: &str) -> Result<u32, String> {
+    let (local, dotted) = flatten_field_chain(base, suffix)?;
+    match ctx.locals.get(&local).cloned() {
+        Some(LocalSlot::Struct { fields }) => fields
+            .get(&dotted)
+            .copied()
+            .ok_or_else(|| format!("thumb-lower: unknown field `{dotted}` on `{local}`")),
+        _ => Err(format!(
+            "thumb-lower: `{local}` is not a struct in `{}`",
+            ctx.fn_name
+        )),
+    }
+}
+
+fn lower_field_load(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    base: &Expr,
+    name: &str,
+    dest: u8,
+    _pending: &mut Vec<PendingCall>,
+) -> Result<(), String> {
+    let off = resolve_field_offset(ctx, base, name)?;
+    emitter.emit_u16(thumb::ldr_sp(R0, off)?);
+    if dest != R0 {
+        emitter.emit_u16(thumb::mov_low(dest, R0));
+    }
+    Ok(())
+}
+
+fn lower_field_assign(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    base: &Expr,
+    name: &str,
+    value: &Expr,
+    pending: &mut Vec<PendingCall>,
+) -> Result<(), String> {
+    let off = resolve_field_offset(ctx, base, name)?;
+    lower_expr_into(emitter, ctx, value, R0, pending)?;
+    emitter.emit_u16(thumb::str_sp(R0, off)?);
+    Ok(())
+}
+
+fn lower_struct_init(
+    _emitter: &mut CodeEmitter,
+    _ctx: &mut LowerCtx<'_>,
+    _name: &str,
+    _fields: &[(String, Expr)],
+    _dest: u8,
+    _pending: &mut Vec<PendingCall>,
+) -> Result<(), String> {
+    Err("thumb-lower: struct value not supported in expression position".into())
 }
 
 fn try_lower_mmio(
@@ -1046,6 +1285,26 @@ fn main() -> void { return }
 "#,
         );
         let result = lower_module(&module, "sum_until").expect("lower break");
+        assert!(!result.code.is_empty());
+    }
+
+    #[test]
+    fn lower_struct_init_and_field() {
+        let module = parse(
+            r#"
+struct Point {
+  Int x
+  Int y
+}
+fn sum() -> Int {
+  let p: Point = Point { x: 3, y: 4 }
+  p.x = p.x + 1
+  return p.x + p.y
+}
+fn main() -> void { return }
+"#,
+        );
+        let result = lower_module(&module, "sum").expect("lower struct");
         assert!(!result.code.is_empty());
     }
 
