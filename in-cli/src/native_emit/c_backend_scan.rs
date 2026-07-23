@@ -1,3 +1,4 @@
+#![allow(clippy::redundant_closure)]
 //! AST scans for C backend: InVec need + emit size/depth DoS guards.
 
 use crate::core_ir::{Decl, Expr, LoopKind, Stmt, Typ, UnifiedModule};
