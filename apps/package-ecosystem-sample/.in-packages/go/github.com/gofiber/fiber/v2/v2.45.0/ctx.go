@@ -652,23 +652,8 @@ func (c *Ctx) IP() string {
 	return c.fasthttp.RemoteIP().String()
 }
 
-// extractIPsFromHeader will return a slice of IPs it found given a header name in the order they appear.
-// When IP validation is enabled, any invalid IPs will be omitted.
-func (c *Ctx) extractIPsFromHeader(header string) []string {
-	// TODO: Reuse the c.extractIPFromHeader func somehow in here
-
-	headerValue := c.Get(header)
-
-	// We can't know how many IPs we will return, but we will try to guess with this constant division.
-	// Counting ',' makes function slower for about 50ns in general case.
-	const maxEstimatedCount = 8
-	estimatedCount := len(headerValue) / maxEstimatedCount
-	if estimatedCount > maxEstimatedCount {
-		estimatedCount = maxEstimatedCount // Avoid big allocation on big header
-	}
-
-	ipsFound := make([]string, 0, estimatedCount)
-
+// extractIPs executes a callback for each IP in the header.
+func (c *Ctx) extractIPs(headerValue string, onIP func(ip string) bool) {
 	i := 0
 	j := -1
 
@@ -705,8 +690,31 @@ iploop:
 			}
 		}
 
-		ipsFound = append(ipsFound, s)
+		if onIP(s) {
+			return
+		}
 	}
+}
+
+// extractIPsFromHeader will return a slice of IPs it found given a header name in the order they appear.
+// When IP validation is enabled, any invalid IPs will be omitted.
+func (c *Ctx) extractIPsFromHeader(header string) []string {
+	headerValue := c.Get(header)
+
+	// We can't know how many IPs we will return, but we will try to guess with this constant division.
+	// Counting ',' makes function slower for about 50ns in general case.
+	const maxEstimatedCount = 8
+	estimatedCount := len(headerValue) / maxEstimatedCount
+	if estimatedCount > maxEstimatedCount {
+		estimatedCount = maxEstimatedCount // Avoid big allocation on big header
+	}
+
+	ipsFound := make([]string, 0, estimatedCount)
+
+	c.extractIPs(headerValue, func(ip string) bool {
+		ipsFound = append(ipsFound, ip)
+		return false
+	})
 
 	return ipsFound
 }
@@ -718,43 +726,15 @@ iploop:
 func (c *Ctx) extractIPFromHeader(header string) string {
 	if c.app.config.EnableIPValidation {
 		headerValue := c.Get(header)
+		var firstIP string
 
-		i := 0
-		j := -1
+		c.extractIPs(headerValue, func(ip string) bool {
+			firstIP = ip
+			return true
+		})
 
-	iploop:
-		for {
-			var v4, v6 bool
-
-			// Manually splitting string without allocating slice, working with parts directly
-			i, j = j+1, j+2
-
-			if j > len(headerValue) {
-				break
-			}
-
-			for j < len(headerValue) && headerValue[j] != ',' {
-				if headerValue[j] == ':' {
-					v6 = true
-				} else if headerValue[j] == '.' {
-					v4 = true
-				}
-				j++
-			}
-
-			for i < j && headerValue[i] == ' ' {
-				i++
-			}
-
-			s := utils.TrimRight(headerValue[i:j], ' ')
-
-			if c.app.config.EnableIPValidation {
-				if (!v6 && !v4) || (v6 && !utils.IsIPv6(s)) || (v4 && !utils.IsIPv4(s)) {
-					continue iploop
-				}
-			}
-
-			return s
+		if firstIP != "" {
+			return firstIP
 		}
 
 		return c.fasthttp.RemoteIP().String()
