@@ -2281,17 +2281,12 @@ func Test_Ctx_SaveFile(t *testing.T) {
 		fh, err := c.FormFile("file")
 		utils.AssertEqual(t, nil, err)
 
-		tempFile, err := os.CreateTemp(os.TempDir(), "test-")
+		tempFile := filepath.Join(t.TempDir(), "test")
+
+		err = c.SaveFile(fh, tempFile)
 		utils.AssertEqual(t, nil, err)
 
-		defer func(file *os.File) {
-			_ = file.Close()
-			_ = os.Remove(file.Name())
-		}(tempFile)
-		err = c.SaveFile(fh, tempFile.Name())
-		utils.AssertEqual(t, nil, err)
-
-		bs, err := os.ReadFile(tempFile.Name())
+		bs, err := os.ReadFile(tempFile)
 		utils.AssertEqual(t, nil, err)
 		utils.AssertEqual(t, "hello world", string(bs))
 		return nil
