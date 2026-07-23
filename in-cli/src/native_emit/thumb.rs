@@ -293,9 +293,19 @@ pub fn ldr_sp(rt: u8, imm: u32) -> Result<u16, String> {
     Ok(0x9800 | ((rt as u16) << 8) | ((imm / 4) as u16))
 }
 
-/// `b.n` rel8 (signed, halfword offset from next insn)
+/// Unconditional `b` T2: 11100 imm11 (signed halfword offset from next insn).
+/// Range ±1024 halfwords (±2048 bytes). Do not treat as imm8 — high bits of
+/// imm11 must be set for negative offsets.
+pub fn b_rel11(rel_halfwords: i32) -> Result<u16, String> {
+    if !(-1024..=1023).contains(&rel_halfwords) {
+        return Err(format!("thumb: b range ({rel_halfwords})"));
+    }
+    Ok(0xE000 | ((rel_halfwords as u32) & 0x7FF) as u16)
+}
+
+/// `b.n` backward-compat wrapper for tiny signed offsets (still T2 imm11).
 pub fn b_rel8(rel_halfwords: i8) -> u16 {
-    0xE000 | ((rel_halfwords as u8) as u16)
+    b_rel11(i32::from(rel_halfwords)).expect("i8 always in b imm11 range")
 }
 
 /// Conditional branch T1: cond in 0..13, rel8 signed halfwords from next insn.
@@ -414,5 +424,14 @@ mod tests {
         emit_prologue(&mut e);
         // push {r4-r7,lr} = 0xB5F0, mov r7,sp = 0x466F
         assert_eq!(e.bytes, [0xF0, 0xB5, 0x6F, 0x46]);
+    }
+
+    #[test]
+    fn unconditional_b_encodes_negative_imm11() {
+        // -52 halfwords must set high bits of imm11, not look like +204.
+        let enc = b_rel11(-52).unwrap();
+        assert_eq!(enc, 0xE000 | (0x7CC));
+        assert_eq!(b_rel11(0).unwrap(), 0xE000);
+        assert!(b_rel11(-1025).is_err());
     }
 }

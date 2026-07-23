@@ -14,7 +14,7 @@
 
 use crate::core_ir::{Decl, Expr, LoopKind, Stmt, Typ, UnifiedModule};
 use crate::native_emit::thumb::{
-    self, COND_EQ, COND_GE, COND_GT, COND_LE, COND_LT, COND_NE, CodeEmitter, R0, R1, R2, R3,
+    self, COND_EQ, COND_GE, COND_GT, COND_LE, COND_LT, COND_NE, CodeEmitter, R0, R1, R2, R3, R4,
     REG_RET,
 };
 use std::collections::HashMap;
@@ -449,13 +449,10 @@ fn lower_while(
 }
 
 fn patch_b(emitter: &mut CodeEmitter, site: u32, target: u32) -> Result<(), String> {
-    // b.n: next = site+2; rel_half = (target - next) / 2
+    // unconditional B T2: next = site+2; rel_half = (target - next) / 2; imm11 signed
     let next = site as i32 + 2;
     let rel = (target as i32 - next) / 2;
-    if !(-128..=127).contains(&rel) {
-        return Err(format!("thumb-lower: b range {rel}"));
-    }
-    emitter.patch_u16(site, thumb::b_rel8(rel as i8));
+    emitter.patch_u16(site, thumb::b_rel11(rel)?);
     Ok(())
 }
 
@@ -671,11 +668,11 @@ fn try_lower_mmio(
                     ctx.fn_name
                 ));
             }
-            lower_expr_into(emitter, ctx, &args[0], R1, pending)?;
-            emitter.emit_u16(thumb::push(1 << 1, false));
+            // Hold address in callee-saved r4 so val evaluation keeps local SP offsets valid.
+            lower_expr_into(emitter, ctx, &args[0], R0, pending)?;
+            emitter.emit_u16(thumb::mov_low(R4, R0));
             lower_expr_into(emitter, ctx, &args[1], R0, pending)?;
-            emitter.emit_u16(thumb::pop(1 << 1, false));
-            emitter.emit_u16(thumb::strb_imm(R0, R1, 0)?);
+            emitter.emit_u16(thumb::strb_imm(R0, R4, 0)?);
             Ok(true)
         }
         "store16" => {
@@ -685,11 +682,10 @@ fn try_lower_mmio(
                     ctx.fn_name
                 ));
             }
-            lower_expr_into(emitter, ctx, &args[0], R1, pending)?;
-            emitter.emit_u16(thumb::push(1 << 1, false));
+            lower_expr_into(emitter, ctx, &args[0], R0, pending)?;
+            emitter.emit_u16(thumb::mov_low(R4, R0));
             lower_expr_into(emitter, ctx, &args[1], R0, pending)?;
-            emitter.emit_u16(thumb::pop(1 << 1, false));
-            emitter.emit_u16(thumb::strh_imm(R0, R1, 0)?);
+            emitter.emit_u16(thumb::strh_imm(R0, R4, 0)?);
             Ok(true)
         }
         "store32" => {
@@ -699,11 +695,10 @@ fn try_lower_mmio(
                     ctx.fn_name
                 ));
             }
-            lower_expr_into(emitter, ctx, &args[0], R1, pending)?;
-            emitter.emit_u16(thumb::push(1 << 1, false));
+            lower_expr_into(emitter, ctx, &args[0], R0, pending)?;
+            emitter.emit_u16(thumb::mov_low(R4, R0));
             lower_expr_into(emitter, ctx, &args[1], R0, pending)?;
-            emitter.emit_u16(thumb::pop(1 << 1, false));
-            emitter.emit_u16(thumb::str_imm(R0, R1, 0)?);
+            emitter.emit_u16(thumb::str_imm(R0, R4, 0)?);
             Ok(true)
         }
         "store64" => {
@@ -713,11 +708,10 @@ fn try_lower_mmio(
                     ctx.fn_name
                 ));
             }
-            lower_expr_into(emitter, ctx, &args[0], R1, pending)?;
-            emitter.emit_u16(thumb::push(1 << 1, false));
+            lower_expr_into(emitter, ctx, &args[0], R0, pending)?;
+            emitter.emit_u16(thumb::mov_low(R4, R0));
             lower_expr_into(emitter, ctx, &args[1], R0, pending)?;
-            emitter.emit_u16(thumb::pop(1 << 1, false));
-            emitter.emit_u16(thumb::str_imm(R0, R1, 0)?);
+            emitter.emit_u16(thumb::str_imm(R0, R4, 0)?);
             Ok(true)
         }
         _ => Ok(false),
@@ -773,18 +767,18 @@ fn lower_binary(
                 ">=" => COND_GE,
                 _ => unreachable!(),
             };
-            // movs r0,#0; b<cond> +2; movs r0,#1  — actually:
-            // movs r0, #0
-            // b<inv> skip
-            // movs r0, #1
-            // skip:
+            // cmp flags must not be clobbered before the conditional branch.
+            // b<cond> true; movs r0,#0; b end; true: movs r0,#1; end:
+            let b_true = emitter.len();
+            emitter.emit_u16(thumb::b_cond_rel8(cond, 0));
             emitter.emit_u16(thumb::movs_imm8(R0, 0));
-            let inv = invert_cond(cond);
-            let b_site = emitter.len();
-            emitter.emit_u16(thumb::b_cond_rel8(inv, 0));
+            let b_end = emitter.len();
+            emitter.emit_u16(thumb::b_rel8(0));
+            let true_site = emitter.len();
+            patch_b_cond(emitter, b_true, true_site)?;
             emitter.emit_u16(thumb::movs_imm8(R0, 1));
             let end = emitter.len();
-            patch_b_cond(emitter, b_site, end)?;
+            patch_b(emitter, b_end, end)?;
         }
         "&&" | "||" => {
             return Err(format!(
@@ -908,6 +902,13 @@ fn main() -> void { return }
         );
         let result = lower_module(&module, "sum_to").expect("lower");
         assert!(!result.code.is_empty());
+        // Back-edge unconditional B must use signed imm11 (high bits set for backward).
+        // Encoded form 0xExxx with imm11 > 0x400 when jumping backward.
+        let has_backward_b = result.code.windows(2).any(|w| {
+            let insn = u16::from_le_bytes([w[0], w[1]]);
+            (insn & 0xF800) == 0xE000 && (insn & 0x400) != 0
+        });
+        assert!(has_backward_b, "while back-edge missing signed imm11 b");
     }
 
     #[test]
@@ -937,7 +938,12 @@ fn main() -> void { return }
         let load = lower_module(&module, "peek").expect("load32");
         assert!(load.code.windows(2).any(|w| w == [0x08, 0x68]));
         let store = lower_module(&module, "poke").expect("store32");
-        assert!(store.code.windows(2).any(|w| w == [0x08, 0x60]));
+        // str rt,[rn,#0] with rn=r4: 0x6020 (rt=0, rn=4)
+        assert!(
+            store.code.windows(2).any(|w| w == [0x20, 0x60]),
+            "store32 should str via r4 base: {:?}",
+            store.code
+        );
     }
 
     #[test]
@@ -952,7 +958,7 @@ fn main() -> void { return }
         let load = lower_module(&module, "peek8").expect("load8");
         assert!(load.code.windows(2).any(|w| w == [0x08, 0x78]));
         let store = lower_module(&module, "poke8").expect("store8");
-        assert!(store.code.windows(2).any(|w| w == [0x08, 0x70]));
+        assert!(store.code.windows(2).any(|w| w == [0x20, 0x70]));
     }
 
     #[test]
@@ -967,7 +973,7 @@ fn main() -> void { return }
         let load = lower_module(&module, "peek16").expect("load16");
         assert!(load.code.windows(2).any(|w| w == [0x08, 0x88]));
         let store = lower_module(&module, "poke16").expect("store16");
-        assert!(store.code.windows(2).any(|w| w == [0x08, 0x80]));
+        assert!(store.code.windows(2).any(|w| w == [0x20, 0x80]));
     }
 
     #[test]
