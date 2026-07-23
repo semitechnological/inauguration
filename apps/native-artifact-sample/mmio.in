@@ -1,0 +1,9 @@
+fn mmio-or(addr: Int, bit: Int) -> Int {
+  let v = load32(addr)
+  store32(addr, v | bit)
+  return load32(addr)
+}
+
+fn main() -> void {
+  return
+}
