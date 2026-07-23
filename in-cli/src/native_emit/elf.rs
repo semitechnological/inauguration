@@ -36,6 +36,8 @@ pub struct ElfObject {
     pub exports: Vec<(String, u32)>,
     /// Undefined symbols (externs) — must be resolved at link time.
     pub undefs: Vec<String>,
+    /// Thumb BL sites needing R_ARM_THM_CALL relocation: (offset, symbol).
+    pub thumb_calls: Vec<(u32, String)>,
 }
 
 pub fn x86_64_return_i32_object_code(value: u8) -> Vec<u8> {
@@ -237,7 +239,11 @@ pub fn write_arm32_relocatable_object(object: &ElfObject, out: &mut Vec<u8>) {
     // EF_ARM_EABI_VER5 — Thumb freestanding objects need EABI flags so linkers
     // treat the stream as Thumb-capable rather than pure ARM.
     const EF_ARM_EABI_VER5: u32 = 0x0500_0000;
-    let shstrtab = b"\0.text\0.symtab\0.strtab\0.shstrtab\0";
+    const SHT_REL: u32 = 9;
+    const R_ARM_THM_CALL: u32 = 10;
+    let shstrtab = b"\0.text\0.symtab\0.strtab\0.shstrtab\0.rel.text\0";
+    let rel_name = 33u32;
+
     let mut all_exports: Vec<(&str, u32)> = Vec::new();
     all_exports.push((&object.export_name, 0));
     for (name, offset) in &object.exports {
@@ -248,14 +254,30 @@ pub fn write_arm32_relocatable_object(object: &ElfObject, out: &mut Vec<u8>) {
     }
     all_exports.sort_by_key(|a| a.1);
 
+    // Undefs must cover both declared externs and any call relocation targets.
+    let mut all_undefs: Vec<String> = Vec::new();
+    for name in &object.undefs {
+        if !all_undefs.contains(name) {
+            all_undefs.push(name.clone());
+        }
+    }
+    for (_, name) in &object.thumb_calls {
+        if !all_undefs.contains(name) {
+            all_undefs.push(name.clone());
+        }
+    }
+
     let mut strtab: Vec<u8> = vec![0u8];
     let mut name_indices: Vec<u32> = Vec::new();
+    let mut symbol_index: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
     for (name, _) in &all_exports {
+        symbol_index.insert(name.to_string(), name_indices.len() as u32 + 1);
         name_indices.push(strtab.len() as u32);
         strtab.extend_from_slice(name.as_bytes());
         strtab.push(0);
     }
-    for name in &object.undefs {
+    for name in &all_undefs {
+        symbol_index.insert(name.clone(), name_indices.len() as u32 + 1);
         name_indices.push(strtab.len() as u32);
         strtab.extend_from_slice(name.as_bytes());
         strtab.push(0);
@@ -263,16 +285,18 @@ pub fn write_arm32_relocatable_object(object: &ElfObject, out: &mut Vec<u8>) {
 
     let n_local = 1u32; // null symbol only
     let n_exports = all_exports.len() as u32;
-    let n_undefs = object.undefs.len() as u32;
+    let n_undefs = all_undefs.len() as u32;
     let sym_count = 1 + n_exports + n_undefs;
     let symtab_size = sym_count * 16;
+    let rel_size = object.thumb_calls.len() as u32 * 8;
     let text_name = 1u32;
     let symtab_name = 7u32;
     let strtab_name = 15u32;
     let shstrtab_name = 23u32;
     let text_offset = EHDR32_SIZE;
     let symtab_offset = text_offset + object.code.len() as u32;
-    let strtab_offset = symtab_offset + symtab_size;
+    let rel_offset = symtab_offset + symtab_size;
+    let strtab_offset = rel_offset + rel_size;
     let shstrtab_offset = strtab_offset + strtab.len() as u32;
     let shoff = shstrtab_offset + shstrtab.len() as u32;
 
@@ -293,8 +317,8 @@ pub fn write_arm32_relocatable_object(object: &ElfObject, out: &mut Vec<u8>) {
     out.extend_from_slice(&0u16.to_le_bytes());
     out.extend_from_slice(&0u16.to_le_bytes());
     out.extend_from_slice(&40u16.to_le_bytes());
-    out.extend_from_slice(&5u16.to_le_bytes());
-    out.extend_from_slice(&4u16.to_le_bytes());
+    out.extend_from_slice(&6u16.to_le_bytes()); // null + .text + .symtab + .rel.text + .strtab + .shstrtab
+    out.extend_from_slice(&5u16.to_le_bytes()); // .shstrtab section index
 
     out.extend_from_slice(&object.code);
     write_symbol32(out, 0, 0, 0, 0, 0, 0);
@@ -308,10 +332,19 @@ pub fn write_arm32_relocatable_object(object: &ElfObject, out: &mut Vec<u8>) {
         let size = next_off.saturating_sub(*offset);
         write_symbol32(out, name_indices[i], value, size, 0x12, 0, 1);
     }
-    for i in 0..object.undefs.len() {
+    for i in 0..all_undefs.len() {
         let idx = name_indices[n_exports as usize + i];
         write_symbol32(out, idx, 0, 0, 0x10, 0, 0);
     }
+
+    // .rel.text entries: R_ARM_THM_CALL for each extern BL.
+    for (offset, name) in &object.thumb_calls {
+        let sym = *symbol_index.get(name).expect("thumb call symbol in strtab");
+        out.extend_from_slice(&offset.to_le_bytes());
+        let info = (sym << 8) | R_ARM_THM_CALL;
+        out.extend_from_slice(&info.to_le_bytes());
+    }
+
     out.extend_from_slice(&strtab);
     out.extend_from_slice(shstrtab);
 
@@ -337,10 +370,13 @@ pub fn write_arm32_relocatable_object(object: &ElfObject, out: &mut Vec<u8>) {
         0,
         symtab_offset,
         symtab_size,
-        3,
+        4,
         n_local,
         4,
         16,
+    );
+    write_section_header32(
+        out, rel_name, SHT_REL, 0, 0, rel_offset, rel_size, 2, 1, 4, 8,
     );
     write_section_header32(
         out,
@@ -675,6 +711,7 @@ mod tests {
             export_name: "answer".to_string(),
             exports: vec![],
             undefs: vec![],
+            thumb_calls: vec![],
         };
         let mut out = Vec::new();
         write_x86_64_relocatable_object(&object, &mut out);
@@ -695,6 +732,7 @@ mod tests {
             export_name: "answer".to_string(),
             exports: vec![],
             undefs: vec![],
+            thumb_calls: vec![],
         };
         let mut out = Vec::new();
         write_aarch64_relocatable_object(&object, &mut out);
@@ -720,6 +758,7 @@ mod tests {
             export_name: "answer".to_string(),
             exports: vec![],
             undefs: vec![],
+            thumb_calls: vec![],
         };
         let mut out = Vec::new();
         write_arm32_relocatable_object(&object, &mut out);
