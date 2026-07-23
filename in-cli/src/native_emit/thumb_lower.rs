@@ -45,6 +45,12 @@ enum LocalSlot {
     Scalar(u32),
     /// Struct local: flattened field name → SP offset.
     Struct { fields: HashMap<String, u32> },
+    /// Fixed-size array: SP base offset, element size, and element count.
+    Array {
+        base: u32,
+        elem_size: u32,
+        len: usize,
+    },
 }
 
 struct LowerCtx<'a> {
@@ -274,6 +280,13 @@ fn scalar_size_align(t: &Typ) -> (u32, u32) {
     }
 }
 
+fn type_size(t: &Typ) -> Result<u32, String> {
+    match t.canonical() {
+        Typ::Int | Typ::Bool => Ok(4),
+        other => Err(format!("thumb-lower: unsupported element type {other:?}")),
+    }
+}
+
 /// Flatten a struct (including nested structs) into dotted field names with
 /// absolute byte offsets. Also returns the total aligned size.
 fn build_struct_layout(
@@ -406,7 +419,7 @@ fn lower_function(
 fn alloc_declared_locals(ctx: &mut LowerCtx<'_>, body: &[Stmt]) -> Result<(), String> {
     for stmt in body {
         match stmt {
-            Stmt::Let(name, typ, _) => {
+            Stmt::Let(name, typ, expr) => {
                 if ctx.locals.contains_key(name) {
                     continue;
                 }
@@ -420,6 +433,23 @@ fn alloc_declared_locals(ctx: &mut LowerCtx<'_>, body: &[Stmt]) -> Result<(), St
                         let (_, fields) = ctx.alloc_struct(&s)?;
                         ctx.locals
                             .insert(name.clone(), LocalSlot::Struct { fields });
+                    }
+                    Typ::Array(elem) => {
+                        let esz = type_size(&elem)?;
+                        let Expr::ArrayLit(items) = expr else {
+                            return Err(format!("thumb-lower: `{name}` needs an array literal"));
+                        };
+                        let len = items.len();
+                        let base = ctx.frame_size;
+                        ctx.frame_size += esz * len as u32;
+                        ctx.locals.insert(
+                            name.clone(),
+                            LocalSlot::Array {
+                                base,
+                                elem_size: esz,
+                                len,
+                            },
+                        );
                     }
                     other => {
                         return Err(format!(
@@ -516,6 +546,9 @@ fn lower_stmt(
         Stmt::Assign(name, expr) => lower_store_local(emitter, ctx, name, expr, pending),
         Stmt::FieldAssign { base, name, value } => {
             lower_field_assign(emitter, ctx, base, name, value, pending)
+        }
+        Stmt::IndexAssign { base, index, value } => {
+            lower_index_assign(emitter, ctx, base, index, value, pending)
         }
         Stmt::Expr(expr) => {
             lower_expr_into(emitter, ctx, expr, R0, pending)?;
@@ -700,6 +733,10 @@ fn lower_expr_into(
                     "thumb-lower: struct `{name}` used as scalar in `{}`",
                     ctx.fn_name
                 )),
+                Some(LocalSlot::Array { .. }) => Err(format!(
+                    "thumb-lower: array `{name}` used as scalar in `{}`",
+                    ctx.fn_name
+                )),
                 None => {
                     if ctx.functions.contains_key(name) {
                         Err(format!(
@@ -760,7 +797,8 @@ fn lower_expr_into(
             lower_struct_init(emitter, ctx, name, fields, dest, pending)
         }
         Expr::Field { base, name } => lower_field_load(emitter, ctx, base, name, dest, pending),
-        Expr::ArrayLit(_) | Expr::Index { .. } => Err("thumb-lower: arrays not supported".into()),
+        Expr::ArrayLit(_) => Err("thumb-lower: array literal in expression position".into()),
+        Expr::Index { base, index } => lower_index_load(emitter, ctx, base, index, dest, pending),
         Expr::Closure { .. } => Err("thumb-lower: closures not supported".into()),
     }
 }
@@ -841,6 +879,23 @@ fn lower_store_local(
         }
         Some(LocalSlot::Struct { fields }) => {
             lower_struct_init_into(emitter, ctx, expr, &fields, pending)
+        }
+        Some(LocalSlot::Array {
+            base,
+            elem_size,
+            len,
+        }) => {
+            let Expr::ArrayLit(items) = expr else {
+                return Err(format!("thumb-lower: `{name}` needs an array literal"));
+            };
+            if items.len() != len {
+                return Err(format!("thumb-lower: array length mismatch for `{name}`"));
+            }
+            for (i, item) in items.iter().enumerate() {
+                lower_expr_into(emitter, ctx, item, R0, pending)?;
+                emitter.emit_u16(thumb::str_sp(R0, base + i as u32 * elem_size)?);
+            }
+            Ok(())
         }
         None => Err(format!(
             "thumb-lower: unknown local `{name}` in `{}`",
@@ -956,6 +1011,114 @@ fn lower_field_assign(
     let off = resolve_field_offset(ctx, base, name)?;
     lower_expr_into(emitter, ctx, value, R0, pending)?;
     emitter.emit_u16(thumb::str_sp(R0, off)?);
+    Ok(())
+}
+
+fn lower_index_load(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    base: &Expr,
+    index: &Expr,
+    dest: u8,
+    pending: &mut Vec<PendingCall>,
+) -> Result<(), String> {
+    let Expr::Ident(name) = base else {
+        return Err("thumb-lower: array index base must be a local".into());
+    };
+    let Some(LocalSlot::Array {
+        base,
+        elem_size,
+        len,
+    }) = ctx.locals.get(name).cloned()
+    else {
+        return Err(format!(
+            "thumb-lower: `{name}` is not an array in `{}`",
+            ctx.fn_name
+        ));
+    };
+
+    lower_expr_into(emitter, ctx, index, R2, pending)?;
+
+    // Bounds: index < 0 or index >= len -> load 0
+    let neg = emitter.len();
+    emitter.emit_u16(thumb::b_cond_rel8(COND_LT, 0));
+    thumb::load_i32(emitter, R3, len as i32);
+    emitter.emit_u16(thumb::cmp_reg(R2, R3));
+    let oob = emitter.len();
+    emitter.emit_u16(thumb::b_cond_rel8(COND_GE, 0));
+
+    // Address = sp + base + index * elem_size
+    emitter.emit_u16(thumb::mov_sp(R1));
+    thumb::load_i32(emitter, R3, base as i32);
+    emitter.emit_u16(thumb::adds_reg(R1, R1, R3));
+    thumb::load_i32(emitter, R3, elem_size as i32);
+    emitter.emit_u16(thumb::muls(R2, R3));
+    emitter.emit_u16(thumb::adds_reg(R1, R1, R2));
+
+    emitter.emit_u16(thumb::ldr_imm(R0, R1, 0)?);
+
+    let b_end = emitter.len();
+    emitter.emit_u16(thumb::b_rel8(0));
+    let fail = emitter.len();
+    thumb::load_i32(emitter, R0, 0);
+    patch_b(emitter, b_end, emitter.len())?;
+    patch_b_cond(emitter, neg, fail)?;
+    patch_b_cond(emitter, oob, fail)?;
+
+    if dest != R0 {
+        emitter.emit_u16(thumb::mov_low(dest, R0));
+    }
+    Ok(())
+}
+
+fn lower_index_assign(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    base: &Expr,
+    index: &Expr,
+    value: &Expr,
+    pending: &mut Vec<PendingCall>,
+) -> Result<(), String> {
+    let Expr::Ident(name) = base else {
+        return Err("thumb-lower: array index base must be a local".into());
+    };
+    let Some(LocalSlot::Array {
+        base,
+        elem_size,
+        len,
+    }) = ctx.locals.get(name).cloned()
+    else {
+        return Err(format!(
+            "thumb-lower: `{name}` is not an array in `{}`",
+            ctx.fn_name
+        ));
+    };
+
+    lower_expr_into(emitter, ctx, value, R0, pending)?;
+    emitter.emit_u16(thumb::mov_low(R4, R0));
+    lower_expr_into(emitter, ctx, index, R2, pending)?;
+
+    // Bounds: negative or >= len -> skip store
+    let neg = emitter.len();
+    emitter.emit_u16(thumb::b_cond_rel8(COND_LT, 0));
+    thumb::load_i32(emitter, R3, len as i32);
+    emitter.emit_u16(thumb::cmp_reg(R2, R3));
+    let oob = emitter.len();
+    emitter.emit_u16(thumb::b_cond_rel8(COND_GE, 0));
+
+    // Address = sp + base + index * elem_size
+    emitter.emit_u16(thumb::mov_sp(R1));
+    thumb::load_i32(emitter, R3, base as i32);
+    emitter.emit_u16(thumb::adds_reg(R1, R1, R3));
+    thumb::load_i32(emitter, R3, elem_size as i32);
+    emitter.emit_u16(thumb::muls(R2, R3));
+    emitter.emit_u16(thumb::adds_reg(R1, R1, R2));
+
+    emitter.emit_u16(thumb::str_imm(R4, R1, 0)?);
+
+    let end = emitter.len();
+    patch_b_cond(emitter, neg, end)?;
+    patch_b_cond(emitter, oob, end)?;
     Ok(())
 }
 
@@ -1403,6 +1566,22 @@ fn main() -> void { return }
 "#,
         );
         let result = lower_module(&module, "sum_until").expect("lower break");
+        assert!(!result.code.is_empty());
+    }
+
+    #[test]
+    fn lower_array_init_index_and_assign() {
+        let module = parse(
+            r#"
+fn sum() -> Int {
+  let a: [Int] = [10, 20, 30]
+  a[1] = a[0] + a[1]
+  return a[1]
+}
+fn main() -> void { return }
+"#,
+        );
+        let result = lower_module(&module, "sum").expect("lower array");
         assert!(!result.code.is_empty());
     }
 

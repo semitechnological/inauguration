@@ -79,6 +79,13 @@ pub fn movs_reg(rd: u8, rm: u8) -> u16 {
     ((rm as u16) << 3) | rd as u16
 }
 
+/// `mov rd, sp` (T1 MOV register, low destination)
+pub fn mov_sp(rd: u8) -> u16 {
+    debug_assert!(rd < 8);
+    // 01000110 D=0 Rm=1101 rd[2:0]
+    0x4668 | (rd as u16)
+}
+
 /// `mov rd, rm` high/low via T1 MOV (register) encoding for low regs uses
 /// `adds rd, rm, #0` when both low, otherwise specials. For low regs use movs.
 pub fn mov_low(rd: u8, rm: u8) -> u16 {
