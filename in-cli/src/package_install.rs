@@ -1040,6 +1040,20 @@ mod tests {
     }
 
     #[test]
+    fn prune_empty_dirs_removes_nested_empty_directories() {
+        let temp = tempfile_dir("prune-empty");
+        fs::create_dir_all(temp.join("a/b/c")).expect("create empty nested dirs");
+        fs::create_dir_all(temp.join("keep/b")).expect("create keep dir");
+        fs::write(temp.join("keep/b/f.txt"), "hi").expect("write file");
+
+        prune_empty_dirs(&temp).expect("prune");
+        assert!(!temp.join("a").exists());
+        assert!(temp.join("keep").exists());
+        assert!(temp.join("keep/b/f.txt").exists());
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn installs_path_dependencies_offline() {
         let temp = tempfile_dir("package-install");
         let vendor = temp.join("vendor/cargo/demo");
