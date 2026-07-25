@@ -316,8 +316,14 @@ mod tests {
         assert_eq!(parser_from_cli(None), ParserCli::Auto);
         assert_eq!(parser_from_cli(Some("in")), ParserCli::In);
         assert_eq!(parser_from_cli(Some("icore")), ParserCli::Icore);
-        assert_eq!(target_from_cli(None), CompileTarget::Jit);
+    }
+
+    #[test]
+    fn test_target_from_cli() {
         assert_eq!(target_from_cli(Some("native")), CompileTarget::Native);
+        assert_eq!(target_from_cli(Some("jit")), CompileTarget::Jit);
+        assert_eq!(target_from_cli(Some("unknown")), CompileTarget::Jit);
+        assert_eq!(target_from_cli(None), CompileTarget::Jit);
     }
 
     #[test]
