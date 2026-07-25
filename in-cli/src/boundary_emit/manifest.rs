@@ -92,9 +92,6 @@ mod tests {
             parsed.get("component").unwrap().as_str().unwrap(),
             "test_comp"
         );
-        assert_eq!(
-            parsed.get("deterministic").unwrap().as_bool().unwrap(),
-            true
-        );
+        assert!(parsed.get("deterministic").unwrap().as_bool().unwrap());
     }
 }
