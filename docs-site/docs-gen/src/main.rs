@@ -374,3 +374,107 @@ fn esc(s: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn get_theme() -> ThemeCss {
+        ThemeCss {
+            accent: "#3b82f6".into(),
+            accent_soft: "#60a5fa".into(),
+            surface: "#09090b".into(),
+            text: "#f4f4f5".into(),
+            muted: "#a1a1aa".into(),
+            border: "#27272a".into(),
+        }
+    }
+
+    #[test]
+    fn test_generate_docs_not_a_dir() -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = std::env::temp_dir();
+        let src_file = temp_dir.join("not_a_dir.md");
+        fs::write(&src_file, "content")?;
+        let out_dir = temp_dir.join("out_not_a_dir");
+
+        generate_docs(&src_file, &out_dir, &get_theme(), "Test Site")?;
+
+        assert!(!out_dir.exists());
+
+        fs::remove_file(src_file)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_generate_docs_happy_path() -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = std::env::temp_dir().join("happy_path_test");
+        let src_dir = temp_dir.join("src");
+        let out_dir = temp_dir.join("out");
+
+        fs::create_dir_all(src_dir.join("sub"))?;
+        fs::write(src_dir.join("README.md"), "# Readme\n")?;
+        fs::write(src_dir.join("test.md"), "# Test\nContent")?;
+        fs::write(src_dir.join("sub/test2.md"), "# Test 2\nContent 2")?;
+
+        let internal_dir = src_dir.join("internal");
+        fs::create_dir_all(&internal_dir)?;
+        fs::write(internal_dir.join("hidden.md"), "secret")?;
+
+        generate_docs(&src_dir, &out_dir, &get_theme(), "Test Site")?;
+
+        assert!(out_dir.exists());
+        assert!(out_dir.join("test.html").exists());
+        assert!(out_dir.join("sub/test2.html").exists());
+        assert!(out_dir.join("docs-search-index.json").exists());
+        assert!(out_dir.join("index.html").exists());
+
+        assert!(!out_dir.join("README.html").exists());
+        assert!(!out_dir.join("internal/hidden.html").exists());
+
+        let idx_str = fs::read_to_string(out_dir.join("docs-search-index.json"))?;
+        let idx: Vec<serde_json::Value> = serde_json::from_str(&idx_str)?;
+        assert_eq!(idx.len(), 2);
+
+        fs::remove_dir_all(temp_dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_generate_docs_empty_pages() -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = std::env::temp_dir().join("empty_pages_test");
+        let src_dir = temp_dir.join("src");
+        let out_dir = temp_dir.join("out");
+
+        fs::create_dir_all(&src_dir)?;
+
+        generate_docs(&src_dir, &out_dir, &get_theme(), "Test Site")?;
+
+        assert!(out_dir.exists());
+        assert!(!out_dir.join("docs-search-index.json").exists());
+        assert!(!out_dir.join("index.html").exists());
+
+        fs::remove_dir_all(temp_dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_generate_docs_out_dir_error() -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = std::env::temp_dir().join("out_dir_error_test");
+        let src_dir = temp_dir.join("src");
+        fs::create_dir_all(&src_dir)?;
+        fs::write(src_dir.join("test.md"), "# Test")?;
+
+        let dummy_file = temp_dir.join("file_not_dir");
+        fs::write(&dummy_file, "")?;
+
+        let out_dir = dummy_file.join("out");
+
+        let res = generate_docs(&src_dir, &out_dir, &get_theme(), "Test Site");
+        assert!(res.is_err());
+        assert_eq!(res.unwrap_err().kind(), std::io::ErrorKind::NotADirectory);
+
+        fs::remove_dir_all(temp_dir)?;
+        Ok(())
+    }
+}
