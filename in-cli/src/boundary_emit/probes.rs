@@ -143,4 +143,20 @@ mod tests {
         let err = emit_layout_probes(&module).expect_err("expected error");
         assert!(err.contains("no layouts"));
     }
+
+    #[test]
+    fn rejects_empty_module_id() {
+        let mut module = sample_module();
+        module.module.clear();
+        let err = emit_layout_probes(&module).expect_err("expected error");
+        assert!(err.contains("module id is empty"));
+    }
+
+    #[test]
+    fn rejects_empty_layout_name() {
+        let mut module = sample_module();
+        module.layouts[0].name.clear();
+        let err = emit_layout_probes(&module).expect_err("expected error");
+        assert!(err.contains("layout name is empty"));
+    }
 }
