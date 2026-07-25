@@ -336,12 +336,20 @@ mod tests {
     }
 
     #[test]
-    fn parses_daemon_defaults() {
+    fn test_parser_from_cli() {
         assert_eq!(parser_from_cli(None), ParserCli::Auto);
+        assert_eq!(parser_from_cli(Some("auto")), ParserCli::Auto);
         assert_eq!(parser_from_cli(Some("in")), ParserCli::In);
         assert_eq!(parser_from_cli(Some("icore")), ParserCli::Icore);
+        assert_eq!(parser_from_cli(Some("unsupported")), ParserCli::Auto);
+    }
+
+    #[test]
+    fn test_target_from_cli() {
         assert_eq!(target_from_cli(None), CompileTarget::Jit);
+        assert_eq!(target_from_cli(Some("jit")), CompileTarget::Jit);
         assert_eq!(target_from_cli(Some("native")), CompileTarget::Native);
+        assert_eq!(target_from_cli(Some("unsupported")), CompileTarget::Jit);
     }
 
     #[test]
