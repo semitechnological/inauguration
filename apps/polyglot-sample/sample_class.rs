@@ -23,3 +23,25 @@ fn answer() -> i64 {
 }
 
 fn main() {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_calculator_add() {
+        let mut calc = Calculator::new();
+
+        let result = calc.add(10);
+        assert_eq!(result, 10);
+        assert_eq!(calc.value, 10);
+
+        let result = calc.add(-5);
+        assert_eq!(result, 5);
+        assert_eq!(calc.value, 5);
+
+        let result = calc.add(0);
+        assert_eq!(result, 5);
+        assert_eq!(calc.value, 5);
+    }
+}

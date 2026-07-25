@@ -49,6 +49,7 @@ pub enum DaemonRequest {
         jobs: Option<usize>,
     },
     Ping,
+    Stop,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -203,21 +204,35 @@ fn handle_compile(
     }
 }
 
-fn handle_request(request: DaemonRequest) -> DaemonResponse {
+fn handle_request(request: DaemonRequest) -> (DaemonResponse, bool) {
     match request {
-        DaemonRequest::Ping => DaemonResponse {
-            success: true,
-            result: None,
-            report_json: None,
-            output: None,
-            error: None,
-            timing_us: None,
-        },
+        DaemonRequest::Ping => (
+            DaemonResponse {
+                success: true,
+                result: None,
+                report_json: None,
+                output: None,
+                error: None,
+                timing_us: None,
+            },
+            false,
+        ),
+        DaemonRequest::Stop => (
+            DaemonResponse {
+                success: true,
+                result: None,
+                report_json: None,
+                output: None,
+                error: None,
+                timing_us: None,
+            },
+            true,
+        ),
         DaemonRequest::Eval {
             code,
             parser,
             verbose,
-        } => handle_eval(&code, parser.as_deref(), verbose),
+        } => (handle_eval(&code, parser.as_deref(), verbose), false),
         DaemonRequest::Compile {
             path,
             target,
@@ -236,40 +251,47 @@ fn handle_request(request: DaemonRequest) -> DaemonResponse {
                 Some("dylib") | Some("dynamic") => crate::native_emit::NativeLinkage::Dylib,
                 _ => crate::native_emit::NativeLinkage::Executable,
             };
-            handle_compile(
-                &path,
-                target,
-                entry,
-                out,
-                module_id,
-                target_triple,
-                linkage,
-                jobs.unwrap_or(1),
+            (
+                handle_compile(
+                    &path,
+                    target,
+                    entry,
+                    out,
+                    module_id,
+                    target_triple,
+                    linkage,
+                    jobs.unwrap_or(1),
+                ),
+                false,
             )
         }
     }
 }
 
-fn handle_client(mut stream: UnixStream) -> std::io::Result<()> {
+fn handle_client(mut stream: UnixStream) -> std::io::Result<bool> {
     let mut reader = BufReader::new(&stream);
     let mut line = String::new();
     reader.read_line(&mut line)?;
     let line = line.trim();
     if line.is_empty() {
-        return Ok(());
+        return Ok(false);
     }
-    let response = match serde_json::from_str::<DaemonRequest>(line) {
+    let (response, stop) = match serde_json::from_str::<DaemonRequest>(line) {
         Ok(request) => handle_request(request),
-        Err(e) => DaemonResponse {
-            success: false,
-            result: None,
-            report_json: None,
-            output: None,
-            error: Some(format!("invalid request: {e}")),
-            timing_us: None,
-        },
+        Err(e) => (
+            DaemonResponse {
+                success: false,
+                result: None,
+                report_json: None,
+                output: None,
+                error: Some(format!("invalid request: {e}")),
+                timing_us: None,
+            },
+            false,
+        ),
     };
-    write_response(&mut stream, &response)
+    write_response(&mut stream, &response)?;
+    Ok(stop)
 }
 
 pub fn run_compiler_daemon(socket_path: &Path) -> std::io::Result<()> {
@@ -283,16 +305,18 @@ pub fn run_compiler_daemon(socket_path: &Path) -> std::io::Result<()> {
     eprintln!("[in daemon] listening on {}", socket_path.display());
     for stream in listener.incoming() {
         match stream {
-            Ok(stream) => {
-                if let Err(e) = handle_client(stream) {
-                    eprintln!("[in daemon] client error: {e}");
-                }
-            }
+            Ok(stream) => match handle_client(stream) {
+                Ok(true) => break,
+                Ok(false) => {}
+                Err(e) => eprintln!("[in daemon] client error: {e}"),
+            },
             Err(e) => {
                 eprintln!("[in daemon] accept error: {e}");
             }
         }
     }
+    let _ = std::fs::remove_file(socket_path);
+    let _ = std::fs::remove_file(daemon_pid_path(socket_path));
     Ok(())
 }
 
@@ -312,12 +336,20 @@ mod tests {
     }
 
     #[test]
-    fn parses_daemon_defaults() {
+    fn test_parser_from_cli() {
         assert_eq!(parser_from_cli(None), ParserCli::Auto);
+        assert_eq!(parser_from_cli(Some("auto")), ParserCli::Auto);
         assert_eq!(parser_from_cli(Some("in")), ParserCli::In);
         assert_eq!(parser_from_cli(Some("icore")), ParserCli::Icore);
+        assert_eq!(parser_from_cli(Some("unsupported")), ParserCli::Auto);
+    }
+
+    #[test]
+    fn test_target_from_cli() {
         assert_eq!(target_from_cli(None), CompileTarget::Jit);
+        assert_eq!(target_from_cli(Some("jit")), CompileTarget::Jit);
         assert_eq!(target_from_cli(Some("native")), CompileTarget::Native);
+        assert_eq!(target_from_cli(Some("unsupported")), CompileTarget::Jit);
     }
 
     #[test]
