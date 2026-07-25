@@ -45,4 +45,62 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&manifest).expect("json");
         assert!(parsed.get("package").is_none());
     }
+
+    #[test]
+    fn manifest_includes_package_identity() {
+        let module = sample_module();
+        let manifest = emit_abi_manifest_with_package(&module, Some("my-org/my-pkg"));
+        let parsed: serde_json::Value = serde_json::from_str(&manifest).expect("json");
+        assert_eq!(
+            parsed.get("package").and_then(|v| v.as_str()),
+            Some("my-org/my-pkg")
+        );
+    }
+
+    #[test]
+    fn component_metadata_emits_valid_json() {
+        let metadata = ComponentMetadata {
+            component: "test_component".to_string(),
+            target: "wasm32-unknown-unknown".to_string(),
+            entry: Some("main".to_string()),
+            code_sections: vec![],
+            data_sections: vec![],
+            imports: vec![],
+            exports: vec![],
+            capabilities_required: vec![],
+            capabilities_exported: vec![],
+            object_schemas: vec![],
+            memory: None,
+            checkpoint: "test_checkpoint".to_string(),
+            deterministic: true,
+            provenance: crate::boundary_ir::Provenance {
+                compiler: "test_compiler".to_string(),
+                compiler_version: "1.0.0".to_string(),
+                source_hash: "abcd1234".to_string(),
+            },
+        };
+        let json = emit_component_metadata(&metadata);
+        let parsed: serde_json::Value = serde_json::from_str(&json).expect("json");
+
+        assert_eq!(
+            parsed.get("component").and_then(|v| v.as_str()),
+            Some("test_component")
+        );
+        assert_eq!(
+            parsed.get("target").and_then(|v| v.as_str()),
+            Some("wasm32-unknown-unknown")
+        );
+        assert_eq!(parsed.get("entry").and_then(|v| v.as_str()), Some("main"));
+        assert_eq!(
+            parsed.get("deterministic").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            parsed
+                .get("provenance")
+                .and_then(|v| v.as_object())
+                .map(|p| p.len()),
+            Some(3)
+        );
+    }
 }
