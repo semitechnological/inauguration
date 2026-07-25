@@ -46,14 +46,18 @@ pub fn read_pid_file() -> Option<u32> {
 
 pub fn stop_daemon() -> std::io::Result<()> {
     let socket = default_socket_path();
+    if !socket.exists() {
+        return Ok(());
+    }
+    // Try to shutdown gracefully using the Stop command
+    let _ = send_request(&DaemonRequest::Stop);
+
+    // In case the daemon didn't exit cleanly or crashed, ensure cleanup
     if socket.exists() {
-        std::fs::remove_file(&socket)?;
+        let _ = std::fs::remove_file(&socket);
     }
     let pid_path = daemon_pid_path(&socket);
-    if let Some(pid) = read_pid_file() {
-        unsafe {
-            libc::kill(pid as i32, libc::SIGTERM);
-        }
+    if pid_path.exists() {
         let _ = std::fs::remove_file(&pid_path);
     }
     Ok(())

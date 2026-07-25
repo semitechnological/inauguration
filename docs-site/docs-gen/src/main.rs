@@ -98,19 +98,23 @@ fn generate_docs(
     collect_markdown(src_dir, src_dir, &mut files)?;
     files.sort_by(|a, b| a.0.cmp(&b.0));
 
-    let pages: Vec<(String, String)> = files
+    let pages_with_body: Vec<(String, String, String)> = files
         .iter()
         .map(|(stem, content)| {
-            let (title, _) = render_md(content);
-            (stem.clone(), title)
+            let (title, body_html) = render_md(content);
+            (stem.clone(), title, body_html)
         })
         .collect();
 
+    let pages: Vec<(String, String)> = pages_with_body
+        .iter()
+        .map(|(stem, title, _)| (stem.clone(), title.clone()))
+        .collect();
+
     fs::create_dir_all(out_dir)?;
-    for (web_key, content) in &files {
-        let (title, body_html) = render_md(content);
+    for (web_key, title, body_html) in &pages_with_body {
         let nav = render_nav(&pages, web_key);
-        let page = render_shell(&body_html, &title, &nav, theme, site_name, web_key);
+        let page = render_shell(body_html, title, &nav, theme, site_name, web_key);
         let out_path = out_dir.join(format!("{web_key}.html"));
         if let Some(parent) = out_path.parent() {
             fs::create_dir_all(parent)?;
@@ -373,4 +377,126 @@ fn esc(s: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn dummy_theme() -> ThemeCss {
+        ThemeCss {
+            accent: "accent".into(),
+            accent_soft: "accent_soft".into(),
+            surface: "surface".into(),
+            text: "text".into(),
+            muted: "muted".into(),
+            border: "border".into(),
+        }
+    }
+
+    struct TempDirGuard {
+        path: PathBuf,
+    }
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn make_temp_dir(name: &str) -> (PathBuf, TempDirGuard) {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let path = std::env::temp_dir().join(format!("inauguration_docs_gen_test_{}_{}", name, now));
+        fs::create_dir_all(&path).unwrap();
+        let guard = TempDirGuard { path: path.clone() };
+        (path, guard)
+    }
+
+    #[test]
+    fn test_generate_docs_missing_src_dir() -> io::Result<()> {
+        let (out_dir, _out_guard) = make_temp_dir("out_missing");
+        let src_dir = std::env::temp_dir().join(format!("docs_missing_{}", SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+
+        let theme = dummy_theme();
+        let res = generate_docs(&src_dir, &out_dir, &theme, "test site");
+
+        // The function returns early with Ok(()) if src_dir is not a directory
+        assert!(res.is_ok());
+
+        // Out dir shouldn't have files written to it
+        let entries = fs::read_dir(&out_dir)?.count();
+        assert_eq!(entries, 0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_generate_docs_empty_dir() -> io::Result<()> {
+        let (src_dir, _src_guard) = make_temp_dir("src_empty");
+        let (out_dir, _out_guard) = make_temp_dir("out_empty");
+
+        let theme = dummy_theme();
+        generate_docs(&src_dir, &out_dir, &theme, "test site")?;
+
+        // Should NOT create docs-search-index.json or index.html if pages is empty
+        assert!(!out_dir.join("docs-search-index.json").exists());
+        assert!(!out_dir.join("index.html").exists());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_generate_docs_happy_path() -> io::Result<()> {
+        let (src_dir, _src_guard) = make_temp_dir("src_happy");
+        let (out_dir, _out_guard) = make_temp_dir("out_happy");
+
+        // Setup file tree:
+        // /README.md  -> skip
+        // /hello.md   -> process
+        // /sub/test.md -> process
+        // /internal/secret.md -> skip
+
+        fs::write(src_dir.join("README.md"), "# Readme\nThis is a readme")?;
+        fs::write(src_dir.join("hello.md"), "# Hello\nWorld")?;
+
+        let sub_dir = src_dir.join("sub");
+        fs::create_dir_all(&sub_dir)?;
+        fs::write(sub_dir.join("test.md"), "# Test\nTesting 123")?;
+
+        let internal_dir = src_dir.join("internal");
+        fs::create_dir_all(&internal_dir)?;
+        fs::write(internal_dir.join("secret.md"), "# Secret\nDo not read")?;
+
+        let theme = dummy_theme();
+        generate_docs(&src_dir, &out_dir, &theme, "test site")?;
+
+        // Should create docs-search-index.json and index.html
+        assert!(out_dir.join("docs-search-index.json").exists());
+        assert!(out_dir.join("index.html").exists());
+
+        // Verify output files exist
+        assert!(out_dir.join("hello.html").exists());
+        assert!(out_dir.join("sub").join("test.html").exists());
+
+        // Verify skipped files are missing
+        assert!(!out_dir.join("README.html").exists());
+        assert!(!out_dir.join("internal").exists());
+
+        // Verify content
+        let hello_html = fs::read_to_string(out_dir.join("hello.html"))?;
+        assert!(hello_html.contains("Hello"));
+        assert!(hello_html.contains("World"));
+        assert!(hello_html.contains("test site"));
+
+        let test_html = fs::read_to_string(out_dir.join("sub").join("test.html"))?;
+        assert!(test_html.contains("Test"));
+        assert!(test_html.contains("Testing 123"));
+
+        let search_index = fs::read_to_string(out_dir.join("docs-search-index.json"))?;
+        let idx: Vec<serde_json::Value> = serde_json::from_str(&search_index).unwrap();
+        assert_eq!(idx.len(), 2);
+
+        Ok(())
+    }
 }
