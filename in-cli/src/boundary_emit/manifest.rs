@@ -45,4 +45,46 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&manifest).expect("json");
         assert!(parsed.get("package").is_none());
     }
+
+    #[test]
+    fn manifest_includes_package_identity() {
+        let module = sample_module();
+        let manifest = emit_abi_manifest_with_package(&module, Some("my-package"));
+        let parsed: serde_json::Value = serde_json::from_str(&manifest).expect("json");
+        assert_eq!(
+            parsed.get("package").expect("package key missing").as_str().unwrap(),
+            "my-package"
+        );
+    }
+
+    #[test]
+    fn test_emit_component_metadata() {
+        use crate::boundary_ir::Provenance;
+
+        let metadata = ComponentMetadata {
+            component: "test_comp".to_string(),
+            target: "wasm32-wasip1".to_string(),
+            entry: None,
+            code_sections: vec![],
+            data_sections: vec![],
+            imports: vec![],
+            exports: vec![],
+            capabilities_required: vec![],
+            capabilities_exported: vec![],
+            object_schemas: vec![],
+            memory: None,
+            checkpoint: "0000".to_string(),
+            deterministic: true,
+            provenance: Provenance {
+                compiler: "test-compiler".to_string(),
+                compiler_version: "1.0".to_string(),
+                source_hash: "abcd".to_string(),
+            },
+        };
+
+        let manifest = emit_component_metadata(&metadata);
+        let parsed: serde_json::Value = serde_json::from_str(&manifest).expect("json");
+        assert_eq!(parsed.get("component").unwrap().as_str().unwrap(), "test_comp");
+        assert_eq!(parsed.get("deterministic").unwrap().as_bool().unwrap(), true);
+    }
 }
