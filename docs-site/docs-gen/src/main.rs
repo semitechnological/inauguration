@@ -374,3 +374,41 @@ fn esc(s: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_render_md_no_title() {
+        let md = "Some text here.\n\nMore text.";
+        let (title, body) = render_md(md);
+
+        assert_eq!(title, "Documentation");
+        assert!(body.contains("<p>Some text here.</p>"));
+        assert!(body.contains("<p>More text.</p>"));
+    }
+
+    #[test]
+    fn test_render_md_with_title() {
+        let md = "# Hello World\n\nSome text.";
+        let (title, body) = render_md(md);
+
+        assert_eq!(title, "Hello World");
+        assert!(body.contains("<h1>Hello World</h1>"));
+        assert!(body.contains("<p>Some text.</p>"));
+    }
+
+    #[test]
+    fn test_render_md_features() {
+        // GFM table and strikethrough features
+        let md = "# Title\n\n~strike~\n\n| a | b |\n|---|---|\n| 1 | 2 |";
+        let (title, body) = render_md(md);
+
+        assert_eq!(title, "Title");
+        assert!(body.contains("<del>strike</del>"));
+        assert!(body.contains("<table>"));
+        assert!(body.contains("<th>a</th>"));
+        assert!(body.contains("<td>1</td>"));
+    }
+}
