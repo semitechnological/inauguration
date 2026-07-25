@@ -305,13 +305,11 @@ pub fn run_compiler_daemon(socket_path: &Path) -> std::io::Result<()> {
     eprintln!("[in daemon] listening on {}", socket_path.display());
     for stream in listener.incoming() {
         match stream {
-            Ok(stream) => {
-                match handle_client(stream) {
-                    Ok(true) => break,
-                    Ok(false) => {}
-                    Err(e) => eprintln!("[in daemon] client error: {e}"),
-                }
-            }
+            Ok(stream) => match handle_client(stream) {
+                Ok(true) => break,
+                Ok(false) => {}
+                Err(e) => eprintln!("[in daemon] client error: {e}"),
+            },
             Err(e) => {
                 eprintln!("[in daemon] accept error: {e}");
             }
