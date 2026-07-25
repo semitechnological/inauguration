@@ -44,4 +44,10 @@ mod tests {
         assert_eq!(result, 5);
         assert_eq!(calc.value, 5);
     }
+
+    #[test]
+    fn test_calculator_answer() {
+        let calc = Calculator::new();
+        assert_eq!(calc.answer(), 42);
+    }
 }
