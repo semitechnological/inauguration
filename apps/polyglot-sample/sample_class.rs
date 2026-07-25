@@ -23,3 +23,14 @@ fn answer() -> i64 {
 }
 
 fn main() {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_calculator_answer() {
+        let calc = Calculator::new();
+        assert_eq!(calc.answer(), 42);
+    }
+}
