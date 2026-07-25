@@ -90,17 +90,7 @@ fn inliner(_module: &mut IrModule) -> PassResult {
 }
 
 fn cleanup(module: &mut IrModule) -> PassResult {
-    for func in &mut module.functions {
-        func.blocks.retain(|b| {
-            if b.instructions.is_empty() {
-                if let Some(ref term) = b.terminator {
-                    return term.opcode != IrOpcode::Unreachable;
-                }
-            }
-            true
-        });
-    }
-    Ok(())
+    simplify_cfg(module)
 }
 
 #[cfg(test)]
