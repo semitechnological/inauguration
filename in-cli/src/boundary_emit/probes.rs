@@ -171,4 +171,31 @@ mod tests {
         assert!(probes.zig.contains("InSliceU8"));
         assert!(probes.zig.contains("InBufU8"));
     }
+
+    #[test]
+    fn test_emit_rust_layout_success() {
+        let module = sample_module();
+        let layout = &module.layouts[0];
+        let mut out = String::new();
+        emit_rust_layout(&mut out, layout).expect("emit_rust_layout");
+
+        assert!(out.contains("#[repr(c)]\nstruct Person {"));
+        assert!(out.contains("name: InSliceU8"));
+        assert!(out.contains("age: u32"));
+        assert!(out.contains("assert!(size_of::<Person>() == 24);"));
+        assert!(out.contains("assert!(align_of::<Person>() == 8);"));
+        assert!(out.contains("assert!(offset_of!(Person, name) == 0);"));
+        assert!(out.contains("assert!(offset_of!(Person, age) == 16);"));
+    }
+
+    #[test]
+    fn test_emit_rust_layout_empty_name() {
+        let module = sample_module();
+        let mut layout = module.layouts[0].clone();
+        layout.name.clear();
+
+        let mut out = String::new();
+        let err = emit_rust_layout(&mut out, &layout).expect_err("expected error");
+        assert!(err.contains("layout name is empty"));
+    }
 }
