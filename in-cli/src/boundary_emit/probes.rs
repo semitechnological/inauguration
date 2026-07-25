@@ -143,4 +143,32 @@ mod tests {
         let err = emit_layout_probes(&module).expect_err("expected error");
         assert!(err.contains("no layouts"));
     }
+
+    #[test]
+    fn rejects_empty_module_id() {
+        let mut module = sample_module();
+        module.module.clear();
+        let err = emit_layout_probes(&module).expect_err("expected error");
+        assert!(err.contains("module id is empty"));
+    }
+
+    #[test]
+    fn rejects_empty_layout_name() {
+        let mut module = sample_module();
+        module.layouts[0].name.clear();
+        let err = emit_layout_probes(&module).expect_err("expected error");
+        assert!(err.contains("layout name is empty"));
+    }
+
+    #[test]
+    fn probes_emit_abi_types() {
+        let module = sample_module();
+        let probes = emit_layout_probes(&module).expect("probes");
+
+        assert!(probes.rust.contains("InSliceU8"));
+        assert!(probes.rust.contains("InBufU8"));
+
+        assert!(probes.zig.contains("InSliceU8"));
+        assert!(probes.zig.contains("InBufU8"));
+    }
 }
