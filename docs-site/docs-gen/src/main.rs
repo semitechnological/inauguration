@@ -374,3 +374,69 @@ fn esc(s: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_render_nav_basic_sections() {
+        let pages = vec![
+            ("in-language".to_string(), "inlang (.in)".to_string()),
+            ("multi-frontend-ir".to_string(), "Multi-front Core IR".to_string()),
+        ];
+        let nav = render_nav(&pages, "in-language");
+
+        // Check outer structure
+        assert!(nav.starts_with("<nav aria-label=\"Documentation\" class=\"doc-nav\">"));
+        assert!(nav.ends_with("</nav>"));
+
+        // Check section header for "Language & IR"
+        assert!(nav.contains("<div class=\"doc-nav-section\">Language &amp; IR</div>"));
+
+        // Active page logic
+        assert!(nav.contains("<li><a href=\"in-language.html\" class=\"active\">inlang (.in)</a></li>"));
+        assert!(nav.contains("<li><a href=\"multi-frontend-ir.html\">Multi-front Core IR</a></li>"));
+
+        // Missing sections shouldn't be rendered (e.g. "Benchmarks")
+        assert!(!nav.contains("Benchmarks"));
+    }
+
+    #[test]
+    fn test_render_nav_more_section() {
+        let pages = vec![
+            ("in-language".to_string(), "inlang (.in)".to_string()),
+            ("custom-page".to_string(), "Custom Page Title".to_string()),
+        ];
+        let nav = render_nav(&pages, "in-language");
+
+        assert!(nav.contains("<div class=\"doc-nav-section\">More</div>"));
+        assert!(nav.contains("<li><a href=\"custom-page.html\">Custom Page Title</a></li>"));
+    }
+
+    #[test]
+    fn test_render_nav_empty_pages() {
+        let pages: Vec<(String, String)> = vec![];
+        let nav = render_nav(&pages, "in-language");
+        assert_eq!(nav, "<nav aria-label=\"Documentation\" class=\"doc-nav\"></nav>");
+    }
+
+    #[test]
+    fn test_render_nav_nested_class() {
+        let pages = vec![
+            ("benchmarks/README".to_string(), "Overview".to_string()),
+            ("benchmarks/jit".to_string(), "JIT".to_string()),
+        ];
+
+        let nav = render_nav(&pages, "benchmarks/README");
+
+        // README should not have doc-nav-nested class, but is active
+        assert!(nav.contains("<li><a href=\"README.html\" class=\"active\">Overview</a></li>"));
+        // jit should have doc-nav-nested class
+        assert!(nav.contains("<li><a href=\"jit.html\" class=\"doc-nav-nested\">JIT</a></li>"));
+
+        // If jit is active, it has both classes
+        let nav_jit_active = render_nav(&pages, "benchmarks/jit");
+        assert!(nav_jit_active.contains("<li><a href=\"jit.html\" class=\"active doc-nav-nested\">JIT</a></li>"));
+    }
+}
