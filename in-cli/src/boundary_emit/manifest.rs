@@ -52,7 +52,11 @@ mod tests {
         let manifest = emit_abi_manifest_with_package(&module, Some("my-package"));
         let parsed: serde_json::Value = serde_json::from_str(&manifest).expect("json");
         assert_eq!(
-            parsed.get("package").expect("package key missing").as_str().unwrap(),
+            parsed
+                .get("package")
+                .expect("package key missing")
+                .as_str()
+                .unwrap(),
             "my-package"
         );
     }
@@ -84,7 +88,13 @@ mod tests {
 
         let manifest = emit_component_metadata(&metadata);
         let parsed: serde_json::Value = serde_json::from_str(&manifest).expect("json");
-        assert_eq!(parsed.get("component").unwrap().as_str().unwrap(), "test_comp");
-        assert_eq!(parsed.get("deterministic").unwrap().as_bool().unwrap(), true);
+        assert_eq!(
+            parsed.get("component").unwrap().as_str().unwrap(),
+            "test_comp"
+        );
+        assert_eq!(
+            parsed.get("deterministic").unwrap().as_bool().unwrap(),
+            true
+        );
     }
 }
