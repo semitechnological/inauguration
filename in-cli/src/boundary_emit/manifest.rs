@@ -90,16 +90,16 @@ mod tests {
             parsed.get("target").and_then(|v| v.as_str()),
             Some("wasm32-unknown-unknown")
         );
-        assert_eq!(
-            parsed.get("entry").and_then(|v| v.as_str()),
-            Some("main")
-        );
+        assert_eq!(parsed.get("entry").and_then(|v| v.as_str()), Some("main"));
         assert_eq!(
             parsed.get("deterministic").and_then(|v| v.as_bool()),
             Some(true)
         );
         assert_eq!(
-            parsed.get("provenance").and_then(|v| v.as_object()).map(|p| p.len()),
+            parsed
+                .get("provenance")
+                .and_then(|v| v.as_object())
+                .map(|p| p.len()),
             Some(3)
         );
     }
