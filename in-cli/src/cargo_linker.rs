@@ -174,12 +174,20 @@ pub fn compile_cargo_dependencies(project_dir: &Path) -> Vec<(String, UnifiedMod
                     continue;
                 }
                 // Skip proc-macro crates
-                if let Some(manifest_str) = pkg["manifest_path"].as_str() {
-                    if let Ok(content) = std::fs::read_to_string(manifest_str) {
-                        if content.contains("proc-macro") {
-                            continue;
-                        }
-                    }
+                let is_proc_macro = pkg["targets"]
+                    .as_array()
+                    .map(|targets| {
+                        targets.iter().any(|target| {
+                            target["kind"]
+                                .as_array()
+                                .map(|kinds| kinds.iter().any(|k| k.as_str() == Some("proc-macro")))
+                                .unwrap_or(false)
+                        })
+                    })
+                    .unwrap_or(false);
+
+                if is_proc_macro {
+                    continue;
                 }
                 if already_compiled.contains(crate_name) {
                     continue;
