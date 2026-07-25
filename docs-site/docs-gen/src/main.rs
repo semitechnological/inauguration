@@ -98,19 +98,23 @@ fn generate_docs(
     collect_markdown(src_dir, src_dir, &mut files)?;
     files.sort_by(|a, b| a.0.cmp(&b.0));
 
-    let pages: Vec<(String, String)> = files
+    let pages_with_body: Vec<(String, String, String)> = files
         .iter()
         .map(|(stem, content)| {
-            let (title, _) = render_md(content);
-            (stem.clone(), title)
+            let (title, body_html) = render_md(content);
+            (stem.clone(), title, body_html)
         })
         .collect();
 
+    let pages: Vec<(String, String)> = pages_with_body
+        .iter()
+        .map(|(stem, title, _)| (stem.clone(), title.clone()))
+        .collect();
+
     fs::create_dir_all(out_dir)?;
-    for (web_key, content) in &files {
-        let (title, body_html) = render_md(content);
+    for (web_key, title, body_html) in &pages_with_body {
         let nav = render_nav(&pages, web_key);
-        let page = render_shell(&body_html, &title, &nav, theme, site_name, web_key);
+        let page = render_shell(body_html, title, &nav, theme, site_name, web_key);
         let out_path = out_dir.join(format!("{web_key}.html"));
         if let Some(parent) = out_path.parent() {
             fs::create_dir_all(parent)?;
