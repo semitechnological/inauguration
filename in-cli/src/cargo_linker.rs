@@ -106,7 +106,8 @@ pub fn compile_cargo_dependencies(project_dir: &Path) -> Vec<(String, UnifiedMod
     while let Some(current) = queue.pop() {
         if let Some(deps) = node_deps.get(&current) {
             for dep_id in deps {
-                if visited.insert(dep_id.clone()) {
+                if !visited.contains(dep_id) {
+                    visited.insert(dep_id.clone());
                     queue.push(dep_id.clone());
                     if dep_id != root_id {
                         all_dep_ids.push(dep_id.clone());
