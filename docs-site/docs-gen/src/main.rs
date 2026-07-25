@@ -451,12 +451,6 @@ mod tests {
         let (src_dir, _src_guard) = make_temp_dir("src_happy");
         let (out_dir, _out_guard) = make_temp_dir("out_happy");
 
-        // Setup file tree:
-        // /README.md  -> skip
-        // /hello.md   -> process
-        // /sub/test.md -> process
-        // /internal/secret.md -> skip
-
         fs::write(src_dir.join("README.md"), "# Readme\nThis is a readme")?;
         fs::write(src_dir.join("hello.md"), "# Hello\nWorld")?;
 
@@ -471,19 +465,13 @@ mod tests {
         let theme = dummy_theme();
         generate_docs(&src_dir, &out_dir, &theme, "test site")?;
 
-        // Should create docs-search-index.json and index.html
         assert!(out_dir.join("docs-search-index.json").exists());
         assert!(out_dir.join("index.html").exists());
-
-        // Verify output files exist
         assert!(out_dir.join("hello.html").exists());
         assert!(out_dir.join("sub").join("test.html").exists());
-
-        // Verify skipped files are missing
         assert!(!out_dir.join("README.html").exists());
         assert!(!out_dir.join("internal").exists());
 
-        // Verify content
         let hello_html = fs::read_to_string(out_dir.join("hello.html"))?;
         assert!(hello_html.contains("Hello"));
         assert!(hello_html.contains("World"));
@@ -498,5 +486,55 @@ mod tests {
         assert_eq!(idx.len(), 2);
 
         Ok(())
+    }
+
+    #[test]
+    fn test_render_nav_basic_sections() {
+        let pages = vec![
+            ("in-language".to_string(), "inlang (.in)".to_string()),
+            ("multi-frontend-ir".to_string(), "Multi-front Core IR".to_string()),
+        ];
+        let nav = render_nav(&pages, "in-language");
+
+        assert!(nav.starts_with("<nav aria-label=\"Documentation\" class=\"doc-nav\">"));
+        assert!(nav.ends_with("</nav>"));
+        assert!(nav.contains("<div class=\"doc-nav-section\">Language &amp; IR</div>"));
+        assert!(nav.contains("<li><a href=\"in-language.html\" class=\"active\">inlang (.in)</a></li>"));
+        assert!(nav.contains("<li><a href=\"multi-frontend-ir.html\">Multi-front Core IR</a></li>"));
+        assert!(!nav.contains("Benchmarks"));
+    }
+
+    #[test]
+    fn test_render_nav_more_section() {
+        let pages = vec![
+            ("in-language".to_string(), "inlang (.in)".to_string()),
+            ("custom-page".to_string(), "Custom Page Title".to_string()),
+        ];
+        let nav = render_nav(&pages, "in-language");
+
+        assert!(nav.contains("<div class=\"doc-nav-section\">More</div>"));
+        assert!(nav.contains("<li><a href=\"custom-page.html\">Custom Page Title</a></li>"));
+    }
+
+    #[test]
+    fn test_render_nav_empty_pages() {
+        let pages: Vec<(String, String)> = vec![];
+        let nav = render_nav(&pages, "in-language");
+        assert_eq!(nav, "<nav aria-label=\"Documentation\" class=\"doc-nav\"></nav>");
+    }
+
+    #[test]
+    fn test_render_nav_nested_class() {
+        let pages = vec![
+            ("benchmarks/README".to_string(), "Overview".to_string()),
+            ("benchmarks/jit".to_string(), "JIT".to_string()),
+        ];
+
+        let nav = render_nav(&pages, "benchmarks/README");
+        assert!(nav.contains("<li><a href=\"README.html\" class=\"active\">Overview</a></li>"));
+        assert!(nav.contains("<li><a href=\"jit.html\" class=\"doc-nav-nested\">JIT</a></li>"));
+
+        let nav_jit_active = render_nav(&pages, "benchmarks/jit");
+        assert!(nav_jit_active.contains("<li><a href=\"jit.html\" class=\"active doc-nav-nested\">JIT</a></li>"));
     }
 }
