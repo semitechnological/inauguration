@@ -63,6 +63,7 @@ fn emit_layout(out: &mut String, layout: &BoundaryLayout) -> Result<(), String> 
 mod tests {
     use super::*;
     use crate::boundary_emit::sample_module;
+    use crate::boundary_ir::BoundaryRepr;
 
     #[test]
     fn header_guard_uses_module_token() {
@@ -70,5 +71,46 @@ mod tests {
         let header = emit_c_header(&module).expect("header");
         assert!(header.contains("#ifndef IN_BOUNDARY_SAMPLE_PERSON_H"));
         assert!(header.contains("#define IN_BOUNDARY_SAMPLE_PERSON_H"));
+    }
+
+    #[test]
+    fn emit_empty_module_id() {
+        let mut module = sample_module();
+        module.module = "".to_string();
+        let err = emit_c_header(&module).unwrap_err();
+        assert_eq!(err, "module id is empty");
+    }
+
+    #[test]
+    fn emit_empty_layout_name() {
+        let mut module = sample_module();
+        module.layouts[0].name = "".to_string();
+        let err = emit_c_header(&module).unwrap_err();
+        assert_eq!(err, "layout name is empty");
+    }
+
+    #[test]
+    fn emit_unsupported_layout_kind() {
+        let mut module = sample_module();
+        module.layouts[0].kind = "union".to_string();
+        let err = emit_c_header(&module).unwrap_err();
+        assert_eq!(err, "layout `Person` unsupported kind `union`");
+    }
+
+    #[test]
+    fn emit_packed_layout() {
+        let mut module = sample_module();
+        module.layouts[0].repr = Some(BoundaryRepr::Packed);
+        let header = emit_c_header(&module).expect("header");
+        assert!(header.contains("typedef IN_BOUNDARY_PACKED struct Person {"));
+    }
+
+    #[test]
+    fn emit_empty_fields_reserved() {
+        let mut module = sample_module();
+        module.layouts[0].fields.clear();
+        module.layouts[0].size = 42;
+        let header = emit_c_header(&module).expect("header");
+        assert!(header.contains("uint8_t _reserved[42];"));
     }
 }
