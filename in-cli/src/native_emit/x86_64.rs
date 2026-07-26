@@ -126,19 +126,24 @@ pub fn ret() -> Vec<u8> {
     vec![0xC3]
 }
 
-/// push r/m64
+/// push r/m32 or r/m64
 pub fn push_r(reg: u8) -> Vec<u8> {
     if reg < 8 {
         vec![0x50 + reg]
+    } else if is_32bit() {
+        // r8-r15 do not exist in protected mode; ignore rather than emit REX.
+        Vec::new()
     } else {
         vec![0x41, 0x50 + (reg - 8)]
     }
 }
 
-/// pop r/m64
+/// pop r/m32 or r/m64
 pub fn pop_r(reg: u8) -> Vec<u8> {
     if reg < 8 {
         vec![0x58 + reg]
+    } else if is_32bit() {
+        Vec::new()
     } else {
         vec![0x41, 0x58 + (reg - 8)]
     }

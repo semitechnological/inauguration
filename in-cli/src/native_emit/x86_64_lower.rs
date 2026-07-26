@@ -2040,9 +2040,19 @@ fn lower_builtin_call(
     }
 }
 
+fn reg_arg_count() -> usize {
+    // i386 has no r8/r9; keep the first four SysV-style regs only.
+    if x86_64::is_32bit() {
+        4
+    } else {
+        6
+    }
+}
+
 fn emit_stack_cleanup(emitter: &mut CodeEmitter, args_len: usize) {
-    if args_len > 6 {
-        let stack_bytes = (args_len - 6) * if x86_64::is_32bit() { 4 } else { 8 };
+    let nreg = reg_arg_count();
+    if args_len > nreg {
+        let stack_bytes = (args_len - nreg) * if x86_64::is_32bit() { 4 } else { 8 };
         emitter.emit_width(&[0x81, 0xC4], &[0x48, 0x81, 0xC4]); // add esp/rsp, imm32
         emitter.emit_bytes(&(stack_bytes as u32).to_le_bytes());
     }
@@ -2055,20 +2065,26 @@ fn lower_call_args(
     target_name: &str,
     pending_calls: &mut Vec<PendingCall>,
 ) -> Result<(), String> {
-    let arg_regs = [RDI, RSI, RDX, RCX, 8, 9];
+    // r8/r9 only exist in long mode — never select them for i386.
+    let arg_regs: &[u8] = if x86_64::is_32bit() {
+        &[RDI, RSI, RDX, RCX]
+    } else {
+        &[RDI, RSI, RDX, RCX, 8, 9]
+    };
+    let nreg = arg_regs.len();
     if args.len() > 16 {
         return Err(format!(
             "x86_64-lower: too many arguments in call to `{target_name}` in `{}`",
             ctx.fn_name
         ));
     }
-    if args.len() > 6 {
-        for arg in args[6..].iter().rev() {
+    if args.len() > nreg {
+        for arg in args[nreg..].iter().rev() {
             lower_expr_into(emitter, ctx, arg, RAX, pending_calls)?;
             emitter.emit_insns(&x86_64::push_r(RAX));
         }
     }
-    for (i, arg) in args[..6.min(args.len())].iter().enumerate() {
+    for (i, arg) in args[..nreg.min(args.len())].iter().enumerate() {
         if i > 0 {
             for j in 0..i {
                 emitter.emit_insns(&x86_64::push_r(arg_regs[j]));
@@ -2131,9 +2147,14 @@ fn lower_call_expr(
 
     // Save caller-saved regs before call (RAX excluded — gets return value).
     // Skip target_reg if caller-saved — holds return value after mov_rr.
+    // i386: never touch r8-r15 (REX prefixes are illegal in protected mode).
     // ponytail: conservative save of all caller-saved regs; liveness would reduce.
-    let saved: [u8; 8] = [RCX, RDX, RSI, RDI, 8, 9, 10, 11];
-    for &reg in &saved {
+    let saved: &[u8] = if x86_64::is_32bit() {
+        &[RCX, RDX, RSI, RDI]
+    } else {
+        &[RCX, RDX, RSI, RDI, 8, 9, 10, 11]
+    };
+    for &reg in saved {
         if reg == target_reg {
             continue;
         }
