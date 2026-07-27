@@ -21,7 +21,7 @@ jobs:
         run: cargo clippy --all-targets --features extended --locked -- -D warnings
         working-directory: in-cli
       - name: Test
-        run: cargo test --features extended
+        run: cargo test --features extended --locked
         working-directory: in-cli
 
   protocol-models:
