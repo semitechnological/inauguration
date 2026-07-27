@@ -2042,11 +2042,7 @@ fn lower_builtin_call(
 
 fn reg_arg_count() -> usize {
     // i386 has no r8/r9; keep the first four SysV-style regs only.
-    if x86_64::is_32bit() {
-        4
-    } else {
-        6
-    }
+    if x86_64::is_32bit() { 4 } else { 6 }
 }
 
 fn emit_stack_cleanup(emitter: &mut CodeEmitter, args_len: usize) {
