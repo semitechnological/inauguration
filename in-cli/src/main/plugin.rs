@@ -4,6 +4,15 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+fn contains_shell_metacharacters(s: &str) -> bool {
+    s.contains(|c| {
+        matches!(
+            c,
+            ';' | '&' | '|' | '$' | '`' | '\n' | '\r' | '<' | '>' | '(' | ')' | '\\' | '\'' | '"'
+        )
+    })
+}
+
 pub(crate) fn cmd_plugin(root: &Path, action: PluginAction) -> Result<()> {
     match action {
         PluginAction::List => {
@@ -36,6 +45,9 @@ pub(crate) fn cmd_plugin(root: &Path, action: PluginAction) -> Result<()> {
             Ok(())
         }
         PluginAction::Install { name } => {
+            if contains_shell_metacharacters(&name) {
+                return Err(InError::Message("invalid characters in plugin name".to_string()));
+            }
             let src = plugin_registry_dir(root).join(format!("{name}.sh"));
             if !src.exists() {
                 return Err(InError::Message(format!("unknown plugin: {name}")));
@@ -55,6 +67,9 @@ pub(crate) fn cmd_plugin(root: &Path, action: PluginAction) -> Result<()> {
             Ok(())
         }
         PluginAction::Run { name, target } => {
+            if contains_shell_metacharacters(&name) || contains_shell_metacharacters(&target) {
+                return Err(InError::Message("invalid characters in plugin name or target".to_string()));
+            }
             let script = plugin_install_dir()?.join(format!("{name}.sh"));
             if !script.exists() {
                 return Err(InError::Message(format!(
@@ -82,4 +97,19 @@ fn plugin_install_dir() -> Result<PathBuf> {
         .join(".config")
         .join("in")
         .join("plugins"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_contains_shell_metacharacters() {
+        assert!(!contains_shell_metacharacters("valid-target"));
+        assert!(!contains_shell_metacharacters("my_plugin"));
+        assert!(contains_shell_metacharacters("invalid;target"));
+        assert!(contains_shell_metacharacters("$NAME"));
+        assert!(contains_shell_metacharacters("target&"));
+        assert!(contains_shell_metacharacters("rm -rf /`"));
+    }
 }
