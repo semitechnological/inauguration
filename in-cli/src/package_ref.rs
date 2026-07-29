@@ -166,4 +166,17 @@ mod tests {
         let name = split_dependency_header("cargo:crepuscularity:", 3).expect("header");
         assert_eq!(name, "cargo:crepuscularity");
     }
+
+    #[test]
+    fn validates_supported_ecosystems() {
+        assert!(is_supported_ecosystem("cargo"));
+        assert!(is_supported_ecosystem("npm"));
+        assert!(is_supported_ecosystem("pip"));
+        assert!(is_supported_ecosystem("crate"));
+
+        assert!(!is_supported_ecosystem("unknown"));
+        assert!(!is_supported_ecosystem(""));
+        assert!(!is_supported_ecosystem("CARGO"));
+        assert!(!is_supported_ecosystem("cargo "));
+    }
 }
