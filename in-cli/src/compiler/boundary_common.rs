@@ -89,3 +89,59 @@ pub fn ensure_main(decls: &mut Vec<Decl>) {
         });
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_boundary_empty_src() {
+        assert_eq!(extract_boundary_from_comment("", &["//? "]), None);
+    }
+
+    #[test]
+    fn test_extract_boundary_no_match() {
+        assert_eq!(extract_boundary_from_comment("some text", &["//? "]), None);
+    }
+
+    #[test]
+    fn test_extract_boundary_invalid_json() {
+        assert_eq!(
+            extract_boundary_from_comment("//? in_boundary { invalid }", &["//? in_boundary "]),
+            None
+        );
+    }
+
+    #[test]
+    fn test_extract_boundary_valid_json_no_hash() {
+        let src = r#"//? in_boundary {"abi_version": 1, "module": "test", "layouts": [], "symbols": []}"#;
+        let result = extract_boundary_from_comment(src, &["//? in_boundary "]).unwrap();
+        assert_eq!(result.module, "test");
+        assert!(!result.layout_hash.is_empty());
+    }
+
+    #[test]
+    fn test_extract_boundary_valid_json_with_hash() {
+        let src = r#"//? in_boundary {"abi_version": 1, "module": "test", "layouts": [], "symbols": [], "layout_hash": "custom_hash"}"#;
+        let result = extract_boundary_from_comment(src, &["//? in_boundary "]).unwrap();
+        assert_eq!(result.module, "test");
+        assert_eq!(result.layout_hash, "custom_hash");
+    }
+
+    #[test]
+    fn test_extract_boundary_leading_whitespace() {
+        let src = r#"   //? in_boundary {"abi_version": 1, "module": "test", "layouts": [], "symbols": []}"#;
+        let result = extract_boundary_from_comment(src, &["//? in_boundary "]).unwrap();
+        assert_eq!(result.module, "test");
+        assert!(!result.layout_hash.is_empty());
+    }
+
+    #[test]
+    fn test_extract_boundary_multiple_prefixes() {
+        let src = r#"// in_boundary {"abi_version": 1, "module": "test", "layouts": [], "symbols": []}"#;
+        let result =
+            extract_boundary_from_comment(src, &["//? in_boundary ", "// in_boundary "]).unwrap();
+        assert_eq!(result.module, "test");
+        assert!(!result.layout_hash.is_empty());
+    }
+}
