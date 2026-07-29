@@ -114,7 +114,8 @@ mod tests {
 
     #[test]
     fn test_extract_boundary_valid_json_no_hash() {
-        let src = r#"//? in_boundary {"abi_version": 1, "module": "test", "layouts": [], "symbols": []}"#;
+        let src =
+            r#"//? in_boundary {"abi_version": 1, "module": "test", "layouts": [], "symbols": []}"#;
         let result = extract_boundary_from_comment(src, &["//? in_boundary "]).unwrap();
         assert_eq!(result.module, "test");
         assert!(!result.layout_hash.is_empty());
@@ -138,7 +139,8 @@ mod tests {
 
     #[test]
     fn test_extract_boundary_multiple_prefixes() {
-        let src = r#"// in_boundary {"abi_version": 1, "module": "test", "layouts": [], "symbols": []}"#;
+        let src =
+            r#"// in_boundary {"abi_version": 1, "module": "test", "layouts": [], "symbols": []}"#;
         let result =
             extract_boundary_from_comment(src, &["//? in_boundary ", "// in_boundary "]).unwrap();
         assert_eq!(result.module, "test");
