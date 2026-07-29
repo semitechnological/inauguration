@@ -78,7 +78,7 @@ jobs:
           mkdir -p dist
           cp "in-cli/target/${{ matrix.target }}/release/${{ matrix.binary_name }}" "dist/${{ matrix.binary_name }}"
           tar -czf "dist/in-${{ matrix.asset_suffix }}.tar.gz" -C dist "${{ matrix.binary_name }}"
-          shasum -a 256 "dist/in-${{ matrix.asset_suffix }}.tar.gz" > "dist/in-${{ matrix.asset_suffix }}.sha256"
+          shasum -a 256 "dist/in-${{ matrix.asset_suffix }}.tar.gz" > "dist/in-${{ matrix.asset_suffix }}.tar.gz.sha256"
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
