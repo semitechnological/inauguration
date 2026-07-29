@@ -651,9 +651,15 @@ fn extract_tarball(archive_path: &Path, install_path: &Path) -> Result<(), Strin
         tar::Archive::new(Box::new(file) as Box<dyn Read>)
     };
 
-    for entry_result in archive.entries().map_err(|e| format!("read tar entries: {e}"))? {
+    for entry_result in archive
+        .entries()
+        .map_err(|e| format!("read tar entries: {e}"))?
+    {
         let mut entry = entry_result.map_err(|e| format!("read tar entry: {e}"))?;
-        let path = entry.path().map_err(|e| format!("read tar entry path: {e}"))?.into_owned();
+        let path = entry
+            .path()
+            .map_err(|e| format!("read tar entry path: {e}"))?
+            .into_owned();
 
         // Strip components=1
         let mut components = path.components();
@@ -670,7 +676,9 @@ fn extract_tarball(archive_path: &Path, install_path: &Path) -> Result<(), Strin
         let mut is_safe = true;
         for comp in stripped_path.components() {
             match comp {
-                std::path::Component::ParentDir | std::path::Component::RootDir | std::path::Component::Prefix(_) => {
+                std::path::Component::ParentDir
+                | std::path::Component::RootDir
+                | std::path::Component::Prefix(_) => {
                     is_safe = false;
                     break;
                 }
@@ -689,7 +697,9 @@ fn extract_tarball(archive_path: &Path, install_path: &Path) -> Result<(), Strin
             if let Some(parent) = target.parent() {
                 fs::create_dir_all(parent).map_err(|e| e.to_string())?;
             }
-            entry.unpack(&target).map_err(|e| format!("unpack tar entry: {e}"))?;
+            entry
+                .unpack(&target)
+                .map_err(|e| format!("unpack tar entry: {e}"))?;
         }
     }
 
