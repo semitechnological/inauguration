@@ -826,20 +826,15 @@ fn verify_hex_digest(expected: &str, actual: &str, path: &Path, label: &str) -> 
 }
 
 fn extract_zip(archive_path: &Path, install_path: &Path) -> Result<(), String> {
-    let status = Command::new("unzip")
-        .env_clear()
-        .arg("-oq")
-        .arg(archive_path)
-        .arg("-d")
-        .arg(install_path)
-        .status()
-        .map_err(|err| format!("unzip not available for zip extract: {err}"))?;
-    if !status.success() {
-        return Err(format!(
-            "unzip extract failed for {}",
-            archive_path.display()
-        ));
-    }
+    let file = fs::File::open(archive_path)
+        .map_err(|err| format!("failed to open zip archive {}: {err}", archive_path.display()))?;
+    let mut archive = zip::ZipArchive::new(file)
+        .map_err(|err| format!("failed to read zip archive {}: {err}", archive_path.display()))?;
+
+    archive
+        .extract(install_path)
+        .map_err(|err| format!("failed to extract zip archive {}: {err}", archive_path.display()))?;
+
     flatten_single_install_subdir(install_path)
 }
 
@@ -1280,7 +1275,7 @@ mod tests {
 
         let result = extract_zip(&invalid_zip, &install_path);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("unzip extract failed"));
+        assert!(result.unwrap_err().contains("failed to read zip"));
 
         let _ = fs::remove_dir_all(dir);
     }
