@@ -1600,7 +1600,7 @@ pub(crate) fn lower_stdlib_call(
                 "contains" => "in_str_contains",
                 "starts-with" => "in_str_starts_with",
                 "ends-with" => "in_str_ends_with",
-                _ => unreachable!(),
+                _ => return Err(format!("Unrecognized string method: {}", base_owned)),
             };
             emit_stdlib_wrapper_call(
                 emitter,
