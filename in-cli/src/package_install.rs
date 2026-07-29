@@ -6,6 +6,7 @@ use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
+use std::io::Read;
 
 use crate::package_lock::{PackageLock, write_package_lock};
 use crate::package_manifest::{
@@ -622,22 +623,76 @@ fn fetch_and_extract(
             flatten_go_module_root(install_path)?;
         }
     } else {
-        let status = Command::new("tar")
-            .env_clear()
-            .arg("-xf")
-            .arg(&archive_path)
-            .arg("-C")
-            .arg(install_path)
-            .arg("--strip-components=1")
-            .status()
-            .map_err(|err| format!("tar extract failed: {err}"))?;
-        if !status.success() {
-            return Err(format!("tar extract failed for {}", archive_path.display()));
-        }
+        extract_tarball(&archive_path, install_path)?;
     }
     let _ = fs::remove_file(&archive_path);
     // Dependabot scans committed .in-packages; drop upstream noise we never run.
     strip_registry_noise(package_ref, install_path);
+    Ok(())
+}
+
+fn extract_tarball(archive_path: &Path, install_path: &Path) -> Result<(), String> {
+    let file = std::fs::File::open(archive_path).map_err(|e| e.to_string())?;
+
+    // Auto-detect Gz or raw tar
+    let mut is_gz = false;
+    {
+        let mut f = std::fs::File::open(archive_path).map_err(|e| e.to_string())?;
+        let mut magic = [0u8; 2];
+        if f.read_exact(&mut magic).is_ok() && magic == [0x1f, 0x8b] {
+            is_gz = true;
+        }
+    }
+
+    let mut archive = if is_gz {
+        let decoder = flate2::read::GzDecoder::new(file);
+        tar::Archive::new(Box::new(decoder) as Box<dyn Read>)
+    } else {
+        tar::Archive::new(Box::new(file) as Box<dyn Read>)
+    };
+
+    for entry_result in archive.entries().map_err(|e| format!("read tar entries: {e}"))? {
+        let mut entry = entry_result.map_err(|e| format!("read tar entry: {e}"))?;
+        let path = entry.path().map_err(|e| format!("read tar entry path: {e}"))?.into_owned();
+
+        // Strip components=1
+        let mut components = path.components();
+        let first = components.next();
+        if first.is_none() {
+            continue; // Empty path
+        }
+
+        let stripped_path: std::path::PathBuf = components.collect();
+        if stripped_path.as_os_str().is_empty() {
+            continue; // The root directory itself
+        }
+
+        let mut is_safe = true;
+        for comp in stripped_path.components() {
+            match comp {
+                std::path::Component::ParentDir | std::path::Component::RootDir | std::path::Component::Prefix(_) => {
+                    is_safe = false;
+                    break;
+                }
+                _ => {}
+            }
+        }
+        if !is_safe {
+            continue; // Skip unsafe paths
+        }
+
+        let target = install_path.join(stripped_path);
+
+        if let tar::EntryType::Directory = entry.header().entry_type() {
+            fs::create_dir_all(&target).map_err(|e| e.to_string())?;
+        } else {
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            entry.unpack(&target).map_err(|e| format!("unpack tar entry: {e}"))?;
+        }
+    }
+
     Ok(())
 }
 
