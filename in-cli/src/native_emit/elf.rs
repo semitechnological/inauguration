@@ -339,7 +339,9 @@ pub fn write_arm32_relocatable_object(object: &ElfObject, out: &mut Vec<u8>) {
 
     // .rel.text entries: R_ARM_THM_CALL for each extern BL.
     for (offset, name) in &object.thumb_calls {
-        let sym = *symbol_index.get(name.as_str()).expect("thumb call symbol in strtab");
+        let sym = *symbol_index
+            .get(name.as_str())
+            .expect("thumb call symbol in strtab");
         out.extend_from_slice(&offset.to_le_bytes());
         let info = (sym << 8) | R_ARM_THM_CALL;
         out.extend_from_slice(&info.to_le_bytes());
