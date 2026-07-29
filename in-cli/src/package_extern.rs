@@ -178,6 +178,21 @@ mod tests {
     use crate::package_manifest::PACKAGE_MANIFEST_FILE;
 
     #[test]
+    fn maps_ecosystem_to_extern_language() {
+        assert_eq!(extern_language_for_ecosystem("cargo"), "rust");
+        assert_eq!(extern_language_for_ecosystem("npm"), "js");
+        assert_eq!(extern_language_for_ecosystem("pypi"), "python");
+        assert_eq!(extern_language_for_ecosystem("go"), "go");
+        assert_eq!(extern_language_for_ecosystem("composer"), "php");
+        assert_eq!(extern_language_for_ecosystem("nuget"), "dotnet");
+        assert_eq!(extern_language_for_ecosystem("gem"), "ruby");
+        assert_eq!(extern_language_for_ecosystem("hex"), "elixir");
+        assert_eq!(extern_language_for_ecosystem("v"), "v");
+        assert_eq!(extern_language_for_ecosystem("unknown"), "package");
+        assert_eq!(extern_language_for_ecosystem(""), "package");
+    }
+
+    #[test]
     fn synthesizes_bindings_from_installed_metadata() {
         let temp = std::env::temp_dir().join(format!(
             "package-extern-{}-{}",
