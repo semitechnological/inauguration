@@ -153,10 +153,12 @@ fn generate_docs(
     Ok(())
 }
 
-fn collect_markdown(
+use rayon::prelude::*;
+
+fn collect_paths(
     root: &Path,
     dir: &Path,
-    out: &mut Vec<(String, String)>,
+    out: &mut Vec<PathBuf>,
 ) -> io::Result<()> {
     let rel = dir.strip_prefix(root).unwrap_or(dir);
     if rel
@@ -173,7 +175,7 @@ fn collect_markdown(
 
     for path in entries {
         if path.is_dir() {
-            collect_markdown(root, &path, out)?;
+            collect_paths(root, &path, out)?;
             continue;
         }
         if path.extension().and_then(|e| e.to_str()) != Some("md") {
@@ -187,9 +189,35 @@ fn collect_markdown(
         if web_key == "README" {
             continue;
         }
-        let content = fs::read_to_string(&path)?;
-        out.push((web_key, content));
+        out.push(path);
     }
+    Ok(())
+}
+
+fn collect_markdown(
+    root: &Path,
+    dir: &Path,
+    out: &mut Vec<(String, String)>,
+) -> io::Result<()> {
+    let mut paths = Vec::new();
+    collect_paths(root, dir, &mut paths)?;
+
+    let local_out: Result<Vec<(String, String)>, io::Error> = paths
+        .into_par_iter()
+        .map(|path| {
+            let rel = path.strip_prefix(root).unwrap_or(&path);
+            let web_key = rel
+                .with_extension("")
+                .to_string_lossy()
+                .replace(std::path::MAIN_SEPARATOR, "/");
+            let content = fs::read_to_string(&path)?;
+            Ok((web_key, content))
+        })
+        .collect();
+
+    let mut res = local_out?;
+    out.append(&mut res);
+
     Ok(())
 }
 
