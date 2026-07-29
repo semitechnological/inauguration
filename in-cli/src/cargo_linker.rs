@@ -64,15 +64,15 @@ pub fn compile_cargo_dependencies(project_dir: &Path) -> Vec<(String, UnifiedMod
     let root_id = resolve["root"].as_str().unwrap_or("");
 
     // Build maps
-    let mut pkg_manifest: HashMap<String, PathBuf> = HashMap::new();
-    let mut pkg_by_id: HashMap<String, &serde_json::Value> = HashMap::new();
+    let mut pkg_manifest: HashMap<&str, PathBuf> = HashMap::new();
+    let mut pkg_by_id: HashMap<&str, &serde_json::Value> = HashMap::new();
     for pkg in packages {
         let id = pkg["id"].as_str().unwrap_or("");
         let manifest = pkg["manifest_path"].as_str().unwrap_or("");
         if !manifest.is_empty() {
-            pkg_manifest.insert(id.to_string(), PathBuf::from(manifest));
+            pkg_manifest.insert(id, PathBuf::from(manifest));
         }
-        pkg_by_id.insert(id.to_string(), pkg);
+        pkg_by_id.insert(id, pkg);
     }
 
     // Build adjacency list from resolve nodes
@@ -82,34 +82,34 @@ pub fn compile_cargo_dependencies(project_dir: &Path) -> Vec<(String, UnifiedMod
     };
 
     // Collect ALL transitive dependency IDs using BFS from root
-    let mut all_dep_ids: Vec<String> = Vec::new();
-    let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut queue: Vec<String> = vec![root_id.to_string()];
-    visited.insert(root_id.to_string());
+    let mut all_dep_ids: Vec<&str> = Vec::new();
+    let mut visited: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    let mut queue: Vec<&str> = vec![root_id];
+    visited.insert(root_id);
 
     // Build node_id -> [dep_pkg_id] mapping
-    let mut node_deps: HashMap<String, Vec<String>> = HashMap::new();
+    let mut node_deps: HashMap<&str, Vec<&str>> = HashMap::new();
     for node in nodes {
         if let Some(node_id) = node["id"].as_str() {
             let mut deps = Vec::new();
             if let Some(dep_array) = node["deps"].as_array() {
                 for dep in dep_array {
                     if let Some(pkg) = dep["pkg"].as_str() {
-                        deps.push(pkg.to_string());
+                        deps.push(pkg);
                     }
                 }
             }
-            node_deps.insert(node_id.to_string(), deps);
+            node_deps.insert(node_id, deps);
         }
     }
 
     while let Some(current) = queue.pop() {
-        if let Some(deps) = node_deps.get(&current) {
+        if let Some(deps) = node_deps.get(current) {
             for dep_id in deps {
-                if visited.insert(dep_id.clone()) {
-                    queue.push(dep_id.clone());
-                    if dep_id != root_id {
-                        all_dep_ids.push(dep_id.clone());
+                if visited.insert(*dep_id) {
+                    queue.push(*dep_id);
+                    if *dep_id != root_id {
+                        all_dep_ids.push(*dep_id);
                     }
                 }
             }
@@ -167,8 +167,8 @@ pub fn compile_cargo_dependencies(project_dir: &Path) -> Vec<(String, UnifiedMod
     .cloned()
     .collect();
     for dep_id in &all_dep_ids {
-        if let Some(manifest) = pkg_manifest.get(dep_id) {
-            if let Some(pkg) = pkg_by_id.get(dep_id) {
+        if let Some(manifest) = pkg_manifest.get(*dep_id) {
+            if let Some(pkg) = pkg_by_id.get(*dep_id) {
                 let crate_name = pkg["name"].as_str().unwrap_or("");
                 if !direct_dep_names.contains(crate_name) {
                     continue;
