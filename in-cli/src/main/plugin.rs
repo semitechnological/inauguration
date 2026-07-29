@@ -46,7 +46,9 @@ pub(crate) fn cmd_plugin(root: &Path, action: PluginAction) -> Result<()> {
         }
         PluginAction::Install { name } => {
             if contains_shell_metacharacters(&name) {
-                return Err(InError::Message("invalid characters in plugin name".to_string()));
+                return Err(InError::Message(
+                    "invalid characters in plugin name".to_string(),
+                ));
             }
             let src = plugin_registry_dir(root).join(format!("{name}.sh"));
             if !src.exists() {
@@ -68,7 +70,9 @@ pub(crate) fn cmd_plugin(root: &Path, action: PluginAction) -> Result<()> {
         }
         PluginAction::Run { name, target } => {
             if contains_shell_metacharacters(&name) || contains_shell_metacharacters(&target) {
-                return Err(InError::Message("invalid characters in plugin name or target".to_string()));
+                return Err(InError::Message(
+                    "invalid characters in plugin name or target".to_string(),
+                ));
             }
             let script = plugin_install_dir()?.join(format!("{name}.sh"));
             if !script.exists() {
