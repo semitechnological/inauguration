@@ -826,14 +826,25 @@ fn verify_hex_digest(expected: &str, actual: &str, path: &Path, label: &str) -> 
 }
 
 fn extract_zip(archive_path: &Path, install_path: &Path) -> Result<(), String> {
-    let file = fs::File::open(archive_path)
-        .map_err(|err| format!("failed to open zip archive {}: {err}", archive_path.display()))?;
-    let mut archive = zip::ZipArchive::new(file)
-        .map_err(|err| format!("failed to read zip archive {}: {err}", archive_path.display()))?;
+    let file = fs::File::open(archive_path).map_err(|err| {
+        format!(
+            "failed to open zip archive {}: {err}",
+            archive_path.display()
+        )
+    })?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|err| {
+        format!(
+            "failed to read zip archive {}: {err}",
+            archive_path.display()
+        )
+    })?;
 
-    archive
-        .extract(install_path)
-        .map_err(|err| format!("failed to extract zip archive {}: {err}", archive_path.display()))?;
+    archive.extract(install_path).map_err(|err| {
+        format!(
+            "failed to extract zip archive {}: {err}",
+            archive_path.display()
+        )
+    })?;
 
     flatten_single_install_subdir(install_path)
 }
