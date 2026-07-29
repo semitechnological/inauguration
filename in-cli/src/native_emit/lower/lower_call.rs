@@ -121,7 +121,7 @@ pub(crate) fn lower_call(
         return Ok(());
     }
     let Some(target_info) = functions.get(target) else {
-        unreachable!();
+        return Err(format!("native-lower: function `{target}` not found"));
     };
     let abi_arg_count = native_param_abi_slots(&target_info.params, ctx.structs, target)?;
     if abi_arg_count > 32 {
