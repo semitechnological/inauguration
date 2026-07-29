@@ -269,15 +269,15 @@ pub fn write_arm32_relocatable_object(object: &ElfObject, out: &mut Vec<u8>) {
 
     let mut strtab: Vec<u8> = vec![0u8];
     let mut name_indices: Vec<u32> = Vec::new();
-    let mut symbol_index: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+    let mut symbol_index: std::collections::HashMap<&str, u32> = std::collections::HashMap::new();
     for (name, _) in &all_exports {
-        symbol_index.insert(name.to_string(), name_indices.len() as u32 + 1);
+        symbol_index.insert(*name, name_indices.len() as u32 + 1);
         name_indices.push(strtab.len() as u32);
         strtab.extend_from_slice(name.as_bytes());
         strtab.push(0);
     }
     for name in &all_undefs {
-        symbol_index.insert(name.clone(), name_indices.len() as u32 + 1);
+        symbol_index.insert(name.as_str(), name_indices.len() as u32 + 1);
         name_indices.push(strtab.len() as u32);
         strtab.extend_from_slice(name.as_bytes());
         strtab.push(0);
@@ -339,7 +339,7 @@ pub fn write_arm32_relocatable_object(object: &ElfObject, out: &mut Vec<u8>) {
 
     // .rel.text entries: R_ARM_THM_CALL for each extern BL.
     for (offset, name) in &object.thumb_calls {
-        let sym = *symbol_index.get(name).expect("thumb call symbol in strtab");
+        let sym = *symbol_index.get(name.as_str()).expect("thumb call symbol in strtab");
         out.extend_from_slice(&offset.to_le_bytes());
         let info = (sym << 8) | R_ARM_THM_CALL;
         out.extend_from_slice(&info.to_le_bytes());
