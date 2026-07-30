@@ -275,7 +275,12 @@ fn alloc_nested_struct_slots_inner(
                 let inner_name = match field_ty {
                     Typ::Named(name) => name.as_str(),
                     Typ::Vector(_) => "Vec",
-                    _ => unreachable!(),
+                    _ => {
+                        return Err(format!(
+                            "Internal error: expected Named or Vector type, got {:?}",
+                            field_ty
+                        ));
+                    }
                 };
                 let base = base_struct_name(inner_name);
                 let Some(inner_fields) = structs.get(base) else {
@@ -327,7 +332,12 @@ pub(crate) fn alloc_local_struct_fields(
                 let inner_name = match field_ty {
                     Typ::Named(name) => name.as_str(),
                     Typ::Vector(_) => "Vec",
-                    _ => unreachable!(),
+                    _ => {
+                        return Err(format!(
+                            "Internal error: expected Named or Vector type, got {:?}",
+                            field_ty
+                        ));
+                    }
                 };
                 let Some(inner_fields) = all_structs.get(inner_name) else {
                     slots.insert(field.clone(), ctx.alloc_slot());
