@@ -471,6 +471,13 @@ mod tests {
     }
 
     #[test]
+    fn test_all_language_support() {
+        let all = all_language_support();
+        assert!(!all.is_empty());
+        assert_eq!(all.len(), 32);
+    }
+
+    #[test]
     fn test_language_support_for_parser() {
         let rust_support = language_support_for_parser("rust").expect("should find rust");
         assert_eq!(rust_support.language, "Rust");
