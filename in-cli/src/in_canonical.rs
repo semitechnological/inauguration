@@ -316,4 +316,16 @@ fn main() {
         assert!(canonical.contains("  let seed: Int = 0\n"));
         assert!(!canonical.contains(';'));
     }
+
+    #[test]
+    fn handles_empty_input() {
+        let result = canonicalize_in_source("");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn returns_error_on_invalid_syntax() {
+        let result = canonicalize_in_source("!@#$");
+        assert!(result.is_err());
+    }
 }
