@@ -230,8 +230,9 @@ fn render_md(md: &str) -> (String, String) {
 
     let mut title = String::new();
     for line in md.lines() {
-        if title.is_empty() && line.starts_with("# ") {
+        if line.starts_with("# ") {
             title = line[2..].trim().to_string();
+            break;
         }
     }
     let mut body = String::new();
