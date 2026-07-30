@@ -688,13 +688,9 @@ fn lower_function(
         .map_or(false, |s| matches!(s, Stmt::Expr(Expr::StructInit { .. })));
     if last_is_struct_init {
         let last = func.body.last().unwrap();
-        let init_name = match last {
-            Stmt::Expr(Expr::StructInit { name, .. }) => name.clone(),
-            _ => unreachable!(),
-        };
-        let init_fields = match last {
-            Stmt::Expr(Expr::StructInit { fields, .. }) => fields.clone(),
-            _ => unreachable!(),
+        let (init_name, init_fields) = match last {
+            Stmt::Expr(Expr::StructInit { name, fields }) => (name.clone(), fields.clone()),
+            _ => return Err("native-lower: expected StructInit as last statement".to_string()),
         };
         for stmt in &func.body[..func.body.len() - 1] {
             lower_stmt(
