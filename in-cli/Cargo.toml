@@ -71,6 +71,7 @@ tree-sitter-scala = { version = "0.26.0", optional = true }
 tree-sitter-v = { version = "0.0.3", optional = true }
 tar = "0.4.46"
 flate2 = "1.1.9"
+zip = "8.6.0"
 [features]
 default = []
 parse-extended = [
