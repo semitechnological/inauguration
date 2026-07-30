@@ -6,6 +6,7 @@ use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
+use std::io::Read;
 
 use crate::package_lock::{PackageLock, write_package_lock};
 use crate::package_manifest::{
@@ -622,22 +623,102 @@ fn fetch_and_extract(
             flatten_go_module_root(install_path)?;
         }
     } else {
-        let status = Command::new("tar")
-            .env_clear()
-            .arg("-xf")
-            .arg(&archive_path)
-            .arg("-C")
-            .arg(install_path)
-            .arg("--strip-components=1")
-            .status()
-            .map_err(|err| format!("tar extract failed: {err}"))?;
-        if !status.success() {
-            return Err(format!("tar extract failed for {}", archive_path.display()));
-        }
+        extract_tarball(&archive_path, install_path)?;
     }
     let _ = fs::remove_file(&archive_path);
     // Dependabot scans committed .in-packages; drop upstream noise we never run.
     strip_registry_noise(package_ref, install_path);
+    Ok(())
+}
+
+fn extract_tarball(archive_path: &Path, install_path: &Path) -> Result<(), String> {
+    let file = std::fs::File::open(archive_path).map_err(|e| e.to_string())?;
+
+    // Auto-detect Gz or raw tar
+    let mut is_gz = false;
+    {
+        let mut f = std::fs::File::open(archive_path).map_err(|e| e.to_string())?;
+        let mut magic = [0u8; 2];
+        if f.read_exact(&mut magic).is_ok() && magic == [0x1f, 0x8b] {
+            is_gz = true;
+        }
+    }
+
+    let mut archive = if is_gz {
+        let decoder = flate2::read::GzDecoder::new(file);
+        tar::Archive::new(Box::new(decoder) as Box<dyn Read>)
+    } else {
+        tar::Archive::new(Box::new(file) as Box<dyn Read>)
+    };
+
+    for entry_result in archive
+        .entries()
+        .map_err(|e| format!("read tar entries: {e}"))?
+    {
+        let mut entry = entry_result.map_err(|e| format!("read tar entry: {e}"))?;
+        let path = entry
+            .path()
+            .map_err(|e| format!("read tar entry path: {e}"))?
+            .into_owned();
+        if path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        }) {
+            return Err(format!("unsafe tar entry path: {}", path.display()));
+        }
+        if matches!(
+            entry.header().entry_type(),
+            tar::EntryType::Symlink | tar::EntryType::Link
+        ) {
+            return Err(format!("unsafe tar link entry: {}", path.display()));
+        }
+
+        // Strip components=1
+        let mut components = path.components();
+        let first = components.next();
+        if first.is_none() {
+            continue; // Empty path
+        }
+
+        let stripped_path: std::path::PathBuf = components.collect();
+        if stripped_path.as_os_str().is_empty() {
+            continue; // The root directory itself
+        }
+
+        let mut is_safe = true;
+        for comp in stripped_path.components() {
+            match comp {
+                std::path::Component::ParentDir
+                | std::path::Component::RootDir
+                | std::path::Component::Prefix(_) => {
+                    is_safe = false;
+                    break;
+                }
+                _ => {}
+            }
+        }
+        if !is_safe {
+            continue; // Skip unsafe paths
+        }
+
+        let target = install_path.join(stripped_path);
+
+        if let tar::EntryType::Directory = entry.header().entry_type() {
+            fs::create_dir_all(&target).map_err(|e| e.to_string())?;
+        } else {
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            entry
+                .unpack(&target)
+                .map_err(|e| format!("unpack tar entry: {e}"))?;
+        }
+    }
+
     Ok(())
 }
 
@@ -1093,6 +1174,66 @@ mod tests {
         let path = std::env::temp_dir().join(format!("{prefix}-{unique}"));
         fs::create_dir_all(&path).expect("temp dir");
         path
+    }
+
+    fn write_unsafe_tar_entry(path: &Path, name: &str, type_flag: u8, link_name: Option<&str>) {
+        let mut header = [0u8; 512];
+        header[..name.len()].copy_from_slice(name.as_bytes());
+        header[100..108].copy_from_slice(b"0000777\0");
+        header[124..136].copy_from_slice(b"00000000000\0");
+        header[136..148].copy_from_slice(b"00000000000\0");
+        header[148..156].fill(b' ');
+        header[156] = type_flag;
+        if let Some(link_name) = link_name {
+            header[157..157 + link_name.len()].copy_from_slice(link_name.as_bytes());
+        }
+        header[257..263].copy_from_slice(b"ustar\0");
+        header[263..265].copy_from_slice(b"00");
+        let checksum: u32 = header.iter().map(|byte| u32::from(*byte)).sum();
+        header[148..156].copy_from_slice(format!("{checksum:06o}\0 ").as_bytes());
+
+        let mut archive = fs::File::create(path).expect("create archive");
+        use std::io::Write;
+        archive.write_all(&header).expect("write header");
+        archive.write_all(&[0; 1024]).expect("write end markers");
+    }
+
+    fn assert_tar_entry_is_rejected(name: &str, type_flag: u8, link_name: Option<&str>) {
+        let dir = tempfile_dir("extract-tar-unsafe");
+        let archive_path = dir.join("unsafe.tar");
+        let install_path = dir.join("install");
+        write_unsafe_tar_entry(&archive_path, name, type_flag, link_name);
+
+        let result = extract_tarball(&archive_path, &install_path);
+        assert!(
+            result.is_err(),
+            "unsafe tar entry `{name}` must be rejected"
+        );
+        assert!(
+            !install_path.exists(),
+            "unsafe tar entry `{name}` must not create an install path"
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn extract_tarball_rejects_parent_traversal_entry() {
+        assert_tar_entry_is_rejected("package/../../escape", b'0', None);
+    }
+
+    #[test]
+    fn extract_tarball_rejects_absolute_root_entry() {
+        assert_tar_entry_is_rejected("/absolute/escape", b'0', None);
+    }
+
+    #[test]
+    fn extract_tarball_rejects_symlink_entry() {
+        assert_tar_entry_is_rejected("package/link", b'2', Some("../../outside"));
+    }
+
+    #[test]
+    fn extract_tarball_rejects_hardlink_entry() {
+        assert_tar_entry_is_rejected("package/link", b'1', Some("../../outside"));
     }
 
     #[test]
