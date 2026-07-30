@@ -179,4 +179,13 @@ mod tests {
         assert!(!is_supported_ecosystem("CARGO"));
         assert!(!is_supported_ecosystem("cargo "));
     }
+
+    #[test]
+    fn dependency_header_rejects_empty_name() {
+        let err = split_dependency_header(":", 5).expect_err("should reject empty name");
+        assert_eq!(err, "line 5: dependency name is empty");
+
+        let err2 = split_dependency_header("  :  ", 7).expect_err("should reject empty name");
+        assert_eq!(err2, "line 7: dependency name is empty");
+    }
 }
