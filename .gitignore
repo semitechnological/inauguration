@@ -25,3 +25,6 @@ docs-site/.crepus-dev/
 .wrangler/
 docs-site/.wrangler/
 .pi-subagents/artifacts/
+
+# moonshine docs-site deps
+docs-site/node_modules/
