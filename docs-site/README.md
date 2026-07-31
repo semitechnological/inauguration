@@ -13,6 +13,27 @@ is kept alongside for reference; the live server lives in `src/`.
 - `src/server.ts` — `createBunServer` + `crepusRenderer` (head-injecting wrapper); serves `/`, `static/`, and generated `dist/docs/`.
 - `src/build.ts` — prerenders the page to `dist/index.html`.
 
+## Benchmarks
+
+Localhost, warm cache, 10 sequential `GET /` requests (macOS arm64, Bun 1.3.14).
+The legacy stack ships an 8 KB HTML shell that hydrates client-side via WASM; the
+moonshine stack returns fully server-rendered HTML, yet is faster per request.
+
+| Metric | Before (crepuscularity-web) | After (moonshine) |
+|--------|----------------------------|-------------------|
+| Avg response time | 7.7ms | 1.4ms |
+| TTFB | 5.4ms | 0.6ms |
+| HTML size | 7.9KB | 25.1KB |
+| Stack | Rust WASM + UnoCSS | Bun + React + Crepus IR |
+
+Reproduce:
+
+```bash
+# before: crepus web build --site . && python3 -m http.server 3011 -d dist
+# after:  PORT=3012 bun run start
+curl -s -o /dev/null -w "%{time_total}\n" http://localhost:3011/
+```
+
 ## Dev
 
 ```bash
