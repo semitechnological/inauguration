@@ -11,15 +11,16 @@
     "typecheck": "bunx tsc --noEmit"
   },
   "dependencies": {
-    "@tschk/crepus-moonshine": "file:../../moonshine/packages/crepus-moonshine",
-    "@tschk/crepuscularity-wasm": "file:../../crepuscularity/crates/crepuscularity-wasm/npm",
-    "@tschk/moonshine": "file:../../moonshine/packages/core",
-    "@tschk/moonshine-compiler": "file:../../moonshine/packages/compiler",
-    "@tschk/moonshine-deploy-bun": "file:../../moonshine/packages/deploy-bun",
-    "@tschk/moonshine-framework": "file:../../moonshine/packages/framework",
-    "@tschk/moonshine-react": "file:../../moonshine/packages/react",
-    "@tschk/moonshine-router": "file:../../moonshine/packages/router",
-    "@tschk/moonshine-server": "file:../../moonshine/packages/server",
+    "@tschk/crepus-moonshine": "^0.3.1",
+    "@tschk/crepuscularity-wasm": "^0.1.0",
+    "@tschk/moonshine": "^0.3.1",
+    "@tschk/moonshine-adapter-conformance": "^0.3.1",
+    "@tschk/moonshine-compiler": "^0.3.1",
+    "@tschk/moonshine-deploy-bun": "^0.3.1",
+    "@tschk/moonshine-framework": "^0.3.1",
+    "@tschk/moonshine-react": "^0.3.1",
+    "@tschk/moonshine-router": "^0.3.1",
+    "@tschk/moonshine-server": "^0.3.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },
@@ -28,18 +29,5 @@
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "typescript": "^5.9.0"
-  },
-  "overrides": {
-    "@tschk/crepus-moonshine": "file:../../moonshine/packages/crepus-moonshine",
-    "@tschk/crepuscularity-wasm": "file:../../crepuscularity/crates/crepuscularity-wasm/npm",
-    "@tschk/moonshine": "file:../../moonshine/packages/core",
-    "@tschk/moonshine-adapter-conformance": "file:../../moonshine/packages/adapter-conformance",
-    "@tschk/moonshine-compiler": "file:../../moonshine/packages/compiler",
-    "@tschk/moonshine-deploy-bun": "file:../../moonshine/packages/deploy-bun",
-    "@tschk/moonshine-framework": "file:../../moonshine/packages/framework",
-    "@tschk/moonshine-react": "file:../../moonshine/packages/react",
-    "@tschk/moonshine-router": "file:../../moonshine/packages/router",
-    "@tschk/moonshine-server": "file:../../moonshine/packages/server",
-    "@tschk/moonshine-shaders": "file:../../moonshine/packages/shaders"
   }
 }
