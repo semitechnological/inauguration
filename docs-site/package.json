@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@tschk/crepus-moonshine": "file:../../moonshine/packages/crepus-moonshine",
-    "@tschk/crepus-wasm": "file:../../crepuscularity/crates/crepuscularity-wasm/npm",
+    "@tschk/crepuscularity-wasm": "file:../../crepuscularity/crates/crepuscularity-wasm/npm",
     "@tschk/moonshine": "file:../../moonshine/packages/core",
     "@tschk/moonshine-compiler": "file:../../moonshine/packages/compiler",
     "@tschk/moonshine-deploy-bun": "file:../../moonshine/packages/deploy-bun",
@@ -31,7 +31,7 @@
   },
   "overrides": {
     "@tschk/crepus-moonshine": "file:../../moonshine/packages/crepus-moonshine",
-    "@tschk/crepus-wasm": "file:../../crepuscularity/crates/crepuscularity-wasm/npm",
+    "@tschk/crepuscularity-wasm": "file:../../crepuscularity/crates/crepuscularity-wasm/npm",
     "@tschk/moonshine": "file:../../moonshine/packages/core",
     "@tschk/moonshine-adapter-conformance": "file:../../moonshine/packages/adapter-conformance",
     "@tschk/moonshine-compiler": "file:../../moonshine/packages/compiler",

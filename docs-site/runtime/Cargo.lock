@@ -98,8 +98,6 @@ dependencies = [
 [[package]]
 name = "crepuscularity-core"
 version = "0.4.25"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cc3f92a3bb167bb980e236fe9f6def87f0053413ae14fe3acd3a7c1b7c213ef"
 dependencies = [
  "serde_json",
  "sha2",
@@ -111,8 +109,6 @@ dependencies = [
 [[package]]
 name = "crepuscularity-web"
 version = "0.4.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6eccbcd288697a49fd34975351ab65b9039449778cc96fec48efbf36ca1b5f78"
 dependencies = [
  "ammonia",
  "base64",
@@ -125,8 +121,6 @@ dependencies = [
 [[package]]
 name = "crepuscularity_macros"
 version = "0.5.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49d6c652eb167803fd0ceaa2fa2bd61ced14fe691424a3c93138047bda008974"
 dependencies = [
  "crepuscularity-core",
  "proc-macro2",

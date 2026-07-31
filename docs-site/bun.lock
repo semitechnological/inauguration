@@ -6,7 +6,7 @@
       "name": "inauguration-docs-site",
       "dependencies": {
         "@tschk/crepus-moonshine": "file:../../moonshine/packages/crepus-moonshine",
-        "@tschk/crepus-wasm": "file:../../crepuscularity/crates/crepuscularity-wasm/npm",
+        "@tschk/crepuscularity-wasm": "file:../../crepuscularity/crates/crepuscularity-wasm/npm",
         "@tschk/moonshine": "file:../../moonshine/packages/core",
         "@tschk/moonshine-compiler": "file:../../moonshine/packages/compiler",
         "@tschk/moonshine-deploy-bun": "file:../../moonshine/packages/deploy-bun",
@@ -27,7 +27,7 @@
   },
   "overrides": {
     "@tschk/crepus-moonshine": "file:../../moonshine/packages/crepus-moonshine",
-    "@tschk/crepus-wasm": "file:../../crepuscularity/crates/crepuscularity-wasm/npm",
+    "@tschk/crepuscularity-wasm": "file:../../crepuscularity/crates/crepuscularity-wasm/npm",
     "@tschk/moonshine": "file:../../moonshine/packages/core",
     "@tschk/moonshine-adapter-conformance": "file:../../moonshine/packages/adapter-conformance",
     "@tschk/moonshine-compiler": "file:../../moonshine/packages/compiler",
@@ -39,9 +39,9 @@
     "@tschk/moonshine-shaders": "file:../../moonshine/packages/shaders",
   },
   "packages": {
-    "@tschk/crepus-moonshine": ["@tschk/crepus-moonshine@file:../../moonshine/packages/crepus-moonshine", { "dependencies": { "@tschk/crepus-wasm": "file:../../../crepuscularity/crates/crepuscularity-wasm/npm", "@tschk/moonshine": "^0.3.1", "@tschk/moonshine-framework": "^0.3.1" }, "devDependencies": { "@types/bun": "1.3.14", "@types/react": "^19.1.0", "@types/react-dom": "^19.1.0", "react": "19.1.0", "react-dom": "19.1.0", "typescript": "7.0.2" }, "peerDependencies": { "react": ">=18", "react-dom": ">=18" }, "optionalPeers": ["react", "react-dom"] }],
+    "@tschk/crepus-moonshine": ["@tschk/crepus-moonshine@file:../../moonshine/packages/crepus-moonshine", { "dependencies": { "@tschk/crepuscularity-wasm": "file:../../../crepuscularity/crates/crepuscularity-wasm/npm", "@tschk/moonshine": "^0.3.1", "@tschk/moonshine-framework": "^0.3.1" }, "devDependencies": { "@types/bun": "1.3.14", "@types/react": "^19.1.0", "@types/react-dom": "^19.1.0", "react": "19.1.0", "react-dom": "19.1.0", "typescript": "7.0.2" }, "peerDependencies": { "react": ">=18", "react-dom": ">=18" }, "optionalPeers": ["react", "react-dom"] }],
 
-    "@tschk/crepus-wasm": ["@tschk/crepus-wasm@file:../../crepuscularity/crates/crepuscularity-wasm/npm", {}],
+    "@tschk/crepuscularity-wasm": ["@tschk/crepuscularity-wasm@file:../../crepuscularity/crates/crepuscularity-wasm/npm", {}],
 
     "@tschk/moonshine": ["@tschk/moonshine@file:../../moonshine/packages/core", { "dependencies": { "@tschk/moonshine-react": "^0.3.1", "@tschk/moonshine-router": "^0.3.1", "@tschk/moonshine-server": "^0.3.1", "@tschk/moonshine-shaders": "^0.3.1" }, "devDependencies": { "@types/bun": "1.3.14", "@types/react": "^19.1.0", "@types/react-dom": "^19.1.0", "react": "19.1.0", "react-dom": "19.1.0", "typescript": "7.0.2" }, "peerDependencies": { "react": ">=18", "react-dom": ">=18" }, "optionalPeers": ["react", "react-dom"] }],
 
@@ -119,7 +119,7 @@
 
     "undici-types": ["undici-types@8.3.0", "", {}, "sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ=="],
 
-    "@tschk/crepus-moonshine/@tschk/crepus-wasm": ["@tschk/crepus-wasm@file:../../crepuscularity/crates/crepuscularity-wasm/npm", {}],
+    "@tschk/crepus-moonshine/@tschk/crepuscularity-wasm": ["@tschk/crepuscularity-wasm@file:../../crepuscularity/crates/crepuscularity-wasm/npm", {}],
 
     "@tschk/crepus-moonshine/@tschk/moonshine": ["@tschk/moonshine@file:../../moonshine/packages/core", {}],
 
