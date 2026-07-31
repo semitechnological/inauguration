@@ -1,6 +1,29 @@
 # inauguration docs-site
 
-**https://inauguration.tsc.hk** — crepuscularity web target (`crepus.toml` + `index.crepus`).
+**https://inauguration.tsc.hk** — landing + docs, served by a Bun + Moonshine
+runtime using `@tschk/crepus-moonshine` (Crepus IR → React renderer).
+
+The legacy crepuscularity-web target (`crepus.toml` + `index.crepus` + `runtime/`)
+is kept alongside for reference; the live server lives in `src/`.
+
+## Stack
+
+- `src/ir.ts` — page content as `CrepusIr` (inline styles, dark zinc + JetBrains Mono).
+- `src/head.ts` — `<head>` HTML: SEO meta, fonts, and the CSS (animations) ported from `crepus.toml` `head_html`.
+- `src/server.ts` — `createBunServer` + `crepusRenderer` (head-injecting wrapper); serves `/`, `static/`, and generated `dist/docs/`.
+- `src/build.ts` — prerenders the page to `dist/index.html`.
+
+## Dev
+
+```bash
+bun install
+bun run dev          # http://localhost:3000 (hot reload)
+bun run build        # prerender dist/index.html
+bun test             # starts server, fetches /, asserts 200 + HTML
+bun run typecheck    # tsc --noEmit
+```
+
+Port: `PORT=4000 bun run dev`.
 
 ## Docs hook (`[targets.docs]`)
 
