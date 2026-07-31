@@ -20,6 +20,8 @@ test("GET / returns 200 HTML with page content", async () => {
   expect(html).toContain("PIPELINE CAPABILITIES");
   expect(html).toContain("DOCUMENTATION DIRECTORY");
   expect(html).toContain("JetBrains Mono");
+  expect(html).toContain('class="min-h-screen');
+  expect(html.slice(html.indexOf("<body"))).not.toContain("style=");
 });
 
 test("GET /static/favicon.svg returns 200 svg", async () => {
