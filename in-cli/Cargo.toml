@@ -54,7 +54,7 @@ tree-sitter-perl = "1.1.2"
 tree-sitter-holyc = "0.1.2"
 tree-sitter-ruby = "0.23.1"
 # LOLCAT — our own grammar (always compiled)
-tree-sitter-lolcat = { git = "https://github.com/undivisible/tree-sitter-lolcat.git", branch = "master" }
+tree-sitter-lolcat = "0.0.1"
 # Speculative parsers — gated behind parse-extended feature
 tree-sitter-c-sharp = { version = "0.23.5", optional = true }
 tree-sitter-dart = { version = "0.2.0", optional = true }

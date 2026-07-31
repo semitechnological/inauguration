@@ -1375,7 +1375,8 @@ checksum = "009994f150cc0cd50ff54917d5bc8bffe8cad10ca10d81c34da2ec421ae61782"
 [[package]]
 name = "tree-sitter-lolcat"
 version = "0.0.1"
-source = "git+https://github.com/undivisible/tree-sitter-lolcat.git?branch=master#ba921faa8bc6adc95ab4063e5becd80aae9e567f"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06aa281f4f31bd765b6d29dc87d60ecfc6e4aaec8a40ad0d937243eed855b2cd"
 dependencies = [
  "cc",
  "tree-sitter-language",
