@@ -12,13 +12,14 @@
   },
   "dependencies": {
     "@tschk/crepus-moonshine": "file:../../moonshine/packages/crepus-moonshine",
+    "@tschk/crepus-wasm": "file:../../crepuscularity/crates/crepuscularity-wasm/npm",
     "@tschk/moonshine": "file:../../moonshine/packages/core",
     "@tschk/moonshine-compiler": "file:../../moonshine/packages/compiler",
+    "@tschk/moonshine-deploy-bun": "file:../../moonshine/packages/deploy-bun",
     "@tschk/moonshine-framework": "file:../../moonshine/packages/framework",
     "@tschk/moonshine-react": "file:../../moonshine/packages/react",
     "@tschk/moonshine-router": "file:../../moonshine/packages/router",
     "@tschk/moonshine-server": "file:../../moonshine/packages/server",
-    "@tschk/moonshine-deploy-bun": "file:../../moonshine/packages/deploy-bun",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },
@@ -29,15 +30,16 @@
     "typescript": "^5.9.0"
   },
   "overrides": {
+    "@tschk/crepus-moonshine": "file:../../moonshine/packages/crepus-moonshine",
+    "@tschk/crepus-wasm": "file:../../crepuscularity/crates/crepuscularity-wasm/npm",
     "@tschk/moonshine": "file:../../moonshine/packages/core",
+    "@tschk/moonshine-adapter-conformance": "file:../../moonshine/packages/adapter-conformance",
+    "@tschk/moonshine-compiler": "file:../../moonshine/packages/compiler",
+    "@tschk/moonshine-deploy-bun": "file:../../moonshine/packages/deploy-bun",
+    "@tschk/moonshine-framework": "file:../../moonshine/packages/framework",
     "@tschk/moonshine-react": "file:../../moonshine/packages/react",
     "@tschk/moonshine-router": "file:../../moonshine/packages/router",
-    "@tschk/moonshine-framework": "file:../../moonshine/packages/framework",
     "@tschk/moonshine-server": "file:../../moonshine/packages/server",
-    "@tschk/moonshine-compiler": "file:../../moonshine/packages/compiler",
-    "@tschk/moonshine-shaders": "file:../../moonshine/packages/shaders",
-    "@tschk/moonshine-adapter-conformance": "file:../../moonshine/packages/adapter-conformance",
-    "@tschk/crepus-moonshine": "file:../../moonshine/packages/crepus-moonshine",
-    "@tschk/moonshine-deploy-bun": "file:../../moonshine/packages/deploy-bun"
+    "@tschk/moonshine-shaders": "file:../../moonshine/packages/shaders"
   }
 }

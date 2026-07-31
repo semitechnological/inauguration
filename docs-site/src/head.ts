@@ -15,6 +15,12 @@ export const headHtml = `<title>${seoTitle}</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet">
 <script src="/static/splash.js" defer></script>
+<script src="/static/vendor/unocss.js"></script>
+<script>window.addEventListener("load",function(){document.querySelectorAll("[data-crepus-root]").forEach(function(n){n.classList.add("ready")})})</script>
+<style>
+[data-crepus-root] { opacity: 0; }
+[data-crepus-root].ready { opacity: 1; }
+</style>
 <style>
 .in-docs-page {
   --cp-bg: #09090b;
