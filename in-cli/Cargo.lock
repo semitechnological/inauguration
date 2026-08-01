@@ -564,6 +564,7 @@ dependencies = [
  "tree-sitter-javascript",
  "tree-sitter-julia",
  "tree-sitter-kotlin-ng",
+ "tree-sitter-lolcat",
  "tree-sitter-lua",
  "tree-sitter-objc",
  "tree-sitter-ocaml",
@@ -1370,6 +1371,15 @@ name = "tree-sitter-language"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "009994f150cc0cd50ff54917d5bc8bffe8cad10ca10d81c34da2ec421ae61782"
+
+[[package]]
+name = "tree-sitter-lolcat"
+version = "0.0.1"
+source = "git+https://github.com/undivisible/tree-sitter-lolcat.git?branch=master#ba921faa8bc6adc95ab4063e5becd80aae9e567f"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
 
 [[package]]
 name = "tree-sitter-lua"
