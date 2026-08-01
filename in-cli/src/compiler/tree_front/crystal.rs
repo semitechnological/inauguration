@@ -1,26 +1,26 @@
 use super::extract::{
-    ast_body, collect_kinds, node_txt, normalize_entry, AstShape,
+    ast_body, collect_kinds, first_named, node_txt, normalize_entry, AstShape,
 };
 use crate::core_ir::{Decl, Typ};
 use tree_sitter::Node;
 
 const CRYSTAL_AST: AstShape = AstShape {
-    block_kinds: &["source_file", "method_definition", "body"],
-    return_kinds: &[],
-    expr_stmt_kinds: &[],
+    block_kinds: &["source_file", "class_declaration", "body"],
+    return_kinds: &["return_statement"],
+    expr_stmt_kinds: &["expression_statement", "print_statement"],
     local_decl_kinds: &[],
-    assignment_kinds: &[],
+    assignment_kinds: &["assignment"],
     if_kinds: &[],
     while_kinds: &[],
-    call_kinds: &[],
-    arg_container_kinds: &[],
+    call_kinds: &["call"],
+    arg_container_kinds: &["arguments"],
     arg_wrapper_kinds: &[],
     paren_kinds: &[],
-    binary_kinds: &[],
+    binary_kinds: &["binary_expression"],
     unary_kinds: &[],
-    int_kinds: &[],
-    string_kinds: &[],
-    type_kinds: &[],
+    int_kinds: &["int"],
+    string_kinds: &["string"],
+    type_kinds: &["type"],
     local_decl_prefixes: &[],
     shell_first_kinds: &[],
     shell_last_kinds: &[],
@@ -48,7 +48,7 @@ pub(super) fn extract_crystal(src: &[u8], root: Node<'_>) -> Result<Vec<Decl>, S
 fn crystal_method_decl<'a>(src: &[u8], n: Node<'a>) -> Option<Decl> {
     let name_n = n.child_by_field_name("name")?;
     let name = normalize_entry(node_txt(src, name_n).trim());
-    let params = crystal_params(src, n.child_by_field_name("parameters"));
+    let params = crystal_params(src, n);
     let body = ast_body(src, n, CRYSTAL_AST);
     Some(Decl::Function {
         name,
@@ -59,17 +59,15 @@ fn crystal_method_decl<'a>(src: &[u8], n: Node<'a>) -> Option<Decl> {
     })
 }
 
-fn crystal_params<'a>(src: &[u8], params_node: Option<Node<'a>>) -> Vec<(String, Typ)> {
+fn crystal_params<'a>(src: &[u8], n: Node<'a>) -> Vec<(String, Typ)> {
     let mut params = Vec::new();
-    let Some(node) = params_node else {
-        return params;
-    };
-    let text = node_txt(src, node);
-    let inner = text.trim().trim_start_matches('(').trim_end_matches(')');
-    for part in inner.split(',') {
-        let pname = part.split(&[':', '='][..]).next().unwrap_or(part).trim();
-        if !pname.is_empty() {
-            params.push((normalize_entry(pname), Typ::Named("dynamic".into())));
+    let mut param_nodes = Vec::new();
+    collect_kinds(n, &["parameter"], &mut param_nodes);
+    for p in param_nodes {
+        let name_n = p.child_by_field_name("name").or_else(|| first_named(p, "identifier"));
+        if let Some(name_n) = name_n {
+            let pname = normalize_entry(node_txt(src, name_n).trim());
+            params.push((pname, Typ::Named("dynamic".into())));
         }
     }
     params

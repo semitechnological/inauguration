@@ -5031,11 +5031,31 @@ KTHXBYE
 
     #[test]
     fn extract_crystal_method() {
-        let src = r#"def greet(name)
-  puts name
+        let src = r#"class Greeter
+  def initialize(@name : String)
+  end
+
+  def greet(times : Int32)
+    times.times do
+      puts "Hello, #{@name}!"
+    end
+  end
+
+  def name
+    @name
+  end
 end
 "#;
         let m = parse_lang(try_lang_for(ParserId::Crystal).unwrap(), src, extract_crystal).expect("ok");
+        let names: Vec<&str> = m
+            .decls
+            .iter()
+            .filter_map(|d| match d {
+                Decl::Function { name, .. } => Some(name.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(names, vec!["initialize", "greet", "name"]);
         let greet = m
             .decls
             .iter()
@@ -5045,8 +5065,8 @@ end
             Decl::Function { name, params, body, .. } => {
                 assert_eq!(name, "greet");
                 assert_eq!(params.len(), 1);
-                assert_eq!(params[0].0, "name");
-                assert!(!body.is_empty(), "body should not be empty");
+                assert_eq!(params[0].0, "times");
+                assert!(!body.is_empty(), "body should lower statements");
             }
             _ => panic!("expected function"),
         }
@@ -5054,10 +5074,32 @@ end
 
     #[test]
     fn extract_nim_proc() {
-        let src = r#"proc greet(name: string): string =
-  echo name
+        let src = r#"type
+  Greeter = object
+    name: string
+
+proc newGreeter(name: string): Greeter =
+  result = Greeter(name: name)
+
+proc greet(g: Greeter): string =
+  result = "Hello, " & g.name
+
+proc main() =
+  let g = newGreeter("World")
+  echo greet(g)
+
+main()
 "#;
         let m = parse_lang(try_lang_for(ParserId::Nim).unwrap(), src, extract_nim).expect("ok");
+        let names: Vec<&str> = m
+            .decls
+            .iter()
+            .filter_map(|d| match d {
+                Decl::Function { name, .. } => Some(name.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(names, vec!["newGreeter", "greet", "main"]);
         let greet = m
             .decls
             .iter()
@@ -5067,7 +5109,8 @@ end
             Decl::Function { name, params, body, .. } => {
                 assert_eq!(name, "greet");
                 assert_eq!(params.len(), 1);
-                assert_eq!(params[0].0, "name");
+                assert_eq!(params[0].0, "g");
+                assert!(!body.is_empty(), "body should lower statements");
             }
             _ => panic!("expected function"),
         }

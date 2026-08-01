@@ -1251,7 +1251,7 @@ dependencies = [
 [[package]]
 name = "tree-sitter-crystal"
 version = "0.1.0"
-source = "git+https://github.com/undivisible/tree-sitter-crystal.git?branch=master#95813a94bef62098dd440a91cfd60725278080c3"
+source = "git+https://github.com/undivisible/tree-sitter-crystal.git?branch=master#c016476e37c766a32f10cea85413efe435271490"
 dependencies = [
  "cc",
  "tree-sitter-language",
@@ -1406,7 +1406,7 @@ dependencies = [
 [[package]]
 name = "tree-sitter-nim"
 version = "0.1.0"
-source = "git+https://github.com/undivisible/tree-sitter-nim.git?branch=master#2300c98b5b9b49a15e6b3bbc223c4da6f6d4248c"
+source = "git+https://github.com/undivisible/tree-sitter-nim.git?branch=master#aa63f37b2d4920fc3188eda3b4e81041dceada1f"
 dependencies = [
  "cc",
  "tree-sitter-language",
