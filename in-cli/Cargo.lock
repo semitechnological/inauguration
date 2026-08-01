@@ -1251,7 +1251,8 @@ dependencies = [
 [[package]]
 name = "tree-sitter-crystal"
 version = "0.1.0"
-source = "git+https://github.com/undivisible/tree-sitter-crystal.git?branch=master#c016476e37c766a32f10cea85413efe435271490"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f54c017dcecda5f8694ba0afa367da7552fa951cb1aed5c39f6a1fbb207e31a4"
 dependencies = [
  "cc",
  "tree-sitter-language",
@@ -1406,7 +1407,8 @@ dependencies = [
 [[package]]
 name = "tree-sitter-nim"
 version = "0.1.0"
-source = "git+https://github.com/undivisible/tree-sitter-nim.git?branch=master#aa63f37b2d4920fc3188eda3b4e81041dceada1f"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f489c09ddd48f97728ca92b8e6b17a1a56e0e1c4c0c5fd1d0222f1dc494c0bb"
 dependencies = [
  "cc",
  "tree-sitter-language",
