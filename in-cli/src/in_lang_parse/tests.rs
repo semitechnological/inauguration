@@ -694,7 +694,9 @@ fn std_env_import_declares_capability_requirements() {
         vec![
             ("env-get", &["env.read".to_string()][..]),
             ("env-set", &["env.write".to_string()][..]),
-            ("env-has", &["env.read".to_string()][..])
+            ("env-has", &["env.read".to_string()][..]),
+            ("env-temp-dir", &["env.read".to_string()][..]),
+            ("env-current-dir", &["env.read".to_string()][..])
         ]
     );
 }

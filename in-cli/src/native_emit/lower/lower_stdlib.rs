@@ -1064,6 +1064,45 @@ pub(crate) fn lower_stdlib_call(
             )?;
             return Ok(true);
         }
+        "fs-exists" if args.len() == 1 => {
+            emit_stdlib_wrapper_call(
+                emitter,
+                ctx,
+                "in_fs_exists",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
+        "create-dir" if args.len() == 1 => {
+            emit_stdlib_wrapper_call(
+                emitter,
+                ctx,
+                "in_fs_create_dir",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
+        "remove-file" if args.len() == 1 => {
+            emit_stdlib_wrapper_call(
+                emitter,
+                ctx,
+                "in_fs_remove_file",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
         "process-run" if args.len() == 1 => {
             emit_stdlib_wrapper_call(
                 emitter,
@@ -1108,6 +1147,32 @@ pub(crate) fn lower_stdlib_call(
                 emitter,
                 ctx,
                 "in_env_has",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
+        "env-temp-dir" if args.is_empty() => {
+            emit_stdlib_wrapper_call(
+                emitter,
+                ctx,
+                "in_env_temp_dir",
+                args,
+                rd,
+                functions,
+                pending_calls,
+                fn_name,
+            )?;
+            return Ok(true);
+        }
+        "env-current-dir" if args.is_empty() => {
+            emit_stdlib_wrapper_call(
+                emitter,
+                ctx,
+                "in_env_current_dir",
                 args,
                 rd,
                 functions,
