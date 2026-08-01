@@ -552,6 +552,7 @@ dependencies = [
  "tree-sitter-c",
  "tree-sitter-c-sharp",
  "tree-sitter-cpp",
+ "tree-sitter-crystal",
  "tree-sitter-dart",
  "tree-sitter-elixir",
  "tree-sitter-erlang",
@@ -566,6 +567,7 @@ dependencies = [
  "tree-sitter-kotlin-ng",
  "tree-sitter-lolcat",
  "tree-sitter-lua",
+ "tree-sitter-nim",
  "tree-sitter-objc",
  "tree-sitter-ocaml",
  "tree-sitter-perl",
@@ -1247,6 +1249,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "tree-sitter-crystal"
+version = "0.1.0"
+source = "git+https://github.com/undivisible/tree-sitter-crystal.git?branch=master#95813a94bef62098dd440a91cfd60725278080c3"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
 name = "tree-sitter-dart"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1387,6 +1398,15 @@ name = "tree-sitter-lua"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8daaf5f4235188a58603c39760d5fa5d4b920d36a299c934adddae757f32a10c"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-nim"
+version = "0.1.0"
+source = "git+https://github.com/undivisible/tree-sitter-nim.git?branch=master#2300c98b5b9b49a15e6b3bbc223c4da6f6d4248c"
 dependencies = [
  "cc",
  "tree-sitter-language",

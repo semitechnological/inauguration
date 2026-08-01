@@ -25,6 +25,8 @@ mod julia;
 mod kotlin;
 mod lua;
 mod lolcat;
+mod crystal;
+mod nim;
 #[cfg_attr(not(feature = "parse-extended"), allow(dead_code))]
 mod ocaml;
 mod perl;

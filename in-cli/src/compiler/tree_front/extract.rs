@@ -25,7 +25,9 @@ use super::julia::extract_julia;
 #[cfg(feature = "parse-extended")]
 use super::kotlin::extract_kotlin;
 use super::lua::extract_lua;
+use super::crystal::extract_crystal;
 use super::lolcat::extract_lolcat;
+use super::nim::extract_nim;
 #[cfg(feature = "parse-extended")]
 use super::ocaml::extract_ocaml;
 use super::perl::extract_perl;
@@ -85,7 +87,9 @@ use tree_sitter_ruby;
 use tree_sitter_scala;
 #[cfg(feature = "parse-extended")]
 use tree_sitter_v;
+use tree_sitter_crystal;
 use tree_sitter_lolcat;
+use tree_sitter_nim;
 
 /// Try to resolve a ParserId to a Tree-sitter Language.
 fn try_lang_for(id: ParserId) -> Option<Language> {
@@ -135,6 +139,8 @@ fn try_lang_for(id: ParserId) -> Option<Language> {
         #[cfg(feature = "parse-extended")]
         ParserId::V => tree_sitter_v::LANGUAGE.into(),
         ParserId::Lolcode => tree_sitter_lolcat::LANGUAGE.into(),
+        ParserId::Crystal => tree_sitter_crystal::LANGUAGE.into(),
+        ParserId::Nim => tree_sitter_nim::LANGUAGE.into(),
         _ => return None,
     })
 }
@@ -524,6 +530,26 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
             src,
             extract_lolcat,
         ),
+        ParserId::Crystal => parse_lang(
+            try_lang_for(ParserId::Crystal).ok_or_else(|| {
+                format!(
+                    "Parser `{}` unavailable in this build",
+                    ParserId::Crystal.as_str()
+                )
+            })?,
+            src,
+            extract_crystal,
+        ),
+        ParserId::Nim => parse_lang(
+            try_lang_for(ParserId::Nim).ok_or_else(|| {
+                format!(
+                    "Parser `{}` unavailable in this build",
+                    ParserId::Nim.as_str()
+                )
+            })?,
+            src,
+            extract_nim,
+        ),
         _ => parse_textual_polyglot_module(id, src),
     }
 }
@@ -630,42 +656,6 @@ pub fn parse_textual_polyglot_module(id: ParserId, src: &str) -> Result<UnifiedM
                                 type_params: vec![],
                             });
                         }
-                    }
-                }
-            }
-        }
-        ParserId::Nim => {
-            for line in &lines {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("proc ")
-                    .or_else(|| trimmed.strip_prefix("func "))
-                {
-                    let name = normalize_entry(rest.split(&['(', ':', '='][..]).next().unwrap_or(rest).trim());
-                    if !name.is_empty() {
-                        decls.push(Decl::Function {
-                            name,
-                            params: vec![],
-                            ret: Typ::Named("dynamic".into()),
-                            body: vec![],
-                            type_params: vec![],
-                        });
-                    }
-                }
-            }
-        }
-        ParserId::Crystal => {
-            for line in &lines {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("def ") {
-                    let name = normalize_entry(rest.split(&['(', ':', '\n'][..]).next().unwrap_or(rest).trim());
-                    if !name.is_empty() && name != "initialize" {
-                        decls.push(Decl::Function {
-                            name,
-                            params: vec![],
-                            ret: Typ::Named("dynamic".into()),
-                            body: vec![],
-                            type_params: vec![],
-                        });
                     }
                 }
             }
@@ -5030,14 +5020,6 @@ KTHXBYE
         let m = parse_textual_polyglot_module(ParserId::Fortran, fortran).expect("fortran ok");
         assert!(m.decls.iter().any(|d| matches!(d, Decl::Function { name, .. } if name == "hello")));
 
-        let nim = "proc greet(name: string) =\n  echo name";
-        let m = parse_textual_polyglot_module(ParserId::Nim, nim).expect("nim ok");
-        assert!(m.decls.iter().any(|d| matches!(d, Decl::Function { name, .. } if name == "greet")));
-
-        let crystal = "def greet(name)\n  puts name\nend";
-        let m = parse_textual_polyglot_module(ParserId::Crystal, crystal).expect("crystal ok");
-        assert!(m.decls.iter().any(|d| matches!(d, Decl::Function { name, .. } if name == "greet")));
-
         let odin = "main :: proc() {\n}";
         let m = parse_textual_polyglot_module(ParserId::Odin, odin).expect("odin ok");
         assert!(m.decls.iter().any(|d| matches!(d, Decl::Function { name, .. } if name == "main")));
@@ -5045,9 +5027,49 @@ KTHXBYE
         let hare = "export fn main() void = {\n};";
         let m = parse_textual_polyglot_module(ParserId::Hare, hare).expect("hare ok");
         assert!(m.decls.iter().any(|d| matches!(d, Decl::Function { name, .. } if name == "main")));
+    }
 
-        let clojure = "(defn greet [name] (println name))";
-        let m = parse_textual_polyglot_module(ParserId::Clojure, clojure).expect("clojure ok");
-        assert!(m.decls.iter().any(|d| matches!(d, Decl::Function { name, .. } if name == "greet")));
+    #[test]
+    fn extract_crystal_method() {
+        let src = r#"def greet(name)
+  puts name
+end
+"#;
+        let m = parse_lang(try_lang_for(ParserId::Crystal).unwrap(), src, extract_crystal).expect("ok");
+        let greet = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "greet"))
+            .expect("greet method");
+        match greet {
+            Decl::Function { name, params, body, .. } => {
+                assert_eq!(name, "greet");
+                assert_eq!(params.len(), 1);
+                assert_eq!(params[0].0, "name");
+                assert!(!body.is_empty(), "body should not be empty");
+            }
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn extract_nim_proc() {
+        let src = r#"proc greet(name: string): string =
+  echo name
+"#;
+        let m = parse_lang(try_lang_for(ParserId::Nim).unwrap(), src, extract_nim).expect("ok");
+        let greet = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "greet"))
+            .expect("greet proc");
+        match greet {
+            Decl::Function { name, params, body, .. } => {
+                assert_eq!(name, "greet");
+                assert_eq!(params.len(), 1);
+                assert_eq!(params[0].0, "name");
+            }
+            _ => panic!("expected function"),
+        }
     }
 }
