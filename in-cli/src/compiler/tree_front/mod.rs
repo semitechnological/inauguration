@@ -24,6 +24,7 @@ mod julia;
 #[cfg_attr(not(feature = "parse-extended"), allow(dead_code))]
 mod kotlin;
 mod lua;
+mod lolcat;
 #[cfg_attr(not(feature = "parse-extended"), allow(dead_code))]
 mod ocaml;
 mod perl;
