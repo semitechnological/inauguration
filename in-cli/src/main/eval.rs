@@ -710,6 +710,15 @@ pub(crate) fn wrap_eval_expression(
                 None
             }
         }
+        parser_registry::ParserId::Fortran => Some(format!(
+            "program main\n  implicit none\n  print *, {code}\nend program main"
+        )),
+        parser_registry::ParserId::Cobol => Some(format!(
+            "IDENTIFICATION DIVISION.\nPROGRAM-ID. MAIN.\nPROCEDURE DIVISION.\n    DISPLAY {code}.\n    STOP RUN."
+        )),
+        parser_registry::ParserId::Lolcode => Some(format!(
+            "HAI 1.2\nI HAS A RESULT ITZ {code}\nVISIBLE RESULT\nKTHXBYE"
+        )),
         _ => None,
     }
 }
@@ -798,6 +807,15 @@ pub(crate) fn wrap_eval_statement(
         parser_registry::ParserId::Cpp | parser_registry::ParserId::ObjCpp => {
             Some(format!("int main() {{ {code}; return 0; }}"))
         }
+        parser_registry::ParserId::Fortran => Some(format!(
+            "program main\n  implicit none\n  {code}\nend program main"
+        )),
+        parser_registry::ParserId::Cobol => Some(format!(
+            "IDENTIFICATION DIVISION.\nPROGRAM-ID. MAIN.\nPROCEDURE DIVISION.\n    {code}.\n    STOP RUN."
+        )),
+        parser_registry::ParserId::Lolcode => Some(format!(
+            "HAI 1.2\n{code}\nKTHXBYE"
+        )),
         _ => None,
     }
 }
