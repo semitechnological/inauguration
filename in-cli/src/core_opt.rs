@@ -487,11 +487,34 @@ fn simplify_expr(e: Expr) -> Expr {
     // Clone-and-match on owned value to avoid borrow gymnastics
     match e.clone() {
         Expr::Binary { op, lhs, rhs, .. } => {
+            if let (Expr::IntLit(a), Expr::IntLit(b)) = (lhs.as_ref(), rhs.as_ref()) {
+                match op.as_str() {
+                    "add" | "+" => return Expr::IntLit(a + b),
+                    "sub" | "-" => return Expr::IntLit(a - b),
+                    "mul" | "*" => return Expr::IntLit(a * b),
+                    "div" | "/" if *b != 0 => return Expr::IntLit(a / b),
+                    "mod" | "%" if *b != 0 => return Expr::IntLit(a % b),
+                    _ => {}
+                }
+            }
             let is_zero = |e: &Expr| matches!(e, Expr::IntLit(0));
             let is_one = |e: &Expr| matches!(e, Expr::IntLit(1));
             let is_neg1 = |e: &Expr| matches!(e, Expr::IntLit(-1));
+            let is_true = |e: &Expr| matches!(e, Expr::BoolLit(true));
+            let is_false = |e: &Expr| matches!(e, Expr::BoolLit(false));
             match op.as_str() {
-                "add" | "+" | "bor" | "|" | "xor" | "^" => {
+                "add" | "+" => {
+                    if is_zero(&lhs) {
+                        return *rhs;
+                    }
+                    if is_zero(&rhs) {
+                        return *lhs;
+                    }
+                }
+                "bor" | "|" => {
+                    if is_neg1(&lhs) || is_neg1(&rhs) {
+                        return Expr::IntLit(-1);
+                    }
                     if is_zero(&lhs) {
                         return *rhs;
                     }
@@ -500,6 +523,15 @@ fn simplify_expr(e: Expr) -> Expr {
                     }
                 }
                 "land" | "&&" => {
+                    if is_false(&lhs) || is_false(&rhs) {
+                        return Expr::BoolLit(false);
+                    }
+                    if is_true(&lhs) {
+                        return *rhs;
+                    }
+                    if is_true(&rhs) {
+                        return *lhs;
+                    }
                     if is_zero(&lhs) || is_zero(&rhs) {
                         return Expr::IntLit(0);
                     }
@@ -511,6 +543,15 @@ fn simplify_expr(e: Expr) -> Expr {
                     }
                 }
                 "lor" | "||" => {
+                    if is_true(&lhs) || is_true(&rhs) {
+                        return Expr::BoolLit(true);
+                    }
+                    if is_false(&lhs) {
+                        return *rhs;
+                    }
+                    if is_false(&rhs) {
+                        return *lhs;
+                    }
                     if is_one(&lhs) || is_one(&rhs) {
                         return Expr::IntLit(1);
                     }
@@ -524,6 +565,40 @@ fn simplify_expr(e: Expr) -> Expr {
                 "sub" | "-" => {
                     if is_zero(&rhs) {
                         return *lhs;
+                    }
+                    if lhs == rhs && matches!(lhs.as_ref(), Expr::Ident(_) | Expr::IntLit(_)) {
+                        return Expr::IntLit(0);
+                    }
+                }
+                "xor" | "^" => {
+                    if is_zero(&lhs) {
+                        return *rhs;
+                    }
+                    if is_zero(&rhs) {
+                        return *lhs;
+                    }
+                    if lhs == rhs && matches!(lhs.as_ref(), Expr::Ident(_) | Expr::IntLit(_) | Expr::BoolLit(_)) {
+                        return Expr::IntLit(0);
+                    }
+                }
+                "==" => {
+                    if lhs == rhs && matches!(lhs.as_ref(), Expr::Ident(_) | Expr::IntLit(_) | Expr::BoolLit(_) | Expr::StringLit(_)) {
+                        return Expr::BoolLit(true);
+                    }
+                }
+                "!=" => {
+                    if lhs == rhs && matches!(lhs.as_ref(), Expr::Ident(_) | Expr::IntLit(_) | Expr::BoolLit(_) | Expr::StringLit(_)) {
+                        return Expr::BoolLit(false);
+                    }
+                }
+                ">" | "<" | "gt" | "lt" => {
+                    if lhs == rhs && matches!(lhs.as_ref(), Expr::Ident(_) | Expr::IntLit(_)) {
+                        return Expr::BoolLit(false);
+                    }
+                }
+                ">=" | "<=" | "ge" | "le" => {
+                    if lhs == rhs && matches!(lhs.as_ref(), Expr::Ident(_) | Expr::IntLit(_)) {
+                        return Expr::BoolLit(true);
                     }
                 }
                 "mul" | "*" => {
@@ -553,8 +628,13 @@ fn simplify_expr(e: Expr) -> Expr {
                         return *lhs;
                     }
                 }
-                "shl" | "<<" | "shr" | ">>" if is_zero(&rhs) => {
-                    return *lhs;
+                "shl" | "<<" | "shr" | ">>" => {
+                    if is_zero(&rhs) {
+                        return *lhs;
+                    }
+                    if is_zero(&lhs) {
+                        return Expr::IntLit(0);
+                    }
                 }
                 _ => {}
             }
@@ -562,25 +642,25 @@ fn simplify_expr(e: Expr) -> Expr {
         }
         Expr::Unary { op, expr, .. } => {
             match op.as_str() {
-                "neg" => {
+                "neg" | "-" => {
                     if let Expr::Unary {
-                        op: inner_op,
-                        expr: inner_expr,
+                        op: ref inner_op,
+                        expr: ref inner_expr,
                     } = *expr
                     {
-                        if inner_op == "neg" {
-                            return *inner_expr;
+                        if inner_op == "neg" || inner_op == "-" {
+                            return *inner_expr.clone();
                         }
                     }
                 }
-                "not" => {
+                "not" | "!" => {
                     if let Expr::Unary {
-                        op: inner_op,
-                        expr: inner_expr2,
+                        op: ref inner_op,
+                        expr: ref inner_expr2,
                     } = *expr
                     {
-                        if inner_op == "not" {
-                            return *inner_expr2;
+                        if inner_op == "not" || inner_op == "!" {
+                            return *inner_expr2.clone();
                         }
                     }
                 }
@@ -2059,5 +2139,79 @@ mod tests {
         let mut refs = Vec::new();
         detect_ptr_refs(&decls, &mut refs);
         assert!(refs.contains(&"bar".to_string()));
+    }
+
+    #[test]
+    fn algebraic_simplify_double_negation_and_self_identities() {
+        let double_neg = simplify_expr(Expr::Unary {
+            op: "!".into(),
+            expr: Box::new(Expr::Unary {
+                op: "!".into(),
+                expr: Box::new(ident("x")),
+            }),
+        });
+        assert_eq!(double_neg, ident("x"));
+
+        let double_minus = simplify_expr(Expr::Unary {
+            op: "-".into(),
+            expr: Box::new(Expr::Unary {
+                op: "-".into(),
+                expr: Box::new(ident("n")),
+            }),
+        });
+        assert_eq!(double_minus, ident("n"));
+
+        let self_xor = simplify_expr(Expr::Binary {
+            op: "^".into(),
+            lhs: Box::new(ident("a")),
+            rhs: Box::new(ident("a")),
+        });
+        assert_eq!(self_xor, Expr::IntLit(0));
+
+        let self_sub = simplify_expr(Expr::Binary {
+            op: "-".into(),
+            lhs: Box::new(ident("a")),
+            rhs: Box::new(ident("a")),
+        });
+        assert_eq!(self_sub, Expr::IntLit(0));
+
+        let self_eq = simplify_expr(Expr::Binary {
+            op: "==".into(),
+            lhs: Box::new(ident("a")),
+            rhs: Box::new(ident("a")),
+        });
+        assert_eq!(self_eq, Expr::BoolLit(true));
+    }
+
+    #[test]
+    fn simplify_arithmetic_constant_folding() {
+        assert_eq!(
+            simplify_expr(bin("+", Expr::IntLit(2), Expr::IntLit(3))),
+            Expr::IntLit(5)
+        );
+        assert_eq!(
+            simplify_expr(bin("-", Expr::IntLit(10), Expr::IntLit(3))),
+            Expr::IntLit(7)
+        );
+        assert_eq!(
+            simplify_expr(bin("*", Expr::IntLit(4), Expr::IntLit(5))),
+            Expr::IntLit(20)
+        );
+    }
+
+    #[test]
+    fn simplify_boolean() {
+        assert_eq!(
+            simplify_expr(bin("&&", ident("x"), Expr::BoolLit(true))),
+            ident("x")
+        );
+    }
+
+    #[test]
+    fn simplify_multiplication_identity_explicit() {
+        assert_eq!(
+            simplify_expr(bin("*", ident("x"), Expr::IntLit(1))),
+            ident("x")
+        );
     }
 }
