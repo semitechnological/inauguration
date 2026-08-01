@@ -352,6 +352,36 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         example: "apps/polyglot-sample/sample.hc",
         next_step: "Declarators, classes, asm strings, deeper body lowering",
     },
+    LanguageSupport {
+        language: "COBOL",
+        parser_id: Some("cobol"),
+        extensions: &["cob", "cbl"],
+        capabilities: &["parse", "lower"],
+        front: "compiler::tree_front",
+        runtime_boundary: "Core IR declarations only; COBOL runtime is not bundled",
+        example: "docs/parser-surface.md",
+        next_step: "Add program-id extraction, paragraph lowering, and runtime strategy",
+    },
+    LanguageSupport {
+        language: "Fortran",
+        parser_id: Some("fortran"),
+        extensions: &["f90", "f", "for", "f95"],
+        capabilities: &["parse", "lower"],
+        front: "compiler::tree_front",
+        runtime_boundary: "Core IR declarations only; Fortran runtime is not bundled",
+        example: "docs/parser-surface.md",
+        next_step: "Add subroutines, modules, arrays, and runtime strategy",
+    },
+    LanguageSupport {
+        language: "LOLCODE",
+        parser_id: Some("lolcode"),
+        extensions: &["lol"],
+        capabilities: &["parse", "lower"],
+        front: "compiler::tree_front",
+        runtime_boundary: "Core IR declarations only; LOLCODE runtime is not bundled",
+        example: "docs/parser-surface.md",
+        next_step: "Add HAI/KTHXBYE top-level extraction and visible statement lowering",
+    },
 ];
 
 #[must_use]
@@ -405,6 +435,9 @@ mod tests {
             ParserId::Julia,
             ParserId::R,
             ParserId::HolyC,
+            ParserId::Cobol,
+            ParserId::Fortran,
+            ParserId::Lolcode,
         ] {
             assert!(
                 LANGUAGE_SUPPORT
@@ -474,7 +507,7 @@ mod tests {
     fn test_all_language_support() {
         let all = all_language_support();
         assert!(!all.is_empty());
-        assert_eq!(all.len(), 32);
+        assert_eq!(all.len(), 35);
     }
 
     #[test]
