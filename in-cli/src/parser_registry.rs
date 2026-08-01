@@ -73,6 +73,9 @@ pub enum ParserId {
     Odin,
     Hare,
     HolyC,
+    Cobol,
+    Fortran,
+    Lolcode,
 }
 
 impl ParserId {
@@ -118,6 +121,9 @@ impl ParserId {
             ParserId::Odin => "odin",
             ParserId::Hare => "hare",
             ParserId::HolyC => "holyc",
+            ParserId::Cobol => "cobol",
+            ParserId::Fortran => "fortran",
+            ParserId::Lolcode => "lolcode",
         }
     }
 
@@ -143,9 +149,11 @@ impl ParserId {
             | ParserId::Haskell
             | ParserId::OCaml => "functional",
             ParserId::Groovy => "JVM scripting",
-            ParserId::Julia | ParserId::R => "numeric / scientific",
+            ParserId::Julia | ParserId::R | ParserId::Fortran => "numeric / scientific",
             ParserId::Nim | ParserId::D | ParserId::Crystal => "ALGOL-descended",
             ParserId::Odin | ParserId::Hare | ParserId::HolyC => "systems / native",
+            ParserId::Cobol => "legacy / business",
+            ParserId::Lolcode => "esoteric / dynamic",
         }
     }
 
@@ -191,6 +199,9 @@ impl ParserId {
             ParserId::Odin => "odin",
             ParserId::Hare => "ha",
             ParserId::HolyC => "hc",
+            ParserId::Cobol => "cob",
+            ParserId::Fortran => "f90",
+            ParserId::Lolcode => "lol",
         }
     }
 }
@@ -237,8 +248,10 @@ pub fn parser_id_from_extension(ext: &str) -> Option<ParserId> {
         "cr" => Some(ParserId::Crystal),
         "odin" => Some(ParserId::Odin),
         "ha" => Some(ParserId::Hare),
-
         "hc" => Some(ParserId::HolyC),
+        "cob" | "cbl" => Some(ParserId::Cobol),
+        "f90" | "f" | "for" | "f95" => Some(ParserId::Fortran),
+        "lol" | "lolcode" => Some(ParserId::Lolcode),
         _ => None,
     }
 }
@@ -262,6 +275,9 @@ pub fn parser_id_from_magic_token(token: &str) -> Option<ParserId> {
             "ocaml" => Some(ParserId::OCaml),
             "icore" => Some(ParserId::Icore),
             "holyc" | "holy-c" => Some(ParserId::HolyC),
+            "cobol" => Some(ParserId::Cobol),
+            "fortran" => Some(ParserId::Fortran),
+            "lolcode" | "lol" => Some(ParserId::Lolcode),
             _ => None,
         }
     })
@@ -314,6 +330,9 @@ pub fn parser_id_from_cli_token(token: &str) -> Option<ParserId> {
             "odin" => Some(ParserId::Odin),
             "hare" => Some(ParserId::Hare),
             "holyc" | "holy-c" => Some(ParserId::HolyC),
+            "cobol" | "cob" => Some(ParserId::Cobol),
+            "fortran" | "f90" => Some(ParserId::Fortran),
+            "lolcode" | "lol" => Some(ParserId::Lolcode),
             _ => None,
         })
     }
