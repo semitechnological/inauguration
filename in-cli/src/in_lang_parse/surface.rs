@@ -63,10 +63,17 @@ pub(crate) fn std_binding(name: &str, caps: Vec<String>) -> InExternBinding {
 
 pub fn in_standard_import_bindings(import: &str) -> Vec<InExternBinding> {
     match normalize_import_path(import) {
-        "std.io" => vec![std_binding("print", vec!["process.stdout".into()])],
+        "std.io" => vec![
+            std_binding("print", vec!["process.stdout".into()]),
+            std_binding("println", vec!["process.stdout".into()]),
+            std_binding("eprintln", vec!["process.stderr".into()]),
+        ],
         "std.fs" => vec![
             std_binding("read-file", vec!["fs.read".into()]),
             std_binding("write-file", vec!["fs.write".into()]),
+            std_binding("fs-exists", vec!["fs.read".into()]),
+            std_binding("create-dir", vec!["fs.write".into()]),
+            std_binding("remove-file", vec!["fs.write".into()]),
         ],
         "std.http" => vec![std_binding("http-get", vec!["network.http".into()])],
         "std.json" => vec![
@@ -82,6 +89,8 @@ pub fn in_standard_import_bindings(import: &str) -> Vec<InExternBinding> {
             std_binding("env-get", vec!["env.read".into()]),
             std_binding("env-set", vec!["env.write".into()]),
             std_binding("env-has", vec!["env.read".into()]),
+            std_binding("env-temp-dir", vec!["env.read".into()]),
+            std_binding("env-current-dir", vec!["env.read".into()]),
         ],
         "std.path" => vec![
             std_binding("path-join", Vec::new()),
@@ -107,7 +116,7 @@ pub(crate) fn binding_decl(binding: &InExternBinding) -> Decl {
     }
     // Standard library named bindings (legacy imports like "std.io", "std.fs")
     match binding.name.as_str() {
-        "print" => Decl::Function {
+        "print" | "println" | "eprintln" => Decl::Function {
             name: binding.name.clone(),
             params: vec![("text".into(), Typ::String)],
             ret: Typ::Void,
@@ -124,6 +133,13 @@ pub(crate) fn binding_decl(binding: &InExternBinding) -> Decl {
         "write-file" => Decl::Function {
             name: binding.name.clone(),
             params: vec![("path".into(), Typ::String), ("text".into(), Typ::String)],
+            ret: Typ::Bool,
+            body: Vec::new(),
+            type_params: vec![],
+        },
+        "fs-exists" | "create-dir" | "remove-file" => Decl::Function {
+            name: binding.name.clone(),
+            params: vec![("path".into(), Typ::String)],
             ret: Typ::Bool,
             body: Vec::new(),
             type_params: vec![],
@@ -181,6 +197,13 @@ pub(crate) fn binding_decl(binding: &InExternBinding) -> Decl {
             name: binding.name.clone(),
             params: vec![("name".into(), Typ::String)],
             ret: Typ::Bool,
+            body: Vec::new(),
+            type_params: vec![],
+        },
+        "env-temp-dir" | "env-current-dir" => Decl::Function {
+            name: binding.name.clone(),
+            params: Vec::new(),
+            ret: Typ::String,
             body: Vec::new(),
             type_params: vec![],
         },
