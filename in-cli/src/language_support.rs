@@ -382,6 +382,76 @@ pub const LANGUAGE_SUPPORT: &[LanguageSupport] = &[
         example: "docs/parser-surface.md",
         next_step: "Add HAI/KTHXBYE top-level extraction and visible statement lowering",
     },
+    LanguageSupport {
+        language: "Crystal",
+        parser_id: Some("crystal"),
+        extensions: &["cr"],
+        capabilities: &["parse", "lower"],
+        front: "compiler::tree_front",
+        runtime_boundary: "Core IR declarations only; Crystal runtime is not bundled",
+        example: "docs/parser-surface.md",
+        next_step: "Named statement rules for body-level lowering",
+    },
+    LanguageSupport {
+        language: "Nim",
+        parser_id: Some("nim"),
+        extensions: &["nim"],
+        capabilities: &["parse", "lower"],
+        front: "compiler::tree_front",
+        runtime_boundary: "Core IR declarations only; Nim runtime is not bundled",
+        example: "docs/parser-surface.md",
+        next_step: "Named statement rules for body-level lowering",
+    },
+    LanguageSupport {
+        language: "VbNet",
+        parser_id: Some("vb"),
+        extensions: &["vb"],
+        capabilities: &["parse", "lower"],
+        front: "compiler::tree_front",
+        runtime_boundary: "Core IR declarations only; VB.NET runtime is not bundled",
+        example: "docs/parser-surface.md",
+        next_step: "Real tree-sitter grammar; Sub/Function lines only today",
+    },
+    LanguageSupport {
+        language: "Clojure",
+        parser_id: Some("clojure"),
+        extensions: &["clj"],
+        capabilities: &["parse", "lower"],
+        front: "compiler::tree_front",
+        runtime_boundary: "Core IR declarations only; Clojure runtime is not bundled",
+        example: "docs/parser-surface.md",
+        next_step: "Real tree-sitter grammar; (defn ...) lines only today",
+    },
+    LanguageSupport {
+        language: "D",
+        parser_id: Some("d"),
+        extensions: &["d"],
+        capabilities: &["parse", "lower"],
+        front: "compiler::tree_front",
+        runtime_boundary: "Core IR declarations only; D runtime is not bundled",
+        example: "docs/parser-surface.md",
+        next_step: "Real tree-sitter grammar; heuristic decl lines only today",
+    },
+    LanguageSupport {
+        language: "Odin",
+        parser_id: Some("odin"),
+        extensions: &["odin"],
+        capabilities: &["parse", "lower"],
+        front: "compiler::tree_front",
+        runtime_boundary: "Core IR declarations only; Odin runtime is not bundled",
+        example: "docs/parser-surface.md",
+        next_step: "Real tree-sitter grammar; `:: proc(` lines only today",
+    },
+    LanguageSupport {
+        language: "Hare",
+        parser_id: Some("hare"),
+        extensions: &["ha"],
+        capabilities: &["parse", "lower"],
+        front: "compiler::tree_front",
+        runtime_boundary: "Core IR declarations only; Hare runtime is not bundled",
+        example: "docs/parser-surface.md",
+        next_step: "Real tree-sitter grammar; fn lines only today",
+    },
 ];
 
 #[must_use]
@@ -438,6 +508,13 @@ mod tests {
             ParserId::Cobol,
             ParserId::Fortran,
             ParserId::Lolcode,
+            ParserId::Crystal,
+            ParserId::Nim,
+            ParserId::VbNet,
+            ParserId::Clojure,
+            ParserId::D,
+            ParserId::Odin,
+            ParserId::Hare,
         ] {
             assert!(
                 LANGUAGE_SUPPORT
@@ -507,7 +584,7 @@ mod tests {
     fn test_all_language_support() {
         let all = all_language_support();
         assert!(!all.is_empty());
-        assert_eq!(all.len(), 35);
+        assert_eq!(all.len(), 42);
     }
 
     #[test]
