@@ -25,6 +25,7 @@ use super::julia::extract_julia;
 #[cfg(feature = "parse-extended")]
 use super::kotlin::extract_kotlin;
 use super::lua::extract_lua;
+use super::lolcat::extract_lolcat;
 #[cfg(feature = "parse-extended")]
 use super::ocaml::extract_ocaml;
 use super::perl::extract_perl;
@@ -84,6 +85,7 @@ use tree_sitter_ruby;
 use tree_sitter_scala;
 #[cfg(feature = "parse-extended")]
 use tree_sitter_v;
+use tree_sitter_lolcat;
 
 /// Try to resolve a ParserId to a Tree-sitter Language.
 fn try_lang_for(id: ParserId) -> Option<Language> {
@@ -132,6 +134,7 @@ fn try_lang_for(id: ParserId) -> Option<Language> {
         ParserId::R => tree_sitter_r::LANGUAGE.into(),
         #[cfg(feature = "parse-extended")]
         ParserId::V => tree_sitter_v::LANGUAGE.into(),
+        ParserId::Lolcode => tree_sitter_lolcat::LANGUAGE.into(),
         _ => return None,
     })
 }
@@ -513,6 +516,16 @@ fn dispatch(id: ParserId, _path: &Path, src: &str) -> Result<UnifiedModule, Stri
             })?,
             src,
             extract_holyc,
+        ),
+        ParserId::Lolcode => parse_lang(
+            try_lang_for(ParserId::Lolcode).ok_or_else(|| {
+                format!(
+                    "Parser `{}` unavailable in this build",
+                    ParserId::Lolcode.as_str()
+                )
+            })?,
+            src,
+            extract_lolcat,
         ),
         _ => Err(format!(
             "Parser `{}` unavailable in this build",
@@ -4785,6 +4798,33 @@ sub main {
                 }
                 other => panic!("unexpected body: {other:?}"),
             },
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn extract_lolcat_eval_function() {
+        let src = r#"HAI 1.2
+  HOW IZ I add YR x AN YR y
+    I HAS A result ITZ SUM OF x AN y
+    FOUND YR result
+  IF U SAY SO
+KTHXBYE
+"#;
+        let m = parse_lang(try_lang_for(ParserId::Lolcode).unwrap(), src, extract_lolcat).expect("ok");
+        let add = m
+            .decls
+            .iter()
+            .find(|d| matches!(d, Decl::Function { name, .. } if name == "add"))
+            .expect("add function");
+        match add {
+            Decl::Function { name, params, body, .. } => {
+                assert_eq!(name, "add");
+                assert_eq!(params.len(), 2);
+                assert_eq!(params[0].0, "x");
+                assert_eq!(params[1].0, "y");
+                assert!(!body.is_empty(), "body should not be empty");
+            }
             _ => panic!("expected function"),
         }
     }
