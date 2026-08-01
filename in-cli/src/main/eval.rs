@@ -656,7 +656,7 @@ pub(crate) fn wrap_eval_expression(
         parser_registry::ParserId::Haskell => {
             Some(format!("main = {}", render_haskell_eval_expr(code)))
         }
-        parser_registry::ParserId::Nim => Some(format!("proc main(): {ret} =\n  return {code}")),
+        parser_registry::ParserId::Nim => Some(format!("proc main(): {ret} =\n  {code}")),
         parser_registry::ParserId::FSharp => Some(format!("let main _ : {ret} = {code}")),
         parser_registry::ParserId::Odin => Some(format!(
             "package main\n\nmain :: proc() -> {ret} {{\n\treturn {code}\n}}\n"
@@ -719,8 +719,6 @@ pub(crate) fn wrap_eval_expression(
         parser_registry::ParserId::Lolcode => Some(format!(
             "HAI 1.2\nI HAS A RESULT ITZ {code}\nVISIBLE RESULT\nKTHXBYE"
         )),
-        parser_registry::ParserId::Crystal => Some(format!("def main\n  puts {code}\nend")),
-        parser_registry::ParserId::Nim => Some(format!("proc main() =\n  echo {code}")),
         _ => None,
     }
 }
@@ -818,8 +816,6 @@ pub(crate) fn wrap_eval_statement(
         parser_registry::ParserId::Lolcode => Some(format!(
             "HAI 1.2\n{code}\nKTHXBYE"
         )),
-        parser_registry::ParserId::Crystal => Some(format!("def main\n  {code}\nend")),
-        parser_registry::ParserId::Nim => Some(format!("proc main() =\n  {code}")),
         _ => None,
     }
 }
