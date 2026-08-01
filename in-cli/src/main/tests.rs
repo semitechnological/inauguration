@@ -1114,7 +1114,7 @@ fn eval_wraps_crystal_statement() {
 fn eval_wraps_nim_expression() {
     let plans = crate::eval::eval_plans(inauguration::parser_registry::ParserId::Nim, "1 + 2");
     assert_eq!(plans.len(), 2);
-    assert_eq!(plans[0].wrapped, "proc main(): int =\n  return 1 + 2");
+    assert_eq!(plans[0].wrapped, "proc main(): int =\n  1 + 2");
     assert!(plans[0].print_result);
 }
 
@@ -1123,7 +1123,7 @@ fn eval_wraps_nim_statement() {
     let plans =
         crate::eval::eval_plans(inauguration::parser_registry::ParserId::Nim, "echo \"hi\"");
     assert_eq!(plans.len(), 2);
-    assert_eq!(plans[0].wrapped, "proc main(): int =\n  return echo \"hi\"");
+    assert_eq!(plans[0].wrapped, "proc main(): int =\n  echo \"hi\"");
     assert!(plans[0].print_result);
 }
 
