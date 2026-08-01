@@ -719,6 +719,8 @@ pub(crate) fn wrap_eval_expression(
         parser_registry::ParserId::Lolcode => Some(format!(
             "HAI 1.2\nI HAS A RESULT ITZ {code}\nVISIBLE RESULT\nKTHXBYE"
         )),
+        parser_registry::ParserId::Crystal => Some(format!("def main\n  puts {code}\nend")),
+        parser_registry::ParserId::Nim => Some(format!("proc main() =\n  echo {code}")),
         _ => None,
     }
 }
@@ -816,6 +818,8 @@ pub(crate) fn wrap_eval_statement(
         parser_registry::ParserId::Lolcode => Some(format!(
             "HAI 1.2\n{code}\nKTHXBYE"
         )),
+        parser_registry::ParserId::Crystal => Some(format!("def main\n  {code}\nend")),
+        parser_registry::ParserId::Nim => Some(format!("proc main() =\n  {code}")),
         _ => None,
     }
 }
