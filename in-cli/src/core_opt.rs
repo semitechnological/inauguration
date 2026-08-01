@@ -489,10 +489,24 @@ fn simplify_expr(e: Expr) -> Expr {
         Expr::Binary { op, lhs, rhs, .. } => {
             if let (Expr::IntLit(a), Expr::IntLit(b)) = (lhs.as_ref(), rhs.as_ref()) {
                 match op.as_str() {
-                    "add" | "+" => return Expr::IntLit(a + b),
-                    "sub" | "-" => return Expr::IntLit(a - b),
-                    "mul" | "*" => return Expr::IntLit(a * b),
-                    "div" | "/" if *b != 0 => return Expr::IntLit(a / b),
+                    "add" | "+" => {
+                        if let Some(v) = a.checked_add(*b) {
+                            return Expr::IntLit(v);
+                        }
+                    }
+                    "sub" | "-" => {
+                        if let Some(v) = a.checked_sub(*b) {
+                            return Expr::IntLit(v);
+                        }
+                    }
+                    "mul" | "*" => {
+                        if let Some(v) = a.checked_mul(*b) {
+                            return Expr::IntLit(v);
+                        }
+                    }
+                    "div" | "/" if *b != 0 && !(*a == i64::MIN && *b == -1) => {
+                        return Expr::IntLit(a / b)
+                    }
                     "mod" | "%" if *b != 0 => return Expr::IntLit(a % b),
                     _ => {}
                 }
@@ -2196,6 +2210,15 @@ mod tests {
         assert_eq!(
             simplify_expr(bin("*", Expr::IntLit(4), Expr::IntLit(5))),
             Expr::IntLit(20)
+        );
+        // Overflow must not fold (i64::MAX + 1 would panic/wrap otherwise).
+        assert_eq!(
+            simplify_expr(bin("+", Expr::IntLit(i64::MAX), Expr::IntLit(1))),
+            bin("+", Expr::IntLit(i64::MAX), Expr::IntLit(1))
+        );
+        assert_eq!(
+            simplify_expr(bin("/", Expr::IntLit(i64::MIN), Expr::IntLit(-1))),
+            bin("/", Expr::IntLit(i64::MIN), Expr::IntLit(-1))
         );
     }
 
