@@ -165,6 +165,15 @@ pub fn is_intrinsic(name: &str) -> bool {
     )
 }
 
+fn function_sig<'a>(facts: &ModuleFacts<'a>, name: &str) -> Option<FunctionSig<'a>> {
+    facts.functions.get(name).copied().or_else(|| {
+        let kebab_name = name.replace('_', "-");
+        (kebab_name != name)
+            .then(|| facts.functions.get(kebab_name.as_str()).copied())
+            .flatten()
+    })
+}
+
 fn collect_module_facts(module: &UnifiedModule) -> Result<ModuleFacts<'_>, (String, String)> {
     let mut top_level = HashSet::new();
     let mut functions = HashMap::new();
@@ -483,7 +492,7 @@ fn check_expr(
         Expr::Closure { .. } => Ok(()),
         Expr::Ident(name) => {
             if env.contains_key(name)
-                || facts.functions.contains_key(name.as_str())
+                || function_sig(facts, name).is_some()
                 || facts.globals.contains(name.as_str())
             {
                 Ok(())
@@ -598,7 +607,7 @@ fn check_expr(
         }
         Expr::Call { callee, args, .. } => {
             if let Expr::Ident(name) = callee.as_ref() {
-                let Some(sig) = facts.functions.get(name.as_str()) else {
+                let Some(sig) = function_sig(facts, name) else {
                     return Err((
                         "unresolved-symbol".to_string(),
                         format!("unresolved function call `{name}` in `{fn_name}`"),
@@ -721,12 +730,7 @@ fn expr_type(expr: &Expr, facts: &ModuleFacts<'_>, env: &HashMap<String, Typ>) -
         Expr::Ident(name) => env
             .get(name)
             .cloned()
-            .or_else(|| {
-                facts
-                    .functions
-                    .get(name.as_str())
-                    .map(|sig| sig.ret.clone())
-            })
+            .or_else(|| function_sig(facts, name).map(|sig| sig.ret.clone()))
             .or_else(|| {
                 if facts.globals.contains(name.as_str()) {
                     Some(Typ::Int) // most globals are Int
@@ -791,7 +795,7 @@ fn expr_type(expr: &Expr, facts: &ModuleFacts<'_>, env: &HashMap<String, Typ>) -
         }
         Expr::Call { callee, .. } => {
             if let Expr::Ident(name) = callee.as_ref()
-                && let Some(sig) = facts.functions.get(name.as_str())
+                && let Some(sig) = function_sig(facts, name)
             {
                 return Some(sig.ret.clone());
             }
@@ -946,6 +950,26 @@ mod tests {
         assert_eq!(
             report.call_edges,
             vec![("main".to_string(), "helper".to_string())]
+        );
+    }
+
+    #[test]
+    fn accepts_snake_case_reference_to_kebab_case_std_binding() {
+        let module = crate::in_lang_parse::parse_in_source(
+            "import std.io;\nimport std.process;\ncapability process.spawn;\ncapability process.stdout;\nfn main() -> void { let report: String = process_run(\"true\"); print(report); return; }\n",
+        )
+        .expect("parse stdlib source");
+
+        let report = verify_for_entry(&module, "main");
+
+        assert!(
+            report.ok,
+            "snake_case stdlib call should verify: {report:?}"
+        );
+        assert!(
+            report
+                .call_edges
+                .contains(&("main".to_string(), "process_run".to_string()))
         );
     }
 
