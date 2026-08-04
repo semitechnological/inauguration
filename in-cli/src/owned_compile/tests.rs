@@ -76,6 +76,29 @@ fn native_target_reports_host_status() {
 }
 
 #[test]
+fn jit_executes_snake_case_stdlib_process_run() {
+    let source_path = temp_path("stdlib-process-run.in");
+    fs::write(
+        &source_path,
+        "import std.process;\ncapability process.spawn;\nfn main() -> String { return process_run(\"true\"); }\n",
+    )
+    .unwrap();
+
+    let report = compile_owned(&default_request(
+        source_path.clone(),
+        CompileTarget::Jit,
+        Some("main"),
+        None,
+    ));
+
+    assert!(report.success, "{report:?}");
+    assert_eq!(report.reason_code.as_deref(), Some("jit-executed"));
+    assert_eq!(report.eval_result_string.as_deref(), Some(""));
+
+    fs::remove_file(source_path).unwrap();
+}
+
+#[test]
 fn native_compile_rejects_missing_explicit_entry() {
     let source_path = temp_path("native-missing-entry.in");
     let out_path = temp_path("native-missing-entry.out");
