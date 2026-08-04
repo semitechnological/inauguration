@@ -129,6 +129,22 @@ fn parse_canonicalize_check_flag() {
 }
 
 #[test]
+fn execute_propagates_nonzero_jit_exit() {
+    let path = std::env::temp_dir().join(format!("in-cli-nonzero-{}.in", std::process::id()));
+    std::fs::write(&path, "fn main() -> Int { return 7; }\n").expect("write source");
+    let result = crate::compile::cmd_execute(
+        std::path::Path::new("."),
+        &path.to_string_lossy(),
+        "Nonzero",
+        false,
+        false,
+    );
+    let _ = std::fs::remove_file(&path);
+    let error = result.expect_err("nonzero JIT result should fail execute");
+    assert!(error.to_string().contains("status 7"));
+}
+
+#[test]
 fn parse_graph_flags() {
     let cli = Cli::try_parse_from([
         "in",
