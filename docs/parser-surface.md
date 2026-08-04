@@ -61,6 +61,10 @@ Resolution order:
 
 **`.h` headers** map to **`c`**; some Objective-C headers share `.h` — ambiguous paths stay **`c`** Tree-sitter.
 
+The V Tree-sitter frontend is enabled by the `parse-extended` feature, which is
+included by `extended`. Python and `.in` use frontends that are available in a
+default build.
+
 ## Current compatibility ladder
 
 All 37 languages run the same pipeline: grammar → `UnifiedModule` → `family_typecheck` → Core IR → SIL → codegen. Difference is extraction depth:

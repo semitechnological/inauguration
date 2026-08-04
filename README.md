@@ -11,6 +11,13 @@ and workspace-only integration commands (`in test`).
 cargo install inauguration
 ```
 
+Build with `--features extended` when the V frontend (and the other optional
+Tree-sitter fronts) is needed:
+
+```bash
+cargo install inauguration --features extended
+```
+
 Full repository layout, benchmarks, Wax/Homebrew installers, and contribution
 docs live in the GitHub repo.
 
@@ -33,8 +40,9 @@ it in a JIT. It targets its own backends for AArch64 and x86_64.
   self-build is still blocked by stdlib surface coverage; see the language support
   table below.
 - **Script runner**: `in eval <file>` is the fastest way to run an `.in`, `.rs`,
-  `.zig`, `.go`, `.v`, or `.poly` script through the JIT. `in execute` and
-  `in build` are available for explicit compile/artifact paths.
+  `.zig`, `.go`, `.v`, or `.poly` script through the JIT. The V frontend is
+  included in builds with `--features extended`; `in execute` and `in build`
+  are available for explicit compile/artifact paths.
 - **Bytecode VM**: retired. `in eval`, `in execute`, and `in build` use the
   JIT-only path.
 
