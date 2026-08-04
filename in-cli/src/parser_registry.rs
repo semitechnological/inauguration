@@ -759,6 +759,27 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "parse-extended")]
+    #[test]
+    fn v_front_parses_polyglot_sample_functions() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("repo root")
+            .join("apps/polyglot-sample/sample.v");
+        let m = parse_with_resolved(ResolvedBuildParser::CoreIr(ParserId::V), &path)
+            .expect("parse")
+            .expect("module");
+        let names: Vec<_> = m
+            .decls
+            .iter()
+            .filter_map(|decl| match decl {
+                crate::core_ir::Decl::Function { name, .. } => Some(name.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(names, vec!["answer", "main"]);
+    }
+
     #[test]
     fn go_front_parses_main_function() {
         let path = temp_file_path("main.go");
