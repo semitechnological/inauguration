@@ -804,7 +804,7 @@ fn report_defaults_identity_metadata_without_source_identity() {
 }
 
 #[test]
-fn compile_cache_hit_on_second_run() {
+fn jit_execution_does_not_reuse_report_cache() {
     if !native_backend::native_subset_host_available() {
         return;
     }
@@ -823,7 +823,7 @@ fn compile_cache_hit_on_second_run() {
         None,
         None,
     ));
-    assert!(second.cache_hit);
+    assert!(!second.cache_hit);
     assert_eq!(first.success, second.success);
     fs::remove_file(source_path).unwrap();
 }

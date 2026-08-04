@@ -160,7 +160,9 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         }
     };
     let frontend_hash = compile_cache::source_frontend_hash(&request.path, &source);
-    if let Some(mut cached) = compile_cache::read_cached_report(&cwd, &frontend_hash) {
+    let reuse_cache = request.target != CompileTarget::Jit;
+    if reuse_cache && let Some(mut cached) = compile_cache::read_cached_report(&cwd, &frontend_hash)
+    {
         let requested_out = request.out.as_ref().map(|path| path.display().to_string());
         let cached_out = cached
             .executable_path
