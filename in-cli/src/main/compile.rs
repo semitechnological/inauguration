@@ -526,6 +526,14 @@ pub(crate) fn cmd_execute(
         eprintln!("[jit] Execution completed with result: {:?}", result);
     }
 
+    if let JitExecution::Int(code) = result
+        && code != 0
+    {
+        return Err(InError::Message(format!(
+            "program exited with status {code}"
+        )));
+    }
+
     if debug {
         let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
         println!("[jit] Finished execution in {:.3}ms", elapsed_ms);
