@@ -79,10 +79,7 @@ pub fn compile_cargo_dependencies(project_dir: &Path) -> Vec<(String, UnifiedMod
 
 fn build_pkg_maps(
     packages: &[serde_json::Value],
-) -> (
-    HashMap<&str, PathBuf>,
-    HashMap<&str, &serde_json::Value>,
-) {
+) -> (HashMap<&str, PathBuf>, HashMap<&str, &serde_json::Value>) {
     let mut pkg_manifest = HashMap::new();
     let mut pkg_by_id = HashMap::new();
     for pkg in packages {
