@@ -1315,6 +1315,11 @@ mod tests {
         let err_msg = result.unwrap_err();
         assert!(err_msg.contains("Invalid file path") || err_msg.contains("failed to extract zip"));
 
+        assert!(
+            !dir.join("escaped.txt").exists(),
+            "zip extraction should not create a file outside the install path"
+        );
+
         let _ = fs::remove_dir_all(dir);
     }
 
