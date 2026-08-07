@@ -1,6 +1,4 @@
-use super::extract::{
-    ast_body, collect_kinds, first_named, node_txt, normalize_entry, AstShape,
-};
+use super::extract::{AstShape, ast_body, collect_kinds, first_named, node_txt, normalize_entry};
 use crate::core_ir::{Decl, Typ};
 use tree_sitter::Node;
 
@@ -64,7 +62,9 @@ fn crystal_params<'a>(src: &[u8], n: Node<'a>) -> Vec<(String, Typ)> {
     let mut param_nodes = Vec::new();
     collect_kinds(n, &["parameter"], &mut param_nodes);
     for p in param_nodes {
-        let name_n = p.child_by_field_name("name").or_else(|| first_named(p, "identifier"));
+        let name_n = p
+            .child_by_field_name("name")
+            .or_else(|| first_named(p, "identifier"));
         if let Some(name_n) = name_n {
             let pname = normalize_entry(node_txt(src, name_n).trim());
             params.push((pname, Typ::Named("dynamic".into())));
