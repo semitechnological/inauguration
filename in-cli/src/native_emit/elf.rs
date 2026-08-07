@@ -89,25 +89,26 @@ pub fn write_aarch64_relocatable_object(object: &ElfObject, out: &mut Vec<u8>) {
     write_elf64_relocatable_object(object, EM_AARCH64, out);
 }
 
-fn write_elf64_relocatable_object(object: &ElfObject, machine: u16, out: &mut Vec<u8>) {
-    let shstrtab = b"\0.text\0.symtab\0.strtab\0.shstrtab\0";
-    // Build combined export list: primary + additional, sorted by offset
-    let mut all_exports: Vec<(&str, u64)> = Vec::new();
-    // Primary export (entry name at offset 0)
-    all_exports.push((&object.export_name, 0));
+fn build_elf64_exports<'a>(object: &'a ElfObject) -> Vec<(&'a str, u64)> {
+    let mut all_exports = Vec::new();
+    all_exports.push((object.export_name.as_str(), 0));
     for (name, offset) in &object.exports {
-        // Skip if same name AND offset as primary (redundant)
         if name == &object.export_name && *offset == 0 {
             continue;
         }
-        all_exports.push((name, *offset as u64));
+        all_exports.push((name.as_str(), *offset as u64));
     }
-    // Sort by offset (code layout order) so size calculation is correct
     all_exports.sort_by_key(|a| a.1);
-    // Build string table: null + all export names + all undef names
+    all_exports
+}
+
+fn build_elf64_strtab(
+    object: &ElfObject,
+    all_exports: &[(&str, u64)],
+) -> (Vec<u8>, Vec<u32>, Vec<u32>) {
     let mut strtab: Vec<u8> = vec![0u8];
     let mut name_indices: Vec<u32> = vec![0u32];
-    for (name, _) in &all_exports {
+    for (name, _) in all_exports {
         let idx = strtab.len() as u32;
         name_indices.push(idx);
         strtab.extend_from_slice(name.as_bytes());
@@ -120,18 +121,10 @@ fn write_elf64_relocatable_object(object: &ElfObject, machine: u16, out: &mut Ve
         strtab.extend_from_slice(name.as_bytes());
         strtab.push(0u8);
     }
-    let sym_count = all_exports.len() as u64 + object.undefs.len() as u64 + 1;
-    let symtab_entry_size = 24u64;
-    let symtab_size = sym_count * symtab_entry_size;
-    let text_name = 1u32;
-    let symtab_name = 7u32;
-    let strtab_name = 15u32;
-    let shstrtab_name = 23u32;
-    let text_offset = EHDR_SIZE;
-    let symtab_offset = text_offset + object.code.len() as u64;
-    let strtab_offset = symtab_offset + symtab_size;
-    let shstrtab_offset = strtab_offset + strtab.len() as u64;
-    let shoff = shstrtab_offset + shstrtab.len() as u64;
+    (strtab, name_indices, undef_indices)
+}
+
+fn write_elf64_header(out: &mut Vec<u8>, machine: u16, shoff: u64) {
     let shentsize = 64u16;
     let shnum = 5u16;
     let shstrndx = 4u16;
@@ -155,8 +148,31 @@ fn write_elf64_relocatable_object(object: &ElfObject, machine: u16, out: &mut Ve
     out.extend_from_slice(&shentsize.to_le_bytes());
     out.extend_from_slice(&shnum.to_le_bytes());
     out.extend_from_slice(&shstrndx.to_le_bytes());
+}
+
+fn write_elf64_relocatable_object(object: &ElfObject, machine: u16, out: &mut Vec<u8>) {
+    let shstrtab = b"\0.text\0.symtab\0.strtab\0.shstrtab\0";
+
+    let all_exports = build_elf64_exports(object);
+    let (strtab, name_indices, undef_indices) = build_elf64_strtab(object, &all_exports);
+
+    let sym_count = all_exports.len() as u64 + object.undefs.len() as u64 + 1;
+    let symtab_entry_size = 24u64;
+    let symtab_size = sym_count * symtab_entry_size;
+    let text_name = 1u32;
+    let symtab_name = 7u32;
+    let strtab_name = 15u32;
+    let shstrtab_name = 23u32;
+    let text_offset = EHDR_SIZE;
+    let symtab_offset = text_offset + object.code.len() as u64;
+    let strtab_offset = symtab_offset + symtab_size;
+    let shstrtab_offset = strtab_offset + strtab.len() as u64;
+    let shoff = shstrtab_offset + shstrtab.len() as u64;
+
+    write_elf64_header(out, machine, shoff);
 
     out.extend_from_slice(&object.code);
+
     // Null symbol
     write_symbol(out, 0, 0, 0, 0, 0, 0);
     // Defined symbols (shndx=1 = .text)
@@ -177,6 +193,7 @@ fn write_elf64_relocatable_object(object: &ElfObject, machine: u16, out: &mut Ve
             write_symbol(out, undef_indices[i], 0x12, 0, 0, 0, 0);
         }
     }
+
     out.extend_from_slice(&strtab);
     out.extend_from_slice(shstrtab);
 
