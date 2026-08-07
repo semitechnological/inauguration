@@ -89,6 +89,12 @@ impl NativeRuntime {
     }
 
     fn register_pathbuf_operations(&mut self) {
+        self.register_pathbuf_core();
+        self.register_pathbuf_queries();
+        self.register_pathbuf_properties();
+    }
+
+    fn register_pathbuf_core(&mut self) {
         self.register(
             "display",
             Box::new(|args| {
@@ -127,6 +133,9 @@ impl NativeRuntime {
                 }
             }),
         );
+    }
+
+    fn register_pathbuf_queries(&mut self) {
         self.register(
             "is-dir",
             Box::new(|args| {
@@ -147,6 +156,9 @@ impl NativeRuntime {
                 }
             }),
         );
+    }
+
+    fn register_pathbuf_properties(&mut self) {
         self.register(
             "extension",
             Box::new(|args| {
