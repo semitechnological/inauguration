@@ -106,18 +106,37 @@ impl Manifest {
 }
 
 pub fn write_artifacts(artifacts: &[Artifact]) -> Result<(), String> {
-    for artifact in artifacts {
-        let Some(path) = &artifact.path else {
-            continue;
-        };
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("create {}: {e}", parent.display()))?;
-        }
-        std::fs::write(path, &artifact.contents)
-            .map_err(|e| format!("write {}: {e}", path.display()))?;
+    let num_threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+    let chunk_size = (artifacts.len() + num_threads - 1) / num_threads;
+
+    if chunk_size == 0 {
+        return Ok(());
     }
-    Ok(())
+
+    std::thread::scope(|s| {
+        let mut handles = Vec::new();
+        for chunk in artifacts.chunks(chunk_size) {
+            handles.push(s.spawn(move || -> Result<(), String> {
+                for artifact in chunk {
+                    let Some(path) = &artifact.path else {
+                        continue;
+                    };
+                    if let Some(parent) = path.parent() {
+                        std::fs::create_dir_all(parent)
+                            .map_err(|e| format!("create {}: {e}", parent.display()))?;
+                    }
+                    std::fs::write(path, &artifact.contents)
+                        .map_err(|e| format!("write {}: {e}", path.display()))?;
+                }
+                Ok(())
+            }));
+        }
+
+        for handle in handles {
+            handle.join().unwrap()?;
+        }
+        Ok(())
+    })
 }
 
 fn build_target(target: &Target, base_dir: &Path, idx: usize) -> Result<Artifact, String> {
