@@ -547,116 +547,116 @@ fn collect_structs(module: &UnifiedModule) -> HashMap<String, Vec<(String, Typ)>
     structs
 }
 
-/// Collect global variable names and assign them fixed absolute addresses.
-/// Returns: (name → address) map.
+fn collect_strings_from_expr(expr: &Expr, out: &mut Vec<String>) {
+    match expr {
+        Expr::StringLit(s) => out.push(s.clone()),
+        Expr::Unary { expr, .. } => collect_strings_from_expr(expr, out),
+        Expr::Binary { lhs, rhs, .. } => {
+            collect_strings_from_expr(lhs, out);
+            collect_strings_from_expr(rhs, out);
+        }
+        Expr::StructInit { fields, .. } => {
+            for (_, e) in fields {
+                collect_strings_from_expr(e, out);
+            }
+        }
+        Expr::Field { base, .. } => collect_strings_from_expr(base, out),
+        Expr::ArrayLit(elts) => {
+            for e in elts {
+                collect_strings_from_expr(e, out);
+            }
+        }
+        Expr::Index { base, index, .. } => {
+            collect_strings_from_expr(base, out);
+            collect_strings_from_expr(index, out);
+        }
+        Expr::Call { callee, args, .. } => {
+            collect_strings_from_expr(callee, out);
+            for a in args {
+                collect_strings_from_expr(a, out);
+            }
+        }
+        Expr::Closure { body, .. } => {
+            for s in body {
+                collect_strings_from_stmt(s, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_strings_from_stmt(stmt: &Stmt, out: &mut Vec<String>) {
+    match stmt {
+        Stmt::Let(_, _, expr) => collect_strings_from_expr(expr, out),
+        Stmt::Assign(_, expr) => collect_strings_from_expr(expr, out),
+        Stmt::FieldAssign { value: expr, .. } => collect_strings_from_expr(expr, out),
+        Stmt::IndexAssign {
+            base, index, value, ..
+        } => {
+            collect_strings_from_expr(base, out);
+            collect_strings_from_expr(index, out);
+            collect_strings_from_expr(value, out);
+        }
+        Stmt::Return(Some(expr)) => collect_strings_from_expr(expr, out),
+        Stmt::Return(None) => {}
+        Stmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            collect_strings_from_expr(cond, out);
+            for s in then_body {
+                collect_strings_from_stmt(s, out);
+            }
+            for s in else_body {
+                collect_strings_from_stmt(s, out);
+            }
+        }
+        Stmt::Loop { body, .. } => {
+            for s in body {
+                collect_strings_from_stmt(s, out);
+            }
+        }
+        Stmt::Match {
+            scrutinee, arms, ..
+        } => {
+            collect_strings_from_expr(scrutinee, out);
+            for arm in arms {
+                for s in &arm.body {
+                    collect_strings_from_stmt(s, out);
+                }
+            }
+        }
+        Stmt::Throw(expr) => collect_strings_from_expr(expr, out),
+        Stmt::Try { body, catches, .. } => {
+            for s in body {
+                collect_strings_from_stmt(s, out);
+            }
+            for c in catches {
+                for s in &c.body {
+                    collect_strings_from_stmt(s, out);
+                }
+            }
+        }
+        Stmt::Expr(expr) => collect_strings_from_expr(expr, out),
+        Stmt::Break | Stmt::Propagate => {}
+    }
+}
+
 /// Collect all unique string literal contents from the module.
 fn collect_string_literals(module: &UnifiedModule) -> Vec<String> {
-    fn from_expr(expr: &Expr, out: &mut Vec<String>) {
-        match expr {
-            Expr::StringLit(s) => out.push(s.clone()),
-            Expr::Unary { expr, .. } => from_expr(expr, out),
-            Expr::Binary { lhs, rhs, .. } => {
-                from_expr(lhs, out);
-                from_expr(rhs, out);
-            }
-            Expr::StructInit { fields, .. } => {
-                for (_, e) in fields {
-                    from_expr(e, out);
-                }
-            }
-            Expr::Field { base, .. } => from_expr(base, out),
-            Expr::ArrayLit(elts) => {
-                for e in elts {
-                    from_expr(e, out);
-                }
-            }
-            Expr::Index { base, index, .. } => {
-                from_expr(base, out);
-                from_expr(index, out);
-            }
-            Expr::Call { callee, args, .. } => {
-                from_expr(callee, out);
-                for a in args {
-                    from_expr(a, out);
-                }
-            }
-            Expr::Closure { body, .. } => {
-                for s in body {
-                    from_stmt(s, out);
-                }
-            }
-            _ => {}
-        }
-    }
-    fn from_stmt(stmt: &Stmt, out: &mut Vec<String>) {
-        match stmt {
-            Stmt::Let(_, _, expr) => from_expr(expr, out),
-            Stmt::Assign(_, expr) => from_expr(expr, out),
-            Stmt::FieldAssign { value: expr, .. } => from_expr(expr, out),
-            Stmt::IndexAssign {
-                base, index, value, ..
-            } => {
-                from_expr(base, out);
-                from_expr(index, out);
-                from_expr(value, out);
-            }
-            Stmt::Return(Some(expr)) => from_expr(expr, out),
-            Stmt::Return(None) => {}
-            Stmt::If {
-                cond,
-                then_body,
-                else_body,
-            } => {
-                from_expr(cond, out);
-                for s in then_body {
-                    from_stmt(s, out);
-                }
-                for s in else_body {
-                    from_stmt(s, out);
-                }
-            }
-            Stmt::Loop { body, .. } => {
-                for s in body {
-                    from_stmt(s, out);
-                }
-            }
-            Stmt::Match {
-                scrutinee, arms, ..
-            } => {
-                from_expr(scrutinee, out);
-                for arm in arms {
-                    for s in &arm.body {
-                        from_stmt(s, out);
-                    }
-                }
-            }
-            Stmt::Throw(expr) => from_expr(expr, out),
-            Stmt::Try { body, catches, .. } => {
-                for s in body {
-                    from_stmt(s, out);
-                }
-                for c in catches {
-                    for s in &c.body {
-                        from_stmt(s, out);
-                    }
-                }
-            }
-            Stmt::Expr(expr) => from_expr(expr, out),
-            Stmt::Break | Stmt::Propagate => {}
-        }
-    }
     let mut strings = Vec::new();
     for decl in &module.decls {
         if let Decl::Function { body, .. } = decl {
             for stmt in body {
-                from_stmt(stmt, &mut strings);
+                collect_strings_from_stmt(stmt, &mut strings);
             }
         }
         if let Decl::Global {
             init: Some(expr), ..
         } = decl
         {
-            from_expr(expr, &mut strings);
+            collect_strings_from_expr(expr, &mut strings);
         }
     }
     strings.sort();
@@ -664,6 +664,8 @@ fn collect_string_literals(module: &UnifiedModule) -> Vec<String> {
     strings
 }
 
+/// Collect global variable names and assign them fixed absolute addresses.
+/// Returns: (name → address) map.
 fn collect_globals(module: &UnifiedModule) -> HashMap<String, u64> {
     let mut globals = HashMap::new();
     let mut offset = 0u64;
