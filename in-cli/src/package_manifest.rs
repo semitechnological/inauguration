@@ -932,93 +932,117 @@ fn parse_package_manifest(source: &str) -> Result<PackageManifest, String> {
 
     for (index, raw_line) in source.lines().enumerate() {
         let line_number = index + 1;
-        if raw_line.trim().is_empty() {
-            continue;
-        }
-        if raw_line.contains('\t') {
-            return Err(format!(
-                "line {line_number}: tabs are not valid indentation in inauguration.package"
-            ));
-        }
-
-        let indent = raw_line.len() - raw_line.trim_start_matches(' ').len();
-        let line = raw_line.trim_start_matches(' ');
-
-        match indent {
-            0 => {
-                dependency_name = None;
-                dependency_subsection = None;
-                section = parse_top_level(line, line_number, &mut manifest)?;
-            }
-            2 => match section {
-                Some(Section::Targets) => {
-                    dependency_name = None;
-                    dependency_subsection = None;
-                    parse_target(line, line_number, &mut manifest)?;
-                }
-                Some(Section::Dependencies) => {
-                    dependency_subsection = None;
-                    dependency_name =
-                        Some(parse_dependency_header(line, line_number, &mut manifest)?);
-                }
-                Some(Section::Capabilities) => {
-                    dependency_name = None;
-                    dependency_subsection = None;
-                    parse_list_item(
-                        line,
-                        line_number,
-                        "capabilities",
-                        &mut manifest.capabilities,
-                    )?;
-                }
-                Some(Section::Extensions) => {
-                    dependency_name = None;
-                    dependency_subsection = None;
-                    parse_list_item(line, line_number, "extensions", &mut manifest.extensions)?;
-                }
-                None => {
-                    return Err(format!(
-                        "line {line_number}: indentation is only valid inside a section"
-                    ));
-                }
-            },
-            4 => {
-                if section != Some(Section::Dependencies) {
-                    return Err(format!(
-                        "line {line_number}: indentation is only valid for dependency metadata"
-                    ));
-                }
-                let name = dependency_name.as_deref().ok_or_else(|| {
-                    format!("line {line_number}: dependency metadata requires a dependency name")
-                })?;
-                dependency_subsection =
-                    parse_dependency_field(line, line_number, name, &mut manifest)?;
-            }
-            6 => {
-                if section != Some(Section::Dependencies) {
-                    return Err(format!(
-                        "line {line_number}: indentation is only valid for dependency metadata"
-                    ));
-                }
-                let name = dependency_name.as_deref().ok_or_else(|| {
-                    format!("line {line_number}: dependency metadata requires a dependency name")
-                })?;
-                parse_dependency_nested_field(
-                    line,
-                    line_number,
-                    name,
-                    dependency_subsection,
-                    &mut manifest,
-                )?;
-            }
-            _ => {
-                return Err(format!(
-                    "line {line_number}: malformed indentation; use 0, 2, 4, or 6 spaces"
-                ));
-            }
-        }
+        process_manifest_line(
+            raw_line,
+            line_number,
+            &mut manifest,
+            &mut section,
+            &mut dependency_name,
+            &mut dependency_subsection,
+        )?;
     }
 
+    validate_manifest(&manifest)?;
+    Ok(manifest)
+}
+
+fn process_manifest_line(
+    raw_line: &str,
+    line_number: usize,
+    manifest: &mut PackageManifest,
+    section: &mut Option<Section>,
+    dependency_name: &mut Option<String>,
+    dependency_subsection: &mut Option<DependencySubsection>,
+) -> Result<(), String> {
+    if raw_line.trim().is_empty() {
+        return Ok(());
+    }
+    if raw_line.contains('\t') {
+        return Err(format!(
+            "line {line_number}: tabs are not valid indentation in inauguration.package"
+        ));
+    }
+
+    let indent = raw_line.len() - raw_line.trim_start_matches(' ').len();
+    let line = raw_line.trim_start_matches(' ');
+
+    match indent {
+        0 => {
+            *dependency_name = None;
+            *dependency_subsection = None;
+            *section = parse_top_level(line, line_number, manifest)?;
+        }
+        2 => match *section {
+            Some(Section::Targets) => {
+                *dependency_name = None;
+                *dependency_subsection = None;
+                parse_target(line, line_number, manifest)?;
+            }
+            Some(Section::Dependencies) => {
+                *dependency_subsection = None;
+                *dependency_name =
+                    Some(parse_dependency_header(line, line_number, manifest)?);
+            }
+            Some(Section::Capabilities) => {
+                *dependency_name = None;
+                *dependency_subsection = None;
+                parse_list_item(
+                    line,
+                    line_number,
+                    "capabilities",
+                    &mut manifest.capabilities,
+                )?;
+            }
+            Some(Section::Extensions) => {
+                *dependency_name = None;
+                *dependency_subsection = None;
+                parse_list_item(line, line_number, "extensions", &mut manifest.extensions)?;
+            }
+            None => {
+                return Err(format!(
+                    "line {line_number}: indentation is only valid inside a section"
+                ));
+            }
+        },
+        4 => {
+            if *section != Some(Section::Dependencies) {
+                return Err(format!(
+                    "line {line_number}: indentation is only valid for dependency metadata"
+                ));
+            }
+            let name = dependency_name.as_deref().ok_or_else(|| {
+                format!("line {line_number}: dependency metadata requires a dependency name")
+            })?;
+            *dependency_subsection =
+                parse_dependency_field(line, line_number, name, manifest)?;
+        }
+        6 => {
+            if *section != Some(Section::Dependencies) {
+                return Err(format!(
+                    "line {line_number}: indentation is only valid for dependency metadata"
+                ));
+            }
+            let name = dependency_name.as_deref().ok_or_else(|| {
+                format!("line {line_number}: dependency metadata requires a dependency name")
+            })?;
+            parse_dependency_nested_field(
+                line,
+                line_number,
+                name,
+                *dependency_subsection,
+                manifest,
+            )?;
+        }
+        _ => {
+            return Err(format!(
+                "line {line_number}: malformed indentation; use 0, 2, 4, or 6 spaces"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_manifest(manifest: &PackageManifest) -> Result<(), String> {
     if manifest.name.is_empty() {
         return Err("missing required field `name`".into());
     }
@@ -1032,7 +1056,7 @@ fn parse_package_manifest(source: &str) -> Result<PackageManifest, String> {
             ));
         }
     }
-    Ok(manifest)
+    Ok(())
 }
 
 fn parse_top_level(
