@@ -125,7 +125,9 @@ pub fn bootstrap_jit_native() {
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "android"))]
-fn register_env_funcs<S: std::hash::BuildHasher>(c: &mut std::collections::HashMap<String, NativePtr, S>) {
+fn register_env_funcs<S: std::hash::BuildHasher>(
+    c: &mut std::collections::HashMap<String, NativePtr, S>,
+) {
     c.insert(
         "in_env_var".to_string(),
         NativePtr(crate::native_stdlib::in_env_var as *const u8),
@@ -153,7 +155,9 @@ fn register_env_funcs<S: std::hash::BuildHasher>(c: &mut std::collections::HashM
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "android"))]
-fn register_fs_funcs<S: std::hash::BuildHasher>(c: &mut std::collections::HashMap<String, NativePtr, S>) {
+fn register_fs_funcs<S: std::hash::BuildHasher>(
+    c: &mut std::collections::HashMap<String, NativePtr, S>,
+) {
     c.insert(
         "in_fs_read_to_string".to_string(),
         NativePtr(crate::native_stdlib::in_fs_read_to_string as *const u8),
@@ -177,7 +181,9 @@ fn register_fs_funcs<S: std::hash::BuildHasher>(c: &mut std::collections::HashMa
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "android"))]
-fn register_str_funcs<S: std::hash::BuildHasher>(c: &mut std::collections::HashMap<String, NativePtr, S>) {
+fn register_str_funcs<S: std::hash::BuildHasher>(
+    c: &mut std::collections::HashMap<String, NativePtr, S>,
+) {
     c.insert(
         "in_str_contains".to_string(),
         NativePtr(crate::native_stdlib::in_str_contains as *const u8),
@@ -241,7 +247,9 @@ fn register_str_funcs<S: std::hash::BuildHasher>(c: &mut std::collections::HashM
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "android"))]
-fn register_path_funcs<S: std::hash::BuildHasher>(c: &mut std::collections::HashMap<String, NativePtr, S>) {
+fn register_path_funcs<S: std::hash::BuildHasher>(
+    c: &mut std::collections::HashMap<String, NativePtr, S>,
+) {
     c.insert(
         "in_path_join".to_string(),
         NativePtr(crate::native_stdlib::in_path_join as *const u8),
@@ -265,7 +273,9 @@ fn register_path_funcs<S: std::hash::BuildHasher>(c: &mut std::collections::Hash
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "android"))]
-fn register_vec_funcs<S: std::hash::BuildHasher>(c: &mut std::collections::HashMap<String, NativePtr, S>) {
+fn register_vec_funcs<S: std::hash::BuildHasher>(
+    c: &mut std::collections::HashMap<String, NativePtr, S>,
+) {
     c.insert(
         "in_vec_extend".to_string(),
         NativePtr(crate::native_stdlib::in_vec_extend as *const u8),
@@ -285,7 +295,9 @@ fn register_vec_funcs<S: std::hash::BuildHasher>(c: &mut std::collections::HashM
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "android"))]
-fn register_misc_funcs<S: std::hash::BuildHasher>(c: &mut std::collections::HashMap<String, NativePtr, S>) {
+fn register_misc_funcs<S: std::hash::BuildHasher>(
+    c: &mut std::collections::HashMap<String, NativePtr, S>,
+) {
     c.insert(
         "in_process_run".to_string(),
         NativePtr(crate::native_stdlib::in_process_run as *const u8),
