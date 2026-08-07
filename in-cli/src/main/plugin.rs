@@ -109,7 +109,13 @@ pub(crate) fn cmd_plugin(root: &Path, action: PluginAction) -> Result<()> {
                     "plugin not installed: {name} (run `in plugin install {name}`)"
                 )));
             }
-            run_cmd(Command::new("bash").arg("--").arg(&script).arg(target).arg(root))
+            run_cmd(
+                Command::new("bash")
+                    .arg("--")
+                    .arg(&script)
+                    .arg(target)
+                    .arg(root),
+            )
         }
     }
 }
