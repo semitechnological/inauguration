@@ -166,20 +166,13 @@ fn evaluate_parse_result(
     match parsed {
         Ok(Some(module)) => {
             core_decl_count = module.decls.len();
-            *language_level =
-                language_level_for_module(language_level.clone(), parser_id, source);
+            *language_level = language_level_for_module(language_level.clone(), parser_id, source);
 
             if parser_id == Some("in")
                 && let Ok(surface) = crate::in_lang_parse::parse_in_surface_info(source)
             {
-                surface_facts = extract_surface_facts(
-                    surface,
-                    path,
-                    source,
-                    parser_id,
-                    &module,
-                    diagnostics,
-                );
+                surface_facts =
+                    extract_surface_facts(surface, path, source, parser_id, &module, diagnostics);
             }
 
             diagnostics.extend(core_diagnostics(&module, parser_id, source));
