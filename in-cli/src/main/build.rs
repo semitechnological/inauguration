@@ -131,21 +131,29 @@ fn resolve_source_path(path: &Path) -> Result<PathBuf> {
 
 fn resolve_cargo_root(cargo_toml: &Path) -> Result<PathBuf> {
     let base = cargo_toml.parent().unwrap_or(Path::new("."));
-    let src_dir = base.join("src");
+    let mut path = base.to_path_buf();
+    path.push("src");
     for candidate in &["main.rs", "lib.rs"] {
-        let candidate_path = src_dir.join(candidate);
-        if candidate_path.exists() {
-            return Ok(candidate_path);
+        path.push(candidate);
+        if path.exists() {
+            return Ok(path);
         }
+        path.pop();
     }
+    path.pop();
+
     for member_dir in &["in-cli", "inauguration"] {
-        let member_src = base.join(member_dir).join("src");
+        path.push(member_dir);
+        path.push("src");
         for candidate in &["main.rs", "lib.rs"] {
-            let p = member_src.join(candidate);
-            if p.exists() {
-                return Ok(p);
+            path.push(candidate);
+            if path.exists() {
+                return Ok(path);
             }
+            path.pop();
         }
+        path.pop();
+        path.pop();
     }
     Err(InError::Message(format!(
         "no src/main.rs or src/lib.rs found for `{}`",
