@@ -1311,4 +1311,33 @@ mod tests {
         assert!(manifest.dependencies.contains_key("cargo:crepuscularity"));
         assert!(manifest.dependencies.contains_key("npm:hono"));
     }
+
+    #[test]
+    fn write_installed_metadata_success() {
+        let temp = tempfile_dir("write-metadata");
+        fs::create_dir_all(&temp).unwrap();
+
+        let metadata = InstalledPackageMetadata {
+            ecosystem: "npm".to_string(),
+            name: "lodash".to_string(),
+            version: "4.17.21".to_string(),
+            registry: "https://registry.npmjs.org".to_string(),
+            install_path: "/path/to/install".to_string(),
+            exports: vec!["lodash".to_string()],
+            bindings: vec![],
+        };
+
+        let result = write_installed_metadata(&temp, &metadata);
+        assert!(result.is_ok());
+
+        let metadata_path = temp.join(INSTALLED_PACKAGE_METADATA);
+        assert!(metadata_path.exists());
+
+        let content = fs::read_to_string(metadata_path).expect("read metadata");
+        assert!(content.contains("\"npm\""));
+        assert!(content.contains("\"lodash\""));
+        assert!(content.contains("\"4.17.21\""));
+
+        let _ = fs::remove_dir_all(temp);
+    }
 }
