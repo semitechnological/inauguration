@@ -22,12 +22,10 @@ struct ThemeCss {
 
 fn main() -> io::Result<()> {
     let args: Vec<String> = env::args().collect();
-    let docs_src = arg_value(&args, "--docs-src").ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidInput, "missing --docs-src")
-    })?;
-    let out_dir = arg_value(&args, "--out-dir").ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidInput, "missing --out-dir")
-    })?;
+    let docs_src = arg_value(&args, "--docs-src")
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "missing --docs-src"))?;
+    let out_dir = arg_value(&args, "--out-dir")
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "missing --out-dir"))?;
     let site_name = arg_value(&args, "--site-name").unwrap_or_else(|| "inauguration".into());
     let theme_json = arg_value(&args, "--theme-json").unwrap_or_default();
     let theme: ThemeCss = if theme_json.is_empty() {
@@ -40,12 +38,16 @@ fn main() -> io::Result<()> {
             border: "#27272a".into(),
         }
     } else {
-        serde_json::from_str(&theme_json).map_err(|e| {
-            io::Error::new(io::ErrorKind::InvalidData, format!("theme-json: {e}"))
-        })?
+        serde_json::from_str(&theme_json)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("theme-json: {e}")))?
     };
 
-    generate_docs(Path::new(&docs_src), Path::new(&out_dir), &theme, &site_name)?;
+    generate_docs(
+        Path::new(&docs_src),
+        Path::new(&out_dir),
+        &theme,
+        &site_name,
+    )?;
     Ok(())
 }
 
@@ -155,16 +157,9 @@ fn generate_docs(
 
 use rayon::prelude::*;
 
-fn collect_paths(
-    root: &Path,
-    dir: &Path,
-    out: &mut Vec<PathBuf>,
-) -> io::Result<()> {
+fn collect_paths(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> io::Result<()> {
     let rel = dir.strip_prefix(root).unwrap_or(dir);
-    if rel
-        .components()
-        .any(|c| c.as_os_str() == "internal")
-    {
+    if rel.components().any(|c| c.as_os_str() == "internal") {
         return Ok(());
     }
 
@@ -194,11 +189,7 @@ fn collect_paths(
     Ok(())
 }
 
-fn collect_markdown(
-    root: &Path,
-    dir: &Path,
-    out: &mut Vec<(String, String)>,
-) -> io::Result<()> {
+fn collect_markdown(root: &Path, dir: &Path, out: &mut Vec<(String, String)>) -> io::Result<()> {
     let mut paths = Vec::new();
     collect_paths(root, dir, &mut paths)?;
 
@@ -435,8 +426,12 @@ mod tests {
     }
 
     fn make_temp_dir(name: &str) -> (PathBuf, TempDirGuard) {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let path = std::env::temp_dir().join(format!("inauguration_docs_gen_test_{}_{}", name, now));
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path =
+            std::env::temp_dir().join(format!("inauguration_docs_gen_test_{}_{}", name, now));
         fs::create_dir_all(&path).unwrap();
         let guard = TempDirGuard { path: path.clone() };
         (path, guard)
@@ -445,7 +440,13 @@ mod tests {
     #[test]
     fn test_generate_docs_missing_src_dir() -> io::Result<()> {
         let (out_dir, _out_guard) = make_temp_dir("out_missing");
-        let src_dir = std::env::temp_dir().join(format!("docs_missing_{}", SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+        let src_dir = std::env::temp_dir().join(format!(
+            "docs_missing_{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
 
         let theme = dummy_theme();
         let res = generate_docs(&src_dir, &out_dir, &theme, "test site");
@@ -521,14 +522,19 @@ mod tests {
     fn test_render_nav_basic_sections() {
         let pages = vec![
             ("in-language".to_string(), "inlang (.in)".to_string()),
-            ("multi-frontend-ir".to_string(), "Multi-front Core IR".to_string()),
+            (
+                "multi-frontend-ir".to_string(),
+                "Multi-front Core IR".to_string(),
+            ),
         ];
         let nav = render_nav(&pages, "in-language");
 
         assert!(nav.starts_with("<nav aria-label=\"Documentation\" class=\"doc-nav\">"));
         assert!(nav.ends_with("</nav>"));
         assert!(nav.contains("<div class=\"doc-nav-section\">Language &amp; IR</div>"));
-        assert!(nav.contains("<li><a href=\"in-language.html\" class=\"active\">inlang (.in)</a></li>"));
+        assert!(
+            nav.contains("<li><a href=\"in-language.html\" class=\"active\">inlang (.in)</a></li>")
+        );
         assert!(nav.contains("<li><a href=\"multi-frontend-ir.html\">Multi-front Core IR</a></li>"));
         assert!(!nav.contains("Benchmarks"));
     }
@@ -549,7 +555,10 @@ mod tests {
     fn test_render_nav_empty_pages() {
         let pages: Vec<(String, String)> = vec![];
         let nav = render_nav(&pages, "in-language");
-        assert_eq!(nav, "<nav aria-label=\"Documentation\" class=\"doc-nav\"></nav>");
+        assert_eq!(
+            nav,
+            "<nav aria-label=\"Documentation\" class=\"doc-nav\"></nav>"
+        );
     }
 
     #[test]
@@ -564,6 +573,7 @@ mod tests {
         assert!(nav.contains("<li><a href=\"jit.html\" class=\"doc-nav-nested\">JIT</a></li>"));
 
         let nav_jit_active = render_nav(&pages, "benchmarks/jit");
-        assert!(nav_jit_active.contains("<li><a href=\"jit.html\" class=\"active doc-nav-nested\">JIT</a></li>"));
+        assert!(nav_jit_active
+            .contains("<li><a href=\"jit.html\" class=\"active doc-nav-nested\">JIT</a></li>"));
     }
 }
