@@ -116,6 +116,16 @@ pub fn bootstrap_jit_native() {
     }
     // Pre-register in-cli stdlib wrappers so the JIT can call std::env and
     // std::fs helpers without external libc references.
+    register_env_funcs(&mut c);
+    register_fs_funcs(&mut c);
+    register_str_funcs(&mut c);
+    register_path_funcs(&mut c);
+    register_vec_funcs(&mut c);
+    register_misc_funcs(&mut c);
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "android"))]
+fn register_env_funcs<S: std::hash::BuildHasher>(c: &mut std::collections::HashMap<String, NativePtr, S>) {
     c.insert(
         "in_env_var".to_string(),
         NativePtr(crate::native_stdlib::in_env_var as *const u8),
@@ -128,6 +138,22 @@ pub fn bootstrap_jit_native() {
         "in_env_current_dir".to_string(),
         NativePtr(crate::native_stdlib::in_env_current_dir as *const u8),
     );
+    c.insert(
+        "in_env_set_var".to_string(),
+        NativePtr(crate::native_stdlib::in_env_set_var as *const u8),
+    );
+    c.insert(
+        "in_env_remove_var".to_string(),
+        NativePtr(crate::native_stdlib::in_env_remove_var as *const u8),
+    );
+    c.insert(
+        "in_env_has".to_string(),
+        NativePtr(crate::native_stdlib::in_env_has as *const u8),
+    );
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "android"))]
+fn register_fs_funcs<S: std::hash::BuildHasher>(c: &mut std::collections::HashMap<String, NativePtr, S>) {
     c.insert(
         "in_fs_read_to_string".to_string(),
         NativePtr(crate::native_stdlib::in_fs_read_to_string as *const u8),
@@ -148,18 +174,10 @@ pub fn bootstrap_jit_native() {
         "in_fs_remove_file".to_string(),
         NativePtr(crate::native_stdlib::in_fs_remove_file as *const u8),
     );
-    c.insert(
-        "in_process_run".to_string(),
-        NativePtr(crate::native_stdlib::in_process_run as *const u8),
-    );
-    c.insert(
-        "in_env_set_var".to_string(),
-        NativePtr(crate::native_stdlib::in_env_set_var as *const u8),
-    );
-    c.insert(
-        "in_env_remove_var".to_string(),
-        NativePtr(crate::native_stdlib::in_env_remove_var as *const u8),
-    );
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "android"))]
+fn register_str_funcs<S: std::hash::BuildHasher>(c: &mut std::collections::HashMap<String, NativePtr, S>) {
     c.insert(
         "in_str_contains".to_string(),
         NativePtr(crate::native_stdlib::in_str_contains as *const u8),
@@ -177,10 +195,6 @@ pub fn bootstrap_jit_native() {
         NativePtr(crate::native_stdlib::in_str_concat as *const u8),
     );
     c.insert(
-        "in_json_stringify".to_string(),
-        NativePtr(crate::native_stdlib::in_json_stringify as *const u8),
-    );
-    c.insert(
         "in_str_eq".to_string(),
         NativePtr(crate::native_stdlib::in_str_eq as *const u8),
     );
@@ -191,14 +205,6 @@ pub fn bootstrap_jit_native() {
     c.insert(
         "in_str_table_get_int".to_string(),
         NativePtr(crate::native_stdlib::in_str_table_get_int as *const u8),
-    );
-    c.insert(
-        "in_print".to_string(),
-        NativePtr(crate::native_stdlib::in_print as *const u8),
-    );
-    c.insert(
-        "in_print_int".to_string(),
-        NativePtr(crate::native_stdlib::in_print_int as *const u8),
     );
     c.insert(
         "in_str_trim".to_string(),
@@ -232,10 +238,10 @@ pub fn bootstrap_jit_native() {
         "in_str_slice".to_string(),
         NativePtr(crate::native_stdlib::in_str_slice as *const u8),
     );
-    c.insert(
-        "in_int_to_string".to_string(),
-        NativePtr(crate::native_stdlib::in_int_to_string as *const u8),
-    );
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "android"))]
+fn register_path_funcs<S: std::hash::BuildHasher>(c: &mut std::collections::HashMap<String, NativePtr, S>) {
     c.insert(
         "in_path_join".to_string(),
         NativePtr(crate::native_stdlib::in_path_join as *const u8),
@@ -256,10 +262,10 @@ pub fn bootstrap_jit_native() {
         "in_path_normalize".to_string(),
         NativePtr(crate::native_stdlib::in_path_normalize as *const u8),
     );
-    c.insert(
-        "in_env_has".to_string(),
-        NativePtr(crate::native_stdlib::in_env_has as *const u8),
-    );
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "android"))]
+fn register_vec_funcs<S: std::hash::BuildHasher>(c: &mut std::collections::HashMap<String, NativePtr, S>) {
     c.insert(
         "in_vec_extend".to_string(),
         NativePtr(crate::native_stdlib::in_vec_extend as *const u8),
@@ -275,6 +281,30 @@ pub fn bootstrap_jit_native() {
     c.insert(
         "in_vec_push_words".to_string(),
         NativePtr(crate::native_stdlib::in_vec_push_words as *const u8),
+    );
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "android"))]
+fn register_misc_funcs<S: std::hash::BuildHasher>(c: &mut std::collections::HashMap<String, NativePtr, S>) {
+    c.insert(
+        "in_process_run".to_string(),
+        NativePtr(crate::native_stdlib::in_process_run as *const u8),
+    );
+    c.insert(
+        "in_json_stringify".to_string(),
+        NativePtr(crate::native_stdlib::in_json_stringify as *const u8),
+    );
+    c.insert(
+        "in_print".to_string(),
+        NativePtr(crate::native_stdlib::in_print as *const u8),
+    );
+    c.insert(
+        "in_print_int".to_string(),
+        NativePtr(crate::native_stdlib::in_print_int as *const u8),
+    );
+    c.insert(
+        "in_int_to_string".to_string(),
+        NativePtr(crate::native_stdlib::in_int_to_string as *const u8),
     );
 }
 
