@@ -1313,10 +1313,7 @@ mod tests {
         let result = extract_zip(&malicious_zip, &install_path);
         assert!(result.is_err());
         let err_msg = result.unwrap_err();
-        assert!(
-            err_msg.contains("Invalid file path") ||
-            err_msg.contains("failed to extract zip")
-        );
+        assert!(err_msg.contains("Invalid file path") || err_msg.contains("failed to extract zip"));
 
         let _ = fs::remove_dir_all(dir);
     }
