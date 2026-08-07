@@ -1311,4 +1311,63 @@ mod tests {
         assert!(manifest.dependencies.contains_key("cargo:crepuscularity"));
         assert!(manifest.dependencies.contains_key("npm:hono"));
     }
+
+    #[test]
+    fn flatten_go_module_root_already_at_root() {
+        let dir = tempfile_dir("go-mod-root");
+        fs::write(dir.join("go.mod"), b"module foo").unwrap();
+
+        super::flatten_go_module_root(&dir).expect("flatten");
+
+        assert!(dir.join("go.mod").exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn flatten_go_module_root_moves_nested_module() {
+        let dir = tempfile_dir("go-mod-nested");
+        let nested = dir.join("nested");
+        fs::create_dir(&nested).unwrap();
+        fs::write(nested.join("go.mod"), b"module foo").unwrap();
+        fs::write(nested.join("main.go"), b"package main").unwrap();
+
+        super::flatten_go_module_root(&dir).expect("flatten");
+
+        assert!(dir.join("go.mod").exists());
+        assert!(dir.join("main.go").exists());
+        assert!(!dir.join("nested").exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn flatten_go_module_root_ignores_no_module() {
+        let dir = tempfile_dir("go-mod-none");
+        let nested = dir.join("nested");
+        fs::create_dir(&nested).unwrap();
+        fs::write(nested.join("main.go"), b"package main").unwrap();
+
+        super::flatten_go_module_root(&dir).expect("flatten");
+
+        assert!(!dir.join("go.mod").exists());
+        assert!(dir.join("nested").join("main.go").exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn flatten_go_module_root_preserves_existing_files() {
+        let dir = tempfile_dir("go-mod-preserve");
+        fs::write(dir.join("main.go"), b"root").unwrap();
+
+        let nested = dir.join("nested");
+        fs::create_dir(&nested).unwrap();
+        fs::write(nested.join("go.mod"), b"module foo").unwrap();
+        fs::write(nested.join("main.go"), b"nested").unwrap();
+
+        super::flatten_go_module_root(&dir).expect("flatten");
+
+        assert!(dir.join("go.mod").exists());
+        assert_eq!(fs::read_to_string(dir.join("main.go")).unwrap(), "root");
+        assert!(dir.join("nested").join("main.go").exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
 }
