@@ -689,7 +689,6 @@ fn simplify_expr(e: Expr) -> Expr {
     }
 }
 
-
 // ─── Dead Function Elimination ─────────────────────────────────────────────
 
 /// Remove functions that are never called and not referenced as pointers.
