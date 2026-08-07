@@ -3,6 +3,7 @@
 
 #[cfg_attr(not(feature = "parse-extended"), allow(unused_imports))]
 use super::c_family::{c_like_function_decl, extract_cpp_with_classes, objc_like};
+use super::crystal::extract_crystal;
 #[cfg(feature = "parse-extended")]
 use super::csharp::extract_csharp;
 #[cfg(feature = "parse-extended")]
@@ -24,9 +25,8 @@ use super::js::extract_js_with_classes;
 use super::julia::extract_julia;
 #[cfg(feature = "parse-extended")]
 use super::kotlin::extract_kotlin;
-use super::lua::extract_lua;
-use super::crystal::extract_crystal;
 use super::lolcat::extract_lolcat;
+use super::lua::extract_lua;
 use super::nim::extract_nim;
 #[cfg(feature = "parse-extended")]
 use super::ocaml::extract_ocaml;
@@ -55,6 +55,7 @@ use tree_sitter::{Language, Node, Parser};
 
 #[cfg(feature = "parse-extended")]
 use tree_sitter_c_sharp;
+use tree_sitter_crystal;
 #[cfg(feature = "parse-extended")]
 use tree_sitter_dart;
 #[cfg(feature = "parse-extended")]
@@ -72,7 +73,9 @@ use tree_sitter_holyc;
 use tree_sitter_julia;
 #[cfg(feature = "parse-extended")]
 use tree_sitter_kotlin_ng;
+use tree_sitter_lolcat;
 use tree_sitter_lua;
+use tree_sitter_nim;
 #[cfg(feature = "parse-extended")]
 use tree_sitter_objc;
 #[cfg(feature = "parse-extended")]
@@ -87,9 +90,6 @@ use tree_sitter_ruby;
 use tree_sitter_scala;
 #[cfg(feature = "parse-extended")]
 use tree_sitter_v;
-use tree_sitter_crystal;
-use tree_sitter_lolcat;
-use tree_sitter_nim;
 
 /// Try to resolve a ParserId to a Tree-sitter Language.
 fn try_lang_for(id: ParserId) -> Option<Language> {
@@ -625,7 +625,8 @@ pub fn parse_textual_polyglot_module(id: ParserId, src: &str) -> Result<UnifiedM
                 {
                     let parts: Vec<&str> = trimmed.split_whitespace().collect();
                     if parts.len() >= 2 {
-                        let name = normalize_entry(parts[1].split('(').next().unwrap_or(parts[1]).trim());
+                        let name =
+                            normalize_entry(parts[1].split('(').next().unwrap_or(parts[1]).trim());
                         if !name.is_empty() {
                             decls.push(Decl::Function {
                                 name,
@@ -646,7 +647,8 @@ pub fn parse_textual_polyglot_module(id: ParserId, src: &str) -> Result<UnifiedM
                 if lower.starts_with("sub ") || lower.starts_with("function ") {
                     let parts: Vec<&str> = trimmed.split_whitespace().collect();
                     if parts.len() >= 2 {
-                        let name = normalize_entry(parts[1].split('(').next().unwrap_or(parts[1]).trim());
+                        let name =
+                            normalize_entry(parts[1].split('(').next().unwrap_or(parts[1]).trim());
                         if !name.is_empty() {
                             decls.push(Decl::Function {
                                 name,
@@ -682,7 +684,8 @@ pub fn parse_textual_polyglot_module(id: ParserId, src: &str) -> Result<UnifiedM
         ParserId::Hare => {
             for line in &lines {
                 let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("fn ")
+                if let Some(rest) = trimmed
+                    .strip_prefix("fn ")
                     .or_else(|| trimmed.strip_prefix("export fn "))
                 {
                     let name = normalize_entry(rest.split('(').next().unwrap_or(rest).trim());
@@ -701,7 +704,10 @@ pub fn parse_textual_polyglot_module(id: ParserId, src: &str) -> Result<UnifiedM
         ParserId::D => {
             for line in &lines {
                 let trimmed = line.trim();
-                if (trimmed.contains('(') && trimmed.ends_with('{')) || trimmed.starts_with("void ") || trimmed.starts_with("int ") {
+                if (trimmed.contains('(') && trimmed.ends_with('{'))
+                    || trimmed.starts_with("void ")
+                    || trimmed.starts_with("int ")
+                {
                     let parts: Vec<&str> = trimmed.split_whitespace().collect();
                     if parts.len() >= 2 {
                         let name_part = parts[1].split('(').next().unwrap_or(parts[1]);
@@ -722,10 +728,12 @@ pub fn parse_textual_polyglot_module(id: ParserId, src: &str) -> Result<UnifiedM
         ParserId::Clojure => {
             for line in &lines {
                 let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("(defn ")
+                if let Some(rest) = trimmed
+                    .strip_prefix("(defn ")
                     .or_else(|| trimmed.strip_prefix("(defn- "))
                 {
-                    let name = normalize_entry(rest.split_whitespace().next().unwrap_or(rest).trim());
+                    let name =
+                        normalize_entry(rest.split_whitespace().next().unwrap_or(rest).trim());
                     if !name.is_empty() {
                         decls.push(Decl::Function {
                             name,
@@ -4992,14 +5000,21 @@ sub main {
   IF U SAY SO
 KTHXBYE
 "#;
-        let m = parse_lang(try_lang_for(ParserId::Lolcode).unwrap(), src, extract_lolcat).expect("ok");
+        let m = parse_lang(
+            try_lang_for(ParserId::Lolcode).unwrap(),
+            src,
+            extract_lolcat,
+        )
+        .expect("ok");
         let add = m
             .decls
             .iter()
             .find(|d| matches!(d, Decl::Function { name, .. } if name == "add"))
             .expect("add function");
         match add {
-            Decl::Function { name, params, body, .. } => {
+            Decl::Function {
+                name, params, body, ..
+            } => {
                 assert_eq!(name, "add");
                 assert_eq!(params.len(), 2);
                 assert_eq!(params[0].0, "x");
@@ -5012,21 +5027,38 @@ KTHXBYE
 
     #[test]
     fn extract_polyglot_parity_all_languages() {
-        let cobol = "IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO.\nPROCEDURE DIVISION.\nDISPLAY \"Hi\".";
+        let cobol =
+            "IDENTIFICATION DIVISION.\nPROGRAM-ID. HELLO.\nPROCEDURE DIVISION.\nDISPLAY \"Hi\".";
         let m = parse_textual_polyglot_module(ParserId::Cobol, cobol).expect("cobol ok");
-        assert!(m.decls.iter().any(|d| matches!(d, Decl::Function { name, .. } if name == "hello")));
+        assert!(
+            m.decls
+                .iter()
+                .any(|d| matches!(d, Decl::Function { name, .. } if name == "hello"))
+        );
 
         let fortran = "program hello\n print *, \"Hello\"\nend program hello";
         let m = parse_textual_polyglot_module(ParserId::Fortran, fortran).expect("fortran ok");
-        assert!(m.decls.iter().any(|d| matches!(d, Decl::Function { name, .. } if name == "hello")));
+        assert!(
+            m.decls
+                .iter()
+                .any(|d| matches!(d, Decl::Function { name, .. } if name == "hello"))
+        );
 
         let odin = "main :: proc() {\n}";
         let m = parse_textual_polyglot_module(ParserId::Odin, odin).expect("odin ok");
-        assert!(m.decls.iter().any(|d| matches!(d, Decl::Function { name, .. } if name == "main")));
+        assert!(
+            m.decls
+                .iter()
+                .any(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+        );
 
         let hare = "export fn main() void = {\n};";
         let m = parse_textual_polyglot_module(ParserId::Hare, hare).expect("hare ok");
-        assert!(m.decls.iter().any(|d| matches!(d, Decl::Function { name, .. } if name == "main")));
+        assert!(
+            m.decls
+                .iter()
+                .any(|d| matches!(d, Decl::Function { name, .. } if name == "main"))
+        );
     }
 
     #[test]
@@ -5046,7 +5078,12 @@ KTHXBYE
   end
 end
 "#;
-        let m = parse_lang(try_lang_for(ParserId::Crystal).unwrap(), src, extract_crystal).expect("ok");
+        let m = parse_lang(
+            try_lang_for(ParserId::Crystal).unwrap(),
+            src,
+            extract_crystal,
+        )
+        .expect("ok");
         let names: Vec<&str> = m
             .decls
             .iter()
@@ -5062,7 +5099,9 @@ end
             .find(|d| matches!(d, Decl::Function { name, .. } if name == "greet"))
             .expect("greet method");
         match greet {
-            Decl::Function { name, params, body, .. } => {
+            Decl::Function {
+                name, params, body, ..
+            } => {
                 assert_eq!(name, "greet");
                 assert_eq!(params.len(), 1);
                 assert_eq!(params[0].0, "times");
@@ -5106,7 +5145,9 @@ main()
             .find(|d| matches!(d, Decl::Function { name, .. } if name == "greet"))
             .expect("greet proc");
         match greet {
-            Decl::Function { name, params, body, .. } => {
+            Decl::Function {
+                name, params, body, ..
+            } => {
                 assert_eq!(name, "greet");
                 assert_eq!(params.len(), 1);
                 assert_eq!(params[0].0, "g");

@@ -90,10 +90,8 @@ pub fn build_manifest(
             .unwrap_or(true)
     });
     let mut out = Vec::new();
-    let mut ctx_cache = std::collections::HashMap::new();
-    let mut template_cache = std::collections::HashMap::new();
     for (idx, target) in targets {
-        out.push(build_target(target, base_dir, idx, &mut ctx_cache, &mut template_cache)?);
+        out.push(build_target(target, base_dir, idx)?);
     }
     if let (true, Some(target_id)) = (out.is_empty(), target_id) {
         return Err(format!("no target with id {target_id:?}"));
@@ -122,36 +120,29 @@ pub fn write_artifacts(artifacts: &[Artifact]) -> Result<(), String> {
     Ok(())
 }
 
-fn build_target(target: &Target, base_dir: &Path, idx: usize, ctx_cache: &mut std::collections::HashMap<PathBuf, std::sync::Arc<toml::Table>>, template_cache: &mut std::collections::HashMap<PathBuf, String>) -> Result<Artifact, String> {
+fn build_target(target: &Target, base_dir: &Path, idx: usize) -> Result<Artifact, String> {
     let target_type = target.target_type.to_ascii_lowercase();
     match target_type.as_str() {
-        "web" => build_web(target, base_dir, idx, ctx_cache, template_cache),
-        "lvgl" => build_lvgl(target, base_dir, idx, ctx_cache, template_cache),
-        "native" | "ir" => build_native(target, base_dir, idx, ctx_cache, template_cache),
+        "web" => build_web(target, base_dir, idx),
+        "lvgl" => build_lvgl(target, base_dir, idx),
+        "native" | "ir" => build_native(target, base_dir, idx),
         other => Err(format!("unsupported API target type {other:?}")),
     }
 }
 
-fn build_web(target: &Target, base_dir: &Path, idx: usize, ctx_cache: &mut std::collections::HashMap<PathBuf, std::sync::Arc<toml::Table>>, template_cache: &mut std::collections::HashMap<PathBuf, String>) -> Result<Artifact, String> {
+fn build_web(target: &Target, base_dir: &Path, idx: usize) -> Result<Artifact, String> {
     let root = target_dir(target, base_dir);
     let template_path = target
         .entry
         .as_ref()
         .map(|entry| root.join(entry))
         .unwrap_or_else(|| root.join("index.crepus"));
-    let template = if let Some(cached) = template_cache.get(&template_path) {
-        cached.clone()
-    } else {
-        let content = std::fs::read_to_string(&template_path)
-            .map_err(|e| format!("read {}: {e}", template_path.display()))?;
-        template_cache.insert(template_path.clone(), content.clone());
-        content
-    };
+    let template = std::fs::read_to_string(&template_path)
+        .map_err(|e| format!("read {}: {e}", template_path.display()))?;
     let ctx = target_context(
         target,
         base_dir,
         template_path.parent().map(Path::to_path_buf),
-        ctx_cache,
     )?;
     let contents = if let Some(component) = &target.component {
         crepuscularity_web::render_component_file_to_html(&template, component, &ctx)
@@ -164,21 +155,14 @@ fn build_web(target: &Target, base_dir: &Path, idx: usize, ctx_cache: &mut std::
     Ok(artifact(target, idx, "web", contents, base_dir))
 }
 
-fn build_lvgl(target: &Target, base_dir: &Path, idx: usize, ctx_cache: &mut std::collections::HashMap<PathBuf, std::sync::Arc<toml::Table>>, template_cache: &mut std::collections::HashMap<PathBuf, String>) -> Result<Artifact, String> {
+fn build_lvgl(target: &Target, base_dir: &Path, idx: usize) -> Result<Artifact, String> {
     let template_path = template_path(target, base_dir, "ui.crepus");
-    let template = if let Some(cached) = template_cache.get(&template_path) {
-        cached.clone()
-    } else {
-        let content = std::fs::read_to_string(&template_path)
-            .map_err(|e| format!("read {}: {e}", template_path.display()))?;
-        template_cache.insert(template_path.clone(), content.clone());
-        content
-    };
+    let template = std::fs::read_to_string(&template_path)
+        .map_err(|e| format!("read {}: {e}", template_path.display()))?;
     let ctx = target_context(
         target,
         base_dir,
         template_path.parent().map(Path::to_path_buf),
-        ctx_cache,
     )?;
     let contents = if let Some(component) = &target.component {
         crepuscularity_lvgl::render_component_file_to_lvgl_xml(&template, component, &ctx)
@@ -206,21 +190,14 @@ fn build_lvgl(target: &Target, base_dir: &Path, idx: usize, ctx_cache: &mut std:
     Ok(artifact(target, idx, "lvgl", contents, base_dir))
 }
 
-fn build_native(target: &Target, base_dir: &Path, idx: usize, ctx_cache: &mut std::collections::HashMap<PathBuf, std::sync::Arc<toml::Table>>, template_cache: &mut std::collections::HashMap<PathBuf, String>) -> Result<Artifact, String> {
+fn build_native(target: &Target, base_dir: &Path, idx: usize) -> Result<Artifact, String> {
     let template_path = template_path(target, base_dir, "ui.crepus");
-    let template = if let Some(cached) = template_cache.get(&template_path) {
-        cached.clone()
-    } else {
-        let content = std::fs::read_to_string(&template_path)
-            .map_err(|e| format!("read {}: {e}", template_path.display()))?;
-        template_cache.insert(template_path.clone(), content.clone());
-        content
-    };
+    let template = std::fs::read_to_string(&template_path)
+        .map_err(|e| format!("read {}: {e}", template_path.display()))?;
     let ctx = target_context(
         target,
         base_dir,
         template_path.parent().map(Path::to_path_buf),
-        ctx_cache,
     )?;
     let ir = if let Some(component) = &target.component {
         crepuscularity_native::render_component_file_to_ir(&template, component, &ctx)
@@ -266,26 +243,18 @@ fn target_context(
     target: &Target,
     manifest_dir: &Path,
     base_dir: Option<PathBuf>,
-    ctx_cache: &mut std::collections::HashMap<PathBuf, std::sync::Arc<toml::Table>>,
 ) -> Result<TemplateContext, String> {
     let mut ctx = TemplateContext::new();
     ctx.base_dir = base_dir;
     if let Some(path) = &target.ctx {
         let ctx_path = absolutize(manifest_dir, path);
-        let table = if let Some(cached) = ctx_cache.get(&ctx_path) {
-            cached.clone()
-        } else {
-            let raw = std::fs::read_to_string(&ctx_path)
-                .map_err(|e| format!("read {}: {e}", ctx_path.display()))?;
-            let table = raw
-                .parse::<toml::Table>()
-                .map_err(|e| format!("parse {}: {e}", ctx_path.display()))?;
-            let table = std::sync::Arc::new(table);
-            ctx_cache.insert(ctx_path.clone(), table.clone());
-            table
-        };
-        for (key, value) in table.as_ref() {
-            ctx.set(key, toml_to_template_value(value));
+        let raw = std::fs::read_to_string(&ctx_path)
+            .map_err(|e| format!("read {}: {e}", ctx_path.display()))?;
+        let table = raw
+            .parse::<toml::Table>()
+            .map_err(|e| format!("parse {}: {e}", ctx_path.display()))?;
+        for (key, value) in table {
+            ctx.set(key, toml_to_template_value(&value));
         }
     }
     for (key, value) in &target.vars {

@@ -813,9 +813,7 @@ pub(crate) fn wrap_eval_statement(
         parser_registry::ParserId::Cobol => Some(format!(
             "IDENTIFICATION DIVISION.\nPROGRAM-ID. MAIN.\nPROCEDURE DIVISION.\n    {code}.\n    STOP RUN."
         )),
-        parser_registry::ParserId::Lolcode => Some(format!(
-            "HAI 1.2\n{code}\nKTHXBYE"
-        )),
+        parser_registry::ParserId::Lolcode => Some(format!("HAI 1.2\n{code}\nKTHXBYE")),
         _ => None,
     }
 }
