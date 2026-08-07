@@ -1109,7 +1109,46 @@ fn x86_64_insn_length(code: &[u8], pos: usize) -> usize {
     let opcode_total = if let Some(o2) = op2 { o2 } else { op1 };
     let two_byte = op2.is_some();
 
-    let has_modrm = match (two_byte, opcode_total) {
+    let has_modrm = x86_64_has_modrm(two_byte, opcode_total);
+
+    // ── ModRM byte ──
+    let mut modrm: u8 = 0;
+    if has_modrm && p < code.len() {
+        modrm = code[p];
+        p += 1;
+    }
+
+    if has_modrm {
+        let mod_field = modrm >> 6;
+        let rm_field = modrm & 7;
+
+        // ── SIB byte ──
+        let has_sib = mod_field != 3 && rm_field == 4;
+        if has_sib && p < code.len() {
+            p += 1; // skip SIB
+        }
+
+        // ── Displacement ──
+        if mod_field == 1 {
+            p += 1; // disp8
+        } else if mod_field == 2 {
+            p += 4; // disp32
+        } else if mod_field == 0 && rm_field == 5 && !has_sib && !two_byte {
+            p += 4; // disp32 (RIP-relative)
+        } else if mod_field == 0 && rm_field == 5 && two_byte {
+            p += 4; // disp32 (two-byte opcode RIP-relative)
+        }
+    }
+
+    // ── Immediate ──
+    let immediate_size = x86_64_immediate_size(two_byte, opcode_total, code, pos, p, modrm);
+    p += immediate_size;
+
+    p - pos
+}
+
+fn x86_64_has_modrm(two_byte: bool, opcode_total: u8) -> bool {
+    match (two_byte, opcode_total) {
         // Immediate-only: push/pop, mov al/ax/eax/rax, etc.
         (false, 0x50..=0x5F) => false, // push r64 / pop r64
         (false, 0x60..=0x6F) => true,  // pusha/pusha/pushad/pop variants
@@ -1163,39 +1202,18 @@ fn x86_64_insn_length(code: &[u8], pos: usize) -> usize {
         (true, 0xE0..=0xEF) => true,  // SSE1
         (true, 0xF0..=0xFF) => true,  // SSE1/SSE2
         _ => true,                    // Conservative: assume ModRM
-    };
-
-    // ── ModRM byte ──
-    let mut modrm: u8 = 0;
-    if has_modrm && p < code.len() {
-        modrm = code[p];
-        p += 1;
     }
+}
 
-    if has_modrm {
-        let mod_field = modrm >> 6;
-        let rm_field = modrm & 7;
-
-        // ── SIB byte ──
-        let has_sib = mod_field != 3 && rm_field == 4;
-        if has_sib && p < code.len() {
-            p += 1; // skip SIB
-        }
-
-        // ── Displacement ──
-        if mod_field == 1 {
-            p += 1; // disp8
-        } else if mod_field == 2 {
-            p += 4; // disp32
-        } else if mod_field == 0 && rm_field == 5 && !has_sib && !two_byte {
-            p += 4; // disp32 (RIP-relative)
-        } else if mod_field == 0 && rm_field == 5 && two_byte {
-            p += 4; // disp32 (two-byte opcode RIP-relative)
-        }
-    }
-
-    // ── Immediate ──
-    let immediate_size = match (two_byte, opcode_total) {
+fn x86_64_immediate_size(
+    two_byte: bool,
+    opcode_total: u8,
+    code: &[u8],
+    pos: usize,
+    p: usize,
+    modrm: u8,
+) -> usize {
+    match (two_byte, opcode_total) {
         // MOV r8..r15, imm64
         (false, 0xB8..=0xBF)
             if code[pos..p]
@@ -1244,10 +1262,7 @@ fn x86_64_insn_length(code: &[u8], pos: usize) -> usize {
         // MOVSXD
         (false, 0x63) => 0,
         _ => 0,
-    };
-    p += immediate_size;
-
-    p - pos
+    }
 }
 
 // ─── x86_64 Peephole ──────────────────────────────────────────────────────
