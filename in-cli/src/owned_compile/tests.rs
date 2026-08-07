@@ -96,7 +96,7 @@ fn jit_executes_snake_case_stdlib_process_run() {
     // On some environments (like CI runner where `true` has no output), `instring_from_bytes` will return None for empty strings,
     // or Some("") depending on initialization details. We accept both here since the primary goal is executing `process_run("true")`.
     let eval_res = report.eval_result_string.as_deref();
-    assert!(eval_res == Some("") || eval_res == None);
+    assert!(eval_res == Some("") || eval_res.is_none());
 
     fs::remove_file(source_path).unwrap();
 }
