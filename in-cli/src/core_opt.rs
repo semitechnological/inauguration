@@ -505,7 +505,7 @@ fn simplify_expr(e: Expr) -> Expr {
                         }
                     }
                     "div" | "/" if *b != 0 && !(*a == i64::MIN && *b == -1) => {
-                        return Expr::IntLit(a / b)
+                        return Expr::IntLit(a / b);
                     }
                     "mod" | "%" if *b != 0 => return Expr::IntLit(a % b),
                     _ => {}
@@ -591,17 +591,38 @@ fn simplify_expr(e: Expr) -> Expr {
                     if is_zero(&rhs) {
                         return *lhs;
                     }
-                    if lhs == rhs && matches!(lhs.as_ref(), Expr::Ident(_) | Expr::IntLit(_) | Expr::BoolLit(_)) {
+                    if lhs == rhs
+                        && matches!(
+                            lhs.as_ref(),
+                            Expr::Ident(_) | Expr::IntLit(_) | Expr::BoolLit(_)
+                        )
+                    {
                         return Expr::IntLit(0);
                     }
                 }
                 "==" => {
-                    if lhs == rhs && matches!(lhs.as_ref(), Expr::Ident(_) | Expr::IntLit(_) | Expr::BoolLit(_) | Expr::StringLit(_)) {
+                    if lhs == rhs
+                        && matches!(
+                            lhs.as_ref(),
+                            Expr::Ident(_)
+                                | Expr::IntLit(_)
+                                | Expr::BoolLit(_)
+                                | Expr::StringLit(_)
+                        )
+                    {
                         return Expr::BoolLit(true);
                     }
                 }
                 "!=" => {
-                    if lhs == rhs && matches!(lhs.as_ref(), Expr::Ident(_) | Expr::IntLit(_) | Expr::BoolLit(_) | Expr::StringLit(_)) {
+                    if lhs == rhs
+                        && matches!(
+                            lhs.as_ref(),
+                            Expr::Ident(_)
+                                | Expr::IntLit(_)
+                                | Expr::BoolLit(_)
+                                | Expr::StringLit(_)
+                        )
+                    {
                         return Expr::BoolLit(false);
                     }
                 }
