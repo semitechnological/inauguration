@@ -494,9 +494,9 @@ fn fold_int_constants(op: &str, a: i64, b: i64) -> Option<Expr> {
     }
 }
 
-fn simplify_binary_expr(op: String, lhs: Box<Expr>, rhs: Box<Expr>) -> Expr {
-    if let (Expr::IntLit(a), Expr::IntLit(b)) = (lhs.as_ref(), rhs.as_ref()) {
-        if let Some(folded) = fold_int_constants(op.as_str(), *a, *b) {
+fn simplify_binary_expr(original: Expr, op: &str, lhs: &Expr, rhs: &Expr) -> Expr {
+    if let (Expr::IntLit(a), Expr::IntLit(b)) = (lhs, rhs) {
+        if let Some(folded) = fold_int_constants(op, *a, *b) {
             return folded;
         }
     }
@@ -507,94 +507,89 @@ fn simplify_binary_expr(op: String, lhs: Box<Expr>, rhs: Box<Expr>) -> Expr {
     let is_true = |e: &Expr| matches!(e, Expr::BoolLit(true));
     let is_false = |e: &Expr| matches!(e, Expr::BoolLit(false));
 
-    match op.as_str() {
+    match op {
         "add" | "+" => {
-            if is_zero(lhs.as_ref()) {
-                return *rhs;
+            if is_zero(lhs) {
+                return rhs.clone();
             }
-            if is_zero(rhs.as_ref()) {
-                return *lhs;
+            if is_zero(rhs) {
+                return lhs.clone();
             }
         }
         "bor" | "|" => {
-            if is_neg1(lhs.as_ref()) || is_neg1(rhs.as_ref()) {
+            if is_neg1(lhs) || is_neg1(rhs) {
                 return Expr::IntLit(-1);
             }
-            if is_zero(lhs.as_ref()) {
-                return *rhs;
+            if is_zero(lhs) {
+                return rhs.clone();
             }
-            if is_zero(rhs.as_ref()) {
-                return *lhs;
+            if is_zero(rhs) {
+                return lhs.clone();
             }
         }
         "land" | "&&" => {
-            if is_false(lhs.as_ref()) || is_false(rhs.as_ref()) {
+            if is_false(lhs) || is_false(rhs) {
                 return Expr::BoolLit(false);
             }
-            if is_true(lhs.as_ref()) {
-                return *rhs;
+            if is_true(lhs) {
+                return rhs.clone();
             }
-            if is_true(rhs.as_ref()) {
-                return *lhs;
+            if is_true(rhs) {
+                return lhs.clone();
             }
-            if is_zero(lhs.as_ref()) || is_zero(rhs.as_ref()) {
+            if is_zero(lhs) || is_zero(rhs) {
                 return Expr::IntLit(0);
             }
-            if is_one(lhs.as_ref()) {
-                return *rhs;
+            if is_one(lhs) {
+                return rhs.clone();
             }
-            if is_one(rhs.as_ref()) {
-                return *lhs;
+            if is_one(rhs) {
+                return lhs.clone();
             }
         }
         "lor" | "||" => {
-            if is_true(lhs.as_ref()) || is_true(rhs.as_ref()) {
+            if is_true(lhs) || is_true(rhs) {
                 return Expr::BoolLit(true);
             }
-            if is_false(lhs.as_ref()) {
-                return *rhs;
+            if is_false(lhs) {
+                return rhs.clone();
             }
-            if is_false(rhs.as_ref()) {
-                return *lhs;
+            if is_false(rhs) {
+                return lhs.clone();
             }
-            if is_one(lhs.as_ref()) || is_one(rhs.as_ref()) {
+            if is_one(lhs) || is_one(rhs) {
                 return Expr::IntLit(1);
             }
-            if is_zero(lhs.as_ref()) {
-                return *rhs;
+            if is_zero(lhs) {
+                return rhs.clone();
             }
-            if is_zero(rhs.as_ref()) {
-                return *lhs;
+            if is_zero(rhs) {
+                return lhs.clone();
             }
         }
         "sub" | "-" => {
-            if is_zero(rhs.as_ref()) {
-                return *lhs;
+            if is_zero(rhs) {
+                return lhs.clone();
             }
-            if lhs == rhs && matches!(lhs.as_ref(), Expr::Ident(_) | Expr::IntLit(_)) {
+            if lhs == rhs && matches!(lhs, Expr::Ident(_) | Expr::IntLit(_)) {
                 return Expr::IntLit(0);
             }
         }
         "xor" | "^" => {
-            if is_zero(lhs.as_ref()) {
-                return *rhs;
+            if is_zero(lhs) {
+                return rhs.clone();
             }
-            if is_zero(rhs.as_ref()) {
-                return *lhs;
+            if is_zero(rhs) {
+                return lhs.clone();
             }
-            if lhs == rhs
-                && matches!(
-                    lhs.as_ref(),
-                    Expr::Ident(_) | Expr::IntLit(_) | Expr::BoolLit(_)
-                )
-            {
+            if lhs == rhs && matches!(lhs, Expr::Ident(_) | Expr::IntLit(_) | Expr::BoolLit(_)) {
                 return Expr::IntLit(0);
             }
         }
         "==" => {
             if lhs == rhs
                 && matches!(
-                    lhs.as_ref(),
+                    lhs,
                     Expr::Ident(_) | Expr::IntLit(_) | Expr::BoolLit(_) | Expr::StringLit(_)
                 )
             {
@@ -604,7 +599,7 @@ fn simplify_binary_expr(op: String, lhs: Box<Expr>, rhs: Box<Expr>) -> Expr {
         "!=" => {
             if lhs == rhs
                 && matches!(
-                    lhs.as_ref(),
+                    lhs,
                     Expr::Ident(_) | Expr::IntLit(_) | Expr::BoolLit(_) | Expr::StringLit(_)
                 )
             {
@@ -612,79 +607,89 @@ fn simplify_binary_expr(op: String, lhs: Box<Expr>, rhs: Box<Expr>) -> Expr {
             }
         }
         ">" | "<" | "gt" | "lt" => {
-            if lhs == rhs && matches!(lhs.as_ref(), Expr::Ident(_) | Expr::IntLit(_)) {
+            if lhs == rhs && matches!(lhs, Expr::Ident(_) | Expr::IntLit(_)) {
                 return Expr::BoolLit(false);
             }
         }
         ">=" | "<=" | "ge" | "le" => {
-            if lhs == rhs && matches!(lhs.as_ref(), Expr::Ident(_) | Expr::IntLit(_)) {
+            if lhs == rhs && matches!(lhs, Expr::Ident(_) | Expr::IntLit(_)) {
                 return Expr::BoolLit(true);
             }
         }
         "mul" | "*" => {
-            if is_zero(lhs.as_ref()) || is_zero(rhs.as_ref()) {
+            if is_zero(lhs) || is_zero(rhs) {
                 return Expr::IntLit(0);
             }
-            if is_one(lhs.as_ref()) {
-                return *rhs;
+            if is_one(lhs) {
+                return rhs.clone();
             }
-            if is_one(rhs.as_ref()) {
-                return *lhs;
+            if is_one(rhs) {
+                return lhs.clone();
             }
         }
         "div" | "/" => {
-            if is_one(rhs.as_ref()) {
-                return *lhs;
+            if is_one(rhs) {
+                return lhs.clone();
             }
         }
         "band" | "&" => {
-            if is_zero(lhs.as_ref()) || is_zero(rhs.as_ref()) {
+            if is_zero(lhs) || is_zero(rhs) {
                 return Expr::IntLit(0);
             }
-            if is_neg1(lhs.as_ref()) {
-                return *rhs;
+            if is_neg1(lhs) {
+                return rhs.clone();
             }
-            if is_neg1(rhs.as_ref()) {
-                return *lhs;
+            if is_neg1(rhs) {
+                return lhs.clone();
             }
         }
         "shl" | "<<" | "shr" | ">>" => {
-            if is_zero(rhs.as_ref()) {
-                return *lhs;
+            if is_zero(rhs) {
+                return lhs.clone();
             }
-            if is_zero(lhs.as_ref()) {
+            if is_zero(lhs) {
                 return Expr::IntLit(0);
             }
         }
         _ => {}
     }
-    Expr::Binary { op, lhs, rhs }
+    original
 }
 
-fn simplify_unary_expr(op: String, expr: Box<Expr>) -> Expr {
-    let collapse = matches!(
-        expr.as_ref(),
-        Expr::Unary { op: inner_op, .. }
-            if ((op == "neg" || op == "-") && (inner_op == "neg" || inner_op == "-"))
-                || ((op == "not" || op == "!") && (inner_op == "not" || inner_op == "!"))
-    );
-    if collapse {
-        match *expr {
-            Expr::Unary {
-                expr: inner_expr, ..
-            } => *inner_expr,
-            _ => unreachable!(),
+fn simplify_unary_expr(original: Expr, op: &str, expr: &Expr) -> Expr {
+    match op {
+        "neg" | "-" => {
+            if let Expr::Unary {
+                op: ref inner_op,
+                expr: ref inner_expr,
+            } = *expr
+            {
+                if inner_op == "neg" || inner_op == "-" {
+                    return *inner_expr.clone();
+                }
+            }
         }
-    } else {
-        Expr::Unary { op, expr }
+        "not" | "!" => {
+            if let Expr::Unary {
+                op: ref inner_op,
+                expr: ref inner_expr2,
+            } = *expr
+            {
+                if inner_op == "not" || inner_op == "!" {
+                    return *inner_expr2.clone();
+                }
+            }
+        }
+        _ => {}
     }
+    original
 }
 
 fn simplify_expr(e: Expr) -> Expr {
     // Clone-and-match on owned value to avoid borrow gymnastics
-    match e {
-        Expr::Binary { op, lhs, rhs } => simplify_binary_expr(op, lhs, rhs),
-        Expr::Unary { op, expr } => simplify_unary_expr(op, expr),
+    match e.clone() {
+        Expr::Binary { op, lhs, rhs, .. } => simplify_binary_expr(e, &op, &lhs, &rhs),
+        Expr::Unary { op, expr, .. } => simplify_unary_expr(e, &op, &expr),
         _ => e,
     }
 }
