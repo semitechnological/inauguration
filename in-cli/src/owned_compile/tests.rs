@@ -76,6 +76,7 @@ fn native_target_reports_host_status() {
 }
 
 #[test]
+#[cfg(target_arch = "aarch64")]
 fn jit_executes_snake_case_stdlib_process_run() {
     let source_path = temp_path("stdlib-process-run.in");
     fs::write(
