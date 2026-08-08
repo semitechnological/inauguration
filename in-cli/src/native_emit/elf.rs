@@ -89,7 +89,7 @@ pub fn write_aarch64_relocatable_object(object: &ElfObject, out: &mut Vec<u8>) {
     write_elf64_relocatable_object(object, EM_AARCH64, out);
 }
 
-fn build_elf64_exports<'a>(object: &'a ElfObject) -> Vec<(&'a str, u64)> {
+fn build_elf64_exports(object: &ElfObject) -> Vec<(&str, u64)> {
     let mut all_exports = Vec::new();
     all_exports.push((object.export_name.as_str(), 0));
     for (name, offset) in &object.exports {
