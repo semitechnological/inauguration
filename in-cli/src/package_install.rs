@@ -1316,14 +1316,21 @@ mod tests {
     fn strip_npm_dev_dependencies_removes_field() {
         let temp = tempfile_dir("strip-npm");
         let path = temp.join("package.json");
-        fs::write(&path, r#"{"name": "test", "devDependencies": {"foo": "1.0"}}"#).expect("write package.json");
+        fs::write(
+            &path,
+            r#"{"name": "test", "devDependencies": {"foo": "1.0"}}"#,
+        )
+        .expect("write package.json");
 
         super::strip_npm_dev_dependencies(&temp);
 
         let content = fs::read_to_string(&path).expect("read package.json");
         let json: serde_json::Value = serde_json::from_str(&content).expect("parse json");
         assert!(json.get("name").is_some(), "name should remain");
-        assert!(json.get("devDependencies").is_none(), "devDependencies should be removed");
+        assert!(
+            json.get("devDependencies").is_none(),
+            "devDependencies should be removed"
+        );
         let _ = fs::remove_dir_all(temp);
     }
 
@@ -1333,7 +1340,10 @@ mod tests {
 
         super::strip_npm_dev_dependencies(&temp);
 
-        assert!(!temp.join("package.json").exists(), "package.json should not be created");
+        assert!(
+            !temp.join("package.json").exists(),
+            "package.json should not be created"
+        );
         let _ = fs::remove_dir_all(temp);
     }
 
