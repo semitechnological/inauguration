@@ -318,7 +318,11 @@ fn append_package_info(report: &GraphReport, lines: &mut Vec<String>) {
     }
 }
 
-fn append_selection_info(report: &GraphReport, selection: GraphReportSelection, lines: &mut Vec<String>) {
+fn append_selection_info(
+    report: &GraphReport,
+    selection: GraphReportSelection,
+    lines: &mut Vec<String>,
+) {
     if selection.include_imports() {
         lines.push(format!("imports: {}", join_or_none(&report.imports)));
         lines.push(format!("effects: {}", join_or_none(&report.effects)));

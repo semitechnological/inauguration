@@ -2,6 +2,7 @@
 //! with bounded declaration and body extraction where each language extractor is wired.
 
 mod c_family;
+mod crystal;
 #[cfg_attr(not(feature = "parse-extended"), allow(dead_code))]
 mod csharp;
 #[cfg_attr(not(feature = "parse-extended"), allow(dead_code))]
@@ -23,9 +24,8 @@ mod js;
 mod julia;
 #[cfg_attr(not(feature = "parse-extended"), allow(dead_code))]
 mod kotlin;
-mod lua;
 mod lolcat;
-mod crystal;
+mod lua;
 mod nim;
 #[cfg_attr(not(feature = "parse-extended"), allow(dead_code))]
 mod ocaml;
