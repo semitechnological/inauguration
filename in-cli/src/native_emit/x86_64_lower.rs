@@ -981,7 +981,8 @@ fn lower_stmt(
     match stmt {
         Stmt::Return(expr) => {
             if let Some(expr) = expr {
-                if matches!(&ctx.ret_typ, Typ::Named(_) | Typ::Array(_)) {
+                let ret_typ = ctx.ret_typ.canonical();
+                if matches!(ret_typ, Typ::Named(_) | Typ::Array(_)) {
                     // ponytail: struct/array return — just return 0 (tag)
                     emitter.emit_insns(&x86_64::load_i64(RAX, 0));
                 } else {
@@ -2175,21 +2176,23 @@ fn lower_call_expr(
         return Ok(());
     }
 
+    if TL_JIT_EXTERNS.with(|m| *m.borrow()) {
+        if let Some(wrapper) = jit_stdlib_wrapper(&target_name)
+            && let Some(ptr) = crate::native_emit::native_link::resolve_native_fn(wrapper)
+        {
+            lower_call_args(emitter, ctx, args, &target_name, pending_calls)?;
+            emitter.emit_insns(&x86_64::load_i64(RAX, ptr as i64));
+            emitter.emit_insns(&[0xFF, 0xD0]);
+            emit_stack_cleanup(emitter, args.len());
+            if target_reg != RAX {
+                emitter.emit_insns(&x86_64::xor_rr(target_reg, target_reg));
+            }
+            return Ok(());
+        }
+    }
+
     if !ctx.functions.contains_key(&target_name) {
         lower_call_args(emitter, ctx, args, &target_name, pending_calls)?;
-        if TL_JIT_EXTERNS.with(|m| *m.borrow()) {
-            if let Some(wrapper) = jit_stdlib_wrapper(&target_name)
-                && let Some(ptr) = crate::native_emit::native_link::resolve_native_fn(wrapper)
-            {
-                emitter.emit_insns(&x86_64::load_i64(RAX, ptr as i64));
-                emitter.emit_insns(&[0xFF, 0xD0]);
-                emit_stack_cleanup(emitter, args.len());
-                if target_reg != RAX {
-                    emitter.emit_insns(&x86_64::xor_rr(target_reg, target_reg));
-                }
-                return Ok(());
-            }
-        }
         // Extern function: emit CALL instruction with relocation.
         // The linker resolves the target — until then, displacement=0.
         let site = emitter.len() as u32;
@@ -2464,6 +2467,23 @@ fn answer() -> Int {
 fn main() -> void { return 0 }
 "#;
         crate::in_lang_parse::parse_in_source(src).expect("parse")
+    }
+
+    #[test]
+    fn jit_string_return_and_stdlib_extern_lower_together() {
+        let src = "import std.process;\ncapability process.spawn;\nfn main() -> String { return process-run(\"true\"); }\n";
+        let module = crate::in_lang_parse::parse_in_source(src).expect("parse");
+        crate::native_emit::native_link::bootstrap_jit_native();
+        TL_JIT_EXTERNS.with(|m| *m.borrow_mut() = true);
+        let result = lower_module(&module, "main").expect("lower");
+        TL_JIT_EXTERNS.with(|m| *m.borrow_mut() = false);
+        let has_call_rax = result.code.windows(2).any(|w| w == [0xFF, 0xD0]);
+        let has_unresolved_rel32 = result.code.windows(5).any(|w| w == [0xE8, 0, 0, 0, 0]);
+        assert!(has_call_rax, "stdlib extern must lower to call rax");
+        assert!(
+            !has_unresolved_rel32,
+            "stdlib extern must not stay an unresolved rel32 call"
+        );
     }
 
     fn make_arith_fn_module() -> UnifiedModule {
