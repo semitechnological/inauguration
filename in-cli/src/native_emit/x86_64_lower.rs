@@ -12,7 +12,58 @@
 
 use crate::core_ir::{Decl, Expr, LoopKind, MatchArm, Stmt, Typ, UnifiedModule};
 use crate::native_emit::x86_64::{self, CodeEmitter, RAX, RBP, RBX, RCX, RDI, RDX, REG_SP, RSI};
+use std::cell::RefCell;
 use std::collections::HashMap;
+
+thread_local! {
+    /// JIT mode: resolve extern stdlib calls to in-process wrapper addresses
+    /// instead of leaving rel32 placeholders for the system linker.
+    pub(crate) static TL_JIT_EXTERNS: RefCell<bool> = const { RefCell::new(false) };
+}
+
+/// Core IR stdlib call name -> C-ABI wrapper registered in the JIT symbol cache.
+fn jit_stdlib_wrapper(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "join" => "in_vec_join",
+        "chain" | "extend" => "in_vec_extend",
+        "push" => "in_vec_push",
+        "push-str" => "in_vec_push_words",
+        "print" => "in_print",
+        "read-file" => "in_fs_read_to_string",
+        "write-file" => "in_fs_write",
+        "fs-exists" => "in_fs_exists",
+        "create-dir" => "in_fs_create_dir",
+        "remove-file" => "in_fs_remove_file",
+        "process-run" => "in_process_run",
+        "env-get" => "in_env_var",
+        "env-set" => "in_env_set_var",
+        "env-has" => "in_env_has",
+        "env-temp-dir" => "in_env_temp_dir",
+        "env-current-dir" => "in_env_current_dir",
+        "path-join" => "in_path_join",
+        "path-dirname" => "in_path_dirname",
+        "path-basename" => "in_path_basename",
+        "path-extname" => "in_path_extname",
+        "path-normalize" => "in_path_normalize",
+        "str-concat" => "in_str_concat",
+        "str-eq" => "in_str_eq",
+        "json-stringify" => "in_json_stringify",
+        "str-table-has" => "in_str_table_has",
+        "str-table-get-int" => "in_str_table_get_int",
+        "str-contains" => "in_str_contains",
+        "str-starts-with" => "in_str_starts_with",
+        "str-ends-with" => "in_str_ends_with",
+        "str-index-of" => "in_str_index_of",
+        "str-is-int" => "in_str_is_int",
+        "str-slice" => "in_str_slice",
+        "str-split-lines" => "in_str_split_lines",
+        "str-split-spaces" => "in_str_split_spaces",
+        "str-tokenize-expr" => "in_str_tokenize_expr",
+        "str-to-int" => "in_str_to_int",
+        "str-trim" => "in_str_trim",
+        _ => return None,
+    })
+}
 
 pub const X86_64_TRIPLE: &str = "x86_64-unknown-none";
 
@@ -2126,6 +2177,19 @@ fn lower_call_expr(
 
     if !ctx.functions.contains_key(&target_name) {
         lower_call_args(emitter, ctx, args, &target_name, pending_calls)?;
+        if TL_JIT_EXTERNS.with(|m| *m.borrow()) {
+            if let Some(wrapper) = jit_stdlib_wrapper(&target_name)
+                && let Some(ptr) = crate::native_emit::native_link::resolve_native_fn(wrapper)
+            {
+                emitter.emit_insns(&x86_64::load_i64(RAX, ptr as i64));
+                emitter.emit_insns(&[0xFF, 0xD0]);
+                emit_stack_cleanup(emitter, args.len());
+                if target_reg != RAX {
+                    emitter.emit_insns(&x86_64::xor_rr(target_reg, target_reg));
+                }
+                return Ok(());
+            }
+        }
         // Extern function: emit CALL instruction with relocation.
         // The linker resolves the target — until then, displacement=0.
         let site = emitter.len() as u32;
