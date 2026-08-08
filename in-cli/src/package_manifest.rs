@@ -980,8 +980,7 @@ fn process_manifest_line(
             }
             Some(Section::Dependencies) => {
                 *dependency_subsection = None;
-                *dependency_name =
-                    Some(parse_dependency_header(line, line_number, manifest)?);
+                *dependency_name = Some(parse_dependency_header(line, line_number, manifest)?);
             }
             Some(Section::Capabilities) => {
                 *dependency_name = None;
@@ -1013,8 +1012,7 @@ fn process_manifest_line(
             let name = dependency_name.as_deref().ok_or_else(|| {
                 format!("line {line_number}: dependency metadata requires a dependency name")
             })?;
-            *dependency_subsection =
-                parse_dependency_field(line, line_number, name, manifest)?;
+            *dependency_subsection = parse_dependency_field(line, line_number, name, manifest)?;
         }
         6 => {
             if *section != Some(Section::Dependencies) {
