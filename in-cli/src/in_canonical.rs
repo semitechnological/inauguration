@@ -317,13 +317,7 @@ fn format_if(
     }
 }
 
-fn format_while_loop(
-    cond: &Expr,
-    body: &[Stmt],
-    depth: usize,
-    indent: &str,
-    out: &mut String,
-) {
+fn format_while_loop(cond: &Expr, body: &[Stmt], depth: usize, indent: &str, out: &mut String) {
     out.push_str(indent);
     out.push_str("while ");
     out.push_str(&format_expr(cond));
@@ -333,12 +327,7 @@ fn format_while_loop(
     out.push_str("}\n");
 }
 
-fn format_loop(
-    body: &[Stmt],
-    depth: usize,
-    indent: &str,
-    out: &mut String,
-) {
+fn format_loop(body: &[Stmt], depth: usize, indent: &str, out: &mut String) {
     out.push_str(indent);
     out.push_str("while true {\n");
     format_body(body, depth + 1, out);
@@ -346,13 +335,7 @@ fn format_loop(
     out.push_str("}\n");
 }
 
-fn format_match(
-    scrutinee: &Expr,
-    arms: &[MatchArm],
-    depth: usize,
-    indent: &str,
-    out: &mut String,
-) {
+fn format_match(scrutinee: &Expr, arms: &[MatchArm], depth: usize, indent: &str, out: &mut String) {
     out.push_str(indent);
     out.push_str("match ");
     out.push_str(&format_expr(scrutinee));
