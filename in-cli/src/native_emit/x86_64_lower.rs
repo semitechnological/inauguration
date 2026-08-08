@@ -2177,7 +2177,12 @@ fn lower_call_expr(
     }
 
     if TL_JIT_EXTERNS.with(|m| *m.borrow()) {
-        if let Some(wrapper) = jit_stdlib_wrapper(&target_name)
+        let base = target_name
+            .rsplit("::")
+            .next()
+            .unwrap_or(&target_name)
+            .replace('_', "-");
+        if let Some(wrapper) = jit_stdlib_wrapper(&base)
             && let Some(ptr) = crate::native_emit::native_link::resolve_native_fn(wrapper)
         {
             lower_call_args(emitter, ctx, args, &target_name, pending_calls)?;
@@ -2471,7 +2476,7 @@ fn main() -> void { return 0 }
 
     #[test]
     fn jit_string_return_and_stdlib_extern_lower_together() {
-        let src = "import std.process;\ncapability process.spawn;\nfn main() -> String { return process-run(\"true\"); }\n";
+        let src = "import std.process;\ncapability process.spawn;\nfn main() -> String { return process_run(\"true\"); }\n";
         let module = crate::in_lang_parse::parse_in_source(src).expect("parse");
         crate::native_emit::native_link::bootstrap_jit_native();
         TL_JIT_EXTERNS.with(|m| *m.borrow_mut() = true);
