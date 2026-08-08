@@ -225,6 +225,67 @@ fn format_expr(expr: &Expr) -> String {
     }
 }
 
+fn format_if(
+    cond: &Expr,
+    then_body: &[Stmt],
+    else_body: &[Stmt],
+    depth: usize,
+    indent: &str,
+    out: &mut String,
+) {
+    out.push_str(indent);
+    out.push_str("if ");
+    out.push_str(&format_expr(cond));
+    out.push_str(" {\n");
+    format_body(then_body, depth + 1, out);
+    out.push_str(indent);
+    out.push('}');
+    if else_body.is_empty() {
+        out.push('\n');
+    } else {
+        out.push_str(" else {\n");
+        format_body(else_body, depth + 1, out);
+        out.push_str(indent);
+        out.push_str("}\n");
+    }
+}
+
+fn format_while_loop(cond: &Expr, body: &[Stmt], depth: usize, indent: &str, out: &mut String) {
+    out.push_str(indent);
+    out.push_str("while ");
+    out.push_str(&format_expr(cond));
+    out.push_str(" {\n");
+    format_body(body, depth + 1, out);
+    out.push_str(indent);
+    out.push_str("}\n");
+}
+
+fn format_loop(body: &[Stmt], depth: usize, indent: &str, out: &mut String) {
+    out.push_str(indent);
+    out.push_str("while true {\n");
+    format_body(body, depth + 1, out);
+    out.push_str(indent);
+    out.push_str("}\n");
+}
+
+fn format_match(scrutinee: &Expr, arms: &[MatchArm], depth: usize, indent: &str, out: &mut String) {
+    out.push_str(indent);
+    out.push_str("match ");
+    out.push_str(&format_expr(scrutinee));
+    out.push_str(" {\n");
+    for arm in arms {
+        out.push_str(indent);
+        out.push_str("  ");
+        out.push_str(&arm.pattern);
+        out.push_str(" {\n");
+        format_body(&arm.body, depth + 2, out);
+        out.push_str(indent);
+        out.push_str("  }\n");
+    }
+    out.push_str(indent);
+    out.push_str("}\n");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -290,65 +351,4 @@ fn main() {
         let result = canonicalize_in_source("!@#$");
         assert!(result.is_err());
     }
-}
-
-fn format_if(
-    cond: &Expr,
-    then_body: &[Stmt],
-    else_body: &[Stmt],
-    depth: usize,
-    indent: &str,
-    out: &mut String,
-) {
-    out.push_str(indent);
-    out.push_str("if ");
-    out.push_str(&format_expr(cond));
-    out.push_str(" {\n");
-    format_body(then_body, depth + 1, out);
-    out.push_str(indent);
-    out.push('}');
-    if else_body.is_empty() {
-        out.push('\n');
-    } else {
-        out.push_str(" else {\n");
-        format_body(else_body, depth + 1, out);
-        out.push_str(indent);
-        out.push_str("}\n");
-    }
-}
-
-fn format_while_loop(cond: &Expr, body: &[Stmt], depth: usize, indent: &str, out: &mut String) {
-    out.push_str(indent);
-    out.push_str("while ");
-    out.push_str(&format_expr(cond));
-    out.push_str(" {\n");
-    format_body(body, depth + 1, out);
-    out.push_str(indent);
-    out.push_str("}\n");
-}
-
-fn format_loop(body: &[Stmt], depth: usize, indent: &str, out: &mut String) {
-    out.push_str(indent);
-    out.push_str("while true {\n");
-    format_body(body, depth + 1, out);
-    out.push_str(indent);
-    out.push_str("}\n");
-}
-
-fn format_match(scrutinee: &Expr, arms: &[MatchArm], depth: usize, indent: &str, out: &mut String) {
-    out.push_str(indent);
-    out.push_str("match ");
-    out.push_str(&format_expr(scrutinee));
-    out.push_str(" {\n");
-    for arm in arms {
-        out.push_str(indent);
-        out.push_str("  ");
-        out.push_str(&arm.pattern);
-        out.push_str(" {\n");
-        format_body(&arm.body, depth + 2, out);
-        out.push_str(indent);
-        out.push_str("  }\n");
-    }
-    out.push_str(indent);
-    out.push_str("}\n");
 }
