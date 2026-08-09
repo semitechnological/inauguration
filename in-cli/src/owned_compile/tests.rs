@@ -93,13 +93,7 @@ fn jit_executes_snake_case_stdlib_process_run() {
 
     assert!(report.success, "{report:?}");
     assert_eq!(report.reason_code.as_deref(), Some("jit-executed"));
-
-    // The JIT string returned by process_run("true") might be Some("") or Some("\n"),
-    // or the test might be hitting an edge case where it returns None if the process output is truly empty
-    // and gets mapped to a null pointer (though the string length should handle it).
-    // Let's assert on what it actually is, or just check that it's empty.
-    let out = report.eval_result_string.as_deref();
-    assert!(out == Some("") || out == Some("\n") || out == None, "expected empty or None, got {:?}", out);
+    assert_eq!(report.eval_result_string.as_deref(), Some(""));
 
     fs::remove_file(source_path).unwrap();
 }
