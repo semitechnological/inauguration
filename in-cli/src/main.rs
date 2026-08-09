@@ -436,194 +436,184 @@ fn main() {
     }
 }
 
-fn run() -> Result<()> {
-    use crate::backend::cmd_backend;
-    use crate::bench::cmd_bench;
-    use crate::build::cmd_build;
-    use crate::compile::cmd_compile;
-    use crate::compiler_daemon::{cmd_daemon_start, cmd_daemon_status, cmd_daemon_stop};
-    use crate::daemon::{cmd_dev, cmd_run};
-    use crate::doctor::cmd_doctor;
-    use crate::eval::cmd_eval_source_or_path;
-    use crate::graph::cmd_graph;
-    use crate::package::{cmd_install, cmd_package, cmd_package_lock};
-    use crate::plugin::cmd_plugin;
-    use crate::tools::{cmd_agent, cmd_canonicalize, cmd_explain, cmd_fix, cmd_languages};
-    use crate::update::{cmd_update, cmd_update_remote};
-    use crate::util::{cwd, workspace_root};
+impl Commands {
+    fn execute(self, invocation_cwd: &std::path::Path) -> Result<()> {
+        use crate::backend::cmd_backend;
+        use crate::bench::cmd_bench;
+        use crate::build::cmd_build;
+        use crate::compile::cmd_compile;
+        use crate::compiler_daemon::{cmd_daemon_start, cmd_daemon_status, cmd_daemon_stop};
+        use crate::daemon::{cmd_dev, cmd_run};
+        use crate::doctor::cmd_doctor;
+        use crate::eval::cmd_eval_source_or_path;
+        use crate::graph::cmd_graph;
+        use crate::package::{cmd_install, cmd_package, cmd_package_lock};
+        use crate::plugin::cmd_plugin;
+        use crate::tools::{cmd_agent, cmd_canonicalize, cmd_explain, cmd_fix, cmd_languages};
+        use crate::update::{cmd_update, cmd_update_remote};
+        use crate::util::workspace_root;
 
-    let cli = Cli::parse();
-    let invocation_cwd = cwd()?;
-    match cli.command {
-        Commands::Build {
-            path,
-            out,
-            release,
-            module_id,
-            verbose,
-            swiftpm,
-            allow_external_toolchain,
-            parser,
-        } => cmd_build(
-            &invocation_cwd,
-            &path,
-            out,
-            release,
-            &module_id,
-            verbose,
-            swiftpm,
-            allow_external_toolchain,
-            parser,
-        ),
-        Commands::Agent {
-            path,
-            module_id,
-            parser,
-        } => cmd_agent(&invocation_cwd, &path, &module_id, parser),
-        Commands::Explain {
-            diagnostic_code,
-            json,
-        } => cmd_explain(&diagnostic_code, json),
-        Commands::Fix {
-            plan,
-            json,
-            path,
-            module_id,
-            parser,
-        } => cmd_fix(&invocation_cwd, plan, json, &path, &module_id, parser),
-        Commands::Canonicalize { path, check } => cmd_canonicalize(&invocation_cwd, &path, check),
-        Commands::Graph {
-            path,
-            module_id,
-            parser,
-            imports,
-            capabilities,
-            symbols,
-            calls,
-            json,
-        } => cmd_graph(
-            &invocation_cwd,
-            &path,
-            &module_id,
-            parser,
-            inauguration::graph_report::GraphReportSelection {
+        match self {
+            Commands::Build {
+                path,
+                out,
+                release,
+                module_id,
+                verbose,
+                swiftpm,
+                allow_external_toolchain,
+                parser,
+            } => cmd_build(
+                invocation_cwd,
+                &path,
+                out,
+                release,
+                &module_id,
+                verbose,
+                swiftpm,
+                allow_external_toolchain,
+                parser,
+            ),
+            Commands::Agent {
+                path,
+                module_id,
+                parser,
+            } => cmd_agent(invocation_cwd, &path, &module_id, parser),
+            Commands::Explain {
+                diagnostic_code,
+                json,
+            } => cmd_explain(&diagnostic_code, json),
+            Commands::Fix {
+                plan,
+                json,
+                path,
+                module_id,
+                parser,
+            } => cmd_fix(invocation_cwd, plan, json, &path, &module_id, parser),
+            Commands::Canonicalize { path, check } => {
+                cmd_canonicalize(invocation_cwd, &path, check)
+            }
+            Commands::Graph {
+                path,
+                module_id,
+                parser,
                 imports,
                 capabilities,
                 symbols,
                 calls,
-            },
-            json,
-        ),
-        Commands::Install {
-            packages,
-            path,
-            offline,
-            json,
-        } => cmd_install(&invocation_cwd, &packages, &path, offline, json, "latest"),
-        Commands::Add {
-            packages,
-            path,
-            version,
-            offline,
-            json,
-        } => cmd_install(&invocation_cwd, &packages, &path, offline, json, &version),
-        Commands::Package { action, path, json } => match action {
-            Some(PackageCommands::Install {
-                path: install_path,
-                offline,
-                json: install_json,
-            }) => cmd_install(
-                &invocation_cwd,
-                &[],
-                &install_path,
-                offline,
-                install_json,
-                "latest",
+                json,
+            } => cmd_graph(
+                invocation_cwd,
+                &path,
+                &module_id,
+                parser,
+                inauguration::graph_report::GraphReportSelection {
+                    imports,
+                    capabilities,
+                    symbols,
+                    calls,
+                },
+                json,
             ),
-            Some(PackageCommands::Lock {
-                path: lock_path,
-                json: lock_json,
-            }) => cmd_package_lock(&invocation_cwd, &lock_path, lock_json),
-            None => cmd_package(&invocation_cwd, &path, json),
-        },
-        Commands::Languages { json } => cmd_languages(json),
-        Commands::Dev => cmd_dev(&workspace_root(invocation_cwd.clone())?),
-        Commands::Daemon { action } => match action {
-            DaemonAction::Start => cmd_daemon_start(),
-            DaemonAction::Stop => cmd_daemon_stop(),
-            DaemonAction::Status => cmd_daemon_status(),
-        },
-        Commands::Run {
-            watch_root,
-            socket,
-            metrics,
-            debounce_ms,
-        } => cmd_run(
-            &workspace_root(invocation_cwd.clone())?,
-            &watch_root,
-            &socket,
-            &metrics,
-            debounce_ms,
-        ),
-        Commands::Compile {
-            path,
-            target,
-            out,
-            module_id,
-            parser,
-            entry,
-            target_triple,
-            linkage,
-            jobs,
-            json,
-            emit,
-            trampoline,
-            base,
-            metadata,
-            debug,
-        } => cmd_compile(
-            &invocation_cwd,
-            &path,
-            target,
-            &out,
-            &module_id,
-            parser,
-            entry.as_deref(),
-            target_triple.as_deref(),
-            linkage,
-            jobs,
-            json,
-            emit,
-            trampoline.as_deref(),
-            base.as_deref(),
-            metadata.as_deref(),
-            debug,
-        ),
-        Commands::Execute {
-            path,
-            module_id,
-            verbose,
-            debug,
-        } => crate::compile::cmd_execute(&invocation_cwd, &path, &module_id, verbose, debug),
-        Commands::Backend {
-            path,
-            module_id,
-            parser,
-            target,
-            json,
-        } => cmd_backend(&invocation_cwd, &path, &module_id, parser, target, json),
-        Commands::Test {
-            list,
-            self_host,
-            toolchain,
-            external_parity,
-            owned_native,
-            all,
-            serial,
-            paths,
-        } => cli_test::cmd_test(
-            &workspace_root(invocation_cwd.clone())?,
-            cli_test::TestOptions {
+            Commands::Install {
+                packages,
+                path,
+                offline,
+                json,
+            } => cmd_install(invocation_cwd, &packages, &path, offline, json, "latest"),
+            Commands::Add {
+                packages,
+                path,
+                version,
+                offline,
+                json,
+            } => cmd_install(invocation_cwd, &packages, &path, offline, json, &version),
+            Commands::Package { action, path, json } => match action {
+                Some(PackageCommands::Install {
+                    path: install_path,
+                    offline,
+                    json: install_json,
+                }) => cmd_install(
+                    invocation_cwd,
+                    &[],
+                    &install_path,
+                    offline,
+                    install_json,
+                    "latest",
+                ),
+                Some(PackageCommands::Lock {
+                    path: lock_path,
+                    json: lock_json,
+                }) => cmd_package_lock(invocation_cwd, &lock_path, lock_json),
+                None => cmd_package(invocation_cwd, &path, json),
+            },
+            Commands::Languages { json } => cmd_languages(json),
+            Commands::Dev => cmd_dev(&workspace_root(invocation_cwd.to_path_buf())?),
+            Commands::Daemon { action } => match action {
+                DaemonAction::Start => cmd_daemon_start(),
+                DaemonAction::Stop => cmd_daemon_stop(),
+                DaemonAction::Status => cmd_daemon_status(),
+            },
+            Commands::Run {
+                watch_root,
+                socket,
+                metrics,
+                debounce_ms,
+            } => cmd_run(
+                &workspace_root(invocation_cwd.to_path_buf())?,
+                &watch_root,
+                &socket,
+                &metrics,
+                debounce_ms,
+            ),
+            Commands::Compile {
+                path,
+                target,
+                out,
+                module_id,
+                parser,
+                entry,
+                target_triple,
+                linkage,
+                jobs,
+                json,
+                emit,
+                trampoline,
+                base,
+                metadata,
+                debug,
+            } => cmd_compile(
+                invocation_cwd,
+                &path,
+                target,
+                &out,
+                &module_id,
+                parser,
+                entry.as_deref(),
+                target_triple.as_deref(),
+                linkage,
+                jobs,
+                json,
+                emit,
+                trampoline.as_deref(),
+                base.as_deref(),
+                metadata.as_deref(),
+                debug,
+            ),
+            Commands::Execute {
+                path,
+                module_id,
+                verbose,
+                debug,
+            } => crate::compile::cmd_execute(invocation_cwd, &path, &module_id, verbose, debug),
+            Commands::Backend {
+                path,
+                module_id,
+                parser,
+                target,
+                json,
+            } => cmd_backend(invocation_cwd, &path, &module_id, parser, target, json),
+            Commands::Test {
                 list,
                 self_host,
                 toolchain,
@@ -632,24 +622,44 @@ fn run() -> Result<()> {
                 all,
                 serial,
                 paths,
+            } => cli_test::cmd_test(
+                &workspace_root(invocation_cwd.to_path_buf())?,
+                cli_test::TestOptions {
+                    list,
+                    self_host,
+                    toolchain,
+                    external_parity,
+                    owned_native,
+                    all,
+                    serial,
+                    paths,
+                },
+            ),
+            Commands::Update => match workspace_root(invocation_cwd.to_path_buf()) {
+                Ok(root) => cmd_update(&root),
+                Err(_) => cmd_update_remote(),
             },
-        ),
-        Commands::Update => match workspace_root(invocation_cwd.clone()) {
-            Ok(root) => cmd_update(&root),
-            Err(_) => cmd_update_remote(),
-        },
-        Commands::Eval {
-            source,
-            parser,
-            verbose,
-            debug,
-        } => cmd_eval_source_or_path(&invocation_cwd, source, parser, verbose, debug),
-        Commands::Doctor => cmd_doctor(),
-        Commands::Bench { metrics } => {
-            cmd_bench(&workspace_root(invocation_cwd.clone())?, &metrics)
+            Commands::Eval {
+                source,
+                parser,
+                verbose,
+                debug,
+            } => cmd_eval_source_or_path(invocation_cwd, source, parser, verbose, debug),
+            Commands::Doctor => cmd_doctor(),
+            Commands::Bench { metrics } => {
+                cmd_bench(&workspace_root(invocation_cwd.to_path_buf())?, &metrics)
+            }
+            Commands::Plugin { action } => {
+                cmd_plugin(&workspace_root(invocation_cwd.to_path_buf())?, action)
+            }
         }
-        Commands::Plugin { action } => cmd_plugin(&workspace_root(invocation_cwd.clone())?, action),
     }
+}
+
+fn run() -> Result<()> {
+    let cli = Cli::parse();
+    let invocation_cwd = crate::util::cwd()?;
+    cli.command.execute(&invocation_cwd)
 }
 #[cfg(test)]
 #[path = "main/tests.rs"]
