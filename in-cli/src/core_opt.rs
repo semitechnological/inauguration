@@ -1283,6 +1283,12 @@ struct RelJump {
     target: usize,      // absolute target position after instruction
 }
 
+#[derive(Debug)]
+struct RemoveRange {
+    start: usize,
+    len: usize,
+}
+
 /// Scan the code buffer and remove redundant `mov r, r` instructions where
 /// source and destination registers are the same. Also removes trailing NOPs.
 ///
@@ -1296,8 +1302,30 @@ pub fn peephole_x86_64(code: &mut Vec<u8>) {
 
     let orig_len = code.len();
 
-    // ── Pass 1: locate all relative jump/call instructions ──
-    let mut jumps: Vec<RelJump> = Vec::new();
+    let jumps = find_relative_jumps(code);
+    let mut remove = find_removable_instructions(code, &jumps);
+
+    // Nothing to do?
+    if remove.is_empty() {
+        return;
+    }
+
+    adjust_jump_offsets(code, &jumps, &remove);
+
+    // ── Pass 5: remove bytes (highest first to avoid shifting) ──
+    remove.sort_by_key(|r| std::cmp::Reverse(r.start));
+    for r in remove {
+        code.drain(r.start..r.start + r.len);
+    }
+
+    let removed = orig_len - code.len();
+    if removed > 0 {
+        eprintln!("peephole: removed {removed} bytes");
+    }
+}
+
+fn find_relative_jumps(code: &[u8]) -> Vec<RelJump> {
+    let mut jumps = Vec::new();
     let mut i = 0;
     while i < code.len() {
         let b = code[i];
@@ -1337,22 +1365,10 @@ pub fn peephole_x86_64(code: &mut Vec<u8>) {
         }
         i += len;
     }
+    jumps
+}
 
-    // ── Pass 2: locate redundant mov-same-reg patterns ──
-    // Patterns (modrm where mod=3 and reg==r/m):
-    //   48 89 XX   mov r64, r64 (REX.W + MOV r/m64, r64)
-    //   89 XX      mov r32, r32 (MOV r/m32, r32)
-    //   48 8B XX   mov r64, r64 (REX.W + MOV r64, r/m64)
-    //   8B XX      mov r32, r32 (MOV r32, r/m32)
-    //
-    // NOTE: only remove instructions that are NOT a jump target.
-    // Removing a jump target breaks control flow.
-    #[derive(Debug)]
-    struct RemoveRange {
-        start: usize,
-        len: usize,
-    }
-    // Build set of jump targets for safety check
+fn find_removable_instructions(code: &[u8], jumps: &[RelJump]) -> Vec<RemoveRange> {
     let target_set: std::collections::HashSet<usize> = jumps.iter().map(|j| j.target).collect();
     let mut remove: Vec<RemoveRange> = Vec::new();
 
@@ -1430,7 +1446,6 @@ pub fn peephole_x86_64(code: &mut Vec<u8>) {
         }
     }
 
-    // ── Pass 3: locate trailing NOPs ──
     // Remove trailing `66 90` (2-byte NOP) and `90` (single NOP)
     let mut trailing = 0;
     let mut j = code.len();
@@ -1448,11 +1463,6 @@ pub fn peephole_x86_64(code: &mut Vec<u8>) {
         });
     }
 
-    // Nothing to do?
-    if remove.is_empty() {
-        return;
-    }
-
     // Sort remove ranges by position (ascending) and merge overlaps
     remove.sort_by_key(|r| r.start);
     let mut merged: Vec<RemoveRange> = Vec::new();
@@ -1467,12 +1477,11 @@ pub fn peephole_x86_64(code: &mut Vec<u8>) {
         }
         merged.push(r);
     }
-    let mut remove = merged;
+    merged
+}
 
-    // ── Pass 4: adjust jump offsets for byte removal ──
-    // For each jump, compute how many removed bytes fall between pos and target.
-    // Then update the offset in the buffer.
-    for jmp in &jumps {
+fn adjust_jump_offsets(code: &mut [u8], jumps: &[RelJump], remove: &[RemoveRange]) {
+    for jmp in jumps {
         let old_target = jmp.target;
         let old_offset = jmp.offset_value;
 
@@ -1480,7 +1489,7 @@ pub fn peephole_x86_64(code: &mut Vec<u8>) {
         // and its target (after jump end, before target start)
         let jump_end = jmp.pos + jmp.len;
         let mut removed_between: usize = 0;
-        for r in &remove {
+        for r in remove {
             let r_end = r.start + r.len;
             // Removal is after jump end and before target
             if r.start >= jump_end && r_end <= old_target {
@@ -1499,7 +1508,7 @@ pub fn peephole_x86_64(code: &mut Vec<u8>) {
         // Write the adjusted offset into the buffer
         // Bytes removed before the jump shift the offset byte position
         let mut removed_before_jump: usize = 0;
-        for r in &remove {
+        for r in remove {
             let r_end = r.start + r.len;
             if r_end <= jmp.pos {
                 removed_before_jump += r.len;
@@ -1515,17 +1524,6 @@ pub fn peephole_x86_64(code: &mut Vec<u8>) {
             let new_offset_i32 = new_offset as i32;
             code[offset_byte..offset_byte + 4].copy_from_slice(&new_offset_i32.to_le_bytes());
         }
-    }
-
-    // ── Pass 5: remove bytes (highest first to avoid shifting) ──
-    remove.sort_by_key(|r| std::cmp::Reverse(r.start));
-    for r in remove {
-        code.drain(r.start..r.start + r.len);
-    }
-
-    let removed = orig_len - code.len();
-    if removed > 0 {
-        eprintln!("peephole: removed {removed} bytes");
     }
 }
 
