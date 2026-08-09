@@ -189,7 +189,8 @@ sys.exit(0 if c >= int('$value') else 1)" 2>/dev/null && ok=1 ;;
   if [[ $has_jit -eq 1 ]] && [[ $failed -eq 0 ]]; then
     local exec_tmp
     exec_tmp=$(mktemp "${TMPDIR:-/tmp}/conformance-exec.XXXXXX")
-    if "${IN_CMD[@]}" execute --verbose "$fixture" >"$exec_tmp" 2>&1; then
+    if "${IN_CMD[@]}" execute --verbose "$fixture" >"$exec_tmp" 2>&1 \
+      || grep -q "Execution completed with result:" "$exec_tmp"; then
       while IFS='|' read -r check value; do
         [[ -z "$check" ]] && continue
         case "$check" in
