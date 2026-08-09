@@ -12,7 +12,58 @@
 
 use crate::core_ir::{Decl, Expr, LoopKind, MatchArm, Stmt, Typ, UnifiedModule};
 use crate::native_emit::x86_64::{self, CodeEmitter, RAX, RBP, RBX, RCX, RDI, RDX, REG_SP, RSI};
+use std::cell::RefCell;
 use std::collections::HashMap;
+
+thread_local! {
+    /// JIT mode: resolve extern stdlib calls to in-process wrapper addresses
+    /// instead of leaving rel32 placeholders for the system linker.
+    pub(crate) static TL_JIT_EXTERNS: RefCell<bool> = const { RefCell::new(false) };
+}
+
+/// Core IR stdlib call name -> C-ABI wrapper registered in the JIT symbol cache.
+fn jit_stdlib_wrapper(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "join" => "in_vec_join",
+        "chain" | "extend" => "in_vec_extend",
+        "push" => "in_vec_push",
+        "push-str" => "in_vec_push_words",
+        "print" => "in_print",
+        "read-file" => "in_fs_read_to_string",
+        "write-file" => "in_fs_write",
+        "fs-exists" => "in_fs_exists",
+        "create-dir" => "in_fs_create_dir",
+        "remove-file" => "in_fs_remove_file",
+        "process-run" => "in_process_run",
+        "env-get" => "in_env_var",
+        "env-set" => "in_env_set_var",
+        "env-has" => "in_env_has",
+        "env-temp-dir" => "in_env_temp_dir",
+        "env-current-dir" => "in_env_current_dir",
+        "path-join" => "in_path_join",
+        "path-dirname" => "in_path_dirname",
+        "path-basename" => "in_path_basename",
+        "path-extname" => "in_path_extname",
+        "path-normalize" => "in_path_normalize",
+        "str-concat" => "in_str_concat",
+        "str-eq" => "in_str_eq",
+        "json-stringify" => "in_json_stringify",
+        "str-table-has" => "in_str_table_has",
+        "str-table-get-int" => "in_str_table_get_int",
+        "str-contains" => "in_str_contains",
+        "str-starts-with" => "in_str_starts_with",
+        "str-ends-with" => "in_str_ends_with",
+        "str-index-of" => "in_str_index_of",
+        "str-is-int" => "in_str_is_int",
+        "str-slice" => "in_str_slice",
+        "str-split-lines" => "in_str_split_lines",
+        "str-split-spaces" => "in_str_split_spaces",
+        "str-tokenize-expr" => "in_str_tokenize_expr",
+        "str-to-int" => "in_str_to_int",
+        "str-trim" => "in_str_trim",
+        _ => return None,
+    })
+}
 
 pub const X86_64_TRIPLE: &str = "x86_64-unknown-none";
 
@@ -930,7 +981,8 @@ fn lower_stmt(
     match stmt {
         Stmt::Return(expr) => {
             if let Some(expr) = expr {
-                if matches!(&ctx.ret_typ, Typ::Named(_) | Typ::Array(_)) {
+                let ret_typ = ctx.ret_typ.canonical();
+                if matches!(ret_typ, Typ::Named(_) | Typ::Array(_)) {
                     // ponytail: struct/array return — just return 0 (tag)
                     emitter.emit_insns(&x86_64::load_i64(RAX, 0));
                 } else {
@@ -2124,6 +2176,26 @@ fn lower_call_expr(
         return Ok(());
     }
 
+    if TL_JIT_EXTERNS.with(|m| *m.borrow()) {
+        let base = target_name
+            .rsplit("::")
+            .next()
+            .unwrap_or(&target_name)
+            .replace('_', "-");
+        if let Some(wrapper) = jit_stdlib_wrapper(&base)
+            && let Some(ptr) = crate::native_emit::native_link::resolve_native_fn(wrapper)
+        {
+            lower_call_args(emitter, ctx, args, &target_name, pending_calls)?;
+            emitter.emit_insns(&x86_64::load_i64(RAX, ptr as i64));
+            emitter.emit_insns(&[0xFF, 0xD0]);
+            emit_stack_cleanup(emitter, args.len());
+            if target_reg != RAX {
+                emitter.emit_insns(&x86_64::xor_rr(target_reg, target_reg));
+            }
+            return Ok(());
+        }
+    }
+
     if !ctx.functions.contains_key(&target_name) {
         lower_call_args(emitter, ctx, args, &target_name, pending_calls)?;
         // Extern function: emit CALL instruction with relocation.
@@ -2400,6 +2472,23 @@ fn answer() -> Int {
 fn main() -> void { return 0 }
 "#;
         crate::in_lang_parse::parse_in_source(src).expect("parse")
+    }
+
+    #[test]
+    fn jit_string_return_and_stdlib_extern_lower_together() {
+        let src = "import std.process;\ncapability process.spawn;\nfn main() -> String { return process_run(\"true\"); }\n";
+        let module = crate::in_lang_parse::parse_in_source(src).expect("parse");
+        crate::native_emit::native_link::bootstrap_jit_native();
+        TL_JIT_EXTERNS.with(|m| *m.borrow_mut() = true);
+        let result = lower_module(&module, "main").expect("lower");
+        TL_JIT_EXTERNS.with(|m| *m.borrow_mut() = false);
+        let has_call_rax = result.code.windows(2).any(|w| w == [0xFF, 0xD0]);
+        let has_unresolved_rel32 = result.code.windows(5).any(|w| w == [0xE8, 0, 0, 0, 0]);
+        assert!(has_call_rax, "stdlib extern must lower to call rax");
+        assert!(
+            !has_unresolved_rel32,
+            "stdlib extern must not stay an unresolved rel32 call"
+        );
     }
 
     fn make_arith_fn_module() -> UnifiedModule {
