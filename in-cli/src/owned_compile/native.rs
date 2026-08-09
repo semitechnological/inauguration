@@ -170,108 +170,108 @@ fn native_entry_exit_code(
     }
 }
 
-pub fn native_entry_module(module: &UnifiedModule, entry: &str) -> UnifiedModule {
-    /// Normalize a name by removing spaces around :: separators
-    fn normalize_name(name: &str) -> String {
-        name.chars().filter(|&c| c != ' ').collect()
-    }
+/// Normalize a name by removing spaces around :: separators
+fn normalize_name(name: &str) -> String {
+    name.chars().filter(|&c| c != ' ').collect()
+}
 
-    fn collect_expr_calls(expr: &Expr, out: &mut HashSet<String>) {
-        match expr {
-            Expr::Call { callee, args, .. } => {
-                if let Expr::Ident(name) = callee.as_ref() {
-                    out.insert(normalize_name(name));
-                } else {
-                    collect_expr_calls(callee, out);
-                }
-                for arg in args {
-                    collect_expr_calls(arg, out);
-                }
+fn collect_expr_calls(expr: &Expr, out: &mut HashSet<String>) {
+    match expr {
+        Expr::Call { callee, args, .. } => {
+            if let Expr::Ident(name) = callee.as_ref() {
+                out.insert(normalize_name(name));
+            } else {
+                collect_expr_calls(callee, out);
             }
-            Expr::Unary { expr, .. } => collect_expr_calls(expr, out),
-            Expr::Binary { lhs, rhs, .. } => {
-                collect_expr_calls(lhs, out);
-                collect_expr_calls(rhs, out);
+            for arg in args {
+                collect_expr_calls(arg, out);
             }
-            Expr::StructInit { fields, .. } => {
-                for (_, expr) in fields {
-                    collect_expr_calls(expr, out);
-                }
+        }
+        Expr::Unary { expr, .. } => collect_expr_calls(expr, out),
+        Expr::Binary { lhs, rhs, .. } => {
+            collect_expr_calls(lhs, out);
+            collect_expr_calls(rhs, out);
+        }
+        Expr::StructInit { fields, .. } => {
+            for (_, expr) in fields {
+                collect_expr_calls(expr, out);
             }
-            Expr::Field { base, .. } => collect_expr_calls(base, out),
-            Expr::ArrayLit(items) => {
-                for item in items {
-                    collect_expr_calls(item, out);
-                }
+        }
+        Expr::Field { base, .. } => collect_expr_calls(base, out),
+        Expr::ArrayLit(items) => {
+            for item in items {
+                collect_expr_calls(item, out);
             }
-            Expr::Index { base, index, .. } => {
+        }
+        Expr::Index { base, index, .. } => {
+            collect_expr_calls(base, out);
+            collect_expr_calls(index, out);
+        }
+        Expr::Closure { body, .. } => collect_stmt_calls(body, out),
+        Expr::Ident(name) => {
+            // Also track function names used as values (address references)
+            // The caller will filter these against module function names.
+            out.insert(normalize_name(name));
+        }
+        Expr::IntLit(_) | Expr::FloatLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => {}
+    }
+}
+
+fn collect_stmt_calls(stmts: &[Stmt], out: &mut HashSet<String>) {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Let(_, _, expr)
+            | Stmt::Assign(_, expr)
+            | Stmt::Return(Some(expr))
+            | Stmt::Expr(expr)
+            | Stmt::Throw(expr) => collect_expr_calls(expr, out),
+            Stmt::FieldAssign { base, value, .. } => {
+                collect_expr_calls(base, out);
+                collect_expr_calls(value, out);
+            }
+            Stmt::IndexAssign {
+                base, index, value, ..
+            } => {
                 collect_expr_calls(base, out);
                 collect_expr_calls(index, out);
+                collect_expr_calls(value, out);
             }
-            Expr::Closure { body, .. } => collect_stmt_calls(body, out),
-            Expr::Ident(name) => {
-                // Also track function names used as values (address references)
-                // The caller will filter these against module function names.
-                out.insert(normalize_name(name));
+            Stmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                collect_expr_calls(cond, out);
+                collect_stmt_calls(then_body, out);
+                collect_stmt_calls(else_body, out);
             }
-            Expr::IntLit(_) | Expr::FloatLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => {}
-        }
-    }
-
-    fn collect_stmt_calls(stmts: &[Stmt], out: &mut HashSet<String>) {
-        for stmt in stmts {
-            match stmt {
-                Stmt::Let(_, _, expr)
-                | Stmt::Assign(_, expr)
-                | Stmt::Return(Some(expr))
-                | Stmt::Expr(expr)
-                | Stmt::Throw(expr) => collect_expr_calls(expr, out),
-                Stmt::FieldAssign { base, value, .. } => {
-                    collect_expr_calls(base, out);
-                    collect_expr_calls(value, out);
-                }
-                Stmt::IndexAssign {
-                    base, index, value, ..
-                } => {
-                    collect_expr_calls(base, out);
-                    collect_expr_calls(index, out);
-                    collect_expr_calls(value, out);
-                }
-                Stmt::If {
-                    cond,
-                    then_body,
-                    else_body,
-                } => {
+            Stmt::Loop { cond, body, .. } => {
+                if let Some(cond) = cond {
                     collect_expr_calls(cond, out);
-                    collect_stmt_calls(then_body, out);
-                    collect_stmt_calls(else_body, out);
                 }
-                Stmt::Loop { cond, body, .. } => {
-                    if let Some(cond) = cond {
-                        collect_expr_calls(cond, out);
-                    }
-                    collect_stmt_calls(body, out);
-                }
-                Stmt::Match {
-                    scrutinee, arms, ..
-                } => {
-                    collect_expr_calls(scrutinee, out);
-                    for arm in arms {
-                        collect_stmt_calls(&arm.body, out);
-                    }
-                }
-                Stmt::Try { body, catches, .. } => {
-                    collect_stmt_calls(body, out);
-                    for catch in catches {
-                        collect_stmt_calls(&catch.body, out);
-                    }
-                }
-                Stmt::Return(None) => {}
-                Stmt::Break | Stmt::Propagate => {}
+                collect_stmt_calls(body, out);
             }
+            Stmt::Match {
+                scrutinee, arms, ..
+            } => {
+                collect_expr_calls(scrutinee, out);
+                for arm in arms {
+                    collect_stmt_calls(&arm.body, out);
+                }
+            }
+            Stmt::Try { body, catches, .. } => {
+                collect_stmt_calls(body, out);
+                for catch in catches {
+                    collect_stmt_calls(&catch.body, out);
+                }
+            }
+            Stmt::Return(None) => {}
+            Stmt::Break | Stmt::Propagate => {}
         }
     }
+}
 
+pub fn native_entry_module(module: &UnifiedModule, entry: &str) -> UnifiedModule {
     let mut reachable = HashSet::from([entry.to_string()]);
     loop {
         let mut next = reachable.clone();
