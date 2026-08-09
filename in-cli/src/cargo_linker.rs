@@ -63,9 +63,25 @@ pub fn compile_cargo_dependencies(project_dir: &Path) -> Vec<(String, UnifiedMod
     let resolve = &metadata["resolve"];
     let root_id = resolve["root"].as_str().unwrap_or("");
 
-    // Build maps
-    let mut pkg_manifest: HashMap<&str, PathBuf> = HashMap::new();
-    let mut pkg_by_id: HashMap<&str, &serde_json::Value> = HashMap::new();
+    let (pkg_manifest, pkg_by_id) = build_pkg_maps(packages);
+
+    let nodes = match resolve["nodes"].as_array() {
+        Some(n) => n,
+        None => return modules,
+    };
+
+    let all_dep_ids = collect_transitive_dependencies(root_id, nodes);
+
+    compile_resolved_dependencies(&all_dep_ids, &pkg_manifest, &pkg_by_id, &mut modules);
+
+    modules
+}
+
+fn build_pkg_maps(
+    packages: &[serde_json::Value],
+) -> (HashMap<&str, PathBuf>, HashMap<&str, &serde_json::Value>) {
+    let mut pkg_manifest = HashMap::new();
+    let mut pkg_by_id = HashMap::new();
     for pkg in packages {
         let id = pkg["id"].as_str().unwrap_or("");
         let manifest = pkg["manifest_path"].as_str().unwrap_or("");
@@ -74,14 +90,13 @@ pub fn compile_cargo_dependencies(project_dir: &Path) -> Vec<(String, UnifiedMod
         }
         pkg_by_id.insert(id, pkg);
     }
+    (pkg_manifest, pkg_by_id)
+}
 
-    // Build adjacency list from resolve nodes
-    let nodes = match resolve["nodes"].as_array() {
-        Some(n) => n,
-        None => return modules,
-    };
-
-    // Collect ALL transitive dependency IDs using BFS from root
+fn collect_transitive_dependencies<'a>(
+    root_id: &'a str,
+    nodes: &'a [serde_json::Value],
+) -> Vec<&'a str> {
     let mut all_dep_ids: Vec<&str> = Vec::new();
     let mut visited: std::collections::HashSet<&str> = std::collections::HashSet::new();
     let mut queue: Vec<&str> = vec![root_id];
@@ -115,11 +130,16 @@ pub fn compile_cargo_dependencies(project_dir: &Path) -> Vec<(String, UnifiedMod
             }
         }
     }
+    all_dep_ids
+}
 
-    // Compile each dependency — skip known-problematic std/platform/proc-macro crates
+fn compile_resolved_dependencies(
+    all_dep_ids: &[&str],
+    pkg_manifest: &HashMap<&str, PathBuf>,
+    pkg_by_id: &HashMap<&str, &serde_json::Value>,
+    modules: &mut Vec<(String, UnifiedModule)>,
+) {
     let mut already_compiled: std::collections::HashSet<String> = std::collections::HashSet::new();
-    // Only compile specific crates that we KNOW we need and can parse
-    // (the exact set of direct dependencies from Cargo.toml)
     let direct_dep_names: std::collections::HashSet<&str> = [
         "clap",
         "serde",
@@ -166,7 +186,7 @@ pub fn compile_cargo_dependencies(project_dir: &Path) -> Vec<(String, UnifiedMod
     .iter()
     .cloned()
     .collect();
-    for dep_id in &all_dep_ids {
+    for dep_id in all_dep_ids {
         if let Some(manifest) = pkg_manifest.get(*dep_id) {
             if let Some(pkg) = pkg_by_id.get(*dep_id) {
                 let crate_name = pkg["name"].as_str().unwrap_or("");
@@ -195,8 +215,6 @@ pub fn compile_cargo_dependencies(project_dir: &Path) -> Vec<(String, UnifiedMod
             }
         }
     }
-
-    modules
 }
 
 /// Merge dependency modules into the main module.
