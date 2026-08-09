@@ -235,9 +235,7 @@ fn write_elf64_relocatable_object(object: &ElfObject, machine: u16, out: &mut Ve
     );
 }
 
-fn gather_arm32_exports_and_undefs<'a>(
-    object: &'a ElfObject,
-) -> (Vec<(&'a str, u32)>, Vec<String>) {
+fn gather_arm32_exports_and_undefs(object: &ElfObject) -> (Vec<(&str, u32)>, Vec<String>) {
     let mut all_exports: Vec<(&str, u32)> = Vec::new();
     all_exports.push((&object.export_name, 0));
     for (name, offset) in &object.exports {
