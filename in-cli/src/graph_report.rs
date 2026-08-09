@@ -259,6 +259,21 @@ pub fn graph_report_text(report: &GraphReport, selection: GraphReportSelection) 
         "entry: {}",
         report.entry_function.as_deref().unwrap_or("none")
     ));
+
+    append_package_info(report, &mut lines);
+    append_selection_info(report, selection, &mut lines);
+
+    lines.push(format!(
+        "timing: parse={}us lower={}us graph={}us total={}us",
+        report.timing.parse_micros,
+        report.timing.lower_micros,
+        report.timing.graph_micros,
+        report.timing.total_micros
+    ));
+    lines.join("\n")
+}
+
+fn append_package_info(report: &GraphReport, lines: &mut Vec<String>) {
     if let Some(identity) = &report.package_identity {
         lines.push(format!(
             "package_identity: {} ({})",
@@ -301,6 +316,13 @@ pub fn graph_report_text(report: &GraphReport, selection: GraphReportSelection) 
                 .join(", ")
         ));
     }
+}
+
+fn append_selection_info(
+    report: &GraphReport,
+    selection: GraphReportSelection,
+    lines: &mut Vec<String>,
+) {
     if selection.include_imports() {
         lines.push(format!("imports: {}", join_or_none(&report.imports)));
         lines.push(format!("effects: {}", join_or_none(&report.effects)));
@@ -341,14 +363,6 @@ pub fn graph_report_text(report: &GraphReport, selection: GraphReportSelection) 
             }
         ));
     }
-    lines.push(format!(
-        "timing: parse={}us lower={}us graph={}us total={}us",
-        report.timing.parse_micros,
-        report.timing.lower_micros,
-        report.timing.graph_micros,
-        report.timing.total_micros
-    ));
-    lines.join("\n")
 }
 
 fn join_or_none(values: &[String]) -> String {

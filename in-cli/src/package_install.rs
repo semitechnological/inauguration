@@ -1292,6 +1292,38 @@ mod tests {
     }
 
     #[test]
+    fn extract_zip_rejects_parent_traversal_entry() {
+        use std::io::Cursor;
+        use std::io::Write;
+        let dir = tempfile_dir("extract-zip-malicious");
+        let malicious_zip = dir.join("malicious.zip");
+
+        let mut buffer = Vec::new();
+        {
+            let mut zip = zip::ZipWriter::new(Cursor::new(&mut buffer));
+            let options = zip::write::SimpleFileOptions::default();
+            zip.start_file("../escaped.txt", options).unwrap();
+            zip.write_all(b"bad content").unwrap();
+            zip.finish().unwrap();
+        }
+        fs::write(&malicious_zip, buffer).unwrap();
+
+        let install_path = dir.join("extracted");
+
+        let result = extract_zip(&malicious_zip, &install_path);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err();
+        assert!(err_msg.contains("Invalid file path") || err_msg.contains("failed to extract zip"));
+
+        assert!(
+            !dir.join("escaped.txt").exists(),
+            "zip extraction should not create a file outside the install path"
+        );
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn add_packages_writes_manifest_entries() {
         let temp = tempfile_dir("package-add");
         let (_, added) = add_packages(&temp, &["pip:flask".to_string()], "latest").expect("add");
@@ -1369,5 +1401,53 @@ mod tests {
         assert_eq!(fs::read_to_string(dir.join("main.go")).unwrap(), "root");
         assert!(dir.join("nested").join("main.go").exists());
         fs::remove_dir_all(dir).unwrap();
+
+    fn strip_npm_dev_dependencies_removes_field() {
+        let temp = tempfile_dir("strip-npm");
+        let path = temp.join("package.json");
+        fs::write(
+            &path,
+            r#"{"name": "test", "devDependencies": {"foo": "1.0"}}"#,
+        )
+        .expect("write package.json");
+
+        super::strip_npm_dev_dependencies(&temp);
+
+        let content = fs::read_to_string(&path).expect("read package.json");
+        let json: serde_json::Value = serde_json::from_str(&content).expect("parse json");
+        assert!(json.get("name").is_some(), "name should remain");
+        assert!(
+            json.get("devDependencies").is_none(),
+            "devDependencies should be removed"
+        );
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn strip_npm_dev_dependencies_ignores_missing_file() {
+        let temp = tempfile_dir("strip-npm-missing");
+
+        super::strip_npm_dev_dependencies(&temp);
+
+        assert!(
+            !temp.join("package.json").exists(),
+            "package.json should not be created"
+        );
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn strip_npm_dev_dependencies_ignores_invalid_json() {
+        let temp = tempfile_dir("strip-npm-invalid");
+        let path = temp.join("package.json");
+        let invalid_json = r#"{"name": "test", "devDependencies""#;
+        fs::write(&path, invalid_json).expect("write invalid package.json");
+
+        super::strip_npm_dev_dependencies(&temp);
+
+        let content = fs::read_to_string(&path).expect("read package.json");
+        assert_eq!(content, invalid_json, "invalid json should not be modified");
+        let _ = fs::remove_dir_all(temp);
+    }
     }
 }
