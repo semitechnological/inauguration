@@ -483,226 +483,213 @@ fn algebraic_simplify(decls: &mut [Decl]) {
     }
 }
 
+fn fold_int_constants(op: &str, a: i64, b: i64) -> Option<Expr> {
+    match op {
+        "add" | "+" => a.checked_add(b).map(Expr::IntLit),
+        "sub" | "-" => a.checked_sub(b).map(Expr::IntLit),
+        "mul" | "*" => a.checked_mul(b).map(Expr::IntLit),
+        "div" | "/" if b != 0 && !(a == i64::MIN && b == -1) => Some(Expr::IntLit(a / b)),
+        "mod" | "%" if b != 0 => Some(Expr::IntLit(a % b)),
+        _ => None,
+    }
+}
+
+fn simplify_binary_expr(original: Expr, op: &str, lhs: &Expr, rhs: &Expr) -> Expr {
+    if let (Expr::IntLit(a), Expr::IntLit(b)) = (lhs, rhs) {
+        if let Some(folded) = fold_int_constants(op, *a, *b) {
+            return folded;
+        }
+    }
+
+    let is_zero = |e: &Expr| matches!(e, Expr::IntLit(0));
+    let is_one = |e: &Expr| matches!(e, Expr::IntLit(1));
+    let is_neg1 = |e: &Expr| matches!(e, Expr::IntLit(-1));
+    let is_true = |e: &Expr| matches!(e, Expr::BoolLit(true));
+    let is_false = |e: &Expr| matches!(e, Expr::BoolLit(false));
+
+    match op {
+        "add" | "+" => {
+            if is_zero(lhs) {
+                return rhs.clone();
+            }
+            if is_zero(rhs) {
+                return lhs.clone();
+            }
+        }
+        "bor" | "|" => {
+            if is_neg1(lhs) || is_neg1(rhs) {
+                return Expr::IntLit(-1);
+            }
+            if is_zero(lhs) {
+                return rhs.clone();
+            }
+            if is_zero(rhs) {
+                return lhs.clone();
+            }
+        }
+        "land" | "&&" => {
+            if is_false(lhs) || is_false(rhs) {
+                return Expr::BoolLit(false);
+            }
+            if is_true(lhs) {
+                return rhs.clone();
+            }
+            if is_true(rhs) {
+                return lhs.clone();
+            }
+            if is_zero(lhs) || is_zero(rhs) {
+                return Expr::IntLit(0);
+            }
+            if is_one(lhs) {
+                return rhs.clone();
+            }
+            if is_one(rhs) {
+                return lhs.clone();
+            }
+        }
+        "lor" | "||" => {
+            if is_true(lhs) || is_true(rhs) {
+                return Expr::BoolLit(true);
+            }
+            if is_false(lhs) {
+                return rhs.clone();
+            }
+            if is_false(rhs) {
+                return lhs.clone();
+            }
+            if is_one(lhs) || is_one(rhs) {
+                return Expr::IntLit(1);
+            }
+            if is_zero(lhs) {
+                return rhs.clone();
+            }
+            if is_zero(rhs) {
+                return lhs.clone();
+            }
+        }
+        "sub" | "-" => {
+            if is_zero(rhs) {
+                return lhs.clone();
+            }
+            if lhs == rhs && matches!(lhs, Expr::Ident(_) | Expr::IntLit(_)) {
+                return Expr::IntLit(0);
+            }
+        }
+        "xor" | "^" => {
+            if is_zero(lhs) {
+                return rhs.clone();
+            }
+            if is_zero(rhs) {
+                return lhs.clone();
+            }
+            if lhs == rhs && matches!(lhs, Expr::Ident(_) | Expr::IntLit(_) | Expr::BoolLit(_)) {
+                return Expr::IntLit(0);
+            }
+        }
+        "==" => {
+            if lhs == rhs
+                && matches!(
+                    lhs,
+                    Expr::Ident(_) | Expr::IntLit(_) | Expr::BoolLit(_) | Expr::StringLit(_)
+                )
+            {
+                return Expr::BoolLit(true);
+            }
+        }
+        "!=" => {
+            if lhs == rhs
+                && matches!(
+                    lhs,
+                    Expr::Ident(_) | Expr::IntLit(_) | Expr::BoolLit(_) | Expr::StringLit(_)
+                )
+            {
+                return Expr::BoolLit(false);
+            }
+        }
+        ">" | "<" | "gt" | "lt" => {
+            if lhs == rhs && matches!(lhs, Expr::Ident(_) | Expr::IntLit(_)) {
+                return Expr::BoolLit(false);
+            }
+        }
+        ">=" | "<=" | "ge" | "le" => {
+            if lhs == rhs && matches!(lhs, Expr::Ident(_) | Expr::IntLit(_)) {
+                return Expr::BoolLit(true);
+            }
+        }
+        "mul" | "*" => {
+            if is_zero(lhs) || is_zero(rhs) {
+                return Expr::IntLit(0);
+            }
+            if is_one(lhs) {
+                return rhs.clone();
+            }
+            if is_one(rhs) {
+                return lhs.clone();
+            }
+        }
+        "div" | "/" => {
+            if is_one(rhs) {
+                return lhs.clone();
+            }
+        }
+        "band" | "&" => {
+            if is_zero(lhs) || is_zero(rhs) {
+                return Expr::IntLit(0);
+            }
+            if is_neg1(lhs) {
+                return rhs.clone();
+            }
+            if is_neg1(rhs) {
+                return lhs.clone();
+            }
+        }
+        "shl" | "<<" | "shr" | ">>" => {
+            if is_zero(rhs) {
+                return lhs.clone();
+            }
+            if is_zero(lhs) {
+                return Expr::IntLit(0);
+            }
+        }
+        _ => {}
+    }
+    original
+}
+
+fn simplify_unary_expr(original: Expr, op: &str, expr: &Expr) -> Expr {
+    match op {
+        "neg" | "-" => {
+            if let Expr::Unary {
+                op: ref inner_op,
+                expr: ref inner_expr,
+            } = *expr
+            {
+                if inner_op == "neg" || inner_op == "-" {
+                    return *inner_expr.clone();
+                }
+            }
+        }
+        "not" | "!" => {
+            if let Expr::Unary {
+                op: ref inner_op,
+                expr: ref inner_expr2,
+            } = *expr
+            {
+                if inner_op == "not" || inner_op == "!" {
+                    return *inner_expr2.clone();
+                }
+            }
+        }
+        _ => {}
+    }
+    original
+}
+
 fn simplify_expr(e: Expr) -> Expr {
     // Clone-and-match on owned value to avoid borrow gymnastics
     match e.clone() {
-        Expr::Binary { op, lhs, rhs, .. } => {
-            if let (Expr::IntLit(a), Expr::IntLit(b)) = (lhs.as_ref(), rhs.as_ref()) {
-                match op.as_str() {
-                    "add" | "+" => {
-                        if let Some(v) = a.checked_add(*b) {
-                            return Expr::IntLit(v);
-                        }
-                    }
-                    "sub" | "-" => {
-                        if let Some(v) = a.checked_sub(*b) {
-                            return Expr::IntLit(v);
-                        }
-                    }
-                    "mul" | "*" => {
-                        if let Some(v) = a.checked_mul(*b) {
-                            return Expr::IntLit(v);
-                        }
-                    }
-                    "div" | "/" if *b != 0 && !(*a == i64::MIN && *b == -1) => {
-                        return Expr::IntLit(a / b);
-                    }
-                    "mod" | "%" if *b != 0 => return Expr::IntLit(a % b),
-                    _ => {}
-                }
-            }
-            let is_zero = |e: &Expr| matches!(e, Expr::IntLit(0));
-            let is_one = |e: &Expr| matches!(e, Expr::IntLit(1));
-            let is_neg1 = |e: &Expr| matches!(e, Expr::IntLit(-1));
-            let is_true = |e: &Expr| matches!(e, Expr::BoolLit(true));
-            let is_false = |e: &Expr| matches!(e, Expr::BoolLit(false));
-            match op.as_str() {
-                "add" | "+" => {
-                    if is_zero(&lhs) {
-                        return *rhs;
-                    }
-                    if is_zero(&rhs) {
-                        return *lhs;
-                    }
-                }
-                "bor" | "|" => {
-                    if is_neg1(&lhs) || is_neg1(&rhs) {
-                        return Expr::IntLit(-1);
-                    }
-                    if is_zero(&lhs) {
-                        return *rhs;
-                    }
-                    if is_zero(&rhs) {
-                        return *lhs;
-                    }
-                }
-                "land" | "&&" => {
-                    if is_false(&lhs) || is_false(&rhs) {
-                        return Expr::BoolLit(false);
-                    }
-                    if is_true(&lhs) {
-                        return *rhs;
-                    }
-                    if is_true(&rhs) {
-                        return *lhs;
-                    }
-                    if is_zero(&lhs) || is_zero(&rhs) {
-                        return Expr::IntLit(0);
-                    }
-                    if is_one(&lhs) {
-                        return *rhs;
-                    }
-                    if is_one(&rhs) {
-                        return *lhs;
-                    }
-                }
-                "lor" | "||" => {
-                    if is_true(&lhs) || is_true(&rhs) {
-                        return Expr::BoolLit(true);
-                    }
-                    if is_false(&lhs) {
-                        return *rhs;
-                    }
-                    if is_false(&rhs) {
-                        return *lhs;
-                    }
-                    if is_one(&lhs) || is_one(&rhs) {
-                        return Expr::IntLit(1);
-                    }
-                    if is_zero(&lhs) {
-                        return *rhs;
-                    }
-                    if is_zero(&rhs) {
-                        return *lhs;
-                    }
-                }
-                "sub" | "-" => {
-                    if is_zero(&rhs) {
-                        return *lhs;
-                    }
-                    if lhs == rhs && matches!(lhs.as_ref(), Expr::Ident(_) | Expr::IntLit(_)) {
-                        return Expr::IntLit(0);
-                    }
-                }
-                "xor" | "^" => {
-                    if is_zero(&lhs) {
-                        return *rhs;
-                    }
-                    if is_zero(&rhs) {
-                        return *lhs;
-                    }
-                    if lhs == rhs
-                        && matches!(
-                            lhs.as_ref(),
-                            Expr::Ident(_) | Expr::IntLit(_) | Expr::BoolLit(_)
-                        )
-                    {
-                        return Expr::IntLit(0);
-                    }
-                }
-                "==" => {
-                    if lhs == rhs
-                        && matches!(
-                            lhs.as_ref(),
-                            Expr::Ident(_)
-                                | Expr::IntLit(_)
-                                | Expr::BoolLit(_)
-                                | Expr::StringLit(_)
-                        )
-                    {
-                        return Expr::BoolLit(true);
-                    }
-                }
-                "!=" => {
-                    if lhs == rhs
-                        && matches!(
-                            lhs.as_ref(),
-                            Expr::Ident(_)
-                                | Expr::IntLit(_)
-                                | Expr::BoolLit(_)
-                                | Expr::StringLit(_)
-                        )
-                    {
-                        return Expr::BoolLit(false);
-                    }
-                }
-                ">" | "<" | "gt" | "lt" => {
-                    if lhs == rhs && matches!(lhs.as_ref(), Expr::Ident(_) | Expr::IntLit(_)) {
-                        return Expr::BoolLit(false);
-                    }
-                }
-                ">=" | "<=" | "ge" | "le" => {
-                    if lhs == rhs && matches!(lhs.as_ref(), Expr::Ident(_) | Expr::IntLit(_)) {
-                        return Expr::BoolLit(true);
-                    }
-                }
-                "mul" | "*" => {
-                    if is_zero(&lhs) || is_zero(&rhs) {
-                        return Expr::IntLit(0);
-                    }
-                    if is_one(&lhs) {
-                        return *rhs;
-                    }
-                    if is_one(&rhs) {
-                        return *lhs;
-                    }
-                }
-                "div" | "/" => {
-                    if is_one(&rhs) {
-                        return *lhs;
-                    }
-                }
-                "band" | "&" => {
-                    if is_zero(&lhs) || is_zero(&rhs) {
-                        return Expr::IntLit(0);
-                    }
-                    if is_neg1(&lhs) {
-                        return *rhs;
-                    }
-                    if is_neg1(&rhs) {
-                        return *lhs;
-                    }
-                }
-                "shl" | "<<" | "shr" | ">>" => {
-                    if is_zero(&rhs) {
-                        return *lhs;
-                    }
-                    if is_zero(&lhs) {
-                        return Expr::IntLit(0);
-                    }
-                }
-                _ => {}
-            }
-            e
-        }
-        Expr::Unary { op, expr, .. } => {
-            match op.as_str() {
-                "neg" | "-" => {
-                    if let Expr::Unary {
-                        op: ref inner_op,
-                        expr: ref inner_expr,
-                    } = *expr
-                    {
-                        if inner_op == "neg" || inner_op == "-" {
-                            return *inner_expr.clone();
-                        }
-                    }
-                }
-                "not" | "!" => {
-                    if let Expr::Unary {
-                        op: ref inner_op,
-                        expr: ref inner_expr2,
-                    } = *expr
-                    {
-                        if inner_op == "not" || inner_op == "!" {
-                            return *inner_expr2.clone();
-                        }
-                    }
-                }
-                _ => {}
-            }
-            e
-        }
+        Expr::Binary { op, lhs, rhs, .. } => simplify_binary_expr(e, &op, &lhs, &rhs),
+        Expr::Unary { op, expr, .. } => simplify_unary_expr(e, &op, &expr),
         _ => e,
     }
 }
@@ -1130,46 +1117,7 @@ fn x86_64_insn_length(code: &[u8], pos: usize) -> usize {
     let opcode_total = if let Some(o2) = op2 { o2 } else { op1 };
     let two_byte = op2.is_some();
 
-    let has_modrm = x86_64_has_modrm(two_byte, opcode_total);
-
-    // ── ModRM byte ──
-    let mut modrm: u8 = 0;
-    if has_modrm && p < code.len() {
-        modrm = code[p];
-        p += 1;
-    }
-
-    if has_modrm {
-        let mod_field = modrm >> 6;
-        let rm_field = modrm & 7;
-
-        // ── SIB byte ──
-        let has_sib = mod_field != 3 && rm_field == 4;
-        if has_sib && p < code.len() {
-            p += 1; // skip SIB
-        }
-
-        // ── Displacement ──
-        if mod_field == 1 {
-            p += 1; // disp8
-        } else if mod_field == 2 {
-            p += 4; // disp32
-        } else if mod_field == 0 && rm_field == 5 && !has_sib && !two_byte {
-            p += 4; // disp32 (RIP-relative)
-        } else if mod_field == 0 && rm_field == 5 && two_byte {
-            p += 4; // disp32 (two-byte opcode RIP-relative)
-        }
-    }
-
-    // ── Immediate ──
-    let immediate_size = x86_64_immediate_size(two_byte, opcode_total, code, pos, p, modrm);
-    p += immediate_size;
-
-    p - pos
-}
-
-fn x86_64_has_modrm(two_byte: bool, opcode_total: u8) -> bool {
-    match (two_byte, opcode_total) {
+    let has_modrm = match (two_byte, opcode_total) {
         // Immediate-only: push/pop, mov al/ax/eax/rax, etc.
         (false, 0x50..=0x5F) => false, // push r64 / pop r64
         (false, 0x60..=0x6F) => true,  // pusha/pusha/pushad/pop variants
@@ -1223,18 +1171,39 @@ fn x86_64_has_modrm(two_byte: bool, opcode_total: u8) -> bool {
         (true, 0xE0..=0xEF) => true,  // SSE1
         (true, 0xF0..=0xFF) => true,  // SSE1/SSE2
         _ => true,                    // Conservative: assume ModRM
-    }
-}
+    };
 
-fn x86_64_immediate_size(
-    two_byte: bool,
-    opcode_total: u8,
-    code: &[u8],
-    pos: usize,
-    p: usize,
-    modrm: u8,
-) -> usize {
-    match (two_byte, opcode_total) {
+    // ── ModRM byte ──
+    let mut modrm: u8 = 0;
+    if has_modrm && p < code.len() {
+        modrm = code[p];
+        p += 1;
+    }
+
+    if has_modrm {
+        let mod_field = modrm >> 6;
+        let rm_field = modrm & 7;
+
+        // ── SIB byte ──
+        let has_sib = mod_field != 3 && rm_field == 4;
+        if has_sib && p < code.len() {
+            p += 1; // skip SIB
+        }
+
+        // ── Displacement ──
+        if mod_field == 1 {
+            p += 1; // disp8
+        } else if mod_field == 2 {
+            p += 4; // disp32
+        } else if mod_field == 0 && rm_field == 5 && !has_sib && !two_byte {
+            p += 4; // disp32 (RIP-relative)
+        } else if mod_field == 0 && rm_field == 5 && two_byte {
+            p += 4; // disp32 (two-byte opcode RIP-relative)
+        }
+    }
+
+    // ── Immediate ──
+    let immediate_size = match (two_byte, opcode_total) {
         // MOV r8..r15, imm64
         (false, 0xB8..=0xBF)
             if code[pos..p]
@@ -1283,7 +1252,10 @@ fn x86_64_immediate_size(
         // MOVSXD
         (false, 0x63) => 0,
         _ => 0,
-    }
+    };
+    p += immediate_size;
+
+    p - pos
 }
 
 // ─── x86_64 Peephole ──────────────────────────────────────────────────────
@@ -1296,6 +1268,12 @@ struct RelJump {
     offset_byte: usize, // position of the offset bytes (pos+1 for most, pos+2 for 0F 8x)
     offset_value: i32,  // original signed offset
     target: usize,      // absolute target position after instruction
+}
+
+#[derive(Debug)]
+struct RemoveRange {
+    start: usize,
+    len: usize,
 }
 
 /// Scan the code buffer and remove redundant `mov r, r` instructions where
@@ -1311,8 +1289,30 @@ pub fn peephole_x86_64(code: &mut Vec<u8>) {
 
     let orig_len = code.len();
 
-    // ── Pass 1: locate all relative jump/call instructions ──
-    let mut jumps: Vec<RelJump> = Vec::new();
+    let jumps = find_relative_jumps(code);
+    let mut remove = find_removable_instructions(code, &jumps);
+
+    // Nothing to do?
+    if remove.is_empty() {
+        return;
+    }
+
+    adjust_jump_offsets(code, &jumps, &remove);
+
+    // ── Pass 5: remove bytes (highest first to avoid shifting) ──
+    remove.sort_by_key(|r| std::cmp::Reverse(r.start));
+    for r in remove {
+        code.drain(r.start..r.start + r.len);
+    }
+
+    let removed = orig_len - code.len();
+    if removed > 0 {
+        eprintln!("peephole: removed {removed} bytes");
+    }
+}
+
+fn find_relative_jumps(code: &[u8]) -> Vec<RelJump> {
+    let mut jumps = Vec::new();
     let mut i = 0;
     while i < code.len() {
         let b = code[i];
@@ -1352,22 +1352,10 @@ pub fn peephole_x86_64(code: &mut Vec<u8>) {
         }
         i += len;
     }
+    jumps
+}
 
-    // ── Pass 2: locate redundant mov-same-reg patterns ──
-    // Patterns (modrm where mod=3 and reg==r/m):
-    //   48 89 XX   mov r64, r64 (REX.W + MOV r/m64, r64)
-    //   89 XX      mov r32, r32 (MOV r/m32, r32)
-    //   48 8B XX   mov r64, r64 (REX.W + MOV r64, r/m64)
-    //   8B XX      mov r32, r32 (MOV r32, r/m32)
-    //
-    // NOTE: only remove instructions that are NOT a jump target.
-    // Removing a jump target breaks control flow.
-    #[derive(Debug)]
-    struct RemoveRange {
-        start: usize,
-        len: usize,
-    }
-    // Build set of jump targets for safety check
+fn find_removable_instructions(code: &[u8], jumps: &[RelJump]) -> Vec<RemoveRange> {
     let target_set: std::collections::HashSet<usize> = jumps.iter().map(|j| j.target).collect();
     let mut remove: Vec<RemoveRange> = Vec::new();
 
@@ -1445,7 +1433,6 @@ pub fn peephole_x86_64(code: &mut Vec<u8>) {
         }
     }
 
-    // ── Pass 3: locate trailing NOPs ──
     // Remove trailing `66 90` (2-byte NOP) and `90` (single NOP)
     let mut trailing = 0;
     let mut j = code.len();
@@ -1463,11 +1450,6 @@ pub fn peephole_x86_64(code: &mut Vec<u8>) {
         });
     }
 
-    // Nothing to do?
-    if remove.is_empty() {
-        return;
-    }
-
     // Sort remove ranges by position (ascending) and merge overlaps
     remove.sort_by_key(|r| r.start);
     let mut merged: Vec<RemoveRange> = Vec::new();
@@ -1482,12 +1464,11 @@ pub fn peephole_x86_64(code: &mut Vec<u8>) {
         }
         merged.push(r);
     }
-    let mut remove = merged;
+    merged
+}
 
-    // ── Pass 4: adjust jump offsets for byte removal ──
-    // For each jump, compute how many removed bytes fall between pos and target.
-    // Then update the offset in the buffer.
-    for jmp in &jumps {
+fn adjust_jump_offsets(code: &mut [u8], jumps: &[RelJump], remove: &[RemoveRange]) {
+    for jmp in jumps {
         let old_target = jmp.target;
         let old_offset = jmp.offset_value;
 
@@ -1495,7 +1476,7 @@ pub fn peephole_x86_64(code: &mut Vec<u8>) {
         // and its target (after jump end, before target start)
         let jump_end = jmp.pos + jmp.len;
         let mut removed_between: usize = 0;
-        for r in &remove {
+        for r in remove {
             let r_end = r.start + r.len;
             // Removal is after jump end and before target
             if r.start >= jump_end && r_end <= old_target {
@@ -1514,7 +1495,7 @@ pub fn peephole_x86_64(code: &mut Vec<u8>) {
         // Write the adjusted offset into the buffer
         // Bytes removed before the jump shift the offset byte position
         let mut removed_before_jump: usize = 0;
-        for r in &remove {
+        for r in remove {
             let r_end = r.start + r.len;
             if r_end <= jmp.pos {
                 removed_before_jump += r.len;
@@ -1530,17 +1511,6 @@ pub fn peephole_x86_64(code: &mut Vec<u8>) {
             let new_offset_i32 = new_offset as i32;
             code[offset_byte..offset_byte + 4].copy_from_slice(&new_offset_i32.to_le_bytes());
         }
-    }
-
-    // ── Pass 5: remove bytes (highest first to avoid shifting) ──
-    remove.sort_by_key(|r| std::cmp::Reverse(r.start));
-    for r in remove {
-        code.drain(r.start..r.start + r.len);
-    }
-
-    let removed = orig_len - code.len();
-    if removed > 0 {
-        eprintln!("peephole: removed {removed} bytes");
     }
 }
 

@@ -135,6 +135,78 @@ struct CoreIrFacts {
     graph_facts: Option<GraphFacts>,
 }
 
+fn evaluate_parse_result(
+    parsed: Result<Option<UnifiedModule>, crate::parser_registry::ParserRegistryError>,
+    path: &Path,
+    source: &str,
+    parser_id: Option<&str>,
+    config: &AgentModeConfig,
+    language_level: &mut LanguageLevel,
+    diagnostics: &mut Vec<AgentDiagnostic>,
+) -> (usize, CoreIrFacts, SurfaceFacts) {
+    let mut core_decl_count = 0;
+
+    let mut core_ir_facts = CoreIrFacts {
+        lower_micros: 0,
+        graph_micros: 0,
+        textual_sil_bytes: 0,
+        textual_sil_lines: 0,
+        core_ir_summary: None,
+        graph_facts: None,
+    };
+
+    let mut surface_facts = SurfaceFacts {
+        effects: Vec::new(),
+        capabilities: Vec::new(),
+        orchestration: OrchestrationFacts::default(),
+        package_symbol_index: Vec::new(),
+        package_diagnostics: Vec::new(),
+    };
+
+    match parsed {
+        Ok(Some(module)) => {
+            core_decl_count = module.decls.len();
+            *language_level = language_level_for_module(language_level.clone(), parser_id, source);
+
+            if parser_id == Some("in")
+                && let Ok(surface) = crate::in_lang_parse::parse_in_surface_info(source)
+            {
+                surface_facts =
+                    extract_surface_facts(surface, path, source, parser_id, &module, diagnostics);
+            }
+
+            diagnostics.extend(core_diagnostics(&module, parser_id, source));
+            core_ir_facts = extract_core_ir_facts(&module, &config.module_id);
+        }
+        Ok(None) => {
+            diagnostics.push(diagnostic(
+                "AGENT_SWIFT_SIL_ROUTE",
+                AgentDiagnosticSeverity::Info,
+                None,
+                parser_id,
+                Some("Core IR parser route for agent-mode reports"),
+                excerpt_bounds(source, None),
+                Some("Pass a .in/.icore/polyglot source with a registered Core IR frontend or force parser=in/icore"),
+                "agent-mode core reporting does not invoke the Swift SIL emit route",
+            ));
+        }
+        Err(err) => {
+            diagnostics.push(diagnostic(
+                "AGENT_PARSE_FAILED",
+                AgentDiagnosticSeverity::Error,
+                None,
+                parser_id,
+                Some("source accepted by the resolved parser and lowered to Core IR"),
+                excerpt_bounds(source, None),
+                Some("Check the parser decision, source extension, magic parser line, and frontend-supported syntax"),
+                &err.to_string(),
+            ));
+        }
+    }
+
+    (core_decl_count, core_ir_facts, surface_facts)
+}
+
 fn extract_core_ir_facts(module: &UnifiedModule, module_id: &str) -> CoreIrFacts {
     let summary = summarize_core_ir(module);
     let lower_start = Instant::now();
@@ -171,72 +243,15 @@ fn build_report(path: &Path, config: &AgentModeConfig) -> Result<AgentReport, Ag
     let parsed = parser_registry::parse_with_resolved(resolved, path);
     let parse_micros = micros(parse_start);
 
-    let mut core_decl_count = 0;
-
-    let mut core_ir_facts = CoreIrFacts {
-        lower_micros: 0,
-        graph_micros: 0,
-        textual_sil_bytes: 0,
-        textual_sil_lines: 0,
-        core_ir_summary: None,
-        graph_facts: None,
-    };
-
-    let mut surface_facts = SurfaceFacts {
-        effects: Vec::new(),
-        capabilities: Vec::new(),
-        orchestration: OrchestrationFacts::default(),
-        package_symbol_index: Vec::new(),
-        package_diagnostics: Vec::new(),
-    };
-
-    match parsed {
-        Ok(Some(module)) => {
-            core_decl_count = module.decls.len();
-            language_level =
-                language_level_for_module(language_level, parser_id.as_deref(), &source);
-
-            if parser_id.as_deref() == Some("in")
-                && let Ok(surface) = crate::in_lang_parse::parse_in_surface_info(&source)
-            {
-                surface_facts = extract_surface_facts(
-                    surface,
-                    path,
-                    &source,
-                    parser_id.as_deref(),
-                    &module,
-                    &mut diagnostics,
-                );
-            }
-
-            diagnostics.extend(core_diagnostics(&module, parser_id.as_deref(), &source));
-            core_ir_facts = extract_core_ir_facts(&module, &config.module_id);
-        }
-        Ok(None) => {
-            diagnostics.push(diagnostic(
-                "AGENT_SWIFT_SIL_ROUTE",
-                AgentDiagnosticSeverity::Info,
-                None,
-                parser_id.as_deref(),
-                Some("Core IR parser route for agent-mode reports"),
-                excerpt_bounds(&source, None),
-                Some("Pass a .in/.icore/polyglot source with a registered Core IR frontend or force parser=in/icore"),
-                "agent-mode core reporting does not invoke the Swift SIL emit route",
-            ));
-        }
-        Err(err) => {
-            diagnostics.push(diagnostic(
-                "AGENT_PARSE_FAILED",
-                AgentDiagnosticSeverity::Error,
-                None,
-                parser_id.as_deref(),
-                Some("source accepted by the resolved parser and lowered to Core IR"),
-                excerpt_bounds(&source, None),
-                Some("Check the parser decision, source extension, magic parser line, and frontend-supported syntax"),
-                &err.to_string(),
-            ));
-        }
-    }
+    let (core_decl_count, core_ir_facts, surface_facts) = evaluate_parse_result(
+        parsed,
+        path,
+        &source,
+        parser_id.as_deref(),
+        config,
+        &mut language_level,
+        &mut diagnostics,
+    );
 
     repair_plans.extend(
         diagnostics
