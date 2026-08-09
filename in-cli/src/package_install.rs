@@ -1311,4 +1311,53 @@ mod tests {
         assert!(manifest.dependencies.contains_key("cargo:crepuscularity"));
         assert!(manifest.dependencies.contains_key("npm:hono"));
     }
+
+    #[test]
+    fn strip_npm_dev_dependencies_removes_field() {
+        let temp = tempfile_dir("strip-npm");
+        let path = temp.join("package.json");
+        fs::write(
+            &path,
+            r#"{"name": "test", "devDependencies": {"foo": "1.0"}}"#,
+        )
+        .expect("write package.json");
+
+        super::strip_npm_dev_dependencies(&temp);
+
+        let content = fs::read_to_string(&path).expect("read package.json");
+        let json: serde_json::Value = serde_json::from_str(&content).expect("parse json");
+        assert!(json.get("name").is_some(), "name should remain");
+        assert!(
+            json.get("devDependencies").is_none(),
+            "devDependencies should be removed"
+        );
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn strip_npm_dev_dependencies_ignores_missing_file() {
+        let temp = tempfile_dir("strip-npm-missing");
+
+        super::strip_npm_dev_dependencies(&temp);
+
+        assert!(
+            !temp.join("package.json").exists(),
+            "package.json should not be created"
+        );
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn strip_npm_dev_dependencies_ignores_invalid_json() {
+        let temp = tempfile_dir("strip-npm-invalid");
+        let path = temp.join("package.json");
+        let invalid_json = r#"{"name": "test", "devDependencies""#;
+        fs::write(&path, invalid_json).expect("write invalid package.json");
+
+        super::strip_npm_dev_dependencies(&temp);
+
+        let content = fs::read_to_string(&path).expect("read package.json");
+        assert_eq!(content, invalid_json, "invalid json should not be modified");
+        let _ = fs::remove_dir_all(temp);
+    }
 }
