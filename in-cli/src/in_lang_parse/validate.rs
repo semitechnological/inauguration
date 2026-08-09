@@ -481,6 +481,119 @@ pub(crate) fn infer_in_expr_type(
     }
 }
 
+fn replace_idents(expr: &mut Expr, consts: &std::collections::HashMap<String, Expr>) {
+    match expr {
+        Expr::Ident(name) => {
+            if let Some(replacement) = consts.get(name) {
+                *expr = replacement.clone();
+            }
+        }
+        Expr::Unary { expr: inner, .. } => replace_idents(inner, consts),
+        Expr::Binary { lhs, rhs, .. } => {
+            replace_idents(lhs, consts);
+            replace_idents(rhs, consts);
+        }
+        Expr::Call { callee, args, .. } => {
+            replace_idents(callee, consts);
+            for arg in args {
+                replace_idents(arg, consts);
+            }
+        }
+        Expr::StructInit { fields, .. } => {
+            for (_, expr) in fields {
+                replace_idents(expr, consts);
+            }
+        }
+        Expr::Field { base, .. } => replace_idents(base, consts),
+        Expr::ArrayLit(items) => {
+            for item in items {
+                replace_idents(item, consts);
+            }
+        }
+        Expr::Index { base, index, .. } => {
+            replace_idents(base, consts);
+            replace_idents(index, consts);
+        }
+        Expr::Closure { body, .. } => {
+            for stmt in body {
+                replace_stmt_idents(stmt, consts);
+            }
+        }
+        Expr::IntLit(_) | Expr::FloatLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => {}
+    }
+}
+
+fn replace_stmt_idents(stmt: &mut Stmt, consts: &std::collections::HashMap<String, Expr>) {
+    match stmt {
+        Stmt::Let(_, _, expr)
+        | Stmt::Assign(_, expr)
+        | Stmt::Return(Some(expr))
+        | Stmt::Expr(expr)
+        | Stmt::Throw(expr) => replace_idents(expr, consts),
+        Stmt::FieldAssign { base, value, .. } => {
+            replace_idents(base, consts);
+            replace_idents(value, consts);
+        }
+        Stmt::IndexAssign {
+            base, index, value, ..
+        } => {
+            replace_idents(base, consts);
+            replace_idents(index, consts);
+            replace_idents(value, consts);
+        }
+        Stmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            replace_idents(cond, consts);
+            for s in then_body {
+                replace_stmt_idents(s, consts);
+            }
+            for s in else_body {
+                replace_stmt_idents(s, consts);
+            }
+        }
+        Stmt::Loop {
+            cond: Some(cond),
+            body,
+            ..
+        } => {
+            replace_idents(cond, consts);
+            for s in body {
+                replace_stmt_idents(s, consts);
+            }
+        }
+        Stmt::Loop {
+            cond: None, body, ..
+        } => {
+            for s in body {
+                replace_stmt_idents(s, consts);
+            }
+        }
+        Stmt::Match { scrutinee, arms } => {
+            replace_idents(scrutinee, consts);
+            for arm in arms {
+                for s in &mut arm.body {
+                    replace_stmt_idents(s, consts);
+                }
+            }
+        }
+        Stmt::Try { body, catches, .. } => {
+            for s in body {
+                replace_stmt_idents(s, consts);
+            }
+            for catch in catches {
+                for s in &mut catch.body {
+                    replace_stmt_idents(s, consts);
+                }
+            }
+        }
+        Stmt::Return(None) => {}
+        Stmt::Break | Stmt::Propagate => {}
+    }
+}
+
 pub fn inline_const_values(module: &mut UnifiedModule) {
     // Collect const init values: name -> cloned init expression
     let consts: std::collections::HashMap<String, Expr> = module
@@ -499,119 +612,6 @@ pub fn inline_const_values(module: &mut UnifiedModule) {
 
     if consts.is_empty() {
         return;
-    }
-
-    fn replace_idents(expr: &mut Expr, consts: &std::collections::HashMap<String, Expr>) {
-        match expr {
-            Expr::Ident(name) => {
-                if let Some(replacement) = consts.get(name) {
-                    *expr = replacement.clone();
-                }
-            }
-            Expr::Unary { expr: inner, .. } => replace_idents(inner, consts),
-            Expr::Binary { lhs, rhs, .. } => {
-                replace_idents(lhs, consts);
-                replace_idents(rhs, consts);
-            }
-            Expr::Call { callee, args, .. } => {
-                replace_idents(callee, consts);
-                for arg in args {
-                    replace_idents(arg, consts);
-                }
-            }
-            Expr::StructInit { fields, .. } => {
-                for (_, expr) in fields {
-                    replace_idents(expr, consts);
-                }
-            }
-            Expr::Field { base, .. } => replace_idents(base, consts),
-            Expr::ArrayLit(items) => {
-                for item in items {
-                    replace_idents(item, consts);
-                }
-            }
-            Expr::Index { base, index, .. } => {
-                replace_idents(base, consts);
-                replace_idents(index, consts);
-            }
-            Expr::Closure { body, .. } => {
-                for stmt in body {
-                    replace_stmt_idents(stmt, consts);
-                }
-            }
-            Expr::IntLit(_) | Expr::FloatLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => {}
-        }
-    }
-
-    fn replace_stmt_idents(stmt: &mut Stmt, consts: &std::collections::HashMap<String, Expr>) {
-        match stmt {
-            Stmt::Let(_, _, expr)
-            | Stmt::Assign(_, expr)
-            | Stmt::Return(Some(expr))
-            | Stmt::Expr(expr)
-            | Stmt::Throw(expr) => replace_idents(expr, consts),
-            Stmt::FieldAssign { base, value, .. } => {
-                replace_idents(base, consts);
-                replace_idents(value, consts);
-            }
-            Stmt::IndexAssign {
-                base, index, value, ..
-            } => {
-                replace_idents(base, consts);
-                replace_idents(index, consts);
-                replace_idents(value, consts);
-            }
-            Stmt::If {
-                cond,
-                then_body,
-                else_body,
-            } => {
-                replace_idents(cond, consts);
-                for s in then_body {
-                    replace_stmt_idents(s, consts);
-                }
-                for s in else_body {
-                    replace_stmt_idents(s, consts);
-                }
-            }
-            Stmt::Loop {
-                cond: Some(cond),
-                body,
-                ..
-            } => {
-                replace_idents(cond, consts);
-                for s in body {
-                    replace_stmt_idents(s, consts);
-                }
-            }
-            Stmt::Loop {
-                cond: None, body, ..
-            } => {
-                for s in body {
-                    replace_stmt_idents(s, consts);
-                }
-            }
-            Stmt::Match { scrutinee, arms } => {
-                replace_idents(scrutinee, consts);
-                for arm in arms {
-                    for s in &mut arm.body {
-                        replace_stmt_idents(s, consts);
-                    }
-                }
-            }
-            Stmt::Try { body, catches, .. } => {
-                for s in body {
-                    replace_stmt_idents(s, consts);
-                }
-                for catch in catches {
-                    for s in &mut catch.body {
-                        replace_stmt_idents(s, consts);
-                    }
-                }
-            }
-            Stmt::Return(None) => {}
-            Stmt::Break | Stmt::Propagate => {}
-        }
     }
 
     // Walk all function bodies and replace const references
