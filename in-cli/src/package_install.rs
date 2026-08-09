@@ -1292,6 +1292,38 @@ mod tests {
     }
 
     #[test]
+    fn extract_zip_rejects_parent_traversal_entry() {
+        use std::io::Cursor;
+        use std::io::Write;
+        let dir = tempfile_dir("extract-zip-malicious");
+        let malicious_zip = dir.join("malicious.zip");
+
+        let mut buffer = Vec::new();
+        {
+            let mut zip = zip::ZipWriter::new(Cursor::new(&mut buffer));
+            let options = zip::write::SimpleFileOptions::default();
+            zip.start_file("../escaped.txt", options).unwrap();
+            zip.write_all(b"bad content").unwrap();
+            zip.finish().unwrap();
+        }
+        fs::write(&malicious_zip, buffer).unwrap();
+
+        let install_path = dir.join("extracted");
+
+        let result = extract_zip(&malicious_zip, &install_path);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err();
+        assert!(err_msg.contains("Invalid file path") || err_msg.contains("failed to extract zip"));
+
+        assert!(
+            !dir.join("escaped.txt").exists(),
+            "zip extraction should not create a file outside the install path"
+        );
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn add_packages_writes_manifest_entries() {
         let temp = tempfile_dir("package-add");
         let (_, added) = add_packages(&temp, &["pip:flask".to_string()], "latest").expect("add");
@@ -1310,5 +1342,141 @@ mod tests {
         .expect("parse");
         assert!(manifest.dependencies.contains_key("cargo:crepuscularity"));
         assert!(manifest.dependencies.contains_key("npm:hono"));
+    }
+
+    #[test]
+    fn flatten_go_module_root_already_at_root() {
+        let dir = tempfile_dir("go-mod-root");
+        fs::write(dir.join("go.mod"), b"module foo").unwrap();
+
+        super::flatten_go_module_root(&dir).expect("flatten");
+
+        assert!(dir.join("go.mod").exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn flatten_go_module_root_moves_nested_module() {
+        let dir = tempfile_dir("go-mod-nested");
+        let nested = dir.join("nested");
+        fs::create_dir(&nested).unwrap();
+        fs::write(nested.join("go.mod"), b"module foo").unwrap();
+        fs::write(nested.join("main.go"), b"package main").unwrap();
+
+        super::flatten_go_module_root(&dir).expect("flatten");
+
+        assert!(dir.join("go.mod").exists());
+        assert!(dir.join("main.go").exists());
+        assert!(!dir.join("nested").exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn flatten_go_module_root_ignores_no_module() {
+        let dir = tempfile_dir("go-mod-none");
+        let nested = dir.join("nested");
+        fs::create_dir(&nested).unwrap();
+        fs::write(nested.join("main.go"), b"package main").unwrap();
+
+        super::flatten_go_module_root(&dir).expect("flatten");
+
+        assert!(!dir.join("go.mod").exists());
+        assert!(dir.join("nested").join("main.go").exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn flatten_go_module_root_preserves_existing_files() {
+        let dir = tempfile_dir("go-mod-preserve");
+        fs::write(dir.join("main.go"), b"root").unwrap();
+
+        let nested = dir.join("nested");
+        fs::create_dir(&nested).unwrap();
+        fs::write(nested.join("go.mod"), b"module foo").unwrap();
+        fs::write(nested.join("main.go"), b"nested").unwrap();
+
+        super::flatten_go_module_root(&dir).expect("flatten");
+
+        assert!(dir.join("go.mod").exists());
+        assert_eq!(fs::read_to_string(dir.join("main.go")).unwrap(), "root");
+        assert!(dir.join("nested").join("main.go").exists());
+        fs::remove_dir_all(dir).unwrap();
+
+    fn write_installed_metadata_success() {
+        let temp = tempfile_dir("write-metadata");
+        fs::create_dir_all(&temp).unwrap();
+
+        let metadata = InstalledPackageMetadata {
+            ecosystem: "npm".to_string(),
+            name: "lodash".to_string(),
+            version: "4.17.21".to_string(),
+            registry: "https://registry.npmjs.org".to_string(),
+            install_path: "/path/to/install".to_string(),
+            exports: vec!["lodash".to_string()],
+            bindings: vec![],
+        };
+
+        let result = write_installed_metadata(&temp, &metadata);
+        assert!(result.is_ok());
+
+        let metadata_path = temp.join(INSTALLED_PACKAGE_METADATA);
+        assert!(metadata_path.exists());
+
+        let content = fs::read_to_string(metadata_path).expect("read metadata");
+        assert!(content.contains("\"npm\""));
+        assert!(content.contains("\"lodash\""));
+        assert!(content.contains("\"4.17.21\""));
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    fn strip_npm_dev_dependencies_removes_field() {
+        let temp = tempfile_dir("strip-npm");
+        let path = temp.join("package.json");
+        fs::write(
+            &path,
+            r#"{"name": "test", "devDependencies": {"foo": "1.0"}}"#,
+        )
+        .expect("write package.json");
+
+        super::strip_npm_dev_dependencies(&temp);
+
+        let content = fs::read_to_string(&path).expect("read package.json");
+        let json: serde_json::Value = serde_json::from_str(&content).expect("parse json");
+        assert!(json.get("name").is_some(), "name should remain");
+        assert!(
+            json.get("devDependencies").is_none(),
+            "devDependencies should be removed"
+        );
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn strip_npm_dev_dependencies_ignores_missing_file() {
+        let temp = tempfile_dir("strip-npm-missing");
+
+        super::strip_npm_dev_dependencies(&temp);
+
+        assert!(
+            !temp.join("package.json").exists(),
+            "package.json should not be created"
+        );
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn strip_npm_dev_dependencies_ignores_invalid_json() {
+        let temp = tempfile_dir("strip-npm-invalid");
+        let path = temp.join("package.json");
+        let invalid_json = r#"{"name": "test", "devDependencies""#;
+        fs::write(&path, invalid_json).expect("write invalid package.json");
+
+        super::strip_npm_dev_dependencies(&temp);
+
+        let content = fs::read_to_string(&path).expect("read package.json");
+        assert_eq!(content, invalid_json, "invalid json should not be modified");
+
+        let _ = fs::remove_dir_all(temp);
+    }
     }
 }

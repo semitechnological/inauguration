@@ -174,12 +174,7 @@ fn function_sig<'a>(facts: &ModuleFacts<'a>, name: &str) -> Option<FunctionSig<'
     })
 }
 
-fn collect_module_facts(module: &UnifiedModule) -> Result<ModuleFacts<'_>, (String, String)> {
-    let mut top_level = HashSet::new();
-    let mut functions = HashMap::new();
-    let mut structs = HashMap::new();
-    let mut globals = HashSet::new();
-
+fn add_intrinsics<'a>(functions: &mut HashMap<&'a str, FunctionSig<'a>>) {
     // Static intrinsics: these variants contain no owned data, so a static item
     // gives a cheap 'static reference without leaking an allocation.
     static VOID_RET: Typ = Typ::Void;
@@ -232,48 +227,50 @@ fn collect_module_facts(module: &UnifiedModule) -> Result<ModuleFacts<'_>, (Stri
     for (name, ret) in intrinsics {
         functions.insert(name, FunctionSig { params: &[], ret });
     }
+}
+
+fn check_and_insert_top_level<'a>(
+    top_level: &mut HashSet<&'a str>,
+    name: &'a str,
+) -> Result<(), (String, String)> {
+    if !top_level.insert(name) {
+        return Err((
+            "duplicate-top-level-name".to_string(),
+            format!("duplicate top-level name `{name}`"),
+        ));
+    }
+    Ok(())
+}
+
+fn collect_module_facts(module: &UnifiedModule) -> Result<ModuleFacts<'_>, (String, String)> {
+    let mut top_level = HashSet::new();
+    let mut functions = HashMap::new();
+    let mut structs = HashMap::new();
+    let mut globals = HashSet::new();
+
+    add_intrinsics(&mut functions);
 
     for decl in &module.decls {
         match decl {
             Decl::Struct { name, fields, .. } => {
-                if !top_level.insert(name.as_str()) {
-                    return Err((
-                        "duplicate-top-level-name".to_string(),
-                        format!("duplicate top-level name `{name}`"),
-                    ));
-                }
+                check_and_insert_top_level(&mut top_level, name.as_str())?;
                 structs.insert(name.as_str(), fields.as_slice());
             }
             Decl::Class { name, fields, .. } => {
                 // Register class fields as struct schema for verification
-                if !top_level.insert(name.as_str()) {
-                    return Err((
-                        "duplicate-top-level-name".to_string(),
-                        format!("duplicate top-level name `{name}`"),
-                    ));
-                }
+                check_and_insert_top_level(&mut top_level, name.as_str())?;
                 structs.insert(name.as_str(), fields.as_slice());
             }
             Decl::Function {
                 name, params, ret, ..
             } => {
-                if !top_level.insert(name.as_str()) {
-                    return Err((
-                        "duplicate-top-level-name".to_string(),
-                        format!("duplicate top-level name `{name}`"),
-                    ));
-                }
+                check_and_insert_top_level(&mut top_level, name.as_str())?;
                 functions.insert(name.as_str(), FunctionSig { params, ret });
             }
             Decl::Interface { .. } => {}
             Decl::Component { .. } => {}
             Decl::Global { name, .. } => {
-                if !top_level.insert(name.as_str()) {
-                    return Err((
-                        "duplicate-top-level-name".to_string(),
-                        format!("duplicate top-level name `{name}`"),
-                    ));
-                }
+                check_and_insert_top_level(&mut top_level, name.as_str())?;
                 globals.insert(name.as_str());
             }
         }
