@@ -186,7 +186,11 @@ pub fn compile_jit(
         (
             raw as u8,
             Some(raw),
-            if decode_string { Some(string) } else { None },
+            if entry_returns_string {
+                Some(string)
+            } else {
+                None
+            },
         )
     };
 
