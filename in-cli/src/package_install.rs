@@ -1292,6 +1292,38 @@ mod tests {
     }
 
     #[test]
+    fn extract_zip_rejects_parent_traversal_entry() {
+        use std::io::Cursor;
+        use std::io::Write;
+        let dir = tempfile_dir("extract-zip-malicious");
+        let malicious_zip = dir.join("malicious.zip");
+
+        let mut buffer = Vec::new();
+        {
+            let mut zip = zip::ZipWriter::new(Cursor::new(&mut buffer));
+            let options = zip::write::SimpleFileOptions::default();
+            zip.start_file("../escaped.txt", options).unwrap();
+            zip.write_all(b"bad content").unwrap();
+            zip.finish().unwrap();
+        }
+        fs::write(&malicious_zip, buffer).unwrap();
+
+        let install_path = dir.join("extracted");
+
+        let result = extract_zip(&malicious_zip, &install_path);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err();
+        assert!(err_msg.contains("Invalid file path") || err_msg.contains("failed to extract zip"));
+
+        assert!(
+            !dir.join("escaped.txt").exists(),
+            "zip extraction should not create a file outside the install path"
+        );
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn add_packages_writes_manifest_entries() {
         let temp = tempfile_dir("package-add");
         let (_, added) = add_packages(&temp, &["pip:flask".to_string()], "latest").expect("add");
