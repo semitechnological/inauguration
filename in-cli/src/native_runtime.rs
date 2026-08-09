@@ -48,6 +48,10 @@ impl NativeRuntime {
         rt.register_std_env();
         rt.register_pathbuf_operations();
         rt.register_string_methods();
+        rt.register_common_methods();
+        rt.register_option_result_methods();
+        rt.register_iterator_methods();
+        rt.register_collection_methods();
         rt.register_serde_json();
         rt.register_cli_parsing();
         rt.register_instant();
@@ -89,6 +93,12 @@ impl NativeRuntime {
     }
 
     fn register_pathbuf_operations(&mut self) {
+        self.register_pathbuf_core();
+        self.register_pathbuf_queries();
+        self.register_pathbuf_properties();
+    }
+
+    fn register_pathbuf_core(&mut self) {
         self.register(
             "display",
             Box::new(|args| {
@@ -127,6 +137,9 @@ impl NativeRuntime {
                 }
             }),
         );
+    }
+
+    fn register_pathbuf_queries(&mut self) {
         self.register(
             "is-dir",
             Box::new(|args| {
@@ -147,6 +160,9 @@ impl NativeRuntime {
                 }
             }),
         );
+    }
+
+    fn register_pathbuf_properties(&mut self) {
         self.register(
             "extension",
             Box::new(|args| {
@@ -206,9 +222,27 @@ impl NativeRuntime {
             }),
         );
         self.register(
+            "ends-with",
+            Box::new(|args| {
+                if let (Some(Value::String(s)), Some(Value::String(suffix))) =
+                    (args.first(), args.get(1))
+                {
+                    Ok(Value::Bool(s.ends_with(suffix)))
+                } else {
+                    Ok(Value::Bool(false))
+                }
+            }),
+        );
+    }
+
+    fn register_common_methods(&mut self) {
+        self.register(
             "clone",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
+    }
+
+    fn register_option_result_methods(&mut self) {
         self.register(
             "as-deref",
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
@@ -244,14 +278,6 @@ impl NativeRuntime {
             Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
         self.register(
-            "collect",
-            Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
-        );
-        self.register(
-            "iter",
-            Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
-        );
-        self.register(
             "is-ok",
             Box::new(|args| Ok(Value::Bool(!matches!(args.first(), Some(Value::Nil))))),
         );
@@ -263,7 +289,25 @@ impl NativeRuntime {
             "is-some-and",
             Box::new(|args| Ok(Value::Bool(!matches!(args.first(), Some(Value::Nil))))),
         );
+        self.register(
+            "unwrap",
+            Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
+        );
+    }
+
+    fn register_iterator_methods(&mut self) {
+        self.register(
+            "collect",
+            Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
+        );
+        self.register(
+            "iter",
+            Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
+        );
         self.register("any", Box::new(|_args| Ok(Value::Bool(false))));
+    }
+
+    fn register_collection_methods(&mut self) {
         self.register(
             "is-empty",
             Box::new(|args| {
@@ -271,22 +315,6 @@ impl NativeRuntime {
                     matches!(args.first(), Some(Value::Array(a)) if a.is_empty()),
                 ))
             }),
-        );
-        self.register(
-            "ends-with",
-            Box::new(|args| {
-                if let (Some(Value::String(s)), Some(Value::String(suffix))) =
-                    (args.first(), args.get(1))
-                {
-                    Ok(Value::Bool(s.ends_with(suffix)))
-                } else {
-                    Ok(Value::Bool(false))
-                }
-            }),
-        );
-        self.register(
-            "unwrap",
-            Box::new(|args| args.first().cloned().map(Ok).unwrap_or(Ok(Value::Nil))),
         );
         self.register(
             "len",
