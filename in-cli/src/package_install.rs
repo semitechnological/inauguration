@@ -1401,82 +1401,84 @@ mod tests {
         assert_eq!(fs::read_to_string(dir.join("main.go")).unwrap(), "root");
         assert!(dir.join("nested").join("main.go").exists());
         fs::remove_dir_all(dir).unwrap();
+    }
 
-        fn write_installed_metadata_success() {
-            let temp = tempfile_dir("write-metadata");
-            fs::create_dir_all(&temp).unwrap();
+    #[test]
+    fn write_installed_metadata_success() {
+        let temp = tempfile_dir("write-metadata");
+        fs::create_dir_all(&temp).unwrap();
 
-            let metadata = InstalledPackageMetadata {
-                ecosystem: "npm".to_string(),
-                name: "lodash".to_string(),
-                version: "4.17.21".to_string(),
-                registry: "https://registry.npmjs.org".to_string(),
-                install_path: "/path/to/install".to_string(),
-                exports: vec!["lodash".to_string()],
-                bindings: vec![],
-            };
+        let metadata = InstalledPackageMetadata {
+            ecosystem: "npm".to_string(),
+            name: "lodash".to_string(),
+            version: "4.17.21".to_string(),
+            registry: "https://registry.npmjs.org".to_string(),
+            install_path: "/path/to/install".to_string(),
+            exports: vec!["lodash".to_string()],
+            bindings: vec![],
+        };
 
-            let result = write_installed_metadata(&temp, &metadata);
-            assert!(result.is_ok());
+        let result = write_installed_metadata(&temp, &metadata);
+        assert!(result.is_ok());
 
-            let metadata_path = temp.join(INSTALLED_PACKAGE_METADATA);
-            assert!(metadata_path.exists());
+        let metadata_path = temp.join(INSTALLED_PACKAGE_METADATA);
+        assert!(metadata_path.exists());
 
-            let content = fs::read_to_string(metadata_path).expect("read metadata");
-            assert!(content.contains("\"npm\""));
-            assert!(content.contains("\"lodash\""));
-            assert!(content.contains("\"4.17.21\""));
+        let content = fs::read_to_string(metadata_path).expect("read metadata");
+        assert!(content.contains("\"npm\""));
+        assert!(content.contains("\"lodash\""));
+        assert!(content.contains("\"4.17.21\""));
 
-            let _ = fs::remove_dir_all(temp);
-        }
+        let _ = fs::remove_dir_all(temp);
+    }
 
-        fn strip_npm_dev_dependencies_removes_field() {
-            let temp = tempfile_dir("strip-npm");
-            let path = temp.join("package.json");
-            fs::write(
-                &path,
-                r#"{"name": "test", "devDependencies": {"foo": "1.0"}}"#,
-            )
-            .expect("write package.json");
+    #[test]
+    fn strip_npm_dev_dependencies_removes_field() {
+        let temp = tempfile_dir("strip-npm");
+        let path = temp.join("package.json");
+        fs::write(
+            &path,
+            r#"{"name": "test", "devDependencies": {"foo": "1.0"}}"#,
+        )
+        .expect("write package.json");
 
-            super::strip_npm_dev_dependencies(&temp);
+        super::strip_npm_dev_dependencies(&temp);
 
-            let content = fs::read_to_string(&path).expect("read package.json");
-            let json: serde_json::Value = serde_json::from_str(&content).expect("parse json");
-            assert!(json.get("name").is_some(), "name should remain");
-            assert!(
-                json.get("devDependencies").is_none(),
-                "devDependencies should be removed"
-            );
-            let _ = fs::remove_dir_all(temp);
-        }
+        let content = fs::read_to_string(&path).expect("read package.json");
+        let json: serde_json::Value = serde_json::from_str(&content).expect("parse json");
+        assert!(json.get("name").is_some(), "name should remain");
+        assert!(
+            json.get("devDependencies").is_none(),
+            "devDependencies should be removed"
+        );
+        let _ = fs::remove_dir_all(temp);
+    }
 
-        #[test]
-        fn strip_npm_dev_dependencies_ignores_missing_file() {
-            let temp = tempfile_dir("strip-npm-missing");
+    #[test]
+    fn strip_npm_dev_dependencies_ignores_missing_file() {
+        let temp = tempfile_dir("strip-npm-missing");
 
-            super::strip_npm_dev_dependencies(&temp);
+        super::strip_npm_dev_dependencies(&temp);
 
-            assert!(
-                !temp.join("package.json").exists(),
-                "package.json should not be created"
-            );
-            let _ = fs::remove_dir_all(temp);
-        }
+        assert!(
+            !temp.join("package.json").exists(),
+            "package.json should not be created"
+        );
+        let _ = fs::remove_dir_all(temp);
+    }
 
-        #[test]
-        fn strip_npm_dev_dependencies_ignores_invalid_json() {
-            let temp = tempfile_dir("strip-npm-invalid");
-            let path = temp.join("package.json");
-            let invalid_json = r#"{"name": "test", "devDependencies""#;
-            fs::write(&path, invalid_json).expect("write invalid package.json");
+    #[test]
+    fn strip_npm_dev_dependencies_ignores_invalid_json() {
+        let temp = tempfile_dir("strip-npm-invalid");
+        let path = temp.join("package.json");
+        let invalid_json = r#"{"name": "test", "devDependencies""#;
+        fs::write(&path, invalid_json).expect("write invalid package.json");
 
-            super::strip_npm_dev_dependencies(&temp);
+        super::strip_npm_dev_dependencies(&temp);
 
-            let content = fs::read_to_string(&path).expect("read package.json");
-            assert_eq!(content, invalid_json, "invalid json should not be modified");
+        let content = fs::read_to_string(&path).expect("read package.json");
+        assert_eq!(content, invalid_json, "invalid json should not be modified");
 
-            let _ = fs::remove_dir_all(temp);
-        }
+        let _ = fs::remove_dir_all(temp);
     }
 }
