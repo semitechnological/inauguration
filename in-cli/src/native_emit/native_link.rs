@@ -340,3 +340,31 @@ fn dlsym_exact(name: &str) -> Option<*const u8> {
 fn dlsym_exact(_name: &str) -> Option<*const u8> {
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[cfg(not(windows))]
+    fn test_resolve_native_fn_allowlist() {
+        let ptr = resolve_native_fn("exit");
+        assert!(ptr.is_some());
+    }
+
+    #[test]
+    fn test_resolve_native_fn_disallowed() {
+        let ptr = resolve_native_fn("system");
+        assert!(ptr.is_none());
+    }
+
+    #[test]
+    fn test_resolve_native_fn_cache() {
+        cache().write().unwrap().insert(
+            "fake_cached_func".to_string(),
+            NativePtr(0x1234_usize as *const u8),
+        );
+        let ptr = resolve_native_fn("fake_cached_func");
+        assert_eq!(ptr, Some(0x1234_usize as *const u8));
+    }
+}
