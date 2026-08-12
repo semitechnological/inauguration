@@ -36,9 +36,8 @@ pub(crate) fn find_field_offset<'a>(
         return Some(offset);
     }
     // Try prefix match for nested structs: "inner" → "inner.val"
-    let prefix = format!("{name}.");
     field_map.iter().find_map(|(k, v)| {
-        if k.starts_with(&prefix) {
+        if k.len() > name.len() && k.starts_with(name) && k.as_bytes()[name.len()] == b'.' {
             Some(v)
         } else {
             None
