@@ -351,4 +351,49 @@ fn main() {
         let result = canonicalize_in_source("!@#$");
         assert!(result.is_err());
     }
+
+    #[test]
+    fn canonicalizes_complex_source_constructs() {
+        let src = r#"
+struct Point {
+  Int x
+  Int y
+}
+
+fn compute() -> Int {
+  let p: Point = Point { x: 1, y: 2 };
+  p.x = 3;
+  let arr: [Int] = [1, 2, 3];
+  arr[0] = 4;
+  while p.x < 10 {
+    p.x = p.x + 1;
+  }
+  match p.y {
+    1 { return 1; }
+    2 { return 2; }
+  }
+  if p.x == 10 {
+    return 10;
+  } else {
+    return 0;
+  }
+  while true {
+    break;
+  }
+  return p.x;
+}
+
+fn main() { return; }
+"#;
+        let canonical = canonicalize_in_source(src).expect("canonicalize");
+        assert!(canonical.contains("struct Point {\n  Int x\n  Int y\n}"));
+        assert!(canonical.contains("let p: Point = Point { x: 1, y: 2 }"));
+        assert!(canonical.contains("p.x = 3"));
+        assert!(canonical.contains("let arr: [Int] = [1, 2, 3]"));
+        assert!(canonical.contains("arr[0] = 4"));
+        assert!(canonical.contains("while p.x < 10 {"));
+        assert!(canonical.contains("match p.y {"));
+        assert!(canonical.contains("if p.x == 10 {"));
+        assert!(canonical.contains("while true {"));
+    }
 }
