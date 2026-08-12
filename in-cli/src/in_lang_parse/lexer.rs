@@ -330,3 +330,21 @@ pub fn filter_top_level_in_decl_lines(source: &str) -> String {
         .collect::<Vec<_>>()
         .join("\n")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_human_in_debug_toggle() {
+        let initial = human_in_debug();
+
+        set_human_in_debug(true);
+        assert!(human_in_debug());
+
+        set_human_in_debug(false);
+        assert!(!human_in_debug());
+
+        set_human_in_debug(initial);
+    }
+}
