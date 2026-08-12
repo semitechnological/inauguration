@@ -70,3 +70,87 @@ pub fn run_unix_preview_client(socket_path: &Path) -> Result<(), PreviewClientEr
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::os::unix::net::UnixListener;
+    use std::thread;
+
+    struct TempDirGuard {
+        path: std::path::PathBuf,
+    }
+
+    impl TempDirGuard {
+        fn new(prefix: &str) -> Self {
+            use std::time::{SystemTime, UNIX_EPOCH};
+            let timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "{}_{}_{}",
+                prefix,
+                std::process::id(),
+                timestamp
+            ));
+            std::fs::create_dir_all(&path).unwrap();
+            Self { path }
+        }
+
+        fn path(&self) -> &std::path::Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn test_run_unix_preview_client_success() {
+        let dir = TempDirGuard::new("preview_client_test");
+        let socket_path = dir.path().join("test.sock");
+
+        let listener = UnixListener::bind(&socket_path).unwrap();
+
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let good_json = r#"{"protocol_version": 1, "patch_id": "p1", "patch": {"target": "t1", "patch_type": "type1", "compatible": true}, "reason": "test"}"#;
+            writeln!(stream, "{}", good_json).unwrap();
+
+            // bad json
+            let bad_json = r#"{"protocol_version": 1, "patch_id": "p2"}"#; // missing fields
+            writeln!(stream, "{}", bad_json).unwrap();
+
+            // unsupported version
+            let bad_version = r#"{"protocol_version": 2, "patch_id": "p3", "patch": {"target": "t3", "patch_type": "type3", "compatible": true}, "reason": "test3"}"#;
+            writeln!(stream, "{}", bad_version).unwrap();
+
+            // empty line (should be ignored)
+            writeln!(stream, "   ").unwrap();
+
+            // done - drop stream to disconnect
+        });
+
+        let result = run_unix_preview_client(&socket_path);
+        assert!(result.is_ok());
+
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn test_run_unix_preview_client_connection_error() {
+        let dir = TempDirGuard::new("preview_client_test_err");
+        let socket_path = dir.path().join("non_existent.sock");
+
+        let result = run_unix_preview_client(&socket_path);
+        assert!(result.is_err());
+        assert!(
+            matches!(result, Err(PreviewClientError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound)
+        );
+    }
+}
