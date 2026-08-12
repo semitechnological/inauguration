@@ -22,6 +22,63 @@ fn main() -> void
 }
 
 #[test]
+fn test_parse_in_surface_info_happy_path() {
+    let src = "
+        package my-pkg
+        module my-mod
+        import foo;
+        use bar
+        bind baz as bz
+        capability network;
+        parallel {
+            task1()
+        }
+    ";
+    let info = parse_in_surface_info(src).expect("should parse successfully");
+    assert_eq!(info.package, Some("my-pkg".to_string()));
+    assert_eq!(info.module, Some("my-mod".to_string()));
+    assert_eq!(info.imports, vec!["foo".to_string()]);
+    assert_eq!(info.semantic_imports, vec!["bar".to_string()]);
+    assert_eq!(
+        info.semantic_bindings,
+        vec![InSemanticBinding {
+            import: "baz".to_string(),
+            alias: "bz".to_string()
+        }]
+    );
+    assert_eq!(info.capabilities, vec!["network".to_string()]);
+    assert_eq!(info.orchestration.parallel_regions, 1);
+    assert_eq!(
+        info.orchestration.parallel_tasks,
+        vec![InParallelTaskFact {
+            region: 0,
+            name: "task1".to_string()
+        }]
+    );
+}
+
+#[test]
+fn test_parse_in_surface_info_duplicate_package() {
+    let src = "package pkg1\npackage pkg2";
+    let err = parse_in_surface_info(src).expect_err("should fail");
+    assert!(err.contains("duplicate package declaration"));
+}
+
+#[test]
+fn test_parse_in_surface_info_duplicate_module() {
+    let src = "module mod1\nmodule mod2";
+    let err = parse_in_surface_info(src).expect_err("should fail");
+    assert!(err.contains("duplicate module declaration"));
+}
+
+#[test]
+fn test_parse_in_surface_info_unknown_syntax() {
+    let src = "unknown_keyword foo";
+    let err = parse_in_surface_info(src).expect_err("should fail");
+    assert!(err.contains("unknown top-level syntax"));
+}
+
+#[test]
 fn void_return_case_insensitive() {
     let m = parse_in_source("fn main() -> VOID\n").expect("ok");
     match &m.decls[0] {
