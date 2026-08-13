@@ -32,7 +32,13 @@ pub fn compile_native(
         .as_deref()
         .filter(|name| !name.is_empty())
         .unwrap_or("main");
-    let native_module = native_entry_module(module, entry);
+    // For a static library every function is a potential export — callers may
+    // resolve them from the object (e.g. assembly capsules calling `.in`
+    // handlers). Do not drop functions that are unreachable from `entry`.
+    let native_module = match request.linkage {
+        NativeLinkage::StaticLib => module.clone(),
+        _ => native_entry_module(module, entry),
+    };
     let eval_exit = match request.linkage {
         NativeLinkage::Executable => {
             Some(native_entry_exit_code(&native_module, module_id, entry)?)
