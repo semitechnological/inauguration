@@ -38,6 +38,9 @@ pub struct ElfObject {
     pub undefs: Vec<String>,
     /// Thumb BL sites needing R_ARM_THM_CALL relocation: (offset, symbol).
     pub thumb_calls: Vec<(u32, String)>,
+    /// Thumb function-address movw/movt pairs needing R_ARM_THM_MOVW_ABS_NC +
+    /// R_ARM_THM_MOVT_ABS: (movw offset, movt offset, symbol).
+    pub thumb_addr_refs: Vec<(u32, u32, String)>,
 }
 
 pub fn x86_64_return_i32_object_code(value: u8) -> Vec<u8> {
@@ -385,6 +388,8 @@ fn write_arm32_section_headers(
 
 pub fn write_arm32_relocatable_object(object: &ElfObject, out: &mut Vec<u8>) {
     const R_ARM_THM_CALL: u32 = 10;
+    const R_ARM_THM_MOVW_ABS_NC: u32 = 47;
+    const R_ARM_THM_MOVT_ABS: u32 = 48;
     let shstrtab = b"\0.text\0.symtab\0.strtab\0.shstrtab\0.rel.text\0";
 
     let (all_exports, all_undefs) = gather_arm32_exports_and_undefs(object);
@@ -410,7 +415,9 @@ pub fn write_arm32_relocatable_object(object: &ElfObject, out: &mut Vec<u8>) {
     let n_undefs = all_undefs.len() as u32;
     let sym_count = 1 + n_exports + n_undefs;
     let symtab_size = sym_count * 16;
-    let rel_size = object.thumb_calls.len() as u32 * 8;
+    // Two relocations per address ref (movw + movt).
+    let n_addr_relocs = object.thumb_addr_refs.len() as u32 * 2;
+    let rel_size = (object.thumb_calls.len() as u32 + n_addr_relocs) * 8;
     let text_offset = EHDR32_SIZE;
     let symtab_offset = text_offset + object.code.len() as u32;
     let rel_offset = symtab_offset + symtab_size;
@@ -437,13 +444,25 @@ pub fn write_arm32_relocatable_object(object: &ElfObject, out: &mut Vec<u8>) {
         write_symbol32(out, idx, 0, 0, 0x10, 0, 0);
     }
 
-    // .rel.text entries: R_ARM_THM_CALL for each extern BL.
+    // .rel.text entries: R_ARM_THM_CALL for each extern BL, then
+    // R_ARM_THM_MOVW_ABS_NC / R_ARM_THM_MOVT_ABS for each function-address load.
     for (offset, name) in &object.thumb_calls {
         let sym = *symbol_index
             .get(name.as_str())
             .expect("thumb call symbol in strtab");
         out.extend_from_slice(&offset.to_le_bytes());
         let info = (sym << 8) | R_ARM_THM_CALL;
+        out.extend_from_slice(&info.to_le_bytes());
+    }
+    for (movw_off, movt_off, name) in &object.thumb_addr_refs {
+        let sym = *symbol_index
+            .get(name.as_str())
+            .expect("thumb addr symbol in strtab");
+        out.extend_from_slice(&movw_off.to_le_bytes());
+        let info = (sym << 8) | R_ARM_THM_MOVW_ABS_NC;
+        out.extend_from_slice(&info.to_le_bytes());
+        out.extend_from_slice(&movt_off.to_le_bytes());
+        let info = (sym << 8) | R_ARM_THM_MOVT_ABS;
         out.extend_from_slice(&info.to_le_bytes());
     }
 
@@ -772,6 +791,7 @@ mod tests {
             exports: vec![],
             undefs: vec![],
             thumb_calls: vec![],
+            thumb_addr_refs: vec![],
         };
         let mut out = Vec::new();
         write_x86_64_relocatable_object(&object, &mut out);
@@ -793,6 +813,7 @@ mod tests {
             exports: vec![],
             undefs: vec![],
             thumb_calls: vec![],
+            thumb_addr_refs: vec![],
         };
         let mut out = Vec::new();
         write_aarch64_relocatable_object(&object, &mut out);
@@ -819,6 +840,7 @@ mod tests {
             exports: vec![],
             undefs: vec![],
             thumb_calls: vec![],
+            thumb_addr_refs: vec![],
         };
         let mut out = Vec::new();
         write_arm32_relocatable_object(&object, &mut out);
@@ -845,6 +867,44 @@ mod tests {
         let answer_sym = &out[sym_off + 16..sym_off + 32];
         let st_value = u32::from_le_bytes(answer_sym[4..8].try_into().unwrap());
         assert_eq!(st_value & 1, 1);
+    }
+
+    #[test]
+    fn writes_arm32_thumb_addr_relocations() {
+        // Function-address movw/movt pair → R_ARM_THM_MOVW_ABS_NC (47) +
+        // R_ARM_THM_MOVT_ABS (48) plus the R_ARM_THM_CALL (10) for the extern.
+        let object = ElfObject {
+            code: vec![0u8; 64],
+            export_name: "entry".to_string(),
+            exports: vec![("entry".to_string(), 0), ("helper".to_string(), 32)],
+            undefs: vec!["rtos_pendsv".to_string()],
+            thumb_calls: vec![(12, "rtos_pendsv".to_string())],
+            thumb_addr_refs: vec![(20, 24, "helper".to_string())],
+        };
+        let mut out = Vec::new();
+        write_arm32_relocatable_object(&object, &mut out);
+
+        // 3 relocs = 24 bytes starting at the rel section.
+        let text_off = EHDR32_SIZE as usize;
+        let symtab_size = (1 + 2 + 1) * 16;
+        let rel_off = text_off + 64 + symtab_size;
+        let rels = &out[rel_off..rel_off + 24];
+        // offsets + info(sym<<8|type)
+        assert_eq!(&rels[0..4], &12u32.to_le_bytes());
+        assert_eq!(
+            u32::from_le_bytes(rels[4..8].try_into().unwrap()) & 0xFF,
+            10
+        );
+        assert_eq!(&rels[8..12], &20u32.to_le_bytes());
+        assert_eq!(
+            u32::from_le_bytes(rels[12..16].try_into().unwrap()) & 0xFF,
+            47
+        );
+        assert_eq!(&rels[16..20], &24u32.to_le_bytes());
+        assert_eq!(
+            u32::from_le_bytes(rels[20..24].try_into().unwrap()) & 0xFF,
+            48
+        );
     }
 
     #[test]

@@ -38,14 +38,30 @@ pub(crate) struct LowerCtx<'a> {
     pub(crate) call_arg_temps: Vec<u32>,
     pub(crate) call_arg_depth: usize,
     pub(crate) call_arg_chunk: usize,
+    /// Two dedicated scratch slots for binary-op operand evaluation (stable SP
+    /// offsets, so nested operands can access locals correctly).
+    pub(crate) scratch0: u32,
+    pub(crate) scratch1: u32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum RelocKind {
+    /// R_ARM_THM_CALL on a BL at `site`.
+    Call,
+    /// R_ARM_THM_MOVW_ABS_NC + R_ARM_THM_MOVT_ABS on the movw/movt pair that
+    /// loads a function's address. `site` = movw offset; `site2` = movt offset.
+    MovwAbs,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct PendingCall {
     /// offset of the first halfword of the 32-bit BL encoding
     pub(crate) site: u32,
+    /// second relocation site (movt for MovwAbs), 0 otherwise
+    pub(crate) site2: u32,
     pub(crate) target: String,
     pub(crate) is_extern: bool,
+    pub(crate) kind: RelocKind,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -67,6 +83,8 @@ impl<'a> LowerCtx<'a> {
             call_arg_temps: Vec::new(),
             call_arg_depth: 0,
             call_arg_chunk: 4,
+            scratch0: 0,
+            scratch1: 0,
         };
         for (name, typ) in params {
             match typ.canonical() {

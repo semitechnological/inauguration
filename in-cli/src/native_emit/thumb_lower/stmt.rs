@@ -41,9 +41,10 @@ pub(crate) fn lower_function(
     alloc_declared_locals(&mut ctx, &func.body)?;
 
     // Scratch slots for binary ops (two 4-byte temps)
-    let _scratch0 = ctx.alloc_slot();
-    let _scratch1 = ctx.alloc_slot();
-    let _ = (_scratch0, _scratch1);
+    let scratch0 = ctx.alloc_slot();
+    let scratch1 = ctx.alloc_slot();
+    ctx.scratch0 = scratch0;
+    ctx.scratch1 = scratch1;
 
     // Call-argument temp pool: chunk = max arity, depth = 8 nested calls.
     let max_arity = max_call_arity(&func.body);
@@ -256,7 +257,7 @@ pub(crate) fn lower_stmt(
                 ));
             };
             let site = emitter.len();
-            emitter.emit_u16(thumb::b_rel8(0));
+            emitter.emit_u32_thumb(thumb::b_wide(0));
             sites.push(site);
             Ok(())
         }
@@ -321,7 +322,7 @@ fn lower_if(
     lower_expr_into(emitter, ctx, cond, R0, pending)?;
     emitter.emit_u16(thumb::cmp_imm8(R0, 0));
     let beq_site = emitter.len();
-    emitter.emit_u16(thumb::b_cond_rel8(COND_EQ, 0)); // patch later
+    emitter.emit_u32_thumb(thumb::b_cond_wide(COND_EQ, 0)); // patch later
 
     for stmt in then_body {
         if ctx.emitted_return {
@@ -335,7 +336,7 @@ fn lower_if(
     let mut b_end_site = None;
     if !else_body.is_empty() && !then_returned {
         b_end_site = Some(emitter.len());
-        emitter.emit_u16(thumb::b_rel8(0));
+        emitter.emit_u32_thumb(thumb::b_wide(0));
     }
 
     let else_start = emitter.len();
@@ -374,7 +375,7 @@ fn lower_while(
     lower_expr_into(emitter, ctx, cond, R0, pending)?;
     emitter.emit_u16(thumb::cmp_imm8(R0, 0));
     let beq_site = emitter.len();
-    emitter.emit_u16(thumb::b_cond_rel8(COND_EQ, 0));
+    emitter.emit_u32_thumb(thumb::b_cond_wide(COND_EQ, 0));
 
     ctx.break_sites.push(Vec::new());
     for stmt in body {
@@ -383,7 +384,7 @@ fn lower_while(
     }
 
     let b_back = emitter.len();
-    emitter.emit_u16(thumb::b_rel8(0));
+    emitter.emit_u32_thumb(thumb::b_wide(0));
     patch_b(emitter, b_back, loop_head)?;
 
     let end = emitter.len();

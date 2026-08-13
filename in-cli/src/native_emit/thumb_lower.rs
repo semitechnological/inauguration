@@ -18,6 +18,7 @@ pub(crate) mod stmt;
 
 use crate::core_ir::{Decl, Typ, UnifiedModule};
 use crate::native_emit::thumb::{self, CodeEmitter};
+use crate::native_emit::thumb_lower::ctx::RelocKind;
 use std::collections::HashMap;
 
 pub const THUMB_TRIPLE: &str = "thumbv8m.main-none-eabi";
@@ -30,6 +31,8 @@ pub struct ThumbCompileResult {
     pub externs: Vec<String>,
     /// Call sites that need linker relocation: (BL offset, symbol name).
     pub relocations: Vec<(u32, String)>,
+    /// Function-address movw/movt pairs: (movw offset, movt offset, symbol).
+    pub addr_relocs: Vec<(u32, u32, String)>,
 }
 
 pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<ThumbCompileResult, String> {
@@ -66,10 +69,24 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<ThumbCompileR
         // ensure 2-byte alignment (always true for Thumb)
     }
 
-    // Patch internal BL sites; collect extern calls for relocation.
+    // Patch internal BL sites; collect extern calls and address refs for
+    // linker relocation.
     let mut externs = Vec::new();
     let mut relocations = Vec::new();
+    let mut addr_relocs = Vec::new();
     for call in &all_pending {
+        match call.kind {
+            RelocKind::MovwAbs => {
+                // Function address loaded via movw/movt; linker patches both
+                // halves. The symbol is added to externs if it's an extern fn.
+                if call.is_extern && !externs.contains(&call.target) {
+                    externs.push(call.target.clone());
+                }
+                addr_relocs.push((call.site, call.site2, call.target.clone()));
+                continue;
+            }
+            RelocKind::Call => {}
+        }
         if call.is_extern {
             if !externs.contains(&call.target) {
                 externs.push(call.target.clone());
@@ -102,6 +119,7 @@ pub fn lower_module(module: &UnifiedModule, entry: &str) -> Result<ThumbCompileR
         exports,
         externs,
         relocations,
+        addr_relocs,
     })
 }
 
@@ -215,6 +233,60 @@ fn main() -> void { return }
     }
 
     #[test]
+    fn lower_function_address_and_invoke() {
+        let module = parse(
+            r#"
+fn helper() -> Int { return 7 }
+fn entry() -> Int {
+  let addr = helper
+  let r = invoke1(addr, 0)
+  return r
+}
+fn main() -> void { return }
+"#,
+        );
+        let result = lower_module(&module, "entry").expect("lower fn addr + invoke");
+        // movw/movt pair for the function address.
+        let pair = result
+            .addr_relocs
+            .iter()
+            .find(|(_, _, n)| n == "helper")
+            .expect("helper addr reloc");
+        assert!(pair.0 < pair.1);
+        // invoke1 → blx register (high byte 0x47) somewhere in the code.
+        assert!(
+            result
+                .code
+                .windows(2)
+                .any(|w| w[1] == 0x47 && (w[0] & 0x80) != 0)
+        );
+        // Return value flows through r0.
+        assert!(!result.code.is_empty());
+    }
+
+    #[test]
+    fn lower_extern_fn_address() {
+        let module = parse(
+            r#"
+extern asm fn rtos_pendsv() -> void
+fn entry() -> Int {
+  let addr = rtos_pendsv
+  return addr
+}
+fn main() -> void { return }
+"#,
+        );
+        let result = lower_module(&module, "entry").expect("lower extern fn addr");
+        assert!(result.externs.contains(&"rtos_pendsv".to_string()));
+        assert!(
+            result
+                .addr_relocs
+                .iter()
+                .any(|(_, _, n)| n == "rtos_pendsv")
+        );
+    }
+
+    #[test]
     fn lower_if_else() {
         let module = parse(
             r#"
@@ -250,11 +322,12 @@ fn main() -> void { return }
         );
         let result = lower_module(&module, "sum_to").expect("lower");
         assert!(!result.code.is_empty());
-        // Back-edge unconditional B must use signed imm11 (high bits set for backward).
-        // Encoded form 0xExxx with imm11 > 0x400 when jumping backward.
+        // Back-edge unconditional B must be a backward branch: either the
+        // 16-bit form (0xExxx, imm11 > 0x400 for backward) or the 32-bit B.W
+        // (low halfword 0x9xxx in memory).
         let has_backward_b = result.code.windows(2).any(|w| {
             let insn = u16::from_le_bytes([w[0], w[1]]);
-            (insn & 0xF800) == 0xE000 && (insn & 0x400) != 0
+            ((insn & 0xF800) == 0xE000 && (insn & 0x400) != 0) || ((w[1] & 0xF0) == 0x90)
         });
         assert!(has_backward_b, "while back-edge missing signed imm11 b");
     }

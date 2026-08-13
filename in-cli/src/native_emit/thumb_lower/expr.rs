@@ -5,7 +5,7 @@ use crate::native_emit::thumb::{
 };
 use std::collections::HashMap;
 
-use super::ctx::{LocalSlot, LowerCtx, PendingCall};
+use super::ctx::{LocalSlot, LowerCtx, PendingCall, RelocKind};
 
 pub(crate) fn lower_expr_into(
     emitter: &mut CodeEmitter,
@@ -16,8 +16,11 @@ pub(crate) fn lower_expr_into(
 ) -> Result<(), String> {
     match expr {
         Expr::IntLit(v) => {
-            if *v < i32::MIN as i64 || *v > i32::MAX as i64 {
-                return Err(format!("thumb-lower: int lit {v} out of i32 range"));
+            // Accept any value that fits a 32-bit word: Cortex-M MMIO/system
+            // register addresses live above i32::MAX (0xE0000000+), so values
+            // in the u32 range are reinterpreted as their bit pattern.
+            if *v < i32::MIN as i64 || *v > u32::MAX as i64 {
+                return Err(format!("thumb-lower: int lit {v} out of 32-bit range"));
             }
             thumb::load_i32(emitter, dest, *v as i32);
             Ok(())
@@ -46,9 +49,26 @@ pub(crate) fn lower_expr_into(
                 )),
                 None => {
                     if ctx.functions.contains_key(name) {
-                        Err(format!(
-                            "thumb-lower: bare function ref `{name}` not supported; call it"
-                        ))
+                        // Bare function reference → load the function's address.
+                        // movw/movt with zero immediates; the linker patches
+                        // both halves (R_ARM_THM_MOVW_ABS_NC / MOVT_ABS).
+                        let is_extern = ctx
+                            .functions
+                            .get(name)
+                            .map(|f| f.body.is_empty())
+                            .unwrap_or(false);
+                        let movw_site = emitter.len();
+                        emitter.emit_u32_thumb(thumb::movw(dest, 0));
+                        let movt_site = emitter.len();
+                        emitter.emit_u32_thumb(thumb::movt(dest, 0));
+                        pending.push(PendingCall {
+                            site: movw_site,
+                            site2: movt_site,
+                            target: name.to_string(),
+                            is_extern,
+                            kind: RelocKind::MovwAbs,
+                        });
+                        Ok(())
                     } else {
                         Err(format!(
                             "thumb-lower: unknown ident `{name}` in `{}`",
@@ -73,7 +93,7 @@ pub(crate) fn lower_expr_into(
                     emitter.emit_u16(thumb::cmp_imm8(R0, 0));
                     emitter.emit_u16(thumb::movs_imm8(R0, 0));
                     let bne = emitter.len();
-                    emitter.emit_u16(thumb::b_cond_rel8(COND_NE, 0));
+                    emitter.emit_u32_thumb(thumb::b_cond_wide(COND_NE, 0));
                     emitter.emit_u16(thumb::movs_imm8(R0, 1));
                     let end = emitter.len();
                     patch_b_cond(emitter, bne, end)?;
@@ -93,6 +113,9 @@ pub(crate) fn lower_expr_into(
                     ctx.fn_name
                 ));
             };
+            if matches!(name.as_str(), "invoke" | "invoke1" | "invoke2") {
+                return lower_invoke(emitter, ctx, args, dest, pending);
+            }
             if try_lower_mmio(emitter, ctx, name, args, dest, pending)? {
                 return Ok(());
             }
@@ -153,8 +176,10 @@ pub(crate) fn lower_call_args(
     emitter.emit_u32_thumb(enc);
     pending.push(PendingCall {
         site,
+        site2: 0,
         target: name.to_string(),
         is_extern,
+        kind: RelocKind::Call,
     });
 
     // 5. Caller cleans up stack arguments.
@@ -165,6 +190,55 @@ pub(crate) fn lower_call_args(
 
     ctx.release_call_arg_temps();
 
+    if dest != REG_RET {
+        emitter.emit_u16(thumb::mov_low(dest, REG_RET));
+    }
+    Ok(())
+}
+
+/// Indirect call via `invoke`/`invoke1`/`invoke2`. arg0 is the target address;
+/// remaining args are the callee's arguments (AAPCS r0-r3).
+///
+///   invoke(addr)          → r0 = addr; blx r0
+///   invoke1(addr, a1)     → r0 = a1; r3 = addr; blx r3
+///   invoke2(addr, a1, a2) → r0 = a1; r1 = a2; r2 = addr; blx r2
+fn lower_invoke(
+    emitter: &mut CodeEmitter,
+    ctx: &mut LowerCtx<'_>,
+    args: &[Expr],
+    dest: u8,
+    pending: &mut Vec<PendingCall>,
+) -> Result<(), String> {
+    let n = args.len();
+    if n < 1 || n > 3 {
+        return Err(format!(
+            "thumb-lower: `invoke` supports 1..=3 arguments in `{}`",
+            ctx.fn_name
+        ));
+    }
+    let base = ctx.acquire_call_arg_temps(n)?;
+    for i in 0..n {
+        lower_expr_into(emitter, ctx, &args[i], R0, pending)?;
+        emitter.emit_u16(thumb::str_sp(R0, ctx.call_arg_temps[base + i])?);
+    }
+    match n {
+        1 => {
+            emitter.emit_u16(thumb::ldr_sp(R0, ctx.call_arg_temps[base + 0])?);
+            emitter.emit_u16(thumb::blx_reg(R0));
+        }
+        2 => {
+            emitter.emit_u16(thumb::ldr_sp(R0, ctx.call_arg_temps[base + 1])?);
+            emitter.emit_u16(thumb::ldr_sp(R3, ctx.call_arg_temps[base + 0])?);
+            emitter.emit_u16(thumb::blx_reg(R3));
+        }
+        _ => {
+            emitter.emit_u16(thumb::ldr_sp(R0, ctx.call_arg_temps[base + 1])?);
+            emitter.emit_u16(thumb::ldr_sp(R1, ctx.call_arg_temps[base + 2])?);
+            emitter.emit_u16(thumb::ldr_sp(R2, ctx.call_arg_temps[base + 0])?);
+            emitter.emit_u16(thumb::blx_reg(R2));
+        }
+    }
+    ctx.release_call_arg_temps();
     if dest != REG_RET {
         emitter.emit_u16(thumb::mov_low(dest, REG_RET));
     }
@@ -298,11 +372,11 @@ pub(crate) fn emit_array_index_address(
 
     // Bounds: index < 0 or index >= len
     let neg = emitter.len();
-    emitter.emit_u16(thumb::b_cond_rel8(COND_LT, 0));
+    emitter.emit_u32_thumb(thumb::b_cond_wide(COND_LT, 0));
     thumb::load_i32(emitter, R3, len as i32);
     emitter.emit_u16(thumb::cmp_reg(R2, R3));
     let oob = emitter.len();
-    emitter.emit_u16(thumb::b_cond_rel8(COND_GE, 0));
+    emitter.emit_u32_thumb(thumb::b_cond_wide(COND_GE, 0));
 
     // Address = sp + base + index * elem_size
     emitter.emit_u16(thumb::mov_sp(R1));
@@ -350,7 +424,7 @@ pub(crate) fn lower_index_load(
     emitter.emit_u16(thumb::ldr_imm(R0, R1, 0)?);
 
     let b_end = emitter.len();
-    emitter.emit_u16(thumb::b_rel8(0));
+    emitter.emit_u32_thumb(thumb::b_wide(0));
     let fail = emitter.len();
     thumb::load_i32(emitter, R0, 0);
     let end = emitter.len();
@@ -532,11 +606,15 @@ pub(crate) fn lower_binary(
         return lower_short_circuit(emitter, ctx, op, lhs, rhs, dest, pending);
     }
 
-    // lhs → r1, rhs → r2, result r0
-    lower_expr_into(emitter, ctx, lhs, R1, pending)?;
-    emitter.emit_u16(thumb::push(1 << 1, false)); // push r1
-    lower_expr_into(emitter, ctx, rhs, R2, pending)?;
-    emitter.emit_u16(thumb::pop(1 << 1, false)); // pop r1
+    // Evaluate both operands into dedicated scratch slots (stable SP offsets)
+    // instead of push/pop: pushing shifts SP, which misaligns the SP-relative
+    // access to locals in the nested operand expressions.
+    lower_expr_into(emitter, ctx, lhs, R0, pending)?;
+    emitter.emit_u16(thumb::str_sp(R0, ctx.scratch0)?);
+    lower_expr_into(emitter, ctx, rhs, R0, pending)?;
+    emitter.emit_u16(thumb::str_sp(R0, ctx.scratch1)?);
+    emitter.emit_u16(thumb::ldr_sp(R1, ctx.scratch0)?);
+    emitter.emit_u16(thumb::ldr_sp(R2, ctx.scratch1)?);
 
     match op {
         "+" => {
@@ -561,6 +639,24 @@ pub(crate) fn lower_binary(
             emitter.emit_u16(thumb::mov_low(R0, R1));
             emitter.emit_u16(thumb::eors(R0, R2));
         }
+        "<<" => {
+            emitter.emit_u16(thumb::mov_low(R0, R1));
+            emitter.emit_u32_thumb(thumb::lsls_reg(R0, R1, R2));
+        }
+        ">>" => {
+            emitter.emit_u16(thumb::mov_low(R0, R1));
+            emitter.emit_u32_thumb(thumb::asrs_reg(R0, R1, R2));
+        }
+        "/" => {
+            emitter.emit_u32_thumb(thumb::sdiv(R0, R1, R2));
+        }
+        "%" => {
+            // a % b = a - (a / b) * b
+            emitter.emit_u32_thumb(thumb::sdiv(R0, R1, R2));
+            emitter.emit_u16(thumb::mov_low(R0, R0));
+            emitter.emit_u16(thumb::muls(R0, R2));
+            emitter.emit_u16(thumb::subs_reg(R0, R1, R0));
+        }
         "==" | "!=" | "<" | "<=" | ">" | ">=" => {
             emitter.emit_u16(thumb::cmp_reg(R1, R2));
             let cond = match op {
@@ -575,10 +671,10 @@ pub(crate) fn lower_binary(
             // cmp flags must not be clobbered before the conditional branch.
             // b<cond> true; movs r0,#0; b end; true: movs r0,#1; end:
             let b_true = emitter.len();
-            emitter.emit_u16(thumb::b_cond_rel8(cond, 0));
+            emitter.emit_u32_thumb(thumb::b_cond_wide(cond, 0));
             emitter.emit_u16(thumb::movs_imm8(R0, 0));
             let b_end = emitter.len();
-            emitter.emit_u16(thumb::b_rel8(0));
+            emitter.emit_u32_thumb(thumb::b_wide(0));
             let true_site = emitter.len();
             patch_b_cond(emitter, b_true, true_site)?;
             emitter.emit_u16(thumb::movs_imm8(R0, 1));
@@ -612,12 +708,12 @@ pub(crate) fn lower_short_circuit(
     emitter.emit_u16(thumb::cmp_imm8(R1, 0));
     let deciding_cond = if op == "&&" { COND_EQ } else { COND_NE };
     let branch = emitter.len();
-    emitter.emit_u16(thumb::b_cond_rel8(deciding_cond, 0));
+    emitter.emit_u32_thumb(thumb::b_cond_wide(deciding_cond, 0));
 
     lower_expr_into(emitter, ctx, rhs, R1, pending)?;
     emitter.emit_u16(thumb::cmp_imm8(R1, 0));
     let branch2 = emitter.len();
-    emitter.emit_u16(thumb::b_cond_rel8(deciding_cond, 0));
+    emitter.emit_u32_thumb(thumb::b_cond_wide(deciding_cond, 0));
 
     // both operands evaluated: && is true, || is false
     let both_val = if op == "&&" { 1 } else { 0 };
@@ -626,7 +722,7 @@ pub(crate) fn lower_short_circuit(
 
     thumb::load_i32(emitter, R0, both_val);
     let b_end = emitter.len();
-    emitter.emit_u16(thumb::b_rel8(0));
+    emitter.emit_u32_thumb(thumb::b_wide(0));
 
     let decided = emitter.len();
     patch_b_cond(emitter, branch, decided)?;
@@ -643,10 +739,12 @@ pub(crate) fn lower_short_circuit(
 }
 
 pub(crate) fn patch_b(emitter: &mut CodeEmitter, site: u32, target: u32) -> Result<(), String> {
-    // Thumb branch target is relative to PC of this insn + 4 (next + 2).
     let next = site as i32 + 4;
     let rel = (target as i32 - next) / 2;
-    emitter.patch_u16(site, thumb::b_rel11(rel)?);
+    if !(-(1 << 20)..(1 << 20)).contains(&rel) {
+        return Err(format!("thumb-lower: b range {rel}"));
+    }
+    emitter.patch_u32(site, thumb::b_wide(rel as i32));
     Ok(())
 }
 
@@ -655,17 +753,19 @@ pub(crate) fn patch_b_cond(
     site: u32,
     target: u32,
 ) -> Result<(), String> {
+    // Wide branch (32-bit): next is the end of the instruction.
     let next = site as i32 + 4;
     let rel = (target as i32 - next) / 2;
-    if !(-128..=127).contains(&rel) {
+    if !(-(1 << 20)..(1 << 20)).contains(&rel) {
         return Err(format!("thumb-lower: bcond range {rel}"));
     }
-    // preserve cond field from existing insn
+    // The cond field lives in bits 25-22 of the 32-bit instruction = bits 9-6
+    // of the high halfword (which is stored first in memory).
     let old = u16::from_le_bytes([
         emitter.bytes[site as usize],
         emitter.bytes[site as usize + 1],
     ]);
-    let cond = ((old >> 8) & 0xF) as u8;
-    emitter.patch_u16(site, thumb::b_cond_rel8(cond, rel as i8));
+    let cond = ((old >> 6) & 0xF) as u8;
+    emitter.patch_u32(site, thumb::b_cond_wide(cond, rel as i32));
     Ok(())
 }

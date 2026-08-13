@@ -69,7 +69,13 @@ pub fn emit_native_object(request: &NativeObjectRequest<'_>) -> Option<NativeObj
             Some(emit_aarch64_freestanding_object(request))
         }
         (THUMBV8M_MAIN_NONE_EABI_TRIPLE, NativeLinkage::StaticLib) => {
-            emit_thumbv8m_freestanding_object(request).ok()
+            match emit_thumbv8m_freestanding_object(request) {
+                Ok(artifact) => Some(artifact),
+                Err(err) => {
+                    eprintln!("thumb-lower error: {err}");
+                    None
+                }
+            }
         }
         _ => None,
     }
@@ -89,6 +95,7 @@ fn emit_thumbv8m_freestanding_object(
             .collect(),
         undefs: result.externs,
         thumb_calls: result.relocations,
+        thumb_addr_refs: result.addr_relocs,
     };
     let mut bytes = Vec::new();
     write_arm32_relocatable_object(&object, &mut bytes);
@@ -124,6 +131,7 @@ fn emit_x86_64_elf_object(request: &NativeObjectRequest<'_>) -> NativeObjectArti
         exports: vec![],
         undefs: vec![],
         thumb_calls: vec![],
+        thumb_addr_refs: vec![],
     };
     let mut bytes = Vec::new();
     write_x86_64_relocatable_object(&object, &mut bytes);
@@ -145,6 +153,7 @@ fn emit_aarch64_elf_object(request: &NativeObjectRequest<'_>) -> NativeObjectArt
         exports: vec![],
         undefs: vec![],
         thumb_calls: vec![],
+        thumb_addr_refs: vec![],
     };
     let mut bytes = Vec::new();
     write_aarch64_relocatable_object(&object, &mut bytes);
@@ -184,6 +193,7 @@ fn emit_arm32_elf_object(request: &NativeObjectRequest<'_>) -> NativeObjectArtif
         exports: vec![],
         undefs: vec![],
         thumb_calls: vec![],
+        thumb_addr_refs: vec![],
     };
     let mut bytes = Vec::new();
     write_arm32_relocatable_object(&object, &mut bytes);
@@ -272,6 +282,7 @@ fn emit_aarch64_freestanding_object(request: &NativeObjectRequest<'_>) -> Native
                 exports: vec![],
                 undefs: vec![],
                 thumb_calls: vec![],
+                thumb_addr_refs: vec![],
             };
             write_aarch64_relocatable_object(&object, &mut bytes);
             NativeObjectArtifact {
@@ -292,6 +303,7 @@ fn emit_aarch64_freestanding_object(request: &NativeObjectRequest<'_>) -> Native
                 exports: vec![],
                 undefs: vec![],
                 thumb_calls: vec![],
+                thumb_addr_refs: vec![],
             };
             let mut bytes = Vec::new();
             write_aarch64_relocatable_object(&object, &mut bytes);
@@ -338,6 +350,7 @@ fn emit_x86_64_freestanding_object(request: &NativeObjectRequest<'_>) -> NativeO
                 exports: result.exports.clone(),
                 undefs: result.externs.clone(),
                 thumb_calls: vec![],
+                thumb_addr_refs: vec![],
             };
             if is_i386 {
                 write_i386_relocatable_object(&object, &mut bytes);
@@ -370,6 +383,7 @@ fn emit_x86_64_freestanding_object(request: &NativeObjectRequest<'_>) -> NativeO
                 exports: vec![],
                 undefs: vec![],
                 thumb_calls: vec![],
+                thumb_addr_refs: vec![],
             };
             let mut bytes = Vec::new();
             if is_i386 {

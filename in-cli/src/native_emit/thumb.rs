@@ -62,6 +62,14 @@ impl CodeEmitter {
         self.bytes[i + 1] = b[1];
     }
 
+    pub fn patch_u32(&mut self, offset: u32, value: u32) {
+        // Match emit_u32_thumb: T32 stores the high halfword first in memory.
+        let hi = (value >> 16) as u16;
+        let lo = value as u16;
+        self.patch_u16(offset, hi);
+        self.patch_u16(offset + 2, lo);
+    }
+
     pub fn patch_i8_at(&mut self, offset: u32, value: i8) {
         self.bytes[offset as usize] = value as u8;
     }
@@ -121,6 +129,79 @@ pub fn movt(rd: u8, imm16: u16) -> u32 {
     let hi = 0xF2C0 | (i << 10) | imm4;
     let lo = (imm3 << 12) | ((rd as u32) << 8) | imm8;
     (hi << 16) | lo
+}
+
+/// `blx rn` — indirect branch/call to the address in `rn` (r0-r7).
+pub fn blx_reg(rn: u8) -> u16 {
+    (0x4780u16) | ((rn as u16) << 3)
+}
+
+/// `lsls rd, rn, rm` (T2, 32-bit) — logical shift left by register.
+/// Encoding: high = 1111 1010 0001 Rn, low = 1111 Rd Rm.
+pub fn lsls_reg(rd: u8, rn: u8, rm: u8) -> u32 {
+    let high = 0xFA10u32 | (rn as u32);
+    let low = 0xF000u32 | ((rd as u32) << 8) | (rm as u32);
+    (high << 16) | low
+}
+
+/// `lsrs rd, rn, rm` (T2, 32-bit) — logical shift right by register.
+pub fn lsrs_reg(rd: u8, rn: u8, rm: u8) -> u32 {
+    let high = 0xFA30u32 | (rn as u32);
+    let low = 0xF000u32 | ((rd as u32) << 8) | (rm as u32);
+    (high << 16) | low
+}
+
+/// `asrs rd, rn, rm` (T2, 32-bit) — arithmetic shift right by register.
+pub fn asrs_reg(rd: u8, rn: u8, rm: u8) -> u32 {
+    let high = 0xFA50u32 | (rn as u32);
+    let low = 0xF000u32 | ((rd as u32) << 8) | (rm as u32);
+    (high << 16) | low
+}
+
+/// `sdiv rd, rn, rm` (T1, 32-bit) — signed divide (rd = rn / rm).
+/// Matches clang's encoding for `sdiv r0, r1, r2` = fb91 f0f2.
+pub fn sdiv(rd: u8, rn: u8, rm: u8) -> u32 {
+    let high = 0xFB90u32 | (rn as u32);
+    let low = 0xF0F0u32 | ((rd as u32) << 8) | (rm as u32);
+    (high << 16) | low
+}
+
+/// `udiv rd, rn, rm` (T1, 32-bit) — unsigned divide (rd = rn / rm).
+pub fn udiv(rd: u8, rn: u8, rm: u8) -> u32 {
+    let high = 0xFBB0u32 | (rn as u32);
+    let low = 0xF0F0u32 | ((rd as u32) << 8) | (rm as u32);
+    (high << 16) | low
+}
+
+/// 32-bit conditional branch `b<cond>.w label` (T3), offset in halfwords.
+/// imm32 = SignExtend(S:J2:J1:imm6:imm11:'0', 25); field bits are direct.
+pub fn b_cond_wide(cond: u8, imm_half: i32) -> u32 {
+    let bits = (((imm_half as i64) * 2) & 0x1FFFFFF) as u32;
+    let s = (bits >> 24) & 1;
+    let j2 = (bits >> 23) & 1;
+    let j1 = (bits >> 22) & 1;
+    let imm6 = (bits >> 12) & 0x3F;
+    let imm11 = (bits >> 1) & 0x7FF;
+    let high = 0xF000 | (s << 10) | ((cond as u32) << 6) | imm6;
+    let low = 0x8000 | (j1 << 13) | (j2 << 11) | imm11;
+    (high << 16) | low
+}
+
+/// 32-bit unconditional branch `b.w label` (T4), offset in halfwords.
+/// imm32 = SignExtend(S:I1:I2:imm10:imm11:'0', 25); I1=NOT(J1 EOR S),
+/// I2=NOT(J2 EOR S).
+pub fn b_wide(imm_half: i32) -> u32 {
+    let bits = (((imm_half as i64) * 2) & 0x1FFFFFF) as u32;
+    let s = (bits >> 24) & 1;
+    let i2 = (bits >> 23) & 1;
+    let i1 = (bits >> 22) & 1;
+    let imm10 = (bits >> 12) & 0x3FF;
+    let imm11 = (bits >> 1) & 0x7FF;
+    let j1 = (!(i1 ^ s)) & 1;
+    let j2 = (!(i2 ^ s)) & 1;
+    let high = 0xF000 | (s << 10) | imm10;
+    let low = 0x9000 | (j1 << 13) | (j2 << 11) | imm11;
+    (high << 16) | low
 }
 
 /// Load signed 32-bit immediate into `rd` (r0-r12) via movw/movt or movs.
