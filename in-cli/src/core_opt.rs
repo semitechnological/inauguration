@@ -34,6 +34,19 @@ fn walk_expr<F: FnMut(&Expr)>(e: &Expr, f: &mut F) {
     crate::core_ir::for_each_expr_child(e, &mut |child| walk_expr(child, f));
 }
 
+/// Whether an expression (or any subexpression) contains a function call.
+/// Calls may have observable side effects (I/O, MMIO, allocation), so an
+/// unused binding whose initializer calls must not be dead-code-eliminated.
+fn expr_has_call(e: &Expr) -> bool {
+    let mut has = false;
+    walk_expr(e, &mut |n| {
+        if matches!(n, Expr::Call { .. }) {
+            has = true;
+        }
+    });
+    has
+}
+
 fn map_expr_mut<F: FnMut(&mut Expr)>(e: &mut Expr, f: &mut F) {
     match e {
         Expr::Call { callee, args, .. } => {
@@ -972,13 +985,15 @@ fn dce_body(stmts: &mut Vec<Stmt>) {
     }
     *stmts = cleaned;
 
-    // Remove unused let bindings
+    // Remove unused let bindings — but never drop one whose initializer may
+    // have observable side effects (a function call: I/O, MMIO, allocation).
+    // Dropping `let x = side_effectful();` would silently skip the call.
     let used: HashSet<String> = {
         let mut s = HashSet::new();
         collect_used(stmts, &mut s);
         s
     };
-    stmts.retain(|s| !matches!(s, Stmt::Let(n, _, _) if !used.contains(n)));
+    stmts.retain(|s| !matches!(s, Stmt::Let(n, _, e) if !used.contains(n) && !expr_has_call(e)));
 
     // Recurse
     for s in stmts.iter_mut() {
@@ -1904,6 +1919,22 @@ mod tests {
         ];
         dce_body(&mut body);
         assert_eq!(body.len(), 2);
+    }
+
+    #[test]
+    fn dce_keeps_side_effecting_call_let() {
+        // An unused `let` whose RHS is a call must NOT be removed: the call has
+        // observable side effects (serial I/O, MMIO, allocation).
+        let mut body = vec![
+            Stmt::Let(
+                "unused".into(),
+                Some(Typ::Int),
+                call("serial-put", vec![ident("port"), Expr::IntLit(90)]),
+            ),
+            Stmt::Return(None),
+        ];
+        dce_body(&mut body);
+        assert_eq!(body.len(), 2, "side-effecting call let must be preserved");
     }
 
     #[test]
