@@ -718,9 +718,14 @@ pub(crate) fn lower_struct_expr_into_regs(
             // Relaxed type check: skip mismatch errors for generic/alias types
             let schema = native_struct_fields(ctx.structs, typ, fn_name)?;
             let mut reg = 0u8;
+
+            // Build a lookup map for O(1) field access
+            let values_map: HashMap<&String, &Expr> =
+                values.iter().map(|(name, expr)| (name, expr)).collect();
+
             for (field, field_typ) in &schema {
-                let (_, value) = if let Some(pair) = values.iter().find(|(name, _)| name == field) {
-                    pair
+                let value = if let Some(val) = values_map.get(field) {
+                    *val
                 } else {
                     // Missing field: emit 0 and advance reg (one field per register)
                     emitter.emit_insns(&crate::native_emit::aarch64::load_i64(reg, 0));
