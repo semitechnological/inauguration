@@ -3,16 +3,17 @@ use crate::core_ir::{Decl, Expr, Stmt, UnifiedModule};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// Cached cargo metadata (avoids re-running `cargo metadata` every compile).
-static METADATA_CACHE: std::sync::LazyLock<Mutex<HashMap<PathBuf, (Instant, serde_json::Value)>>> =
-    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+static METADATA_CACHE: std::sync::LazyLock<
+    Mutex<HashMap<PathBuf, (Instant, Arc<serde_json::Value>)>>,
+> = std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
 const METADATA_CACHE_TTL: Duration = Duration::from_secs(300); // 5 min
 
-fn get_cargo_metadata(project_dir: &Path) -> Option<serde_json::Value> {
+fn get_cargo_metadata(project_dir: &Path) -> Option<Arc<serde_json::Value>> {
     let key = project_dir.to_path_buf();
 
     if let Ok(cache) = METADATA_CACHE.lock() {
@@ -35,7 +36,7 @@ fn get_cargo_metadata(project_dir: &Path) -> Option<serde_json::Value> {
         return None;
     }
 
-    let metadata: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    let metadata: Arc<serde_json::Value> = Arc::new(serde_json::from_slice(&output.stdout).ok()?);
 
     if let Ok(mut cache) = METADATA_CACHE.lock() {
         cache.insert(key, (Instant::now(), metadata.clone()));
