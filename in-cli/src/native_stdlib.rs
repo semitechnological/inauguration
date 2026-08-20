@@ -258,7 +258,7 @@ pub unsafe extern "C" fn in_process_run(command_ptr: *const u8) -> *const u8 {
         if args.is_empty() {
             return instring_empty();
         }
-        let output = std::process::Command::new(&args[0])
+        let output = crate::external_guard::guard_command(&args[0])
             .args(&args[1..])
             .output();
         match output {
