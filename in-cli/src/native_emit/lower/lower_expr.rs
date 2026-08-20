@@ -145,9 +145,12 @@ pub(crate) fn lower_expr_into(
             // Multi-field struct: use call-arg temps as scratch space
             let temp_base = ctx.acquire_call_arg_temps(fn_name)?;
             let mut field_idx = 0u32;
+
+            let field_map: HashMap<&String, &Expr> = fields.iter().map(|(n, v)| (n, v)).collect();
+
             for (field_name, field_typ) in &schema {
                 if matches!(field_typ, Typ::Int | Typ::Bool | Typ::String | Typ::Float) {
-                    let Some((_, value)) = fields.iter().find(|(n, _)| n == field_name) else {
+                    let Some(&value) = field_map.get(field_name) else {
                         emitter.emit_insns(&aarch64::load_i64(0, 0));
                         emitter.emit_u32(aarch64::str64(
                             0,
