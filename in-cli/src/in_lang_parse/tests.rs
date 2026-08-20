@@ -7,6 +7,53 @@ use super::{
 };
 
 #[test]
+fn test_split_top_level_decl_blocks_empty() {
+    let src = "";
+    let blocks = split_top_level_decl_blocks(src);
+    assert_eq!(blocks.len(), 0);
+}
+
+#[test]
+fn test_split_top_level_decl_blocks_single() {
+    let src = "fn test() {}\n";
+    let blocks = split_top_level_decl_blocks(src);
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(blocks[0].0, 1);
+    assert_eq!(blocks[0].1, "fn test() {}");
+}
+
+#[test]
+fn test_split_top_level_decl_blocks_multiple_spacing() {
+    let src = "fn a() {}\n\nfn b() {}\n";
+    let blocks = split_top_level_decl_blocks(src);
+    assert_eq!(blocks.len(), 2);
+    assert_eq!(blocks[0].0, 1);
+    assert_eq!(blocks[0].1, "fn a() {}");
+    assert_eq!(blocks[1].0, 3);
+    assert_eq!(blocks[1].1, "fn b() {}");
+}
+
+#[test]
+fn test_split_top_level_decl_blocks_nested_braces() {
+    let src = "struct A {\n  fn b() {}\n}\nfn c() {}";
+    let blocks = split_top_level_decl_blocks(src);
+    assert_eq!(blocks.len(), 2);
+    assert_eq!(blocks[0].0, 1);
+    assert_eq!(blocks[0].1, "struct A {\nfn b() {}\n}");
+    assert_eq!(blocks[1].0, 4);
+    assert_eq!(blocks[1].1, "fn c() {}");
+}
+
+#[test]
+fn test_split_top_level_decl_blocks_comments() {
+    let src = "// comment\nfn a() {}\n// another\n";
+    let blocks = split_top_level_decl_blocks(src);
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(blocks[0].0, 2);
+    assert_eq!(blocks[0].1, "fn a() {}");
+}
+
+#[test]
 fn ignores_nested_fn_at_nonzero_depth() {
     let src = r#"
 struct Outer {
