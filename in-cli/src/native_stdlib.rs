@@ -239,7 +239,7 @@ fn parse_command_args(cmd: &str) -> Vec<String> {
     args
 }
 
-/// `std::process::Command` shell one-liner for `.in` `process_run`.
+/// argv-style spawn for `.in` `process_run` (`Command::new` + args, no shell).
 /// Returns combined stdout+stderr as an instring; empty when the command fails to start.
 ///
 /// # Safety
@@ -1271,6 +1271,22 @@ mod tests {
         assert_eq!(
             parse_command_args("awk '{print $1}'"),
             vec!["awk", "{print $1}"]
+        );
+        assert_eq!(
+            parse_command_args("echo hello; rm -rf /"),
+            vec!["echo", "hello;", "rm", "-rf", "/"]
+        );
+        assert_eq!(
+            parse_command_args("echo hello && rm"),
+            vec!["echo", "hello", "&&", "rm"]
+        );
+        assert_eq!(
+            parse_command_args("echo $(whoami)"),
+            vec!["echo", "$(whoami)"]
+        );
+        assert_eq!(
+            parse_command_args("echo `whoami`"),
+            vec!["echo", "`whoami`"]
         );
     }
 }

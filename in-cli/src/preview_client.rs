@@ -78,42 +78,26 @@ mod tests {
     use std::os::unix::net::UnixListener;
     use std::thread;
 
-    struct TempDirGuard {
-        path: std::path::PathBuf,
-    }
+    struct ShortSock(std::path::PathBuf);
 
-    impl TempDirGuard {
-        fn new(prefix: &str) -> Self {
-            use std::time::{SystemTime, UNIX_EPOCH};
-            let timestamp = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
-            let path = std::env::temp_dir().join(format!(
-                "{}_{}_{}",
-                prefix,
-                std::process::id(),
-                timestamp
-            ));
-            std::fs::create_dir_all(&path).unwrap();
-            Self { path }
-        }
-
-        fn path(&self) -> &std::path::Path {
-            &self.path
+    impl ShortSock {
+        fn new(tag: &str) -> Self {
+            let path = std::env::temp_dir().join(format!("in{}{}.sock", std::process::id(), tag));
+            let _ = std::fs::remove_file(&path);
+            Self(path)
         }
     }
 
-    impl Drop for TempDirGuard {
+    impl Drop for ShortSock {
         fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.path);
+            let _ = std::fs::remove_file(&self.0);
         }
     }
 
     #[test]
     fn test_run_unix_preview_client_success() {
-        let dir = TempDirGuard::new("preview_client_test");
-        let socket_path = dir.path().join("test.sock");
+        let sock = ShortSock::new("s");
+        let socket_path = sock.0.clone();
 
         let listener = UnixListener::bind(&socket_path).unwrap();
 
@@ -144,8 +128,8 @@ mod tests {
 
     #[test]
     fn test_run_unix_preview_client_connection_error() {
-        let dir = TempDirGuard::new("preview_client_test_err");
-        let socket_path = dir.path().join("non_existent.sock");
+        let sock = ShortSock::new("e");
+        let socket_path = sock.0.clone();
 
         let result = run_unix_preview_client(&socket_path);
         assert!(result.is_err());
