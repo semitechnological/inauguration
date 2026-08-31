@@ -565,4 +565,50 @@ mod tests {
         assert!(json.contains("Point"));
         assert!(json.contains("\"offset\": 0"));
     }
+
+    #[test]
+    fn component_metadata_to_json_serialization() {
+        let metadata = ComponentMetadata {
+            name: "test-component".into(),
+            target: "wasm32-unknown-unknown".into(),
+            entry: Some("main".into()),
+            artifact_kind: ArtifactKind::WasmModule,
+            code_sections: vec![CodeSection {
+                name: ".text".into(),
+                offset: 0,
+                size: 1024,
+                flags: "rx".into(),
+            }],
+            data_sections: vec![],
+            imports: vec![],
+            exports: vec![],
+            capabilities_required: vec![],
+            capabilities_exported: vec![],
+            interfaces: vec![],
+            object_schemas: vec![],
+            memory: MemoryRequirements {
+                stack_bytes: 4096,
+                heap_bytes: 0,
+                static_bytes: 0,
+                vm_object_pages: 0,
+            },
+            checkpoint: String::new(),
+            deterministic: true,
+            provenance: BuildProvenance {
+                compiler_version: "1.0.0".into(),
+                source_hash: "abcdef".into(),
+                build_timestamp: "2023-01-01T00:00:00Z".into(),
+            },
+        };
+
+        let json = metadata.to_json().unwrap();
+        assert!(json.contains("\"name\":\"test-component\""));
+        assert!(json.contains("\"target\":\"wasm32-unknown-unknown\""));
+        assert!(json.contains("\"artifact_kind\":\"WasmModule\""));
+
+        let pretty_json = metadata.to_json_pretty().unwrap();
+        assert!(pretty_json.contains("\"name\": \"test-component\""));
+        assert!(pretty_json.contains("\"target\": \"wasm32-unknown-unknown\""));
+        assert!(pretty_json.contains("\"artifact_kind\": \"WasmModule\""));
+    }
 }
