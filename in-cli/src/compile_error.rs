@@ -168,15 +168,34 @@ mod tests {
 
     #[test]
     fn error_categories() {
-        assert_eq!(CompileError::parse("").category, ErrorCategory::Parse);
-        assert_eq!(
-            CompileError::type_error("").category,
-            ErrorCategory::TypeError
-        );
-        assert_eq!(CompileError::verifier("").category, ErrorCategory::Verifier);
-        assert_eq!(CompileError::lower("").category, ErrorCategory::Lower);
-        assert_eq!(CompileError::io("").category, ErrorCategory::Io);
-        assert_eq!(CompileError::internal("").category, ErrorCategory::Internal);
+        let e_parse = CompileError::parse("parse err");
+        assert_eq!(e_parse.category, ErrorCategory::Parse);
+        assert_eq!(e_parse.message, "parse err");
+
+        let e_parse_at = CompileError::parse_at(1, 1, "test.in", "parse at err");
+        assert_eq!(e_parse_at.category, ErrorCategory::Parse);
+        assert_eq!(e_parse_at.message, "parse at err");
+        assert!(e_parse_at.span.is_some());
+
+        let e_type = CompileError::type_error("type err");
+        assert_eq!(e_type.category, ErrorCategory::TypeError);
+        assert_eq!(e_type.message, "type err");
+
+        let e_verifier = CompileError::verifier("verifier err");
+        assert_eq!(e_verifier.category, ErrorCategory::Verifier);
+        assert_eq!(e_verifier.message, "verifier err");
+
+        let e_lower = CompileError::lower("lower err");
+        assert_eq!(e_lower.category, ErrorCategory::Lower);
+        assert_eq!(e_lower.message, "lower err");
+
+        let e_io = CompileError::io("io err");
+        assert_eq!(e_io.category, ErrorCategory::Io);
+        assert_eq!(e_io.message, "io err");
+
+        let e_internal = CompileError::internal("internal err");
+        assert_eq!(e_internal.category, ErrorCategory::Internal);
+        assert_eq!(e_internal.message, "internal err");
     }
 
     #[test]
