@@ -210,7 +210,7 @@ fn lower_invoke(
     pending: &mut Vec<PendingCall>,
 ) -> Result<(), String> {
     let n = args.len();
-    if n < 1 || n > 3 {
+    if !(1..=3).contains(&n) {
         return Err(format!(
             "thumb-lower: `invoke` supports 1..=3 arguments in `{}`",
             ctx.fn_name
@@ -223,18 +223,18 @@ fn lower_invoke(
     }
     match n {
         1 => {
-            emitter.emit_u16(thumb::ldr_sp(R0, ctx.call_arg_temps[base + 0])?);
+            emitter.emit_u16(thumb::ldr_sp(R0, ctx.call_arg_temps[base])?);
             emitter.emit_u16(thumb::blx_reg(R0));
         }
         2 => {
             emitter.emit_u16(thumb::ldr_sp(R0, ctx.call_arg_temps[base + 1])?);
-            emitter.emit_u16(thumb::ldr_sp(R3, ctx.call_arg_temps[base + 0])?);
+            emitter.emit_u16(thumb::ldr_sp(R3, ctx.call_arg_temps[base])?);
             emitter.emit_u16(thumb::blx_reg(R3));
         }
         _ => {
             emitter.emit_u16(thumb::ldr_sp(R0, ctx.call_arg_temps[base + 1])?);
             emitter.emit_u16(thumb::ldr_sp(R1, ctx.call_arg_temps[base + 2])?);
-            emitter.emit_u16(thumb::ldr_sp(R2, ctx.call_arg_temps[base + 0])?);
+            emitter.emit_u16(thumb::ldr_sp(R2, ctx.call_arg_temps[base])?);
             emitter.emit_u16(thumb::blx_reg(R2));
         }
     }
