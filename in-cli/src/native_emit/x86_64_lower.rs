@@ -117,6 +117,8 @@ struct LowerCtx<'a> {
     error_value_offset: u32,
     /// Return type of the current function
     ret_typ: Typ,
+    /// Pending patches for `break` statements. Stacked for nested loops.
+    loop_break_patches: Vec<Vec<u32>>,
 }
 
 #[derive(Debug, Clone)]
@@ -159,6 +161,7 @@ impl<'a> LowerCtx<'a> {
             error_flag_offset: 0,
             error_value_offset: 0,
             ret_typ: Typ::Int,
+            loop_break_patches: Vec::new(),
         };
         // Allocate stack slots for parameters
         // On x86_64 (System V), first 6 integer args go in RDI, RSI, RDX, RCX, R8, R9.
@@ -1123,7 +1126,16 @@ fn lower_stmt(
             Ok(())
         }
         Stmt::Break => {
-            // ponytail: break is a no-op for now
+            if let Some(patches) = ctx.loop_break_patches.last_mut() {
+                let site = emitter.len();
+                emitter.emit_bytes(&[0xE9, 0, 0, 0, 0]); // jmp rel32
+                patches.push(site as u32);
+            } else {
+                return Err(format!(
+                    "x86_64-lower: break outside of loop in `{}`",
+                    ctx.fn_name
+                ));
+            }
             Ok(())
         }
         Stmt::If {
@@ -1317,6 +1329,7 @@ fn lower_loop(
     pending_calls: &mut Vec<PendingCall>,
 ) -> Result<(), String> {
     let loop_start = emitter.len();
+    ctx.loop_break_patches.push(Vec::new());
 
     if let Some(cond) = cond {
         lower_expr_into(emitter, ctx, cond, RAX, pending_calls)?;
@@ -1353,6 +1366,14 @@ fn lower_loop(
             emitter.emit_insns(&x86_64::jmp_rel8((back_delta - 2) as i8));
         } else {
             emitter.emit_insns(&x86_64::jmp_rel32(back_delta - 5));
+        }
+    }
+
+    let loop_end_final = emitter.len();
+    if let Some(patches) = ctx.loop_break_patches.pop() {
+        for site in patches {
+            let break_delta = loop_end_final as i32 - site as i32 - 5;
+            emitter.patch_u32(site + 1, break_delta as u32);
         }
     }
 
@@ -2462,6 +2483,38 @@ fn lower_expr_into(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn lower_break_outside_loop_fails() {
+        let structs = HashMap::new();
+        let funcs = HashMap::new();
+        let mut ctx = LowerCtx::new("test", &[], &structs, &funcs, HashMap::new());
+        let mut emitter = CodeEmitter::new();
+        let mut pending = Vec::new();
+        let res = lower_stmt(&mut emitter, &mut ctx, &Stmt::Break, &mut pending);
+        assert!(res.is_err());
+        assert_eq!(
+            res.unwrap_err(),
+            "x86_64-lower: break outside of loop in `test`"
+        );
+    }
+
+    #[test]
+    fn lower_break_inside_loop_succeeds() {
+        let structs = HashMap::new();
+        let funcs = HashMap::new();
+        let mut ctx = LowerCtx::new("test", &[], &structs, &funcs, HashMap::new());
+        let mut emitter = CodeEmitter::new();
+        let mut pending = Vec::new();
+
+        let body = vec![Stmt::Break];
+        let res = lower_loop(&mut emitter, &mut ctx, &None, &body, &mut pending);
+        assert!(res.is_ok());
+        // Loop should emit:
+        // 1. Break (jmp rel32) -> 5 bytes
+        // 2. Backward jump to start -> 2 bytes (jmp rel8)
+        assert_eq!(emitter.len(), 7);
+    }
+
     use super::*;
     use crate::core_ir::UnifiedModule;
 
