@@ -589,6 +589,9 @@ mod tests {
 
     #[test]
     fn test_language_support_for_parser() {
+        let in_support = language_support_for_parser("in").expect("should find in");
+        assert_eq!(in_support.language, "in");
+
         let rust_support = language_support_for_parser("rust").expect("should find rust");
         assert_eq!(rust_support.language, "Rust");
 
