@@ -780,14 +780,68 @@ fn verify_archive_checksum(path: &Path, checksum: &ArtifactChecksum) -> Result<(
             }
         }
         ArtifactChecksum::GoModuleSum(expected) => {
-            // ponytail: Go canonicalizes module zips before computing h1: hash;
-            // raw zip SHA-256 won't match. Go already verified during download.
-            if expected.starts_with("h1:") {
+            if !expected.starts_with("h1:") {
+                return Err(format!(
+                    "go module sum has unsupported hash algorithm for {}",
+                    path.display()
+                ));
+            }
+
+            let file = std::fs::File::open(path)
+                .map_err(|err| format!("failed to open zip file {}: {}", path.display(), err))?;
+            let mut archive = zip::ZipArchive::new(file)
+                .map_err(|err| format!("failed to read zip archive {}: {}", path.display(), err))?;
+
+            let mut files = Vec::new();
+            for i in 0..archive.len() {
+                let f = archive.by_index(i).map_err(|err| {
+                    format!("failed to read zip entry {}: {}", path.display(), err)
+                })?;
+                // Go's dirhash ignores directories (they are inherently skipped or
+                // we shouldn't hash directory entries). Wait, Go's HashZip says:
+                // "Only the file names and their contents are included in the hash"
+                if f.is_dir() {
+                    continue;
+                }
+                files.push(f.name().to_string());
+            }
+            files.sort();
+
+            let mut h = sha2::Sha256::new();
+            for file_name in files {
+                if file_name.contains('\n') {
+                    return Err(format!(
+                        "go module zip contains file with newline: {}",
+                        file_name
+                    ));
+                }
+                let mut f = archive.by_name(&file_name).map_err(|err| {
+                    format!("failed to read zip entry {}: {}", path.display(), err)
+                })?;
+                let mut hf = sha2::Sha256::new();
+                let mut buf = [0; 8192];
+                loop {
+                    let n = std::io::Read::read(&mut f, &mut buf)
+                        .map_err(|err| format!("read error: {}", err))?;
+                    if n == 0 {
+                        break;
+                    }
+                    sha2::Digest::update(&mut hf, &buf[..n]);
+                }
+                let content_hash = hex_encode(&sha2::Digest::finalize(hf));
+                let line = format!("{}  {}\n", content_hash, file_name);
+                sha2::Digest::update(&mut h, line.as_bytes());
+            }
+
+            let actual = format!("h1:{}", base64_encode(&sha2::Digest::finalize(h)));
+            if actual == *expected {
                 Ok(())
             } else {
                 Err(format!(
-                    "go module sum has unsupported hash algorithm for {}",
-                    path.display()
+                    "h1 mismatch for {}: expected {}, got {}",
+                    path.display(),
+                    expected,
+                    actual
                 ))
             }
         }
