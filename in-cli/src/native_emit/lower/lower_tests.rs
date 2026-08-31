@@ -353,7 +353,9 @@ fn lowers_string_contains_to_native_wrapper_call() {
     assert!(result.unwrap());
     let words: Vec<u32> = emitter
         .bytes
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
         .collect();
     let has_bl_or_blr = words
@@ -726,8 +728,10 @@ fn main() -> Int {
     let lowered = lower_module(&module, "main", NativeLinkage::Executable).expect("lower");
     let values: Vec<i64> = lowered
         .code
-        .chunks_exact(8)
-        .map(|chunk| i64::from_le_bytes(chunk.try_into().expect("chunk")))
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .map(|chunk| i64::from_le_bytes(*chunk))
         .collect();
     assert!(values.windows(3).any(|window| window == [2, 5, 8]));
 }
@@ -1634,8 +1638,10 @@ fn rejects_aggregate_array_locals_with_stable_diagnostic() {
 
 fn code_contains_insns(code: &[u8], insns: &[u32]) -> bool {
     let words: Vec<u32> = code
-        .chunks_exact(4)
-        .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|b| u32::from_le_bytes(*b))
         .collect();
     for insn in insns {
         if !words.contains(insn) {
@@ -1672,8 +1678,10 @@ fn inrt_call_emits_bl_placeholder() {
     assert!(lowered.code.len() > ENTRY_STUB_SIZE as usize + 4);
     let words: Vec<u32> = lowered
         .code
-        .chunks_exact(4)
-        .filter_map(|b| b.try_into().ok())
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .copied()
         .map(u32::from_le_bytes)
         .collect();
     let has_bl = words.iter().any(|w| (*w >> 26) == 0b100101);
