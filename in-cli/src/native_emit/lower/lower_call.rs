@@ -31,19 +31,6 @@ pub(crate) fn lower_call(
     if is_inrt_builtin(target) {
         return lower_inrt_call(emitter, ctx, target, args, rd, fn_name);
     }
-    // ponytail: try stdlib intrinsic lowering before external ref fallback
-    if lower_stdlib::lower_stdlib_call(
-        emitter,
-        ctx,
-        target,
-        args,
-        rd,
-        functions,
-        pending_calls,
-        fn_name,
-    )? {
-        return Ok(());
-    }
     if !functions.contains_key(target) {
         #[cfg(debug_assertions)]
         eprintln!(
@@ -75,6 +62,21 @@ pub(crate) fn lower_call(
                 fn_name,
             );
         }
+
+        // try stdlib intrinsic lowering before external ref fallback
+        if lower_stdlib::lower_stdlib_call(
+            emitter,
+            ctx,
+            target,
+            args,
+            rd,
+            functions,
+            pending_calls,
+            fn_name,
+        )? {
+            return Ok(());
+        }
+
         // Load args into registers
         for (i, arg) in args.iter().enumerate() {
             if i > 7 {
