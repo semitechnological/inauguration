@@ -39,6 +39,10 @@ test("homepage is moonshine landing HTML with tschk GitHub links", () => {
   expect(homepage).toContain("html, body { margin: 0; }");
   expect(homepage).toContain("/static/vendor/unocss.js");
   expect(homepage).toContain("DOCUMENTATION DIRECTORY");
+  expect(homepage).not.toContain(
+    "THE STACK: INLANG + CREPUSCULARITYUltrafast compiler pipeline",
+  );
+  expect(homepage).toContain("flex-1 max-w-2xl flex flex-col");
   expect(homepage).toContain("https://github.com/tschk/inauguration");
   expect(homepage).not.toContain(
     "https://github.com/semitechnological/inauguration",
