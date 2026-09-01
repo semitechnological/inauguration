@@ -38,7 +38,10 @@ const fetch = async (request: Request): Promise<Response> => {
   if (method === "GET" || method === "HEAD") {
     if (pathname === "/") return serveIndex(request);
     if (pathname.startsWith("/static/")) {
-      const staticRes = await tryServeStatic(staticDir, "/" + pathname.slice("/static/".length));
+      const staticRes = await tryServeStatic(
+        staticDir,
+        "/" + pathname.slice("/static/".length),
+      );
       if (staticRes) return staticRes;
     }
     const docsRes = await tryServeStatic(distDir, pathname);

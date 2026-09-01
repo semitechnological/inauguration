@@ -19,6 +19,10 @@ test("GET / returns 200 HTML with page content", async () => {
   expect(html).toContain("Ultrafast compiler pipeline");
   expect(html).toContain("PIPELINE CAPABILITIES");
   expect(html).toContain("DOCUMENTATION DIRECTORY");
+  expect(html).toContain("https://github.com/tschk/inauguration");
+  expect(html).not.toContain(
+    "https://github.com/semitechnological/inauguration",
+  );
   expect(html).toContain("JetBrains Mono");
   expect(html).toContain('class="min-h-screen');
   expect(html.slice(html.indexOf("<body"))).not.toContain("style=");
