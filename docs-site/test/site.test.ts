@@ -15,6 +15,13 @@ test("GET / returns 200 HTML with page content", async () => {
   expect(res.headers.get("content-type")).toContain("text/html");
   const html = await res.text();
   expect(html).toContain("<!DOCTYPE html>");
+  expect(html).toContain('<html lang="en">');
+  expect(html).toContain('<meta charset="utf-8">');
+  expect(html).toContain(
+    '<meta name="viewport" content="width=device-width, initial-scale=1">',
+  );
+  expect(html).toContain("html, body { margin: 0; }");
+  expect(html).toContain("/static/vendor/unocss.js");
   expect(html).toContain("inauguration");
   expect(html).toContain("Ultrafast compiler pipeline");
   expect(html).toContain("PIPELINE CAPABILITIES");

@@ -2,7 +2,9 @@ export const seoTitle = "inauguration — inlang & hybrid compiler docs";
 export const seoDescription =
   "Ultrafast Core IR → native JIT pipeline for .in (inlang) and polyglot fronts. Documentation built with crepuscularity.";
 
-export const headHtml = `<title>${seoTitle}</title>
+export const headHtml = `<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${seoTitle}</title>
 <meta name="description" content="${seoDescription}">
 <meta name="robots" content="index,follow">
 <meta name="twitter:card" content="summary">
@@ -18,6 +20,16 @@ export const headHtml = `<title>${seoTitle}</title>
 <script src="/static/vendor/unocss.js"></script>
 <script>window.addEventListener("load",function(){document.querySelectorAll("[data-crepus-root]").forEach(function(n){n.classList.add("ready")})})</script>
 <style>
+html { scroll-behavior: smooth; }
+html, body { margin: 0; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: #09090b;
+  color: #f4f4f5;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  -webkit-font-smoothing: antialiased;
+}
 [data-crepus-root] { opacity: 0; }
 [data-crepus-root].ready { opacity: 1; }
 </style>

@@ -31,6 +31,13 @@ const notFound = await readFile(join(outDir, "404.html"), "utf8");
 
 test("homepage is moonshine landing HTML with tschk GitHub links", () => {
   expect(homepage).toContain("<!DOCTYPE html>");
+  expect(homepage).toContain('<html lang="en">');
+  expect(homepage).toContain('<meta charset="utf-8">');
+  expect(homepage).toContain(
+    '<meta name="viewport" content="width=device-width, initial-scale=1">',
+  );
+  expect(homepage).toContain("html, body { margin: 0; }");
+  expect(homepage).toContain("/static/vendor/unocss.js");
   expect(homepage).toContain("DOCUMENTATION DIRECTORY");
   expect(homepage).toContain("https://github.com/tschk/inauguration");
   expect(homepage).not.toContain(
