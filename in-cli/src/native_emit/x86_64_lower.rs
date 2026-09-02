@@ -411,12 +411,17 @@ fn collect_functions(module: &UnifiedModule) -> Result<HashMap<String, FunctionI
         };
         // ponytail: single allocation for the unique name string
         let unique_name = if functions.contains_key(name) {
-            let count = name_counts.entry(name.to_string()).or_insert(1);
-            *count += 1;
+            let count = if let Some(c) = name_counts.get_mut(name) {
+                *c += 1;
+                *c
+            } else {
+                name_counts.insert(name.clone(), 2);
+                2
+            };
             format!("{name}__dup{count}")
         } else {
-            name_counts.insert(name.to_string(), 1);
-            name.to_string()
+            name_counts.insert(name.clone(), 1);
+            name.clone()
         };
         functions.insert(
             unique_name.clone(),
