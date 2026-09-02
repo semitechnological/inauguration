@@ -1,3 +1,4 @@
+#![allow(unknown_lints, clippy::chunks_exact_to_as_chunks)]
 //! Inauguration native runtime (`inrt`) entry contract for Mach-O executables on Apple ARM64.
 
 use crate::native_emit::aarch64;

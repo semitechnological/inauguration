@@ -50,31 +50,6 @@ pub(crate) fn lower_call(
             "[TRACE] EXTERNAL path for target={target}, all fns: {:?}",
             functions.keys().collect::<Vec<_>>()
         );
-        // ponytail: try the bare function name from a module-qualified path
-        // e.g., "inauguration::agent_mode::analyze_path" → try "analyze_path"
-        let bare_name = if let Some(idx) = target.rfind("::") {
-            let last = &target[idx + 2..];
-            if functions.contains_key(last) {
-                Some(last)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-        if let Some(name) = bare_name {
-            // Re-invoke with the bare function name
-            return lower_call(
-                emitter,
-                ctx,
-                &Expr::Ident(name.to_string()),
-                args,
-                rd,
-                functions,
-                pending_calls,
-                fn_name,
-            );
-        }
         // Load args into registers
         for (i, arg) in args.iter().enumerate() {
             if i > 7 {

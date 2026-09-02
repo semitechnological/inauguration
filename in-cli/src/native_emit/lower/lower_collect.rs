@@ -96,6 +96,11 @@ pub(crate) fn rename_call_expr(expr: &mut Expr, name_map: &HashMap<String, Strin
             if let Expr::Ident(name) = callee.as_mut() {
                 if let Some(new_name) = name_map.get(name.as_str()) {
                     *name = new_name.clone();
+                } else if let Some(idx) = name.rfind("::") {
+                    let last = &name[idx + 2..];
+                    if let Some(new_name) = name_map.get(last) {
+                        *name = new_name.clone();
+                    }
                 }
             }
             rename_call_expr(callee, name_map);

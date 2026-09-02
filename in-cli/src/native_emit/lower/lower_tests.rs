@@ -1,3 +1,4 @@
+#![allow(unknown_lints, clippy::chunks_exact_to_as_chunks)]
 use super::*;
 use crate::boundary_emit;
 use crate::core_ir::{
