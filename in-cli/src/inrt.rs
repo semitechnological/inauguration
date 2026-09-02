@@ -466,8 +466,10 @@ mod tests {
     fn array_load_has_bounds_check() {
         let code = build_inrt_array_load();
         let words: Vec<u32> = code
-            .chunks_exact(4)
-            .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|b| u32::from_le_bytes(*b))
             .collect();
         assert!(words.contains(&aarch64::cmp_reg64(1, aarch64::REG_XZR)));
     }
