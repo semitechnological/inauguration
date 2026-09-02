@@ -8,37 +8,21 @@ IN_BIN="${IN_BIN:-$(command -v in 2>/dev/null || true)}"
 if [[ -n "$IN_BIN" && -f "$SITE/scripts/gen-splash.in" ]]; then
   "$IN_BIN" execute --path "$SITE/scripts/gen-splash.in" --module-id inauguration.docs.gen-splash 2>/dev/null || true
 fi
-CREPUS_BIN="${CREPUS_BIN:-crepus}"
-CREPUS_MIN="0.9.18"
-CREPU_ROOT="${CREPU_ROOT:-$ROOT/../crepuscularity}"
 
-finish() {
-  "$ROOT/scripts/normalize-docs-site.sh" "$OUT"
-  echo "inauguration.tsc.hk" >"$OUT/CNAME"
-}
-
-crepus_ok() {
-  command -v "$CREPUS_BIN" >/dev/null 2>&1 || return 1
-  local ver
-  ver="$("$CREPUS_BIN" --version 2>/dev/null | awk '{print $2}')"
-  [[ -n "$ver" ]] && [[ "$(printf '%s\n' "$CREPUS_MIN" "$ver" | sort -V | head -1)" == "$CREPUS_MIN" ]]
-}
-
-if crepus_ok; then
-  "$CREPUS_BIN" web build --site "$SITE" --out-dir "$OUT"
-  finish
-  exit 0
+if ! command -v bun >/dev/null 2>&1; then
+  echo "error: bun is required to build the docs-site (moonshine static export)" >&2
+  echo "  https://bun.sh" >&2
+  exit 1
 fi
 
-if [[ -f "$CREPU_ROOT/Cargo.toml" ]]; then
-  echo "note: using CREPU_ROOT=$CREPU_ROOT (PATH crepus missing or < $CREPUS_MIN)" >&2
-  cargo run --manifest-path "$CREPU_ROOT/Cargo.toml" -p crepuscularity-cli -- \
-    web build --site "$SITE" --out-dir "$OUT"
-  finish
-  exit 0
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "error: cargo is required to generate docs HTML via docs-site/docs-gen" >&2
+  exit 1
 fi
 
-echo "error: need crepuscularity-cli >= $CREPUS_MIN for correct <br> SSR" >&2
-echo "  cargo install crepuscularity-cli --version $CREPUS_MIN --locked" >&2
-echo "  or set CREPU_ROOT to a crepuscularity checkout with void-html fix" >&2
-exit 1
+(cd "$SITE" && bun install --frozen-lockfile)
+export DOCS_SITE_OUT="$OUT"
+(cd "$SITE" && bun run src/build.ts)
+
+"$ROOT/scripts/normalize-docs-site.sh" "$OUT"
+echo "inauguration.tsc.hk" >"$OUT/CNAME"
