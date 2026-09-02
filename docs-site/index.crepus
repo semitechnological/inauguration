@@ -13,17 +13,17 @@ div min-h-screen bg-zinc-950 text-zinc-300 p-6 sm:p-12 text-sm leading-relaxed i
 			nav flex gap-4 text-xs
 				a href="./docs/in-language.html" no-underline text-zinc-400 hover:text-white transition-colors
 					"Docs"
-				a href="https://github.com/semitechnological/inauguration" no-underline text-zinc-400 hover:text-white transition-colors rel="noopener noreferrer" target="_blank"
+				a href="https://github.com/tschk/inauguration" no-underline text-zinc-400 hover:text-white transition-colors rel="noopener noreferrer" target="_blank"
 					"GitHub"
 				a href="https://crates.io/crates/inauguration" no-underline text-zinc-400 hover:text-white transition-colors rel="noopener noreferrer" target="_blank"
 					"Crates.io"
 
 		# Hero Section
 		section flex flex-col lg:flex-row gap-8 items-start justify-between py-4 crepus-entrance crepus-e2
-			div flex-1 max-w-2xl
-				p text-blue-400 font-semibold tracking-widest text-xs uppercase mb-2
+			div flex-1 max-w-2xl flex flex-col
+				p block text-blue-400 font-semibold tracking-widest text-xs uppercase mb-2
 					"THE STACK: INLANG + CREPUSCULARITY"
-				h1 text-2xl sm:text-3xl font-semibold text-zinc-100 tracking-tight leading-snug mb-4
+				h1 block text-2xl sm:text-3xl font-semibold text-zinc-100 tracking-tight leading-snug mb-4
 					"Ultrafast compiler pipeline for OOP and systems languages"
 				p text-zinc-400 leading-relaxed mb-6
 					"A single unified Core IR → MIR → native JIT emitter. No LLVM, no bytecode VM. Experience sub-millisecond compile loops, live code injection, and seamless GUI integration using the "
@@ -36,7 +36,7 @@ div min-h-screen bg-zinc-950 text-zinc-300 p-6 sm:p-12 text-sm leading-relaxed i
 				div flex gap-3
 					a href="./docs/in-language.html" no-underline inline-flex items-center px-4 py-2 bg-zinc-100 text-zinc-950 hover:bg-white text-xs font-semibold rounded transition-colors
 						"Get Started"
-					a href="https://github.com/semitechnological/inauguration" no-underline inline-flex items-center px-4 py-2 border border-zinc-800 hover:bg-zinc-900 text-zinc-300 hover:text-white text-xs font-semibold rounded transition-colors
+					a href="https://github.com/tschk/inauguration" no-underline inline-flex items-center px-4 py-2 border border-zinc-800 hover:bg-zinc-900 text-zinc-300 hover:text-white text-xs font-semibold rounded transition-colors
 						"View GitHub"
 			
 			# Terminal preview
@@ -157,7 +157,7 @@ div min-h-screen bg-zinc-950 text-zinc-300 p-6 sm:p-12 text-sm leading-relaxed i
 						div text-blue-400 font-semibold text-xs uppercase tracking-widest border-b border-zinc-800 pb-2 mb-3
 							"Benchmarks & Performance"
 						div flex flex-col gap-3
-							a doc-item href="./docs/jit.html"
+							a doc-item href="./docs/benchmarks/jit.html"
 								span name
 									"jit.md"
 								span desc
@@ -167,12 +167,12 @@ div min-h-screen bg-zinc-950 text-zinc-300 p-6 sm:p-12 text-sm leading-relaxed i
 									"swift-vs-in.md"
 								span desc
 									" — performance benchmarks compiling swift files via .in"
-							a doc-item href="./docs/polyglot-compilers.html"
+							a doc-item href="./docs/benchmarks/polyglot-compilers.html"
 								span name
 									"polyglot-compilers.md"
 								span desc
 									" — execution metrics across diverse tree-sitter parser targets"
-							a doc-item href="./docs/self-host-vs-native.html"
+							a doc-item href="./docs/benchmarks/self-host-vs-native.html"
 								span name
 									"self-host-vs-native.md"
 								span desc
@@ -220,7 +220,7 @@ div min-h-screen bg-zinc-950 text-zinc-300 p-6 sm:p-12 text-sm leading-relaxed i
 				span
 					"inauguration docs-site · built with crepuscularity + moonshine"
 			div flex gap-4
-				a href="https://github.com/semitechnological/inauguration" no-underline text-zinc-500 hover:text-zinc-300 transition-colors rel="noopener noreferrer" target="_blank"
+				a href="https://github.com/tschk/inauguration" no-underline text-zinc-500 hover:text-zinc-300 transition-colors rel="noopener noreferrer" target="_blank"
 					"GitHub"
 				a href="https://crates.io/crates/inauguration" no-underline text-zinc-500 hover:text-zinc-300 transition-colors rel="noopener noreferrer" target="_blank"
 					"Crates.io"

@@ -15,10 +15,31 @@ test("GET / returns 200 HTML with page content", async () => {
   expect(res.headers.get("content-type")).toContain("text/html");
   const html = await res.text();
   expect(html).toContain("<!DOCTYPE html>");
+  expect(html).toContain('<html lang="en">');
+  expect(html).toContain('<meta charset="utf-8">');
+  expect(html).toContain(
+    '<meta name="viewport" content="width=device-width, initial-scale=1">',
+  );
+  expect(html).toContain("html, body { margin: 0; }");
+  expect(html).toContain("/static/vendor/unocss.js");
   expect(html).toContain("inauguration");
   expect(html).toContain("Ultrafast compiler pipeline");
+  expect(html).not.toContain(
+    "THE STACK: INLANG + CREPUSCULARITYUltrafast compiler pipeline",
+  );
+  expect(html).toContain("flex-1 max-w-2xl flex flex-col");
+  expect(html).toMatch(
+    /class="block text-blue-400[^"]*mb-2"[^>]*>[\s\S]*THE STACK: INLANG \+ CREPUSCULARITY/,
+  );
+  expect(html).toMatch(
+    /class="block text-2xl[^"]*mb-4"[^>]*>[\s\S]*Ultrafast compiler pipeline/,
+  );
   expect(html).toContain("PIPELINE CAPABILITIES");
   expect(html).toContain("DOCUMENTATION DIRECTORY");
+  expect(html).toContain("https://github.com/tschk/inauguration");
+  expect(html).not.toContain(
+    "https://github.com/semitechnological/inauguration",
+  );
   expect(html).toContain("JetBrains Mono");
   expect(html).toContain('class="min-h-screen');
   expect(html.slice(html.indexOf("<body"))).not.toContain("style=");

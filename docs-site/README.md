@@ -11,7 +11,7 @@ is kept alongside for reference; the live server lives in `src/`.
 - `src/ir.ts` — page content as `CrepusIr` (inline styles, dark zinc + JetBrains Mono).
 - `src/head.ts` — `<head>` HTML: SEO meta, fonts, and the CSS (animations) ported from `crepus.toml` `head_html`.
 - `src/server.ts` — `createBunServer` + `crepusRenderer` (head-injecting wrapper); serves `/`, `static/`, and generated `dist/docs/`.
-- `src/build.ts` — prerenders the page to `dist/index.html`.
+- `src/build.ts` — Cloudflare Pages export: homepage, `static/`, `docs/` HTML, `404.html`, and `CNAME`.
 
 ## Benchmarks
 
@@ -39,8 +39,8 @@ curl -s -o /dev/null -w "%{time_total}\n" http://localhost:3011/
 ```bash
 bun install
 bun run dev          # http://localhost:3000 (hot reload)
-bun run build        # prerender dist/index.html
-bun test             # starts server, fetches /, asserts 200 + HTML
+bun run build        # complete Pages dist (homepage + static + docs)
+bun test             # server + dist export (docs/static are not the homepage)
 bun run typecheck    # tsc --noEmit
 ```
 
@@ -70,11 +70,11 @@ in languages --json
 
 ## Build site
 
-Requires **crepuscularity-cli ≥ 0.9.18** (void `<br>` SSR) or `CREPU_ROOT` pointing at a matching checkout. `build-docs-site.sh` falls back to `CREPU_ROOT` when `crepus` on PATH is older.
+Requires **Bun** (moonshine prerender) and **cargo** (`docs-gen` markdown → HTML). `./scripts/build-docs-site.sh` is the deploy entrypoint and runs the same export as `bun run build`.
 
 ```bash
-cargo install crepuscularity-cli --version 0.9.18 --locked   # if needed
 ./scripts/build-docs-site.sh
+# or: cd docs-site && bun install --frozen-lockfile && bun run build
 # or: in execute docs-site/backend.in
 ```
 

@@ -8,7 +8,9 @@
     "start": "bun run src/server.ts",
     "build": "bun run src/build.ts",
     "test": "bun test",
-    "typecheck": "bunx tsc --noEmit"
+    "typecheck": "bunx tsc --noEmit",
+    "format": "bunx prettier --check src test package.json tsconfig.json",
+    "lint": "bunx oxlint src test"
   },
   "dependencies": {
     "@tschk/crepus-moonshine": "^0.4.0",
