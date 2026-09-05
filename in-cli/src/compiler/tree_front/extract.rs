@@ -1414,6 +1414,9 @@ fn ast_binary_expr(src: &[u8], expr: Node<'_>, shape: AstShape) -> Option<Expr> 
         .ok()?
         .trim()
         .to_string();
+    if op.len() > 5 || op.contains('\n') {
+        return None;
+    }
     Some(Expr::Binary {
         op,
         lhs: Box::new(ast_expr(src, lhs, shape)?),
