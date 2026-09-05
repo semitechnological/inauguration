@@ -194,8 +194,10 @@ fn compile_resolved_dependencies(
                 if !direct_dep_names.contains(crate_name) {
                     continue;
                 }
-                // Skip proc-macro crates
-                let is_proc_macro = pkg["targets"].as_array().map_or(false, |targets| {
+                // Skip proc-macro crates (metadata first; narrow manifest
+                // fallback — substring match mirrors the prior behavior that
+                // Self-host relied on, for manifests metadata under-reports).
+                let mut is_proc_macro = pkg["targets"].as_array().map_or(false, |targets| {
                     targets.iter().any(|target| {
                         let kind_hit = target["kind"].as_array().map_or(false, |kinds| {
                             kinds.iter().any(|kind| kind.as_str() == Some("proc-macro"))
@@ -207,6 +209,15 @@ fn compile_resolved_dependencies(
                         kind_hit || crate_type_hit
                     })
                 });
+                if !is_proc_macro {
+                    if let Some(manifest_str) = pkg["manifest_path"].as_str() {
+                        if let Ok(content) = std::fs::read_to_string(manifest_str) {
+                            if content.contains("proc-macro") {
+                                is_proc_macro = true;
+                            }
+                        }
+                    }
+                }
                 if is_proc_macro {
                     continue;
                 }
