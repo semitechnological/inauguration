@@ -19,7 +19,7 @@ fn get_cargo_metadata(project_dir: &Path) -> Option<Arc<serde_json::Value>> {
     if let Ok(cache) = METADATA_CACHE.lock() {
         if let Some((timestamp, value)) = cache.get(&key) {
             if timestamp.elapsed() < METADATA_CACHE_TTL {
-                return Some(value.clone());
+                return Some(Arc::clone(value));
             }
         }
     }
@@ -39,7 +39,7 @@ fn get_cargo_metadata(project_dir: &Path) -> Option<Arc<serde_json::Value>> {
     let metadata: Arc<serde_json::Value> = Arc::new(serde_json::from_slice(&output.stdout).ok()?);
 
     if let Ok(mut cache) = METADATA_CACHE.lock() {
-        cache.insert(key, (Instant::now(), metadata.clone()));
+        cache.insert(key, (Instant::now(), Arc::clone(&metadata)));
     }
 
     Some(metadata)
