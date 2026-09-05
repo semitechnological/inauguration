@@ -197,9 +197,14 @@ fn compile_resolved_dependencies(
                 // Skip proc-macro crates
                 let is_proc_macro = pkg["targets"].as_array().map_or(false, |targets| {
                     targets.iter().any(|target| {
-                        target["kind"].as_array().map_or(false, |kinds| {
+                        let kind_hit = target["kind"].as_array().map_or(false, |kinds| {
                             kinds.iter().any(|kind| kind.as_str() == Some("proc-macro"))
-                        })
+                        });
+                        let crate_type_hit =
+                            target["crate_types"].as_array().map_or(false, |cts| {
+                                cts.iter().any(|ct| ct.as_str() == Some("proc-macro"))
+                            });
+                        kind_hit || crate_type_hit
                     })
                 });
                 if is_proc_macro {
