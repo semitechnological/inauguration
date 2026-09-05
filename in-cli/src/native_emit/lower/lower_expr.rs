@@ -556,11 +556,6 @@ pub(crate) fn lower_binary(
     fn_name: &str,
 ) -> Result<(), String> {
     let op = op.trim();
-    // ponytail: guard against malformed operator strings from tree-sitter
-    if op.len() > 5 || op.contains('\n') {
-        emitter.emit_insns(&aarch64::load_i64(rd, 0));
-        return Ok(());
-    }
     let is_float = matches!(native_expr_type(lhs, ctx, functions), Some(Typ::Float))
         || matches!(native_expr_type(rhs, ctx, functions), Some(Typ::Float));
     if is_float {
