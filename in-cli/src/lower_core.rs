@@ -295,7 +295,7 @@ fn desugar_closures_in_expr(expr: &mut Expr, counter: &mut usize, extra_decls: &
             }
             let mut fn_params = vec![("self".to_string(), Typ::Named(caps_name.clone()))];
             fn_params.extend(std::mem::take(params));
-            let closure_ret = ret.clone();
+            let closure_ret = std::mem::replace(ret, Typ::Void);
             let closure_body = std::mem::take(body);
             extra_decls.push(Decl::Struct {
                 name: caps_name.clone(),
