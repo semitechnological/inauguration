@@ -195,12 +195,15 @@ fn compile_resolved_dependencies(
                     continue;
                 }
                 // Skip proc-macro crates
-                if let Some(manifest_str) = pkg["manifest_path"].as_str() {
-                    if let Ok(content) = std::fs::read_to_string(manifest_str) {
-                        if content.contains("proc-macro") {
-                            continue;
-                        }
-                    }
+                let is_proc_macro = pkg["targets"].as_array().map_or(false, |targets| {
+                    targets.iter().any(|target| {
+                        target["kind"].as_array().map_or(false, |kinds| {
+                            kinds.iter().any(|kind| kind.as_str() == Some("proc-macro"))
+                        })
+                    })
+                });
+                if is_proc_macro {
+                    continue;
                 }
                 if already_compiled.contains(crate_name) {
                     continue;
