@@ -10,6 +10,7 @@ Guides for **inlang** (`.in`), the inauguration compiler, and the docs site.
 | [Language fronts](languages.md) | Live matrix; `in languages --json` |
 | [Parser surface](parser-surface.md) | Extension → `ParserId`, maturity levels |
 | [Native backend](native-backend.md) | MIR, JIT, AArch64 / x86_64 emit |
+| [Emit profiles](emit-profiles.md) | `default` / `harden` / `lean` anti-decomp & inlining |
 | [Docs-site](docs-site.md) | `crepus web`, `backend.in`, Cloudflare deploy |
 | [Benchmarks](benchmarks/README.md) | JIT, polyglot `in` vs native toolchains, self-host vs rustc |
 

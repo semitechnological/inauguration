@@ -364,3 +364,4 @@ int main(void) { return 0; }
     }
 }
 pub mod core_opt;
+pub mod emit_profile;

@@ -27,6 +27,7 @@ pub(crate) fn cmd_compile(
     base: Option<&str>,
     metadata: Option<&str>,
     debug: bool,
+    profile: inauguration::emit_profile::EmitProfile,
 ) -> Result<()> {
     let source_path = resolve_invocation_path(cwd, path);
     let out_path = resolve_invocation_path(cwd, out);
@@ -96,6 +97,7 @@ pub(crate) fn cmd_compile(
         target_triple: target_triple.map(str::to_string),
         jobs: jobs.max(1),
         debug,
+        profile,
         emit: owned_emit,
         base: parsed_base,
     };
@@ -464,6 +466,7 @@ pub(crate) fn compile_and_run_jit_report(
         target_triple: None,
         jobs: 1,
         debug,
+        profile: inauguration::emit_profile::EmitProfile::Default,
         emit: None,
         base: None,
     };

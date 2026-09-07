@@ -139,6 +139,7 @@ fn handle_eval(code: &str, parser: Option<&str>, _verbose: bool) -> DaemonRespon
         target_triple: None,
         jobs: 1,
         debug: false,
+        profile: crate::emit_profile::EmitProfile::Default,
         emit: None,
         base: None,
     };
@@ -188,6 +189,7 @@ fn handle_compile(
         target_triple,
         jobs: jobs.max(1),
         debug: false,
+        profile: crate::emit_profile::EmitProfile::Default,
         emit: None,
         base: None,
     };

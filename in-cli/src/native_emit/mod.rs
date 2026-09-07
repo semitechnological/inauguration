@@ -1,6 +1,7 @@
 //! Owned native code generation for Apple ARM64 (Mach-O executable subset).
 
 pub mod aarch64;
+pub mod antidecomp;
 pub mod c_backend;
 pub mod coff;
 pub mod elf;

@@ -81,6 +81,24 @@ enum NativeLinkageCli {
     StaticLib,
 }
 
+#[derive(Clone, Copy, Debug, ValueEnum, Default)]
+enum EmitProfileCli {
+    #[default]
+    Default,
+    Harden,
+    Lean,
+}
+
+impl EmitProfileCli {
+    fn to_owned(self) -> inauguration::emit_profile::EmitProfile {
+        match self {
+            Self::Default => inauguration::emit_profile::EmitProfile::Default,
+            Self::Harden => inauguration::emit_profile::EmitProfile::Harden,
+            Self::Lean => inauguration::emit_profile::EmitProfile::Lean,
+        }
+    }
+}
+
 #[derive(Subcommand, Debug)]
 enum Commands {
     #[command(about = "Run hybrid compiler pipeline")]
@@ -102,6 +120,12 @@ enum Commands {
             help = "Enable optimization passes (core_opt)"
         )]
         release: bool,
+        #[arg(long, value_enum, default_value_t = EmitProfileCli::Default, help = "Emit profile: default|harden|lean")]
+        profile: EmitProfileCli,
+        #[arg(long, action = clap::ArgAction::SetTrue, help = "Shorthand for --profile harden")]
+        harden: bool,
+        #[arg(long, action = clap::ArgAction::SetTrue, help = "Shorthand for --profile lean")]
+        lean: bool,
         #[arg(long, default_value = "App")]
         module_id: String,
         #[arg(
@@ -298,6 +322,12 @@ enum Commands {
         metadata: Option<String>,
         #[arg(long, default_value_t = false, help = "Show detailed stage report")]
         debug: bool,
+        #[arg(long, value_enum, default_value_t = EmitProfileCli::Default, help = "Emit profile: default|harden|lean")]
+        profile: EmitProfileCli,
+        #[arg(long, action = clap::ArgAction::SetTrue, help = "Shorthand for --profile harden")]
+        harden: bool,
+        #[arg(long, action = clap::ArgAction::SetTrue, help = "Shorthand for --profile lean")]
+        lean: bool,
     },
     #[command(about = "Compile and execute a source file via JIT")]
     Execute {
@@ -458,22 +488,34 @@ impl Commands {
                 path,
                 out,
                 release,
+                profile,
+                harden,
+                lean,
                 module_id,
                 verbose,
                 swiftpm,
                 allow_external_toolchain,
                 parser,
-            } => cmd_build(
+            } => {
+                let profile = inauguration::emit_profile::EmitProfile::resolve(
+                    profile.to_owned(),
+                    harden,
+                    lean,
+                )
+                .map_err(InError::Message)?;
+                cmd_build(
                 invocation_cwd,
                 &path,
                 out,
                 release,
+                profile,
                 &module_id,
                 verbose,
                 swiftpm,
                 allow_external_toolchain,
                 parser,
-            ),
+            )
+            },
             Commands::Agent {
                 path,
                 module_id,
@@ -582,7 +624,17 @@ impl Commands {
                 base,
                 metadata,
                 debug,
-            } => cmd_compile(
+                profile,
+                harden,
+                lean,
+            } => {
+                let profile = inauguration::emit_profile::EmitProfile::resolve(
+                    profile.to_owned(),
+                    harden,
+                    lean,
+                )
+                .map_err(InError::Message)?;
+                cmd_compile(
                 invocation_cwd,
                 &path,
                 target,
@@ -599,7 +651,9 @@ impl Commands {
                 base.as_deref(),
                 metadata.as_deref(),
                 debug,
-            ),
+                profile,
+            )
+            },
             Commands::Execute {
                 path,
                 module_id,

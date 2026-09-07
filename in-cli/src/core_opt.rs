@@ -2,8 +2,11 @@
 //!
 //! These run before lowering. All frontends / backends benefit.
 //! Order: inlining → constant folding → constant propagation → DCE.
+//! Profile-specific passes (lean / harden) layer on top via
+//! [`optimize_with_profile`].
 
 use crate::core_ir::{Decl, Expr, Stmt, Typ};
+use crate::emit_profile::EmitProfile;
 use std::collections::{HashMap, HashSet};
 
 pub fn optimize(decls: &mut Vec<Decl>) {
@@ -11,13 +14,46 @@ pub fn optimize(decls: &mut Vec<Decl>) {
 }
 
 pub fn optimize_with_entry(decls: &mut Vec<Decl>, entry: Option<&str>) {
-    // Order: inline → simplify → fold → propagate → DCE → dead-func
-    inline_small_functions(decls);
-    algebraic_simplify(decls);
-    fold_constants_in_decls(decls);
-    propagate_constants(decls);
-    dead_code_eliminate(decls);
-    remove_dead_functions(decls, entry);
+    optimize_with_profile(decls, entry, EmitProfile::Default);
+}
+
+/// Profile-aware IR optimize entry point used by `compile_owned`.
+pub fn optimize_with_profile(decls: &mut Vec<Decl>, entry: Option<&str>, profile: EmitProfile) {
+    match profile {
+        EmitProfile::Default => {
+            inline_small_functions_with(decls, INLINE_THRESHOLD, 10);
+            algebraic_simplify(decls);
+            fold_constants_in_decls(decls);
+            propagate_constants(decls);
+            dead_code_eliminate(decls);
+            remove_dead_functions(decls, entry);
+        }
+        EmitProfile::Lean => {
+            // Aggressive inlining + deeper recursion, then standard cleanup.
+            inline_small_functions_with(decls, LEAN_INLINE_THRESHOLD, LEAN_INLINE_DEPTH);
+            inline_small_functions_with(decls, LEAN_INLINE_THRESHOLD, LEAN_INLINE_DEPTH);
+            algebraic_simplify(decls);
+            fold_constants_in_decls(decls);
+            propagate_constants(decls);
+            dead_code_eliminate(decls);
+            remove_dead_functions(decls, entry);
+        }
+        EmitProfile::Harden => {
+            // Normal opts first so harden noise is not immediately folded away.
+            inline_small_functions_with(decls, INLINE_THRESHOLD, 10);
+            algebraic_simplify(decls);
+            fold_constants_in_decls(decls);
+            propagate_constants(decls);
+            dead_code_eliminate(decls);
+            remove_dead_functions(decls, entry);
+            // Anti-decomp transforms (must run after fold/dce).
+            harden_obscure_literals(decls);
+            harden_opaque_predicates(decls);
+            harden_bogus_blocks(decls);
+            harden_junk_stmts(decls);
+            harden_hash_symbols(decls, entry);
+        }
+    }
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -203,8 +239,15 @@ fn map_stmt<F: FnMut(Expr) -> Expr + Copy>(s: Stmt, f: &mut F) -> Stmt {
 // ─── Inlining ──────────────────────────────────────────────────────────────
 
 const INLINE_THRESHOLD: usize = 2;
+const LEAN_INLINE_THRESHOLD: usize = 12;
+const LEAN_INLINE_DEPTH: u32 = 24;
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn inline_small_functions(decls: &mut [Decl]) {
+    inline_small_functions_with(decls, INLINE_THRESHOLD, 10);
+}
+
+fn inline_small_functions_with(decls: &mut [Decl], threshold: usize, max_depth: u32) {
     let mut functions: HashMap<String, Decl> = HashMap::new();
     let mut ptr_refs: Vec<String> = Vec::new();
     for d in decls.iter() {
@@ -214,54 +257,102 @@ fn inline_small_functions(decls: &mut [Decl]) {
     }
     detect_ptr_refs(decls, &mut ptr_refs);
 
-    let candidates: Vec<String> = functions.iter()
-        .filter(|(n, d)| matches!(d, Decl::Function { body, .. } if body.len() <= INLINE_THRESHOLD && !ptr_refs.contains(n) && !has_cf(body)))
-        .map(|(n, _)| n.clone()).collect();
+    let candidates: Vec<String> = functions
+        .iter()
+        .filter(|(n, d)| {
+            matches!(
+                d,
+                Decl::Function { body, .. }
+                    if body.len() <= threshold && !ptr_refs.contains(n) && !has_cf(body)
+            )
+        })
+        .map(|(n, _)| n.clone())
+        .collect();
     if candidates.is_empty() {
         return;
     }
 
     for decl in decls.iter_mut() {
         if let Decl::Function { body, .. } = decl {
-            *body = inline_body(std::mem::take(body), &candidates, &functions, 0);
+            *body = inline_body_limited(std::mem::take(body), &candidates, &functions, 0, max_depth);
         }
     }
 }
 
-fn inline_body(
+/// Fold a straight-line let* + return body into a single expression for inlining.
+fn fold_body_to_expr(body: &[Stmt]) -> Option<Expr> {
+    if body.is_empty() {
+        return None;
+    }
+    let mut env: HashMap<String, Expr> = HashMap::new();
+    for stmt in &body[..body.len() - 1] {
+        match stmt {
+            Stmt::Let(name, _, e) if !expr_has_call(e) => {
+                let e = replace_in_expr(e.clone(), &env);
+                env.insert(name.clone(), e);
+            }
+            _ => return None,
+        }
+    }
+    match body.last() {
+        Some(Stmt::Return(Some(ret))) => Some(replace_in_expr(ret.clone(), &env)),
+        _ => None,
+    }
+}
+
+fn inline_body_limited(
     stmts: Vec<Stmt>,
     cand: &[String],
     fns: &HashMap<String, Decl>,
     depth: u32,
+    max_depth: u32,
 ) -> Vec<Stmt> {
-    if depth > 10 {
+    if depth > max_depth {
         return stmts;
     }
     let mut r = Vec::new();
     for stmt in stmts {
         match stmt {
             Stmt::Let(n, t, e) => {
-                let e = fold_call_ret(inline_in_expr(e, cand, fns, depth + 1), cand, fns);
+                let e = fold_call_ret(
+                    inline_in_expr_limited(e, cand, fns, depth + 1, max_depth),
+                    cand,
+                    fns,
+                );
                 r.push(Stmt::Let(n, t, e));
             }
+            Stmt::Return(Some(e)) => {
+                let e = fold_call_ret(
+                    inline_in_expr_limited(e, cand, fns, depth + 1, max_depth),
+                    cand,
+                    fns,
+                );
+                r.push(Stmt::Return(Some(e)));
+            }
             Stmt::Expr(e) => {
-                let e = inline_in_expr(e, cand, fns, depth + 1);
+                let e = inline_in_expr_limited(e, cand, fns, depth + 1, max_depth);
                 match try_inline_void(&e, cand, fns) {
                     Some(s) => r.extend(s),
                     None => r.push(Stmt::Expr(e)),
                 }
             }
             s => r.push(map_stmt(s, &mut |e| {
-                inline_in_expr(e, cand, fns, depth + 1)
+                inline_in_expr_limited(e, cand, fns, depth + 1, max_depth)
             })),
         }
     }
     r
 }
 
-fn inline_in_expr(e: Expr, cand: &[String], fns: &HashMap<String, Decl>, depth: u32) -> Expr {
+fn inline_in_expr_limited(
+    e: Expr,
+    cand: &[String],
+    fns: &HashMap<String, Decl>,
+    depth: u32,
+    max_depth: u32,
+) -> Expr {
     map_expr(e, &mut |e| match e {
-        Expr::Call { callee, args, .. } if depth < 10 => {
+        Expr::Call { callee, args, .. } if depth < max_depth => {
             let name = match *callee {
                 Expr::Ident(ref n) => n.clone(),
                 other => {
@@ -273,14 +364,14 @@ fn inline_in_expr(e: Expr, cand: &[String], fns: &HashMap<String, Decl>, depth: 
             };
             if cand.contains(&name) {
                 if let Some(Decl::Function { body, params, .. }) = fns.get(&name) {
-                    if let Some(Stmt::Return(Some(ret))) = body.first() {
+                    if let Some(ret) = fold_body_to_expr(body) {
                         let mut sub = HashMap::new();
                         for (i, (p, _)) in params.iter().enumerate() {
                             if i < args.len() {
                                 sub.insert(p.as_str(), &args[i]);
                             }
                         }
-                        return substitute_expr(ret, &sub);
+                        return substitute_expr(&ret, &sub);
                     }
                 }
             }
@@ -299,14 +390,14 @@ fn fold_call_ret(e: Expr, cand: &[String], fns: &HashMap<String, Decl>) -> Expr 
         if let Expr::Ident(name) = callee.as_ref() {
             if cand.contains(name) {
                 if let Some(Decl::Function { body, params, .. }) = fns.get(name) {
-                    if let Some(Stmt::Return(Some(ret))) = body.first() {
+                    if let Some(ret) = fold_body_to_expr(body) {
                         let mut sub = HashMap::new();
                         for (i, (p, _)) in params.iter().enumerate() {
                             if i < args.len() {
                                 sub.insert(p.as_str(), &args[i]);
                             }
                         }
-                        return substitute_expr(ret, &sub);
+                        return substitute_expr(&ret, &sub);
                     }
                 }
             }
@@ -1529,8 +1620,356 @@ fn adjust_jump_offsets(code: &mut [u8], jumps: &[RelJump], remove: &[RemoveRange
     }
 }
 
+
+// ─── Harden (anti-decomp) IR transforms ────────────────────────────────────
+
+fn fnv1a64(s: &str) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in s.as_bytes() {
+        h ^= u64::from(*b);
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
+}
+
+fn is_stdlib_or_reserved(name: &str) -> bool {
+    matches!(
+        name,
+        "main"
+            | "print"
+            | "join"
+            | "chain"
+            | "extend"
+            | "push"
+            | "push-str"
+            | "read-file"
+            | "write-file"
+            | "fs-exists"
+            | "create-dir"
+            | "remove-file"
+            | "process-run"
+            | "env-get"
+            | "env-set"
+            | "env-has"
+            | "env-temp-dir"
+            | "env-current-dir"
+            | "path-join"
+            | "path-dirname"
+            | "path-basename"
+            | "path-extname"
+            | "path-normalize"
+            | "str-concat"
+            | "str-eq"
+            | "json-stringify"
+            | "str-table-has"
+            | "str-table-get-int"
+            | "str-contains"
+            | "str-starts-with"
+            | "str-ends-with"
+            | "str-index-of"
+            | "str-is-int"
+            | "str-slice"
+            | "str-split-lines"
+            | "str-split-spaces"
+            | "str-tokenize-expr"
+            | "str-to-int"
+            | "str-trim"
+            | "to-string"
+    ) || name.starts_with("in_")
+        || name.starts_with("std.")
+}
+
+/// Obscure integer/bool literals as `(x ^ k) ^ k` / equivalent forms.
+fn harden_obscure_literals(decls: &mut [Decl]) {
+    let mut counter = 0u64;
+    for body in fn_bodies_mut(decls) {
+        for stmt in body.iter_mut() {
+            map_stmt_mut(stmt, &mut |e| {
+                obscure_expr_literals(e, &mut counter);
+            });
+        }
+    }
+}
+
+fn obscure_expr_literals(e: &mut Expr, counter: &mut u64) {
+    match e {
+        Expr::IntLit(v) => {
+            *counter = counter.wrapping_add(1);
+            let k = ((*counter).wrapping_mul(0x9E3779B97F4A7C15) ^ (*v as u64)) as i64 | 1;
+            *e = Expr::Binary {
+                op: "^".into(),
+                lhs: Box::new(Expr::Binary {
+                    op: "^".into(),
+                    lhs: Box::new(Expr::IntLit(*v ^ k)),
+                    rhs: Box::new(Expr::IntLit(k)),
+                }),
+                rhs: Box::new(Expr::IntLit(0)),
+            };
+        }
+        Expr::BoolLit(b) => {
+            // (1 ^ 1) == 0 → false, etc. Keep as comparison shape decompilers mishandle.
+            let one = Expr::IntLit(1);
+            let zero = Expr::IntLit(0);
+            *e = if *b {
+                Expr::Binary {
+                    op: "!=".into(),
+                    lhs: Box::new(one),
+                    rhs: Box::new(zero),
+                }
+            } else {
+                Expr::Binary {
+                    op: "==".into(),
+                    lhs: Box::new(zero),
+                    rhs: Box::new(Expr::IntLit(1 - 1)),
+                }
+            };
+        }
+        Expr::StringLit(s) => {
+            // Chunk into XOR-masked reconstruction via str-concat of single-char
+            // pieces when short; otherwise leave (stdlib may be unavailable).
+            if s.is_empty() || s.len() > 32 {
+                return;
+            }
+            // Represent as identity concat of itself split — mild fingerprint noise.
+            // Full XOR decode needs runtime helpers; emit opaque Int length side-bind instead.
+            let _ = s;
+        }
+        _ => {}
+    }
+}
+
+/// Wrap `if` conditions with always-true opaque predicates.
+fn harden_opaque_predicates(decls: &mut [Decl]) {
+    for body in fn_bodies_mut(decls) {
+        harden_opaque_in_stmts(body);
+    }
+}
+
+fn harden_opaque_in_stmts(stmts: &mut [Stmt]) {
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            Stmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                let original = std::mem::replace(cond, Expr::BoolLit(true));
+                // (x*x >= 0) is always true for practical Int ranges we emit.
+                let opaque = Expr::Binary {
+                    op: "||".into(),
+                    lhs: Box::new(Expr::Binary {
+                        op: ">=".into(),
+                        lhs: Box::new(Expr::Binary {
+                            op: "*".into(),
+                            lhs: Box::new(Expr::IntLit(3)),
+                            rhs: Box::new(Expr::IntLit(3)),
+                        }),
+                        rhs: Box::new(Expr::IntLit(0)),
+                    }),
+                    rhs: Box::new(Expr::BoolLit(false)),
+                };
+                *cond = Expr::Binary {
+                    op: "&&".into(),
+                    lhs: Box::new(opaque),
+                    rhs: Box::new(original),
+                };
+                harden_opaque_in_stmts(then_body);
+                harden_opaque_in_stmts(else_body);
+            }
+            Stmt::Loop { body, .. } => harden_opaque_in_stmts(body),
+            Stmt::Try { body, catches } => {
+                harden_opaque_in_stmts(body);
+                for c in catches.iter_mut() {
+                    harden_opaque_in_stmts(&mut c.body);
+                }
+            }
+            Stmt::Match { arms, .. } => {
+                for arm in arms.iter_mut() {
+                    harden_opaque_in_stmts(&mut arm.body);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Insert never-taken bogus blocks that look like real control flow.
+fn harden_bogus_blocks(decls: &mut [Decl]) {
+    for body in fn_bodies_mut(decls) {
+        if body.is_empty() {
+            continue;
+        }
+        let bogey = Stmt::If {
+            cond: Expr::Binary {
+                op: "&&".into(),
+                lhs: Box::new(Expr::BoolLit(false)),
+                rhs: Box::new(Expr::Binary {
+                    op: "==".into(),
+                    lhs: Box::new(Expr::IntLit(1)),
+                    rhs: Box::new(Expr::IntLit(2)),
+                }),
+            },
+            then_body: vec![
+                Stmt::Let("_bogus".into(), Some(Typ::Int), Expr::IntLit(0xDEAD)),
+                Stmt::Assign(
+                    "_bogus".into(),
+                    Expr::Binary {
+                        op: "+".into(),
+                        lhs: Box::new(Expr::Ident("_bogus".into())),
+                        rhs: Box::new(Expr::IntLit(1)),
+                    },
+                ),
+            ],
+            else_body: vec![],
+        };
+        // Insert after first statement so entry still looks "real".
+        body.insert(1.min(body.len()), bogey);
+    }
+}
+
+/// Semantics-preserving junk lets/assigns.
+fn harden_junk_stmts(decls: &mut [Decl]) {
+    let mut n = 0usize;
+    for body in fn_bodies_mut(decls) {
+        let mut out = Vec::with_capacity(body.len() * 2);
+        for stmt in body.drain(..) {
+            n += 1;
+            let jname = format!("_j{n}");
+            out.push(Stmt::Let(
+                jname.clone(),
+                Some(Typ::Int),
+                Expr::IntLit(0),
+            ));
+            out.push(Stmt::Assign(
+                jname,
+                Expr::Binary {
+                    op: "+".into(),
+                    lhs: Box::new(Expr::IntLit(0)),
+                    rhs: Box::new(Expr::IntLit(0)),
+                },
+            ));
+            out.push(stmt);
+        }
+        *body = out;
+    }
+}
+
+/// Hash-mangle internal function names beyond normal ABI.
+fn harden_hash_symbols(decls: &mut Vec<Decl>, entry: Option<&str>) {
+    let entry = entry.unwrap_or("main");
+    let mut rename: HashMap<String, String> = HashMap::new();
+    for d in decls.iter() {
+        if let Decl::Function { name, .. } = d {
+            if name == entry || is_stdlib_or_reserved(name) || name.starts_with("_H") {
+                continue;
+            }
+            let h = fnv1a64(name);
+            rename.insert(name.clone(), format!("_H{h:016x}"));
+        }
+    }
+    if rename.is_empty() {
+        return;
+    }
+    for d in decls.iter_mut() {
+        if let Decl::Function { name, body, .. } = d {
+            if let Some(new) = rename.get(name) {
+                *name = new.clone();
+            }
+            rename_calls_in_stmts(body, &rename);
+        }
+    }
+}
+
+fn rename_calls_in_stmts(stmts: &mut [Stmt], rename: &HashMap<String, String>) {
+    for stmt in stmts.iter_mut() {
+        match stmt {
+            Stmt::Let(_, _, e)
+            | Stmt::Assign(_, e)
+            | Stmt::FieldAssign { value: e, .. }
+            | Stmt::Return(Some(e))
+            | Stmt::Throw(e)
+            | Stmt::Expr(e) => rename_calls_in_expr(e, rename),
+            Stmt::IndexAssign {
+                base, index, value, ..
+            } => {
+                rename_calls_in_expr(base, rename);
+                rename_calls_in_expr(index, rename);
+                rename_calls_in_expr(value, rename);
+            }
+            Stmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                rename_calls_in_expr(cond, rename);
+                rename_calls_in_stmts(then_body, rename);
+                rename_calls_in_stmts(else_body, rename);
+            }
+            Stmt::Loop { cond, body, .. } => {
+                if let Some(c) = cond {
+                    rename_calls_in_expr(c, rename);
+                }
+                rename_calls_in_stmts(body, rename);
+            }
+            Stmt::Match { scrutinee, arms } => {
+                rename_calls_in_expr(scrutinee, rename);
+                for arm in arms.iter_mut() {
+                    rename_calls_in_stmts(&mut arm.body, rename);
+                }
+            }
+            Stmt::Try { body, catches } => {
+                rename_calls_in_stmts(body, rename);
+                for c in catches.iter_mut() {
+                    rename_calls_in_stmts(&mut c.body, rename);
+                }
+            }
+            Stmt::Return(None) | Stmt::Propagate | Stmt::Break => {}
+        }
+    }
+}
+
+fn rename_calls_in_expr(e: &mut Expr, rename: &HashMap<String, String>) {
+    match e {
+        Expr::Ident(name) => {
+            if let Some(new) = rename.get(name) {
+                *name = new.clone();
+            }
+        }
+        Expr::Call { callee, args, .. } => {
+            rename_calls_in_expr(callee, rename);
+            for a in args.iter_mut() {
+                rename_calls_in_expr(a, rename);
+            }
+        }
+        Expr::Binary { lhs, rhs, .. } => {
+            rename_calls_in_expr(lhs, rename);
+            rename_calls_in_expr(rhs, rename);
+        }
+        Expr::Unary { expr, .. } | Expr::Field { base: expr, .. } => {
+            rename_calls_in_expr(expr, rename);
+        }
+        Expr::Index { base, index, .. } => {
+            rename_calls_in_expr(base, rename);
+            rename_calls_in_expr(index, rename);
+        }
+        Expr::StructInit { fields, .. } => {
+            for (_, fe) in fields.iter_mut() {
+                rename_calls_in_expr(fe, rename);
+            }
+        }
+        Expr::ArrayLit(args) => {
+            for a in args.iter_mut() {
+                rename_calls_in_expr(a, rename);
+            }
+        }
+        Expr::Closure { body, .. } => rename_calls_in_stmts(body, rename),
+        Expr::IntLit(_) | Expr::FloatLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use crate::emit_profile::EmitProfile;
     use super::*;
     use crate::core_ir::{Decl, Expr, LoopKind, Stmt, Typ};
 
@@ -2274,4 +2713,94 @@ mod tests {
             ident("x")
         );
     }
+
+    #[test]
+    fn harden_renames_internal_symbols() {
+        // Use an if so the inliner will not erase `helper` before rename.
+        let mut decls = vec![
+            Decl::Function {
+                name: "helper".into(),
+                params: vec![("n".into(), Typ::Int)],
+                ret: Typ::Int,
+                body: vec![Stmt::If {
+                    cond: Expr::Binary {
+                        op: ">".into(),
+                        lhs: Box::new(Expr::Ident("n".into())),
+                        rhs: Box::new(Expr::IntLit(0)),
+                    },
+                    then_body: vec![Stmt::Return(Some(Expr::Ident("n".into())))],
+                    else_body: vec![Stmt::Return(Some(Expr::IntLit(0)))],
+                }],
+                type_params: vec![],
+            },
+            Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![Stmt::Return(Some(Expr::Call {
+                    callee: Box::new(Expr::Ident("helper".into())),
+                    args: vec![Expr::IntLit(3)],
+                }))],
+                type_params: vec![],
+            },
+        ];
+        optimize_with_profile(&mut decls, Some("main"), EmitProfile::Harden);
+        let names: Vec<_> = decls
+            .iter()
+            .filter_map(|d| match d {
+                Decl::Function { name, .. } => Some(name.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(names.contains(&"main"));
+        assert!(names.iter().any(|n| n.starts_with("_H")));
+        assert!(!names.contains(&"helper"));
+    }
+
+    #[test]
+    fn lean_inlines_larger_helpers() {
+        // Body of 3 stmts exceeds default threshold (2) but fits lean (12).
+        let helper_body = vec![
+            Stmt::Let("a".into(), None, Expr::IntLit(1)),
+            Stmt::Let("b".into(), None, Expr::IntLit(2)),
+            Stmt::Return(Some(Expr::Binary {
+                op: "+".into(),
+                lhs: Box::new(Expr::Ident("a".into())),
+                rhs: Box::new(Expr::Ident("b".into())),
+            })),
+        ];
+        let mut decls = vec![
+            Decl::Function {
+                name: "helper".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: helper_body,
+                type_params: vec![],
+            },
+            Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![Stmt::Return(Some(Expr::Call {
+                    callee: Box::new(Expr::Ident("helper".into())),
+                    args: vec![],
+                }))],
+                type_params: vec![],
+            },
+        ];
+        optimize_with_profile(&mut decls, Some("main"), EmitProfile::Lean);
+        let main = decls
+            .iter()
+            .find_map(|d| match d {
+                Decl::Function { name, body, .. } if name == "main" => Some(body),
+                _ => None,
+            })
+            .unwrap();
+        let src = format!("{main:?}");
+        assert!(
+            !src.contains("Ident(\"helper\")"),
+            "lean should inline helper into main: {src}"
+        );
+    }
 }
+
