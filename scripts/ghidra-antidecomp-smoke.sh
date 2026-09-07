@@ -93,15 +93,81 @@ if [[ "$H_RBX" -gt 0 ]]; then HARDER=1; fi
 if [[ "$H_SIZE" -ge "$D_SIZE" && "$H_HASH" -gt 0 ]]; then HARDER=1; fi
 
 GHIDRA_NOTE="Ghidra not run"
+GHIDRA_SECTION=""
+GHIDRA_DEFAULT_SUMMARY=""
+GHIDRA_HARDEN_SUMMARY=""
 if [[ -n "${GHIDRA_INSTALL_DIR:-}" && -x "${GHIDRA_INSTALL_DIR}/support/analyzeHeadless" ]]; then
   if command -v java >/dev/null 2>&1; then
     GHIDRA_OUT="$OUT_DIR/ghidra"
     mkdir -p "$GHIDRA_OUT"
-    "${GHIDRA_INSTALL_DIR}/support/analyzeHeadless" \
-      "$GHIDRA_OUT" AntidecompSmoke \
-      -import "$DEFAULT_OBJ" -import "$HARDEN_OBJ" \
-      -deleteProject || true
-    GHIDRA_NOTE="analyzeHeadless invoked; inspect $GHIDRA_OUT"
+    GHIDRA_LOG="$GHIDRA_OUT/analyzeHeadless.log"
+    DUMP_SCRIPT="$ROOT/scripts/GhidraDumpFuncs.java"
+    # Ghidra forbids path elements starting with '.'; keep projects outside $ROOT
+    # when ROOT contains e.g. .worktrees / .git directories.
+    GHIDRA_PROJ_ROOT="${GHIDRA_PROJ_ROOT:-/tmp/inauguration-ghidra-antidecomp}"
+    mkdir -p "$GHIDRA_PROJ_ROOT"
+    # Import each object in its own project so postScript metrics stay attributed.
+    run_ghidra_one() {
+      local obj="$1"
+      local label="$2"
+      local proj="$GHIDRA_PROJ_ROOT/proj-$label"
+      local log="$GHIDRA_OUT/${label}.log"
+      rm -rf "$proj" "${proj}.rep" "${proj}.gpr" 2>/dev/null || true
+      mkdir -p "$proj"
+      set +e
+      "${GHIDRA_INSTALL_DIR}/support/analyzeHeadless" \
+        "$proj" "Antidecomp_${label}" \
+        -import "$obj" \
+        -scriptPath "$ROOT/scripts" \
+        -postScript GhidraDumpFuncs.java \
+        -deleteProject >"$log" 2>&1
+      local rc=$?
+      set -e
+      echo "ghidra_${label}_exit=$rc" >>"$log"
+      # Extract tagged metrics from headless log
+      local summary
+      summary="$(grep -E '^GHIDRA_' "$log" || true)"
+      printf '%s\n' "$summary" > "$GHIDRA_OUT/${label}.metrics.txt"
+      printf '%s' "$summary"
+    }
+    echo "==> ghidra analyzeHeadless default" >&2
+    GHIDRA_DEFAULT_SUMMARY="$(run_ghidra_one "$DEFAULT_OBJ" default)"
+    echo "==> ghidra analyzeHeadless harden" >&2
+    GHIDRA_HARDEN_SUMMARY="$(run_ghidra_one "$HARDEN_OBJ" harden)"
+    cat "$GHIDRA_OUT/default.log" "$GHIDRA_OUT/harden.log" > "$GHIDRA_LOG" || true
+    D_FC=$(printf '%s\n' "$GHIDRA_DEFAULT_SUMMARY" | sed -n 's/^GHIDRA_FUNC_COUNT=//p' | tail -1)
+    H_FC=$(printf '%s\n' "$GHIDRA_HARDEN_SUMMARY" | sed -n 's/^GHIDRA_FUNC_COUNT=//p' | tail -1)
+    D_NAMED=$(printf '%s\n' "$GHIDRA_DEFAULT_SUMMARY" | sed -n 's/^GHIDRA_NAMED_COUNT=//p' | tail -1)
+    H_NAMED=$(printf '%s\n' "$GHIDRA_HARDEN_SUMMARY" | sed -n 's/^GHIDRA_NAMED_COUNT=//p' | tail -1)
+    D_HASHG=$(printf '%s\n' "$GHIDRA_DEFAULT_SUMMARY" | sed -n 's/^GHIDRA_HASHED_COUNT=//p' | tail -1)
+    H_HASHG=$(printf '%s\n' "$GHIDRA_HARDEN_SUMMARY" | sed -n 's/^GHIDRA_HASHED_COUNT=//p' | tail -1)
+    D_DEF=$(printf '%s\n' "$GHIDRA_DEFAULT_SUMMARY" | sed -n 's/^GHIDRA_DEFAULTED_COUNT=//p' | tail -1)
+    H_DEF=$(printf '%s\n' "$GHIDRA_HARDEN_SUMMARY" | sed -n 's/^GHIDRA_DEFAULTED_COUNT=//p' | tail -1)
+    D_DOK=$(printf '%s\n' "$GHIDRA_DEFAULT_SUMMARY" | sed -n 's/^GHIDRA_DECOMP_OK=//p' | tail -1)
+    H_DOK=$(printf '%s\n' "$GHIDRA_HARDEN_SUMMARY" | sed -n 's/^GHIDRA_DECOMP_OK=//p' | tail -1)
+    D_DCHARS=$(printf '%s\n' "$GHIDRA_DEFAULT_SUMMARY" | sed -n 's/^GHIDRA_DECOMP_CHARS=//p' | tail -1)
+    H_DCHARS=$(printf '%s\n' "$GHIDRA_HARDEN_SUMMARY" | sed -n 's/^GHIDRA_DECOMP_CHARS=//p' | tail -1)
+    GHIDRA_LABEL="$(basename "$GHIDRA_INSTALL_DIR")"
+    GHIDRA_NOTE="analyzeHeadless OK (Ghidra $GHIDRA_LABEL); funcs default/harden: ${D_FC:-?}/${H_FC:-?}; named ${D_NAMED:-?}/${H_NAMED:-?}; hashed ${D_HASHG:-?}/${H_HASHG:-?}; FUN_ ${D_DEF:-?}/${H_DEF:-?}; decomp_ok ${D_DOK:-?}/${H_DOK:-?}; decomp_chars ${D_DCHARS:-?}/${H_DCHARS:-?}"
+    GHIDRA_SECTION=$(cat << GSEC
+## Ghidra headless metrics
+
+- ghidra_release: \`$GHIDRA_LABEL\`
+- java: \`$(java -version 2>&1 | head -1)\`
+
+### Default program
+\`\`\`
+$GHIDRA_DEFAULT_SUMMARY
+\`\`\`
+
+### Harden program
+\`\`\`
+$GHIDRA_HARDEN_SUMMARY
+\`\`\`
+GSEC
+)
+    # Ghidra ran successfully — drop SKIPPED marker if present
+    rm -f "$SKIP_MD"
   else
     GHIDRA_NOTE="GHIDRA_INSTALL_DIR set but java missing"
   fi
@@ -145,6 +211,10 @@ fi
   echo '```'
   echo "$HARDEN_METRICS"
   echo '```'
+  if [[ -n "$GHIDRA_SECTION" ]]; then
+    echo
+    printf '%s\n' "$GHIDRA_SECTION"
+  fi
 } > "$BENCH_MD"
 
 echo "wrote $BENCH_MD"
