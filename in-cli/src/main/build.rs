@@ -37,7 +37,8 @@ pub(crate) fn cmd_build(
                 .to_string(),
         ));
     }
-    let result = run_pipeline_for_path(&resolved, out, release, profile, module_id, verbose, parser);
+    let result =
+        run_pipeline_for_path(&resolved, out, release, profile, module_id, verbose, parser);
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
     let wall = format!("{elapsed_ms:.3}ms");
     let mut emit_note = String::new();

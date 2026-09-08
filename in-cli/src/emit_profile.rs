@@ -86,7 +86,10 @@ mod tests {
 
     #[test]
     fn parse_profiles() {
-        assert_eq!("harden".parse::<EmitProfile>().unwrap(), EmitProfile::Harden);
+        assert_eq!(
+            "harden".parse::<EmitProfile>().unwrap(),
+            EmitProfile::Harden
+        );
         assert_eq!("LEAN".parse::<EmitProfile>().unwrap(), EmitProfile::Lean);
         assert!("nope".parse::<EmitProfile>().is_err());
     }

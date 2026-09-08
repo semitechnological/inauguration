@@ -504,18 +504,18 @@ impl Commands {
                 )
                 .map_err(InError::Message)?;
                 cmd_build(
-                invocation_cwd,
-                &path,
-                out,
-                release,
-                profile,
-                &module_id,
-                verbose,
-                swiftpm,
-                allow_external_toolchain,
-                parser,
-            )
-            },
+                    invocation_cwd,
+                    &path,
+                    out,
+                    release,
+                    profile,
+                    &module_id,
+                    verbose,
+                    swiftpm,
+                    allow_external_toolchain,
+                    parser,
+                )
+            }
             Commands::Agent {
                 path,
                 module_id,
@@ -635,25 +635,25 @@ impl Commands {
                 )
                 .map_err(InError::Message)?;
                 cmd_compile(
-                invocation_cwd,
-                &path,
-                target,
-                &out,
-                &module_id,
-                parser,
-                entry.as_deref(),
-                target_triple.as_deref(),
-                linkage,
-                jobs,
-                json,
-                emit,
-                trampoline.as_deref(),
-                base.as_deref(),
-                metadata.as_deref(),
-                debug,
-                profile,
-            )
-            },
+                    invocation_cwd,
+                    &path,
+                    target,
+                    &out,
+                    &module_id,
+                    parser,
+                    entry.as_deref(),
+                    target_triple.as_deref(),
+                    linkage,
+                    jobs,
+                    json,
+                    emit,
+                    trampoline.as_deref(),
+                    base.as_deref(),
+                    metadata.as_deref(),
+                    debug,
+                    profile,
+                )
+            }
             Commands::Execute {
                 path,
                 module_id,

@@ -5,7 +5,7 @@
 //! Profile-specific passes (lean / harden) layer on top via
 //! [`optimize_with_profile`].
 
-use crate::core_ir::{Decl, Expr, Stmt, Typ};
+use crate::core_ir::{CatchArm, Decl, Expr, MatchArm, Stmt, Typ};
 use crate::emit_profile::EmitProfile;
 use std::collections::{HashMap, HashSet};
 
@@ -157,6 +157,27 @@ fn map_stmt_mut<F: FnMut(&mut Expr)>(s: &mut Stmt, f: &mut F) {
             }
         }
         Stmt::Expr(e) => map_expr_mut(e, f),
+        Stmt::Throw(e) => map_expr_mut(e, f),
+        Stmt::Try { body, catches, .. } => {
+            for s in body.iter_mut() {
+                map_stmt_mut(s, f);
+            }
+            for c in catches.iter_mut() {
+                for s in c.body.iter_mut() {
+                    map_stmt_mut(s, f);
+                }
+            }
+        }
+        Stmt::Match {
+            scrutinee, arms, ..
+        } => {
+            map_expr_mut(scrutinee, f);
+            for arm in arms.iter_mut() {
+                for s in arm.body.iter_mut() {
+                    map_stmt_mut(s, f);
+                }
+            }
+        }
         _ => {}
     }
 }
@@ -232,6 +253,27 @@ fn map_stmt<F: FnMut(Expr) -> Expr + Copy>(s: Stmt, f: &mut F) -> Stmt {
             body: body.into_iter().map(|s| map_stmt(s, f)).collect(),
         },
         Stmt::Expr(e) => Stmt::Expr(map_expr(e, f)),
+        Stmt::Throw(e) => Stmt::Throw(map_expr(e, f)),
+        Stmt::Try { body, catches } => Stmt::Try {
+            body: body.into_iter().map(|s| map_stmt(s, f)).collect(),
+            catches: catches
+                .into_iter()
+                .map(|c| CatchArm {
+                    pattern: c.pattern,
+                    body: c.body.into_iter().map(|s| map_stmt(s, f)).collect(),
+                })
+                .collect(),
+        },
+        Stmt::Match { scrutinee, arms } => Stmt::Match {
+            scrutinee: map_expr(scrutinee, f),
+            arms: arms
+                .into_iter()
+                .map(|a| MatchArm {
+                    pattern: a.pattern,
+                    body: a.body.into_iter().map(|s| map_stmt(s, f)).collect(),
+                })
+                .collect(),
+        },
         other => other,
     }
 }
@@ -274,7 +316,8 @@ fn inline_small_functions_with(decls: &mut [Decl], threshold: usize, max_depth: 
 
     for decl in decls.iter_mut() {
         if let Decl::Function { body, .. } = decl {
-            *body = inline_body_limited(std::mem::take(body), &candidates, &functions, 0, max_depth);
+            *body =
+                inline_body_limited(std::mem::take(body), &candidates, &functions, 0, max_depth);
         }
     }
 }
@@ -475,8 +518,29 @@ fn subst_stmt(s: &Stmt, sub: &HashMap<&str, &Expr>) -> Stmt {
             body: substitute_params(body, sub),
         },
         Stmt::Expr(e) => Stmt::Expr(substitute_expr(e, sub)),
+        Stmt::Throw(e) => Stmt::Throw(substitute_expr(e, sub)),
+        Stmt::Try { body, catches } => Stmt::Try {
+            body: substitute_params(body, sub),
+            catches: catches
+                .iter()
+                .map(|c| CatchArm {
+                    pattern: c.pattern.clone(),
+                    body: substitute_params(&c.body, sub),
+                })
+                .collect(),
+        },
+        Stmt::Match { scrutinee, arms } => Stmt::Match {
+            scrutinee: substitute_expr(scrutinee, sub),
+            arms: arms
+                .iter()
+                .map(|a| MatchArm {
+                    pattern: a.pattern.clone(),
+                    body: substitute_params(&a.body, sub),
+                })
+                .collect(),
+        },
         Stmt::Break => Stmt::Break,
-        o => o.clone(),
+        Stmt::Propagate => Stmt::Propagate,
     }
 }
 fn substitute_expr(e: &Expr, sub: &HashMap<&str, &Expr>) -> Expr {
@@ -491,9 +555,18 @@ fn substitute_expr(e: &Expr, sub: &HashMap<&str, &Expr>) -> Expr {
     e
 }
 fn has_cf(stmts: &[Stmt]) -> bool {
-    stmts
-        .iter()
-        .any(|s| matches!(s, Stmt::If { .. } | Stmt::Loop { .. }))
+    stmts.iter().any(|s| {
+        matches!(
+            s,
+            Stmt::If { .. }
+                | Stmt::Loop { .. }
+                | Stmt::Match { .. }
+                | Stmt::Throw(_)
+                | Stmt::Try { .. }
+                | Stmt::Propagate
+                | Stmt::Break
+        )
+    })
 }
 
 fn detect_ptr_refs(decls: &[Decl], out: &mut Vec<String>) {
@@ -525,6 +598,21 @@ fn ptr_in_stmts(stmts: &[Stmt], out: &mut Vec<String>) {
                 ptr_in_stmts(else_body, out);
             }
             Stmt::Loop { body, .. } => ptr_in_stmts(body, out),
+            Stmt::Throw(e) => ptr_in_expr(e, out),
+            Stmt::Try { body, catches, .. } => {
+                ptr_in_stmts(body, out);
+                for c in catches {
+                    ptr_in_stmts(&c.body, out);
+                }
+            }
+            Stmt::Match {
+                scrutinee, arms, ..
+            } => {
+                ptr_in_expr(scrutinee, out);
+                for arm in arms {
+                    ptr_in_stmts(&arm.body, out);
+                }
+            }
             Stmt::FieldAssign { base, value, .. } => {
                 ptr_in_expr(base, out);
                 ptr_in_expr(value, out);
@@ -870,6 +958,27 @@ fn collect_calls_in_stmt(s: &Stmt, out: &mut HashSet<String>) {
             collect_calls_in_expr(base, out);
             collect_calls_in_expr(value, out);
         }
+        Stmt::Throw(e) => collect_calls_in_expr(e, out),
+        Stmt::Try { body, catches, .. } => {
+            for s in body {
+                collect_calls_in_stmt(s, out);
+            }
+            for c in catches {
+                for s in &c.body {
+                    collect_calls_in_stmt(s, out);
+                }
+            }
+        }
+        Stmt::Match {
+            scrutinee, arms, ..
+        } => {
+            collect_calls_in_expr(scrutinee, out);
+            for arm in arms {
+                for s in &arm.body {
+                    collect_calls_in_stmt(s, out);
+                }
+            }
+        }
         _ => {}
     }
 }
@@ -1027,6 +1136,27 @@ fn count_uses_in_stmt(s: &Stmt, consts: &mut HashMap<String, (i64, usize)>) {
             count_uses_in_expr(value, consts);
         }
         Stmt::Expr(e) => count_uses_in_expr(e, consts),
+        Stmt::Throw(e) => count_uses_in_expr(e, consts),
+        Stmt::Try { body, catches, .. } => {
+            for s in body {
+                count_uses_in_stmt(s, consts);
+            }
+            for c in catches {
+                for s in &c.body {
+                    count_uses_in_stmt(s, consts);
+                }
+            }
+        }
+        Stmt::Match {
+            scrutinee, arms, ..
+        } => {
+            count_uses_in_expr(scrutinee, consts);
+            for arm in arms {
+                for s in &arm.body {
+                    count_uses_in_stmt(s, consts);
+                }
+            }
+        }
         _ => {}
     }
 }
@@ -1098,6 +1228,17 @@ fn dce_body(stmts: &mut Vec<Stmt>) {
                 dce_body(else_body);
             }
             Stmt::Loop { body, .. } => dce_body(body),
+            Stmt::Try { body, catches, .. } => {
+                dce_body(body);
+                for c in catches.iter_mut() {
+                    dce_body(&mut c.body);
+                }
+            }
+            Stmt::Match { arms, .. } => {
+                for arm in arms.iter_mut() {
+                    dce_body(&mut arm.body);
+                }
+            }
             Stmt::FieldAssign { .. } => {}
             _ => {}
         }
@@ -1140,6 +1281,21 @@ fn collect_used(stmts: &[Stmt], out: &mut HashSet<String>) {
             Stmt::FieldAssign { base, value, .. } => {
                 collect_used_in_expr(base, out);
                 collect_used_in_expr(value, out);
+            }
+            Stmt::Throw(e) => collect_used_in_expr(e, out),
+            Stmt::Try { body, catches, .. } => {
+                collect_used(body, out);
+                for c in catches {
+                    collect_used(&c.body, out);
+                }
+            }
+            Stmt::Match {
+                scrutinee, arms, ..
+            } => {
+                collect_used_in_expr(scrutinee, out);
+                for arm in arms {
+                    collect_used(&arm.body, out);
+                }
             }
             _ => {}
         }
@@ -1620,7 +1776,6 @@ fn adjust_jump_offsets(code: &mut [u8], jumps: &[RelJump], remove: &[RemoveRange
     }
 }
 
-
 // ─── Harden (anti-decomp) IR transforms ────────────────────────────────────
 
 fn fnv1a64(s: &str) -> u64 {
@@ -1835,11 +1990,7 @@ fn harden_junk_stmts(decls: &mut [Decl]) {
         for stmt in body.drain(..) {
             n += 1;
             let jname = format!("_j{n}");
-            out.push(Stmt::Let(
-                jname.clone(),
-                Some(Typ::Int),
-                Expr::IntLit(0),
-            ));
+            out.push(Stmt::Let(jname.clone(), Some(Typ::Int), Expr::IntLit(0)));
             out.push(Stmt::Assign(
                 jname,
                 Expr::Binary {
@@ -1969,9 +2120,9 @@ fn rename_calls_in_expr(e: &mut Expr, rename: &HashMap<String, String>) {
 
 #[cfg(test)]
 mod tests {
-    use crate::emit_profile::EmitProfile;
     use super::*;
-    use crate::core_ir::{Decl, Expr, LoopKind, Stmt, Typ};
+    use crate::core_ir::{CatchArm, Decl, Expr, LoopKind, Stmt, Typ};
+    use crate::emit_profile::EmitProfile;
 
     fn make_fn(name: &str, body: Vec<Stmt>) -> Decl {
         Decl::Function {
@@ -2541,6 +2692,51 @@ mod tests {
         assert!(!has_cf(&stmts));
     }
 
+    #[test]
+    fn has_cf_detects_throw_and_try() {
+        assert!(has_cf(&[Stmt::Throw(Expr::IntLit(1))]));
+        assert!(has_cf(&[Stmt::Try {
+            body: vec![],
+            catches: vec![],
+        }]));
+    }
+
+    #[test]
+    fn remove_dead_keeps_callees_inside_try() {
+        let mut decls = vec![
+            Decl::Function {
+                name: "inner".into(),
+                params: vec![],
+                ret: Typ::Void,
+                body: vec![Stmt::Throw(Expr::StringLit("nope".into()))],
+                type_params: vec![],
+            },
+            Decl::Function {
+                name: "main".into(),
+                params: vec![],
+                ret: Typ::Int,
+                body: vec![Stmt::Try {
+                    body: vec![Stmt::Expr(Expr::Call {
+                        callee: Box::new(Expr::Ident("inner".into())),
+                        args: vec![],
+                    })],
+                    catches: vec![CatchArm {
+                        pattern: "e".into(),
+                        body: vec![Stmt::Return(Some(Expr::IntLit(1)))],
+                    }],
+                }],
+                type_params: vec![],
+            },
+        ];
+        optimize_with_profile(&mut decls, Some("main"), EmitProfile::Default);
+        assert!(
+            decls
+                .iter()
+                .any(|d| matches!(d, Decl::Function { name, .. } if name == "inner")),
+            "inner must survive DFE when only called from inside try"
+        );
+    }
+
     // ─── x86_64 Peephole ──────────────────────────────────────────────
 
     #[test]
@@ -2803,4 +2999,3 @@ mod tests {
         );
     }
 }
-

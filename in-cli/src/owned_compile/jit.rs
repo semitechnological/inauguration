@@ -53,7 +53,6 @@ pub fn compile_jit(
         );
     }
 
-
     antidecomp::set_profile(request.profile);
     struct _ProfileGuard;
     impl Drop for _ProfileGuard {

@@ -3,10 +3,10 @@ use crate::core_ir::{Decl, ModuleIdentityReport};
 use crate::core_ir_verifier;
 use crate::in_lang_parse;
 
+use crate::emit_profile::EmitProfile;
 use crate::external_guard::ExternalInvocationGuard;
 use crate::native_backend;
 use crate::native_emit::NativeLinkage;
-use crate::emit_profile::EmitProfile;
 use crate::parser_registry::{self, ParserCli};
 use serde::Serialize;
 use std::fs;
@@ -162,8 +162,8 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         }
     };
     let frontend_hash = compile_cache::source_frontend_hash(&request.path, &source);
-    let reuse_cache = request.target != CompileTarget::Jit
-        && request.profile == EmitProfile::Default;
+    let reuse_cache =
+        request.target != CompileTarget::Jit && request.profile == EmitProfile::Default;
     if reuse_cache && let Some(mut cached) = compile_cache::read_cached_report(&cwd, &frontend_hash)
     {
         let requested_out = request.out.as_ref().map(|path| path.display().to_string());

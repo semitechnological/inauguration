@@ -84,7 +84,6 @@ fn emit_profile_epilogue() -> Vec<u8> {
     }
 }
 
-
 pub struct X86_64CompileResult {
     pub code: Vec<u8>,
     pub entry_offset: u32,
@@ -2978,8 +2977,6 @@ fn main() -> void { return 0 }
         assert!(result.code.contains(&0xC3));
     }
 }
-
-
 
 #[cfg(test)]
 mod profile_smoke_tests {

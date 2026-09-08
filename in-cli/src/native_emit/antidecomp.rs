@@ -5,7 +5,7 @@
 //! cleanly. They preserve SysV ABI and observable semantics.
 
 use crate::emit_profile::EmitProfile;
-use crate::native_emit::x86_64::{self, REG_FP, REG_SP, R10, R11, RAX, RBX};
+use crate::native_emit::x86_64::{self, R10, R11, RAX, RBX, REG_FP, REG_SP};
 use std::cell::RefCell;
 
 thread_local! {
