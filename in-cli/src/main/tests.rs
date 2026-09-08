@@ -15,6 +15,9 @@ fn parse_build_subcommand() {
             swiftpm,
             allow_external_toolchain,
             parser,
+            profile,
+            harden,
+            lean,
         } => {
             assert_eq!(path, "Foo.swift");
             assert_eq!(out, None);
@@ -24,6 +27,9 @@ fn parse_build_subcommand() {
             assert!(!swiftpm);
             assert!(!allow_external_toolchain);
             assert!(matches!(parser, ParserCli::Auto));
+            assert!(matches!(profile, EmitProfileCli::Default));
+            assert!(!harden);
+            assert!(!lean);
         }
         _ => panic!("expected build command"),
     }

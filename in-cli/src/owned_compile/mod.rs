@@ -3,6 +3,7 @@ use crate::core_ir::{Decl, ModuleIdentityReport};
 use crate::core_ir_verifier;
 use crate::in_lang_parse;
 
+use crate::emit_profile::EmitProfile;
 use crate::external_guard::ExternalInvocationGuard;
 use crate::native_backend;
 use crate::native_emit::NativeLinkage;
@@ -57,6 +58,7 @@ pub struct OwnedCompileRequest {
     pub target_triple: Option<String>,
     pub jobs: usize,
     pub debug: bool,
+    pub profile: EmitProfile,
     pub emit: Option<OwnedEmit>,
     /// Optional load address for static-lib / freestanding objects that need
     /// position-dependent code/data layouts.
@@ -160,7 +162,8 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
         }
     };
     let frontend_hash = compile_cache::source_frontend_hash(&request.path, &source);
-    let reuse_cache = request.target != CompileTarget::Jit;
+    let reuse_cache =
+        request.target != CompileTarget::Jit && request.profile == EmitProfile::Default;
     if reuse_cache && let Some(mut cached) = compile_cache::read_cached_report(&cwd, &frontend_hash)
     {
         let requested_out = request.out.as_ref().map(|path| path.display().to_string());
@@ -403,6 +406,14 @@ pub fn compile_owned(request: &OwnedCompileRequest) -> OwnedCompileReport {
     report.semantic_level = "typed-subset".to_string();
     report.typed_function_count = report.parsed_function_count;
     report.call_edge_count = count_call_edges(&module, &request.module_id);
+
+    // Profile-aware IR optimize before lowering (default/lean/harden).
+    {
+        let entry = effective_entry.as_deref();
+        crate::core_opt::optimize_with_profile(&mut module.decls, entry, request.profile);
+        report.typed_function_count = count_functions(&module);
+        report.call_edge_count = count_call_edges(&module, &request.module_id);
+    }
 
     if let Some(OwnedEmit::Sci { base }) = request.emit {
         let entry_name = effective_entry.as_deref().unwrap_or("main");

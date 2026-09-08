@@ -1,0 +1,18 @@
+// Anti-decomp smoke sample: helpers + scalar entry for native ELF emit.
+fn mix(a: Int, b: Int) -> Int {
+  let s: Int = a + b;
+  let t: Int = s * 3;
+  return t - a;
+}
+
+fn gate(n: Int) -> Int {
+  if n > 0 {
+    return mix(n, 2);
+  } else {
+    return mix(1, n);
+  }
+}
+
+fn main() -> Int {
+  return gate(7);
+}

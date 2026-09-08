@@ -34,6 +34,7 @@ fn default_request(
         target_triple: None,
         jobs: 1,
         debug: false,
+        profile: crate::emit_profile::EmitProfile::Default,
         emit: None,
         base: None,
     }

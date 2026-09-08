@@ -11,6 +11,7 @@
 //!   - struct init/field access (scalar fields only)
 
 use crate::core_ir::{Decl, Expr, LoopKind, MatchArm, Stmt, Typ, UnifiedModule};
+use crate::native_emit::antidecomp;
 use crate::native_emit::x86_64::{self, CodeEmitter, RAX, RBP, RBX, RCX, RDI, RDX, REG_SP, RSI};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -66,6 +67,22 @@ fn jit_stdlib_wrapper(name: &str) -> Option<&'static str> {
 }
 
 pub const X86_64_TRIPLE: &str = "x86_64-unknown-none";
+
+fn emit_profile_prologue() -> Vec<u8> {
+    if antidecomp::harden_active() {
+        antidecomp::harden_prologue()
+    } else {
+        x86_64::prologue()
+    }
+}
+
+fn emit_profile_epilogue() -> Vec<u8> {
+    if antidecomp::harden_active() {
+        antidecomp::harden_epilogue()
+    } else {
+        x86_64::epilogue()
+    }
+}
 
 pub struct X86_64CompileResult {
     pub code: Vec<u8>,
@@ -804,9 +821,9 @@ fn lower_function(
         ] {
             emitter.emit_insns(&x86_64::push_r(reg));
         }
-        emitter.emit_insns(&x86_64::prologue());
+        emitter.emit_insns(&emit_profile_prologue());
     } else {
-        emitter.emit_insns(&x86_64::prologue());
+        emitter.emit_insns(&emit_profile_prologue());
     }
 
     // Allocate stack frame. Add extra padding for expression temporaries that
@@ -932,7 +949,7 @@ fn lower_function(
             // iret/iretq pops RIP/CS/RFLAGS from interrupt stack frame
             emitter.emit_width(&[0xCF], &[0x48, 0xCF]);
         } else {
-            emitter.emit_insns(&x86_64::epilogue());
+            emitter.emit_insns(&emit_profile_epilogue());
         }
     }
 
@@ -1018,7 +1035,7 @@ fn lower_stmt(
                 }
                 emitter.emit_width(&[0xCF], &[0x48, 0xCF]); // iret/iretq
             } else {
-                emitter.emit_insns(&x86_64::epilogue());
+                emitter.emit_insns(&emit_profile_epilogue());
             }
             ctx.emitted_return = true;
             Ok(())
@@ -1516,7 +1533,11 @@ fn extract_pattern_vars(pattern: &str) -> Vec<String> {
 }
 
 fn lower_int_lit(emitter: &mut CodeEmitter, target_reg: u8, value: i64) -> Result<(), String> {
-    emitter.emit_insns(&x86_64::load_i64(target_reg, value));
+    if antidecomp::harden_active() && target_reg == RAX {
+        emitter.emit_insns(&antidecomp::weird_materialize_rax(value));
+    } else {
+        emitter.emit_insns(&x86_64::load_i64(target_reg, value));
+    }
     Ok(())
 }
 
@@ -2954,5 +2975,31 @@ fn main() -> void { return 0 }
         let result = lower_module(&module, "catcher").expect("lower");
         assert!(!result.code.is_empty());
         assert!(result.code.contains(&0xC3));
+    }
+}
+
+#[cfg(test)]
+mod profile_smoke_tests {
+    use super::*;
+    use crate::core_ir::{Decl, Expr, Stmt, Typ, UnifiedModule};
+    use crate::native_emit::antidecomp;
+
+    #[test]
+    fn lower_simple_default_and_harden() {
+        let module = UnifiedModule::new(vec![Decl::Function {
+            name: "main".into(),
+            params: vec![],
+            ret: Typ::Int,
+            body: vec![Stmt::Return(Some(Expr::IntLit(42)))],
+            type_params: vec![],
+        }]);
+        antidecomp::clear_profile();
+        let d = lower_module(&module, "main").expect("default lower");
+        assert!(!d.code.is_empty());
+        antidecomp::set_profile(crate::emit_profile::EmitProfile::Harden);
+        let h = lower_module(&module, "main").expect("harden lower");
+        antidecomp::clear_profile();
+        assert!(h.code.len() >= d.code.len());
+        assert_eq!(h.code[0], 0x53); // push rbx
     }
 }

@@ -12,6 +12,7 @@ pub(crate) fn cmd_build(
     path: &str,
     out: Option<String>,
     release: bool,
+    profile: inauguration::emit_profile::EmitProfile,
     module_id: &str,
     verbose: bool,
     swiftpm: bool,
@@ -36,7 +37,8 @@ pub(crate) fn cmd_build(
                 .to_string(),
         ));
     }
-    let result = run_pipeline_for_path(&resolved, out, release, module_id, verbose, parser);
+    let result =
+        run_pipeline_for_path(&resolved, out, release, profile, module_id, verbose, parser);
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
     let wall = format!("{elapsed_ms:.3}ms");
     let mut emit_note = String::new();
@@ -165,6 +167,7 @@ fn run_pipeline_for_path(
     path: &Path,
     out: Option<String>,
     _release: bool,
+    profile: inauguration::emit_profile::EmitProfile,
     module_id: &str,
     verbose: bool,
     parser: ParserCli,
@@ -205,6 +208,7 @@ fn run_pipeline_for_path(
             target_triple: None,
             jobs: 1,
             debug: false,
+            profile,
             emit: None,
             base: None,
         };
@@ -237,6 +241,7 @@ fn run_pipeline_for_path(
             target_triple: None,
             jobs: 1,
             debug: false,
+            profile,
             emit: None,
             base: None,
         };
@@ -269,6 +274,7 @@ fn run_pipeline_for_path(
         target_triple: None,
         jobs: 1,
         debug: false,
+        profile,
         emit: None,
         base: None,
     };

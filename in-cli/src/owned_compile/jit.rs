@@ -3,7 +3,7 @@ use crate::crate_db;
 use crate::dep_resolver;
 use crate::jit_runtime;
 use crate::native_emit::native_link;
-use crate::native_emit::{self, NativeLinkage, lower, x86_64_lower};
+use crate::native_emit::{self, NativeLinkage, antidecomp, lower, x86_64_lower};
 use crate::parser_registry::ParserCli;
 use std::path::PathBuf;
 
@@ -52,6 +52,15 @@ pub fn compile_jit(
                 .to_string(),
         );
     }
+
+    antidecomp::set_profile(request.profile);
+    struct _ProfileGuard;
+    impl Drop for _ProfileGuard {
+        fn drop(&mut self) {
+            antidecomp::clear_profile();
+        }
+    }
+    let _profile_guard = _ProfileGuard;
 
     // Lazy dependency resolution: before lowering, resolve external
     // function calls by loading their source crates.
@@ -292,6 +301,7 @@ fn eval_entry_via_jit(module: &UnifiedModule, entry: &str) -> Result<i64, String
         target_triple: None,
         jobs: 1,
         debug: false,
+        profile: crate::emit_profile::EmitProfile::Default,
         emit: None,
         base: None,
     };
