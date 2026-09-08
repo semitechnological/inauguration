@@ -1875,7 +1875,7 @@ fn obscure_expr_literals(e: &mut Expr, counter: &mut u64) {
                 Expr::Binary {
                     op: "==".into(),
                     lhs: Box::new(zero),
-                    rhs: Box::new(Expr::IntLit(1 - 1)),
+                    rhs: Box::new(Expr::IntLit(0)),
                 }
             };
         }
@@ -2006,7 +2006,7 @@ fn harden_junk_stmts(decls: &mut [Decl]) {
 }
 
 /// Hash-mangle internal function names beyond normal ABI.
-fn harden_hash_symbols(decls: &mut Vec<Decl>, entry: Option<&str>) {
+fn harden_hash_symbols(decls: &mut [Decl], entry: Option<&str>) {
     let entry = entry.unwrap_or("main");
     let mut rename: HashMap<String, String> = HashMap::new();
     for d in decls.iter() {
